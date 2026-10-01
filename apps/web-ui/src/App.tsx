@@ -5336,7 +5336,7 @@ export function App() {
 			setCheckpointApprovalError(REMEMBER_OTHER_CONVERSATION_OPEN);
 			return;
 		}
-		if (!guardMarkdownEditorAction(() => { void approveCheckpointProposal(approvedRecentContext); }, "navigate")) return;
+		if (!guardMarkdownEditorAction(() => { void approveCheckpointProposal(approvedFields); }, "navigate")) return;
 		setCheckpointApprovalLoading(true);
 		setCheckpointApprovalError(null);
 		try {
@@ -7426,7 +7426,7 @@ export function App() {
 	}
 
 	async function restAfterCheckpoint() {
-		if (!guardMarkdownEditorAction(() => { void restAfterCheckpoint(); }, "navigate")) return;
+		if (!guardMarkdownEditorAction(() => { void restAfterCheckpoint(); }, "navigate")) return false;
 		const approval = checkpointApprovalResult;
 		const postCheckpointThreadId = approval?.postCheckpoint.activeThreadId;
 		if (approval && postCheckpointThreadId) {
