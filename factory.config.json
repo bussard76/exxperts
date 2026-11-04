@@ -1,0 +1,154 @@
+{
+  "factoryVersion": "0.1.1",
+  "project": {
+    "name": "exxperts",
+    "repo": "github.com/bussard76/exxperts",
+    "mainBranch": "main",
+    "branchPrefix": "agents/",
+    "language": "de",
+    "humanName": "Sascha",
+    "adoptedOn": "2026-11-04"
+  },
+  "rhythm": {
+    "mode": "continuous",
+    "$modes": "day-plan-night-build: the human plans, tests and decides by day, the Controller builds unattended at night, morning handover; continuous: the Controller builds whenever signed-off work exists and asks as questions arise; custom: quietHours define when the Controller may start new work",
+    "quietHours": {
+      "start": "22:00",
+      "end": "07:00",
+      "allowBuild": true
+    }
+  },
+  "steering": {
+    "mode": "github-issues",
+    "$modes": "github-issues: tickets are GitHub issues with labels; orca-tasks: tickets are docs/tasks/T<n>-*.md files",
+    "readyLabel": "ready-for-agent",
+    "tasksDir": "docs/tasks"
+  },
+  "hosts": {
+    "$comment": "A remote server is an option, not a must. The controller runs on one host (the local machine or a remote one). Workers run on zero or more hosts; each has its own paths, Orca environment and capacity. With no remote hosts everything runs locally.",
+    "controller": {
+      "host": "workhorse2",
+      "controllerDir": "~/controller"
+    },
+    "workers": [
+      {
+        "name": "workhorse2",
+        "kind": "remote",
+        "ssh": "developer@ax41",
+        "sshConfig": "",
+        "projectsDir": "~/projects",
+        "workspacesDir": "~/orca/workspaces",
+        "orcaEnvironment": "Workhorse2",
+        "orcaRepoId": "",
+        "capacity": {
+          "suiteWorkersMax": 8,
+          "readOnlyWorkersMax": 6,
+          "gate": {
+            "unitSlots": 3,
+            "e2eSlots": 2
+          }
+        }
+      }
+    ],
+    "frontAgent": {
+      "preview": {
+        "enabled": true,
+        "port": 8181,
+        "command": "npm run build && node bin/exxperts-web.cjs --port 8181 --no-open",
+        "envFile": "~/.config/exxperts/preview.env"
+      }
+    }
+  },
+  "agents": {
+    "runner": "orca",
+    "$runners": "orca: workers run in Orca worktrees and terminals; terminal: workers run as plain codex/claude/pi processes in git worktrees",
+    "default": "codex",
+    "models": {
+      "small": "gpt-6-luna",
+      "default": "gpt-6.1-terra",
+      "large": "gpt-6.1-sol"
+    },
+    "fallback": {
+      "agent": "claude",
+      "models": {
+        "small": "haiku",
+        "default": "sonnet",
+        "large": "opus"
+      },
+      "quotaThresholdPercent": 10
+    },
+    "calibration": "auto",
+    "$calibration": "The model names are examples of what the agent CLI offers; init asks for the available ones. auto: calibrate-models.mjs moves a role one tier down when its pass rate is high and rounds are low, one tier up when failures cluster; manual: it only recommends."
+  },
+  "capacity": {
+    "$comment": "Defaults for every worker host; a host's own capacity block overrides single values.",
+    "suiteWorkersMax": 4,
+    "readOnlyWorkersMax": 4,
+    "gate": {
+      "unitSlots": 2,
+      "e2eSlots": 1,
+      "unitSlotsRange": [
+        1,
+        4
+      ],
+      "e2eSlotsRange": [
+        1,
+        3
+      ]
+    },
+    "pressure": {
+      "cpuAvg10MaxPercent": 20,
+      "memoryAvg10MaxPercent": 5
+    },
+    "availableMemoryMinGb": 8,
+    "gateQueueMax": 3,
+    "worker": {
+      "memoryMax": "6G",
+      "processCeiling": 512
+    },
+    "calibration": {
+      "mode": "auto",
+      "$comment": "The caps above are starting values. auto: start low (startSuite), raise by step while the host stays quiet for raiseAfterQuietMinutes at the cap, lower on pressure or load timeouts; the audit verifies. manual: use the configured caps as they are.",
+      "startSuite": 2,
+      "startReadonly": 2,
+      "step": 1,
+      "raiseAfterQuietMinutes": 30,
+      "maxSuite": 12,
+      "maxReadonly": 8
+    }
+  },
+  "commands": {
+    "install": "npm ci",
+    "typecheck": "npx tsc --noEmit -p apps/web-ui/tsconfig.json && npm run typecheck:scripts",
+    "lint": "",
+    "unit": "npm run test:scripts",
+    "verify": "npm run build && npm run smokes",
+    "e2e": "",
+    "release": [
+      "pnpm e2e:compose",
+      "pnpm test:images"
+    ]
+  },
+  "reviews": {
+    "functionalOnly": true,
+    "maxRounds": 2,
+    "waveTriggers": {
+      "passedTasks": 2,
+      "waitMinutes": 60
+    }
+  },
+  "improvement": {
+    "auditNightly": true,
+    "fastLaneMaxParallel": 1
+  },
+  "design": {
+    "tool": "figma",
+    "exportDir": "design"
+  },
+  "hooks": {
+    "mode": "factory",
+    "dir": ".githooks",
+    "hooksPath": ".githooks",
+    "layout": "githooks"
+  }
+}

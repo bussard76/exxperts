@@ -10,7 +10,6 @@ dist-release/
 
 # Personal AI-session context (each contributor can have their own); only the
 # shared session files under the top .claude/ are tracked
-AGENTS.md
 CLAUDE.md
 CLAUDE.local.md
 .claude/*
@@ -35,3 +34,11 @@ dist-*/
 # Bench and generator scratch: run folders hold full copies of whatever room
 # was benched, real memory included
 scratch/
+.factory/new/
+.factory/controller/
+.factory/front-agent/
+.factory/server/
+.build/
+.env.*
+!.env.example
+.scratch/

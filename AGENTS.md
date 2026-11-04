@@ -1,0 +1,93 @@
+# AGENTS.md — rules for every coding agent in this repo
+
+Read first: `ARCHITECTURE.md` (if present), your task, and `docs/coordinator.md` if you coordinate. For how the product works, start with `docs/developer.md`.
+
+## Repository boundary
+
+- This clone works on the fork `bussard76/exxperts` (`origin`). `EXXETA/exxperts` (`upstream`) is read-only.
+- **Never push to `EXXETA/exxperts` and never open a pull request, issue or comment there.** Pass `--repo bussard76/exxperts` to every `gh` call that writes.
+
+## Layout
+
+- `pi-package/` — extensions, skills, product-state path helpers
+- `runtime/` — owned exxperts runtime packages (Pi fork)
+- `apps/web-server/` — Fastify server: rooms, memory lifecycle, tool policy
+- `apps/web-ui/` — React/Vite web UI
+- `scripts/` — dev launchers (`exxperts-cli`, `exxperts-web`)
+- `bin/` — packaged bin shim
+- `docs/` — architecture, ops, developer docs (start with `docs/developer.md`)
+
+## Commands
+
+```bash
+npm install
+npm run build              # build all workspaces
+./scripts/exxperts-web      # dev web app
+./scripts/exxperts-cli      # dev CLI/TUI
+npm run smokes              # smoke suite, must pass before integrating
+npm run doctor              # env sanity check
+```
+
+After editing `runtime/`: `cd runtime && npm run build && cd ..`
+
+## Conventions
+
+- Workspaces: `runtime/packages/*`, `pi-package`, `apps/web-server`, `apps/web-ui`
+- Two dev loops, keep separate: repo scripts (`./scripts/exxperts-*`) vs installed tarball (`npm pack` + `npm exec --package ./*.tgz -- exxperts`)
+- Full details: `docs/developer.md`, `CONTRIBUTING.md`, `docs/how-exxperts-works.md`
+
+## Way of working
+
+- **One task, its scope only.** Do exactly the task you were given. Out-of-scope findings go into your final report; do not fix them.
+- **TDD.** For every behaviour: write a failing test first, make it pass, then refactor. Test through public entry points, not internals.
+- **Done means:** `npm run build && npm run smokes` is green, the task's acceptance checks pass, and your report lists files changed, tests added and any assumptions.
+- **Never weaken tests.** Do not delete, skip or loosen existing tests. If a test is wrong, escalate.
+- **Small commits** on your branch with clear messages. Push your branch; never push to `main`.
+- **DCO sign-off:** commit with `git commit -s`.
+- **Docs:** update `docs/` if user-visible behaviour changed.
+
+## Review gate
+
+- No code reaches `main` without a passing independent review under `docs/review-protocol.md`. The reviewer is never the builder. Enforced by the factory hooks in `.githooks/` (`tools/factory-guardrails.mjs`). With the hooks armed (`core.hooksPath=.githooks`), `pre-push` checks every update of `main`.
+- Reviewers work read-only and write only their findings file, committed separately under `docs/reviews/`.
+- Builders fix findings. If a finding appears incorrect, explain why to the coordinator.
+- `--no-verify` is forbidden, and so is every other way of skipping hooks (`HUSKY=0`, `core.hooksPath` changes, `git -c core.hooksPath=…`).
+
+## Coordinator
+
+Whoever coordinates work (starts workers, merges, or talks to Sascha) follows `docs/coordinator.md`.
+
+## Change levels
+
+Every task records `## Architecture impact` (level, modules and boundaries; level 3 needs an ADR). A fresh Worker Architect checks every spec before the build and conformance after level 2/3 builds; see `docs/architect-protocol.md`.
+
+| Level | Examples | What you do |
+|---|---|---|
+| 1 | anything inside one module that keeps its public API | just do it |
+| 2 | new or changed public export, new dependency, new route | checked by the Architect; ask the coordinator with a one-paragraph rationale; continue only after the answer |
+| 3 | new module, changed responsibilities or allowed imports, different data flow, new technology, contract or protocol change | escalate; the coordinator gets Sascha's decision; do not implement until the accepted ADR says `Decided by: Sascha` |
+
+**Protected files** (the commit hook blocks changes unless the message references `ADR-NNNN` of an accepted ADR that carries a `Decided by:` line): `ARCHITECTURE.md`, `AGENTS.md`, `docs/adr/**`, `.githooks/**`, `tools/factory-guardrails.mjs`. A **new or proposed ADR** is itself under `docs/adr/`: commit it by citing the adoption ADR (ADR-0001) in the message; once Sascha has accepted it, cite it directly. ADRs follow `docs/adr/0000-template.md` (Status, Date, Decided by, options, decision), not the shorter form in the vendored `domain-modeling` skill. New dependencies are not hook-protected; they are a level-2 change that the Architect's spec review decides, and the Tester checks that every new dependency is named in the task.
+
+## Data rule
+
+No real data in code, fixtures, tests or logs. Demo data is invented. Never read Sascha's real data or real external services from a worker. `.env` is never committed. Never print secrets.
+
+## No outward effects
+
+Agents and their tests change nothing outside the repository and the demo or test environment: no production systems, no real accounts, no real data, no sending, deploying or deleting. Whether and how the product acts on external systems is a product decision recorded in this project's docs.
+
+## Language
+
+Code, identifiers, comments, commit messages, UI texts and demo data: English.
+
+## Paid APIs
+
+Never call real model APIs from tests, scripts or while developing. Use a fake OpenAI-compatible server and scripted implementations.
+
+## Skills
+
+- Developers follow `ponytail` while implementing and use `tdd` for every behaviour change and `diagnosing-bugs` for every bug or review blocker.
+- Testers run `ponytail-review` on the full task diff and merge its findings into the review file with the protocol's severities. A Ponytail **Must fix** maps to at least `major`.
+- Skills never override this file, the architecture docs or the data and safety rules. On conflict, repository rules win.
+- Retro findings change repo files only (`docs/coordinator.md`, `docs/review-protocol.md`, `CODING_STANDARDS.md`, or `AGENTS.md` through an accepted ADR). Never edit global or user-level agent configuration.
