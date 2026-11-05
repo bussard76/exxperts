@@ -63,6 +63,7 @@
     }
   },
   "agents": {
+    "controllerArgs": "--dangerously-bypass-approvals-and-sandbox",
     "runner": "orca",
     "$runners": "orca: workers run in Orca worktrees and terminals; terminal: workers run as plain codex/claude/pi processes in git worktrees",
     "default": "codex",
