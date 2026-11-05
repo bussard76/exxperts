@@ -41,6 +41,8 @@ fs.mkdirSync(path.join(folder, "docs", "img"), { recursive: true });
 const ONE_PIXEL_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==", "base64");
 fs.writeFileSync(path.join(folder, "docs", "img", "pixel.png"), ONE_PIXEL_PNG);
 fs.writeFileSync(path.join(folder, "top pixel.png"), ONE_PIXEL_PNG);
+fs.mkdirSync(path.join(folder, "Library", "LaunchAgents"), { recursive: true });
+fs.writeFileSync(path.join(folder, "Library", "LaunchAgents", "example.md"), "protected");
 fs.mkdirSync(path.join(folder, "node_modules", "hidden"), { recursive: true });
 fs.writeFileSync(path.join(folder, "node_modules", "hidden", "secret.md"), "hidden");
 fs.symlinkSync(path.join(folder, "docs"), path.join(folder, "shortcut"));
@@ -148,6 +150,11 @@ try {
 			assert(response.status !== 200, `direct listing of ${denied} must be denied`);
 		}
 		const fileRoute = (route: string, relative: string) => `/api/persistent-agents/${encodeURIComponent(agentId)}/${route}?${new URLSearchParams({ conversationId, path: relative })}`;
+		const protectedRoute = fileRoute("workspace-markdown", "Library/LaunchAgents/example.md");
+		const protectedFile = await api(protectedRoute);
+		assert(protectedFile.status === 200, "protected file is readable");
+		const blockedWrite = await api(protectedRoute, { method: "PUT", body: JSON.stringify({ content: "overwritten", revision: protectedFile.body.revision }) });
+		assert(blockedWrite.status === 403 && fs.readFileSync(path.join(folder, "Library", "LaunchAgents", "example.md"), "utf8") === "protected", "write restrictions prevent replacement of a protected file");
 		const beforeSwap = await api(fileRoute("workspace-markdown", "docs/guide.md"));
 		assert(beforeSwap.status === 200, "Markdown is readable before the root changes");
 		const replacement = path.join(tempHome, "replacement");

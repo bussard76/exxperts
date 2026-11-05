@@ -6,6 +6,7 @@ import { resolvePersistentRoomEffectiveWorkspacePolicy } from "./persistent-room
 import {
 	PersistentRoomWorkspaceToolError,
 	resolvePersistentRoomWorkspaceExistingFile,
+	resolvePersistentRoomWorkspacePath,
 } from "./persistent-room-workspace-tools.js";
 import { persistentRoomWorkspaceToolNamesForPolicy } from "./persistent-room-tool-policy.js";
 
@@ -234,6 +235,7 @@ function atomicallyReplaceMarkdown(
 	expectedRevision: string,
 ): void {
 	const initial = resolvePersistentRoomWorkspaceExistingFile(policy, relativePath);
+	resolvePersistentRoomWorkspacePath(policy, relativePath, "write");
 	const currentBytes = fs.readFileSync(initial.absolutePath);
 	if (revisionFor(currentBytes) !== expectedRevision) {
 		throw new PersistentRoomWorkspaceMarkdownError("revision_conflict", 409, "The Markdown file changed outside the editor.", revisionFor(currentBytes));
@@ -248,6 +250,7 @@ function atomicallyReplaceMarkdown(
 		fs.closeSync(tempFd);
 		tempFd = null;
 		const beforeRename = resolvePersistentRoomWorkspaceExistingFile(policy, relativePath);
+		resolvePersistentRoomWorkspacePath(policy, relativePath, "write");
 		const beforeRenameBytes = fs.readFileSync(beforeRename.absolutePath);
 		const beforeRenameRevision = revisionFor(beforeRenameBytes);
 		if (beforeRenameRevision !== expectedRevision) {
