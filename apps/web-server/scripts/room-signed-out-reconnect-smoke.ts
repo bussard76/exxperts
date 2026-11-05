@@ -6,12 +6,18 @@
 // (Room settings, Model); no Reconnect, no offline chip, no second sentence,
 // and the room stops dialing. Once the provider is signed in again (noticed
 // when the window comes back to the front), the room dials again by itself
-// and Send is back, without leaving the room. Then the key stops working
+// and Send is back, without leaving the room, with no "Connected again."
+// (nothing dropped). Then the key stops working
 // while the catalog still counts it (an expired sign-in, the provider answers
 // 401): the next turn fails on it, and the room shows the same one notice
 // instead of the raw error, and once the person signs in again the next send
 // runs on the new sign-in, in the same room,
-// with the message back in the composer to send again after signing in.
+// with the message back in the composer to send again after signing in, and
+// the failed message no longer in what the model reads, so it is asked once.
+// A page whose every read of the sign-in status fails still names the key and
+// offers its button, Add key or Replace key, both when the room is refused at
+// opening and when a turn fails on the key: the server's own frames say it is
+// a key.
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
@@ -20,7 +26,10 @@ import path from "node:path";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { authedFetch, SMOKE_AUTH_TOKEN, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, smokeHomeEnv, stopSmokeServer } from "./smoke-server-process.js";
+import { authedFetch, SMOKE_AUTH_TOKEN, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, smokeHomeEnv, stopSmokeServer, freePort } from "./smoke-server-process.js";
+import { waitEvery } from "./smoke-wait.js";
+
+const waitUntil = waitEvery(150);
 
 function assert(condition: unknown, message: string): asserts condition {
 	if (!condition) throw new Error(message);
@@ -39,7 +48,7 @@ function assert(condition: unknown, message: string): asserts condition {
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const webServerDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(webServerDir, "..", "..");
-const port = 27000 + Math.floor(Math.random() * 10000);
+const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "exxperts-signed-out-ui-"));
@@ -67,7 +76,7 @@ process.env.EXXETA_PERSISTENT_AGENTS_ROOT = agentsRoot;
 }
 
 const CLAUDE = { provider: "fake-claude", model: "claude-fake" };
-const requests: Array<{ model: string }> = [];
+const requests: Array<{ model: string; userTexts: string[] }> = [];
 // The one key the OpenAI-style provider takes; changing it retires the stored one.
 let acceptedGptKey = "synthetic-gpt";
 
@@ -86,7 +95,8 @@ const providers = http.createServer((req, res) => {
 			res.end(JSON.stringify({ error: { message: "Incorrect API key provided", type: "invalid_request_error", code: "invalid_api_key" } }));
 			return;
 		}
-		requests.push({ model: String(body.model) });
+		const userTexts = (Array.isArray(body.messages) ? body.messages : []).filter((message: any) => message?.role === "user").map((message: any) => typeof message.content === "string" ? message.content : JSON.stringify(message.content));
+		requests.push({ model: String(body.model), userTexts });
 		res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
 		const text = `Answer from ${body.model}.`;
 		if (String(req.url ?? "").includes("/messages")) {
@@ -106,15 +116,6 @@ const providers = http.createServer((req, res) => {
 		res.end();
 	});
 });
-
-async function waitUntil(predicate: () => Promise<boolean> | boolean, label: string, timeoutMs = 25_000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		if (await predicate()) return;
-		await new Promise((resolve) => setTimeout(resolve, 150));
-	}
-	throw new Error(`timed out waiting until ${label}`);
-}
 
 let server: ChildProcessWithoutNullStreams | undefined;
 const serverOutput: string[] = [];
@@ -164,22 +165,50 @@ try {
 	await waitUntil(() => fetch(`${baseUrl}/healthz`).then((r) => r.ok).catch(() => false), "server ready");
 
 	const browser = await chromium.launch();
+	/** A page whose reads of the sign-in status all fail, in a room just entered. */
+	const enterWithoutSignInStatus = async () => {
+		const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+		await context.route((url) => url.pathname === "/api/auth/status", (route) => route.fulfill({ status: 500, json: { error: "synthetic failure of the sign-in status" } }));
+		const page = await context.newPage();
+		await page.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+		await page.waitForLoadState("networkidle");
+		const dismiss = page.locator(".whats-new-close");
+		if (await dismiss.count()) await dismiss.click();
+		await page.locator(".persistent-agent-card").filter({ hasText: "Signed Out Room" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+		return { context, page, banner: page.locator(".room-model-notice") };
+	};
 	try {
+		{
+			const { context, banner } = await enterWithoutSignInStatus();
+			await banner.waitFor({ timeout: 15000 });
+			const words = await banner.innerText();
+			assert(words.includes("Fake GPT has no key saved. Add the key again to continue this conversation.") && (await banner.getByRole("button", { name: "Add key" }).count()) === 1, `without the sign-in status, a room refused for its missing key still says so with Add key, got ${JSON.stringify(words)}`);
+			await context.close();
+			console.log("  ok  without the sign-in status, a room refused for its missing key says so, with Add key");
+		}
 		const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+		// Every appearance of "Connected again." counts, however briefly it shows.
+		await ctx.addInitScript(() => {
+			(window as any).__connectedAgain = 0;
+			document.addEventListener("DOMContentLoaded", () => new MutationObserver(() => {
+				if (document.body.innerText.includes("Connected again.")) (window as any).__connectedAgain += 1;
+			}).observe(document.body, { childList: true, subtree: true, characterData: true }));
+		});
 		const page = await ctx.newPage();
+		const connectedAgain = () => page.evaluate(() => (window as any).__connectedAgain as number);
 		const roomDials: string[] = [];
 		page.on("websocket", (ws) => { if (ws.url().includes("persistentAgentId=")) roomDials.push(ws.url()); });
 		await page.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
 		await page.waitForLoadState("networkidle");
-		const dismiss = page.locator(".whats-new-foot .btn-primary");
+		const dismiss = page.locator(".whats-new-close");
 		if (await dismiss.count()) await dismiss.click();
 
-		await page.locator(".persistent-agent-card").filter({ hasText: "Signed Out Room" }).getByRole("button", { name: "Resume →" }).click();
+		await page.locator(".persistent-agent-card").filter({ hasText: "Signed Out Room" }).getByRole("button", { name: "Resume" }).click();
 		const banner = page.locator(".room-model-notice");
 		await banner.waitFor({ timeout: 15000 });
-		assert((await banner.innerText()).includes("Fake GPT is signed out. Sign in again to continue this conversation."), `the notice names the signed-out provider, got ${JSON.stringify(await banner.innerText())}`);
-		assert((await banner.getByRole("button").allInnerTexts()).join("|") === "Choose another model|Sign in", "the buttons read in the app's order, Sign in last");
-		assert((await banner.getByRole("button", { name: "Sign in" }).count()) === 1 && (await banner.getByRole("button", { name: "Choose another model" }).count()) === 1, "the notice offers Sign in and Choose another model");
+		assert((await banner.innerText()).includes("Fake GPT has no key saved. Add the key again to continue this conversation."), `the notice names the provider whose key is gone, got ${JSON.stringify(await banner.innerText())}`);
+		assert((await banner.getByRole("button").allInnerTexts()).join("|") === "Choose another model|Add key", "the buttons read in the app's order, Add key last");
+		assert((await banner.getByRole("button", { name: "Add key" }).count()) === 1 && (await banner.getByRole("button", { name: "Choose another model" }).count()) === 1, "the notice offers Add key and Choose another model");
 		const dialsWhileOut = roomDials.length;
 		await page.waitForTimeout(6000);
 		assert(roomDials.length === dialsWhileOut, `the room stops dialing a signed-out provider, got ${roomDials.length - dialsWhileOut} more dials`);
@@ -187,14 +216,14 @@ try {
 		assert((await page.getByRole("button", { name: "Reconnect" }).count()) === 0 && (await page.locator(".composer-connection").count()) === 0, "no Reconnect and no offline chip: reconnecting cannot help");
 		assert((await page.locator('button[title="Waiting for the connection"]').count()) === 1, "Send waits");
 		await banner.getByRole("button", { name: "Choose another model" }).click();
-		await page.locator(".room-model-section").waitFor({ timeout: 10000 });
+		await page.getByRole("dialog", { name: "Model and effort" }).waitFor({ timeout: 10000 });
 		await page.keyboard.press("Escape");
-		await page.locator(".room-model-section").waitFor({ state: "detached", timeout: 10000 });
-		await banner.getByRole("button", { name: "Sign in" }).click();
+		await page.getByRole("dialog", { name: "Model and effort" }).waitFor({ state: "detached", timeout: 10000 });
+		await banner.getByRole("button", { name: "Add key" }).click();
 		await page.locator("[data-provider-id=\"fake-gpt\"]").waitFor({ timeout: 10000 });
 		await page.keyboard.press("Escape");
 		await page.locator("[data-provider-id=\"fake-gpt\"]").waitFor({ state: "detached", timeout: 10000 });
-		console.log("  ok  Choose another model opens Room settings, Model, and Sign in opens AI setup at the provider's row");
+		console.log("  ok  Choose another model opens the conversation's model panel, and Add key opens AI setup at the provider's row");
 
 		// Signed in again elsewhere; the room notices when the window is back.
 		fs.writeFileSync(authFile, JSON.stringify({ "fake-claude": { type: "api_key", key: "synthetic-claude" }, "fake-gpt": { type: "api_key", key: "synthetic-gpt" } }, null, 2), { mode: 0o600 });
@@ -203,6 +232,7 @@ try {
 		await banner.waitFor({ state: "detached", timeout: 10000 });
 		assert(roomDials.length > dialsWhileOut, "the room dialed again by itself");
 		await page.waitForTimeout(800);
+		assert(await connectedAgain() === 0, `a sign-in brings no "Connected again.", it showed ${await connectedAgain()} time(s)`);
 		const composer = page.locator("textarea").first();
 		await composer.fill("Back on GPT.");
 		await composer.press("Enter");
@@ -218,13 +248,13 @@ try {
 		await composer.fill("Still there?");
 		await composer.press("Enter");
 		await banner.waitFor({ timeout: 20000 });
-		assert((await banner.innerText()).includes("Fake GPT is signed out.") && (await banner.getByRole("button", { name: "Sign in" }).count()) === 1 && (await banner.getByRole("button", { name: "Choose another model" }).count()) === 1, `a turn that fails on the sign-in shows the one notice, got ${JSON.stringify(await banner.innerText())}`);
+		assert((await banner.innerText()).includes("Fake GPT did not accept the saved key. Replace the key to continue this conversation.") && (await banner.getByRole("button", { name: "Replace key" }).count()) === 1 && (await banner.getByRole("button", { name: "Choose another model" }).count()) === 1, `a turn that fails on the sign-in shows the one notice, got ${JSON.stringify(await banner.innerText())}`);
 		assert((await page.getByText(/could not respond|Incorrect API key/).count()) === 0, "no raw error on the face");
 		assert(warnings.some((text) => /the turn failed on the provider's sign-in:.*401/.test(text)), `the raw error goes to the log, got ${JSON.stringify(warnings)}`);
 		assert(requests.length === requestsBefore, "the provider refused the key, and nothing answered");
 		assert((await composer.inputValue()) === "Still there?", `the message is back in the composer, to send after signing in, got ${JSON.stringify(await composer.inputValue())}`);
 		assert((await page.getByRole("button", { name: "Reconnect" }).count()) === 0 && (await page.locator(".composer-connection").count()) === 0, "no Reconnect and no offline chip");
-		console.log("  ok  a turn that fails on the sign-in shows the one notice with Sign in, logs the raw error, and keeps the message");
+		console.log("  ok  a turn that fails on a refused key shows the one notice with Replace key, logs the raw error, and keeps the message");
 
 		// The person signs in again (the new key lands in the sign-in store):
 		// the next send runs on it, without leaving the room, and the notice goes.
@@ -235,9 +265,25 @@ try {
 		await composer.press("Enter");
 		await page.getByText("Answer from gpt-fake.").nth(1).waitFor({ timeout: 20000 });
 		assert(requests.length === requestsBefore + 1, "the message was answered on the new sign-in");
+		const askedAgain = requests[requests.length - 1]!.userTexts.filter((text) => text.includes("Still there?")).length;
+		assert(askedAgain === 1, `the failed message left the conversation, so the model is asked it once, got ${askedAgain} times`);
 		await banner.waitFor({ state: "detached", timeout: 10000 });
 		console.log("  ok  after the sign-in the next send answers on it, in the same room, and the notice is gone");
 		await ctx.close();
+
+		{
+			const { context, page: keyPage, banner: keyBanner } = await enterWithoutSignInStatus();
+			await keyPage.locator('button[title="Send"]').first().waitFor({ timeout: 15000 });
+			acceptedGptKey = "synthetic-gpt-renewed-again";
+			const keyComposer = keyPage.locator("textarea").first();
+			await keyComposer.fill("Refused again?");
+			await keyComposer.press("Enter");
+			await keyBanner.waitFor({ timeout: 20000 });
+			const words = await keyBanner.innerText();
+			assert(words.includes("Fake GPT did not accept the saved key. Replace the key to continue this conversation.") && (await keyBanner.getByRole("button", { name: "Replace key" }).count()) === 1, `without the sign-in status, a turn refused for its key still says so with Replace key, got ${JSON.stringify(words)}`);
+			await context.close();
+			console.log("  ok  without the sign-in status, a turn refused for its key says so, with Replace key");
+		}
 	} finally {
 		await browser.close();
 	}

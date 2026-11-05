@@ -43,7 +43,8 @@ export interface McpConnectorStatus {
 	name: string;
 	transport: "http" | "stdio";
 	target: string;
-	source: { path: string; kind: string; importKind?: string } | null;
+	/** importFile: the other tool's own file an imported entry is read from (Cursor's ~/.cursor/mcp.json); Remove cannot remove such an entry, so a change is made there. */
+	source: { path: string; kind: string; importKind?: string; importFile?: string } | null;
 	auth: McpConnectorAuthStatus;
 	tools: McpConnectorToolsStatus | null;
 }
@@ -76,6 +77,17 @@ function tildePath(p: string): string {
 	return p.startsWith(home) ? `~${p.slice(home.length)}` : p;
 }
 
+/**
+ * A header that carries a credential (an API key in its own header), by the
+ * words in its name: Authorization, a token, a secret, or an API key
+ * (X-Api-Key, Api-Key, ApiKey). Whole words, so Idempotency-Key or
+ * Notion-Version are not taken for a sign-in.
+ */
+export function isCredentialHeaderName(name: string): boolean {
+	const words = name.toLowerCase().split(/[-_.]/);
+	return ["authorization", "token", "secret", "apikey"].some((word) => words.includes(word)) || (words.includes("api") && words.includes("key"));
+}
+
 function authModeFor(entry: {
 	url?: string;
 	auth?: "oauth" | "bearer" | false;
@@ -85,10 +97,10 @@ function authModeFor(entry: {
 	oauth?: unknown;
 }): McpConnectorAuthStatus["mode"] {
 	if (entry.auth === "bearer" || entry.bearerToken || entry.bearerTokenEnv) return "bearer";
-	// Static credential headers (Figma's X-Figma-Token, API keys) come with
+	// Static credential headers (API keys in their own header) come with
 	// auth: false to switch off OAuth auto-detect, but to the UI they are
 	// token auth, not "no login needed".
-	if (entry.auth === false && Object.keys(entry.headers ?? {}).some((h) => /token|key|secret|authorization/i.test(h))) return "bearer";
+	if (entry.auth === false && Object.keys(entry.headers ?? {}).some(isCredentialHeaderName)) return "bearer";
 	// Mirrors the adapter's supportsOAuth: HTTP servers auto-detect OAuth
 	// unless auth/oauth is explicitly disabled.
 	if (entry.url && entry.auth !== false && entry.oauth !== false) return "oauth";
@@ -119,6 +131,8 @@ export async function getMcpConnectorsStatus(): Promise<McpConnectorsStatusRespo
 	const config = configMod.loadMcpConfig();
 	const provenance: Map<string, { path: string; kind: string; importKind?: string }> = configMod.getServerProvenance();
 	const cache = cacheMod.loadMetadataCache();
+	// The shared global file is no import kind, so its entries get no importFile: Remove works there.
+	const importFiles = new Map<string, string>((configMod.findAvailableImportConfigs() as Array<{ kind: string; path: string }>).map((found) => [found.kind, found.path]));
 
 	const servers: McpConnectorStatus[] = Object.entries(config.mcpServers ?? {}).map(([name, rawEntry]) => {
 		const entry = rawEntry as {
@@ -139,7 +153,7 @@ export async function getMcpConnectorsStatus(): Promise<McpConnectorsStatusRespo
 			name,
 			transport: entry.url ? "http" : "stdio",
 			target: entry.url ?? [entry.command ?? "", ...(entry.args ?? [])].join(" ").trim(),
-			source: source ? { path: tildePath(source.path), kind: source.kind, importKind: source.importKind } : null,
+			source: source ? { path: tildePath(source.path), kind: source.kind, importKind: source.importKind, ...(source.importKind && importFiles.has(source.importKind) ? { importFile: tildePath(importFiles.get(source.importKind)!) } : {}) } : null,
 			auth: {
 				mode,
 				explicit: mode === "oauth" && (entry.auth === "oauth" || (typeof entry.oauth === "object" && entry.oauth !== null)),

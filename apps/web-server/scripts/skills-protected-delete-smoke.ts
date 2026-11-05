@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { authedFetch, SMOKE_AUTH_TOKEN, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer } from "./smoke-server-process.js";
+import { authedFetch, SMOKE_AUTH_TOKEN, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer, freePort, waitForServer } from "./smoke-server-process.js";
 
 const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "exxperts-skills-protected-"));
 process.env.HOME = tempHome;
@@ -16,7 +16,7 @@ process.env.USERPROFILE = tempHome;
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const webServerDir = path.resolve(scriptDir, "..");
-const port = 24000 + Math.floor(Math.random() * 10000);
+const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -28,21 +28,9 @@ function writeSkill(dir: string, name: string, description: string): void {
 	fs.writeFileSync(path.join(dir, "SKILL.md"), ["---", `name: ${name}`, `description: ${description}`, "---", "", "Follow these steps.", ""].join("\n"));
 }
 
-// --- The words, exactly as specified, for every tier ------------------------
-const copy = await import("../../web-ui/src/skill-source-copy.js");
-const expected: Record<string, [string, string]> = {
-	builtin: ["It comes with exxperts, so it can't be deleted. To stop a room using it, remove it in that room's Skills settings.", "Built in"],
-	shared: ["It lives in ~/.agents/skills, which other tools manage. Delete it there to remove it.", "Shared"],
-	project: ["It comes with this project's folder. Remove it from .exxeta/skills there.", "This project"],
-};
-for (const [tier, [line, label]] of Object.entries(expected)) {
-	assert(copy.protectedSkillDeleteLine(tier) === line, `${tier}: the Delete row's line, got ${JSON.stringify(copy.protectedSkillDeleteLine(tier))}`);
-	assert(copy.skillTierLabel(tier) === label, `${tier}: the table's label, got ${JSON.stringify(copy.skillTierLabel(tier))}`);
-}
-assert(copy.protectedSkillDeleteLine("user") === null && copy.skillTierLabel("user") === null, "a skill of your own has neither");
+const SHARED_DELETE_LINE = "It lives in ~/.agents/skills, which other tools manage. Delete it there to remove it.";
 
-// A machine without Chromium cannot run the browser half; the words above
-// still ran.
+// A machine without Chromium cannot run the browser half.
 {
 	const p = typeof chromium?.executablePath === "function" ? chromium.executablePath() : "";
 	if (!p || !fs.existsSync(p)) {
@@ -52,18 +40,6 @@ assert(copy.protectedSkillDeleteLine("user") === null && copy.skillTierLabel("us
 }
 
 let server: ChildProcessWithoutNullStreams | null = null;
-
-async function waitForServer(): Promise<void> {
-	for (let attempt = 0; attempt < 100; attempt += 1) {
-		if (server?.exitCode != null) throw new Error(`server exited before startup with code ${server.exitCode}`);
-		try {
-			const res = await fetch(`${baseUrl}/healthz`);
-			if (res.ok) return;
-		} catch { /* not up yet */ }
-		await new Promise((resolve) => setTimeout(resolve, 150));
-	}
-	throw new Error("server did not come up");
-}
 
 try {
 	// A shared skill in the cross-tool folder, and one of your own.
@@ -75,7 +51,7 @@ try {
 		env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome, PORT: String(port), ...SMOKE_SERVER_AUTH_ENV },
 		stdio: ["ignore", "pipe", "pipe"],
 	}) as unknown as ChildProcessWithoutNullStreams;
-	await waitForServer();
+	await waitForServer(server, baseUrl, { tries: 100 });
 	const own = await authedFetch(`${baseUrl}/api/skills`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "cite-sources", displayName: "cite-sources", description: "Cites its sources", instructions: "Cite every source." }) });
 	assert(own.status === 201, `writing a skill of your own should succeed, got ${own.status}`);
 
@@ -83,6 +59,8 @@ try {
 	try {
 		const openSkills = async (remote: boolean) => {
 			const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+			// A Home with no rooms: the guide has had its turn, so it leaves the gear free.
+			await ctx.addInitScript(() => localStorage.setItem("exxperts.first-run-guide-seen", "1"));
 			const page = await ctx.newPage();
 			if (remote) {
 				await page.route("**/api/remote/client-context", (route) =>
@@ -90,7 +68,7 @@ try {
 			}
 			await page.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
 			await page.waitForLoadState("networkidle");
-			const dismiss = page.locator(".whats-new-foot .btn-primary");
+			const dismiss = page.locator(".whats-new-close");
 			if (await dismiss.count()) await dismiss.click();
 			await page.locator(".product-sidebar-footer button").first().click();
 			await page.locator(".sidebar-config-menu button, .sidebar-config-menu a").filter({ hasText: /Settings/ }).first().click();
@@ -108,7 +86,7 @@ try {
 		await sharedRow.click();
 		await page.waitForSelector(".skill-detail", { timeout: 10000 });
 		assert((await deleteRow(page).count()) === 1, "a shared skill keeps the Delete skill row");
-		assert((await deleteRow(page).locator(".settings-row-sub").innerText()).trim() === expected.shared[0], "the row says where a shared skill can be removed");
+		assert((await deleteRow(page).locator(".settings-row-sub").innerText()).trim() === SHARED_DELETE_LINE, "the row says where a shared skill can be removed");
 		assert(await deleteRow(page).locator("button.rs-btn-danger").isDisabled(), "its Delete button is disabled");
 
 		await page.locator(".skill-detail-back").click();

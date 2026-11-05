@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { Agent, type AgentMessage, type LoopStrategy, type ThinkingLevel } from "@exxeta/exxperts-core";
-import { clampThinkingLevel, type Message, type Model, streamSimple } from "@exxeta/exxperts-ai";
+import { type CacheRetention, clampThinkingLevel, type Message, type Model, streamSimple } from "@exxeta/exxperts-ai";
 import { getAgentDir } from "../config.js";
 import type { ContextPolicy } from "./context-policy.js";
 import { AgentSession } from "./agent-session.js";
@@ -51,6 +51,11 @@ export interface CreateAgentSessionOptions {
 	 * and inherits the server's default).
 	 */
 	maxTokens?: number;
+	/**
+	 * Explicit prompt-cache retention forwarded to providers on every request.
+	 * When omitted, the provider default applies.
+	 */
+	cacheRetention?: CacheRetention;
 	/**
 	 * Explicit client-side retry cap forwarded to providers on every request.
 	 * When omitted, the configured provider-retry setting applies (and below
@@ -178,8 +183,7 @@ function getAttributionHeaders(
 	if (model.provider === "openrouter" || model.baseUrl.includes("openrouter.ai")) {
 		return {
 			"HTTP-Referer": "https://exxeta.com/exxperts",
-			"X-OpenRouter-Title": "pi",
-			"X-OpenRouter-Categories": "cli-agent",
+			"X-OpenRouter-Title": "exxperts",
 		};
 	}
 
@@ -367,6 +371,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			tools: [],
 		},
 		maxTokens: options.maxTokens,
+		cacheRetention: options.cacheRetention,
 		maxRetries: options.maxRetries,
 		convertToLlm: convertToLlmWithBlockImages,
 		streamFn: async (model, context, options) => {

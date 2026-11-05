@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { authedFetch, type AuthedFetchInit, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer } from "./smoke-server-process.js";
+import { authedFetch, freePort, type AuthedFetchInit, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer, waitForServer } from "./smoke-server-process.js";
 
 /**
  * Several saved gateways, side by side.
@@ -40,9 +40,9 @@ const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "exxperts-multi-gateway-h
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const webServerDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(webServerDir, "..", "..");
-const port = 24000 + Math.floor(Math.random() * 10000);
-const stubPort = port + 1;
-const foreignPort = port + 2;
+const port = await freePort();
+const stubPort = await freePort();
+const foreignPort = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
 const stubGatewayBaseUrl = `http://127.0.0.1:${stubPort}/v1`;
 const restrictedGatewayBaseUrl = `http://127.0.0.1:${stubPort}/restricted/v1`;
@@ -173,23 +173,6 @@ function startForeignServer(): Promise<http.Server> {
 	});
 }
 
-async function waitForServer(server: ChildProcessWithoutNullStreams): Promise<void> {
-	const deadline = Date.now() + 20000;
-	let lastError = "server did not respond";
-	while (Date.now() < deadline) {
-		if (server.exitCode != null) throw new Error(`server exited before startup with code ${server.exitCode}`);
-		try {
-			const response = await fetch(`${baseUrl}/healthz`);
-			if (response.ok) return;
-			lastError = `healthz returned ${response.status}`;
-		} catch (error) {
-			lastError = (error as Error).message;
-		}
-		await new Promise((resolve) => setTimeout(resolve, 150));
-	}
-	throw new Error(`server did not become ready: ${lastError}`);
-}
-
 async function requestJson(pathname: string, init?: AuthedFetchInit): Promise<{ status: number; body: any }> {
 	const response = await authedFetch(`${baseUrl}${pathname}`, init);
 	const text = await response.text();
@@ -283,7 +266,7 @@ try {
 	});
 	server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
 	server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
-	await waitForServer(server);
+	await waitForServer(server, baseUrl, 20000);
 
 	// (b) The legacy file alone is enough to be the first gateway, with both ids
 	// exactly as every existing room lock spells them.
@@ -385,9 +368,8 @@ try {
 	assert(detected.get("plain-model")?.reasoning === true, `the deployment's answer should win over the row's parameter list, got ${JSON.stringify(detected.get("plain-model"))}`);
 	assert(detected.get("dual-shape-model")?.reasoning === null, `a row that lists no parameters says nothing about reasoning, got ${JSON.stringify(detected.get("dual-shape-model"))}`);
 	assert(detected.get("silent-model")?.reasoning === null, `an undescribed model must not be assumed to reason, got ${JSON.stringify(detected.get("silent-model"))}`);
-	// Prompt caching crosses the API the same way: declared yes, declared no,
-	// and silence stay three different answers.
-	assert(detected.get("vision-model")?.promptCaching === true, `a declared caching support should be detected, got ${JSON.stringify(detected.get("vision-model"))}`);
+	// Prompt caching crosses the API the same way: a declared no and silence
+	// stay different answers (a declared yes is checked on the save below).
 	assert(detected.get("plain-model")?.promptCaching === false, `a declared caching refusal should be detected, got ${JSON.stringify(detected.get("plain-model"))}`);
 	assert(detected.get("silent-model")?.promptCaching === null, `an undescribed model must not be assumed to cache, got ${JSON.stringify(detected.get("silent-model"))}`);
 
@@ -417,9 +399,9 @@ try {
 	// OpenRouter field is the more specific and is not displaced by the
 	// max_input_tokens sitting beside it.
 	assert(detected.get("dual-shape-model")?.contextWindow === 64000, `OpenRouter context_length should win inside a row, got ${JSON.stringify(detected.get("dual-shape-model"))}`);
-	// The published price crosses the API in the runtime's unit, from either
-	// dialect, and a silent model crosses as null rather than as zero.
-	assert(JSON.stringify(detected.get("vision-model")?.cost) === JSON.stringify({ input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.25 }), `LiteLLM's price should be detected per million, got ${JSON.stringify(detected.get("vision-model"))}`);
+	// OpenRouter's price crosses the API with its own cache-write figure, and a
+	// silent model crosses as null rather than as zero (LiteLLM's price is
+	// checked on the save below).
 	assert(JSON.stringify(detected.get("thinking-model")?.cost) === JSON.stringify({ input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }), `OpenRouter's pricing strings should be detected per million, got ${JSON.stringify(detected.get("thinking-model"))}`);
 	assert(detected.get("silent-model")?.cost === null, `an unpriced model must cross as null, got ${JSON.stringify(detected.get("silent-model"))}`);
 
@@ -591,6 +573,29 @@ try {
 	});
 	assertStatusOk(readded, "re-adding a gateway with the removed one's name");
 	assert(readded.body.gateway.providerId !== projectProviderId, `a retired provider id must not come back, got ${readded.body.gateway.providerId}`);
+
+	// A saved gateway's key never goes to a new address. A save that moves the
+	// gateway to another server with no key of its own is refused, and nothing
+	// changes; another path on the same server, or a new address with its own
+	// key, saves as before.
+	const again = readded.body.gateway;
+	const saveAgain = (body: Record<string, unknown>) => requestJson(`/api/persistent-agent-ai-profiles/gateways/${again.id}`, {
+		method: "PUT",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ label: "Project gateway", roomModels: [{ modelId: "plain-model" }], maintenanceModel: "plain-model", ...body }),
+	});
+	const modelsBeforeMove = fs.readFileSync(modelsPath, "utf-8");
+	const storesBeforeMove = fs.readFileSync(path.join(productAppRoot, "openai-compatible-gateways.json"), "utf-8");
+	const movedKeyless = await saveAgain({ baseUrl: foreignGatewayBaseUrl });
+	assert(movedKeyless.status === 400 && String(movedKeyless.body?.error ?? "").includes("API key"), `a keyless save to another server must be refused with a request for the key, got ${movedKeyless.status}: ${JSON.stringify(movedKeyless.body)}`);
+	assert(fs.readFileSync(modelsPath, "utf-8") === modelsBeforeMove && fs.readFileSync(path.join(productAppRoot, "openai-compatible-gateways.json"), "utf-8") === storesBeforeMove, "a refused save writes nothing");
+	assert(readJsonFile(authPath)[again.providerId]?.key === projectGatewayKey, "a refused save keeps the key");
+	const samePathChange = await saveAgain({ baseUrl: restrictedGatewayBaseUrl });
+	assertStatusOk(samePathChange, "keyless save of another path on the same server");
+	assert(samePathChange.body.gateway.baseUrl === restrictedGatewayBaseUrl, `the new path is saved, got ${JSON.stringify(samePathChange.body.gateway)}`);
+	const movedWithKey = await saveAgain({ baseUrl: foreignGatewayBaseUrl, key: "synthetic-new-address-key" });
+	assertStatusOk(movedWithKey, "save to another server with a key of its own");
+	assert(movedWithKey.body.gateway.baseUrl === foreignGatewayBaseUrl && readJsonFile(authPath)[again.providerId]?.key === "synthetic-new-address-key", "the new address is saved with its own key");
 
 	console.log("openai-compatible multi-gateway smoke passed");
 } catch (error) {

@@ -11,10 +11,12 @@
 // 1. the progress read: one read of one while a single pass runs;
 // 2. the gate: a prompt frame for the conversation is refused with the plain
 //    sentence, and the gateway never sees a room turn for it;
-// 3. a second Remember for the same conversation is refused with 409;
-// 4. Cancel: the client closing the request aborts the worker's provider call
-//    (the gateway sees its stream closed), the progress read answers 404, and
-//    the next message goes through.
+// 3. a second Remember for the same conversation attaches to the running one
+//    (from another tab or device) and calls no model;
+// 4. a closed request no longer stops the job: it reads on;
+// 5. Cancel, its own route from any tab, aborts the worker's provider call
+//    (the gateway sees its stream closed), the progress read says cancelled,
+//    and the next message goes through.
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs";
@@ -23,7 +25,10 @@ import os from "node:os";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
-import { authedFetch, SMOKE_AUTH_HEADERS, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, smokeHomeEnv, stopSmokeServer, type AuthedFetchInit } from "./smoke-server-process.js";
+import { authedFetch, SMOKE_AUTH_HEADERS, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, smokeHomeEnv, stopSmokeServer, freePort, type AuthedFetchInit, waitForServer } from "./smoke-server-process.js";
+import { waitEvery } from "./smoke-wait.js";
+
+const waitUntil = waitEvery(100);
 
 function assert(condition: unknown, message: string): asserts condition {
 	if (!condition) throw new Error(message);
@@ -36,7 +41,7 @@ function pass(label: string): void {
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const webServerDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(webServerDir, "..", "..");
-const port = 27000 + Math.floor(Math.random() * 10000);
+const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "exxperts-remember-gate-"));
@@ -83,23 +88,6 @@ const gateway = http.createServer((req, res) => {
 	});
 });
 
-async function waitForServer(server: ChildProcessWithoutNullStreams): Promise<void> {
-	const deadline = Date.now() + 20_000;
-	let lastError = "server did not respond";
-	while (Date.now() < deadline) {
-		if (server.exitCode != null) throw new Error(`server exited before startup with code ${server.exitCode}`);
-		try {
-			const response = await fetch(`${baseUrl}/healthz`);
-			if (response.ok) return;
-			lastError = `healthz returned ${response.status}`;
-		} catch (error) {
-			lastError = (error as Error).message;
-		}
-		await new Promise((resolve) => setTimeout(resolve, 150));
-	}
-	throw new Error(`server did not become ready: ${lastError}`);
-}
-
 async function requestJson(pathname: string, init: AuthedFetchInit = {}): Promise<{ status: number; body: any }> {
 	const response = await authedFetch(`${baseUrl}${pathname}`, {
 		...init,
@@ -107,15 +95,6 @@ async function requestJson(pathname: string, init: AuthedFetchInit = {}): Promis
 	});
 	const text = await response.text();
 	return { status: response.status, body: text ? JSON.parse(text) : null };
-}
-
-async function waitUntil(predicate: () => Promise<boolean> | boolean, label: string, timeoutMs = 25_000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		if (await predicate()) return;
-		await new Promise((resolve) => setTimeout(resolve, 100));
-	}
-	throw new Error(`timed out waiting until ${label}`);
 }
 
 type Frame = Record<string, any>;
@@ -173,7 +152,7 @@ try {
 	});
 	server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
 	server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
-	await waitForServer(server);
+	await waitForServer(server, baseUrl, 20_000);
 
 	const room = await requestJson("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Remember Gate Room", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
 	assert(room.status === 201, `room creation should return 201, got ${room.status}`);
@@ -195,6 +174,11 @@ try {
 	socket.send(JSON.stringify({ type: "prompt", text: `Something worth remembering. ${FIRST_TURN}` }));
 	await waitUntil(async () => (await requestJson(`/api/persistent-agents/${encodeURIComponent(agentId)}/status`)).body?.activeThread?.inFlight === false && gatewayRequests.some((request) => request.body.includes(FIRST_TURN)), "first turn settled");
 
+	// --- No Remember yet: the normal answer, not an error (a room open asks it every time) ----
+	const idle = await requestJson(`/api/persistent-agents/${encodeURIComponent(agentId)}/checkpoint/progress?conversationId=${encodeURIComponent(conversationId)}`);
+	assert(idle.status === 200 && idle.body?.state === "none", `with no Remember the progress read answers none, got ${idle.status} ${JSON.stringify(idle.body)}`);
+	pass("with no Remember, the progress read answers none, never a 404");
+
 	// --- A Remember that never finishes ------------------------------------------
 	const cancel = new AbortController();
 	const proposal = authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/checkpoint/propose`, {
@@ -214,25 +198,33 @@ try {
 	const framesBefore = frames.length;
 	const turnsBefore = gatewayRequests.filter((request) => !request.remember).length;
 	socket.send(JSON.stringify({ type: "prompt", text: `A message during Remember. ${GATED_TURN}` }));
-	const refusalIndex = await waitForFrame((frame) => frame.type === "error" && typeof frame.message === "string", "the refusal frame", framesBefore);
-	assert(frames[refusalIndex]!.message === "Remember is reading this conversation. Send your message when it has finished, or cancel it.", `the refusal is the plain sentence, got ${JSON.stringify(frames[refusalIndex]!.message)}`);
+	await waitForFrame((frame) => frame.type === "error" && typeof frame.message === "string", "the refusal frame", framesBefore);
 	await new Promise((resolve) => setTimeout(resolve, 500));
 	assert(gatewayRequests.filter((request) => !request.remember).length === turnsBefore && !gatewayRequests.some((request) => request.body.includes(GATED_TURN)), "the refused message never reaches the model");
-	pass("a prompt frame during the proposal is refused with the plain sentence and never reaches the model");
+	pass("a prompt frame during the proposal is refused and never reaches the model");
 
-	const second = await requestJson(`/api/persistent-agents/${encodeURIComponent(agentId)}/checkpoint/propose`, { method: "POST", body: JSON.stringify({ conversationId, model: { provider: "openai-compatible", model: "room-model" }, density: "standard" }) });
-	assert(second.status === 409 && /Remember is already reading this conversation/.test(String(second.body?.error)), `a second Remember for the conversation is refused with 409, got ${second.status} ${JSON.stringify(second.body)}`);
-	assert(gatewayRequests.filter((request) => request.remember).length === 1, "the refused second Remember calls no model");
-	pass("a second Remember for the same conversation is refused with 409 and calls no model");
+	const second = await requestJson(`/api/persistent-agents/${encodeURIComponent(agentId)}/checkpoint/propose`, { method: "POST", body: JSON.stringify({ conversationId, model: { provider: "openai-compatible", model: "room-model" }, density: "standard", background: true }) });
+	assert(second.status === 202 && second.body?.attached === true && typeof second.body?.jobId === "string", `a second Remember for the conversation attaches to the running one, got ${second.status} ${JSON.stringify(second.body)}`);
+	assert(gatewayRequests.filter((request) => request.remember).length === 1, "the attached second Remember calls no model");
+	pass("a second Remember for the same conversation attaches to the running one and calls no model");
 
-	// --- Cancel ----------------------------------------------------------------
+	// --- A closed request ----------------------------------------------------------
 	cancel.abort();
 	const settled = await proposal;
-	assert("error" in settled, "the cancelled request ends on the client");
+	assert("error" in settled, "the closed request ends on the client");
+	await new Promise((resolve) => setTimeout(resolve, 500));
+	assert(!rememberRequest.aborted, "closing the request leaves the worker's provider call running");
+	const stillReading = await requestJson(progressPath);
+	assert(stillReading.status === 200 && stillReading.body?.state === "reading" && stillReading.body?.jobId === second.body.jobId, `the job reads on after its request closed, got ${stillReading.status} ${JSON.stringify(stillReading.body)}`);
+	pass("a closed request no longer stops the job");
+
+	// --- Cancel ----------------------------------------------------------------
+	const cancelled = await requestJson(`/api/persistent-agents/${encodeURIComponent(agentId)}/checkpoint/cancel`, { method: "POST", body: JSON.stringify({ conversationId }) });
+	assert(cancelled.status === 200 && cancelled.body?.cancelled === true, `Cancel reaches the job, got ${cancelled.status} ${JSON.stringify(cancelled.body)}`);
 	await waitUntil(() => rememberRequest.aborted, "the worker's provider call is closed");
-	pass("Cancel closes the request, and the worker's provider call is aborted");
-	await waitUntil(async () => (await requestJson(progressPath)).status === 404, "the progress read answers 404");
-	pass("once cancelled, the progress read answers 404");
+	pass("Cancel aborts the worker's provider call");
+	await waitUntil(async () => (await requestJson(progressPath)).body?.state === "cancelled", "the progress read says cancelled");
+	pass("once cancelled, the progress read says so");
 	const framesAfter = frames.length;
 	socket.send(JSON.stringify({ type: "prompt", text: `The next message. ${AFTER_TURN}` }));
 	await waitUntil(() => gatewayRequests.some((request) => request.body.includes(AFTER_TURN)), "the next message reaches the model");

@@ -9,21 +9,21 @@
 // The room's own plumbing comes in as deps, the way the entries API takes
 // them: the usable-room check, the error envelope, the maintenance model and
 // the one worker seam every maintenance call goes through. That keeps this
-// file about the Review and leaves index.ts with one registration line.
+// file about the Review and leaves room-fold-routes.ts with one registration line.
 
 import type { FastifyInstance } from "fastify";
 import {
 	archiveIndex,
 	entryTokens,
-	isMigratedMemoryDocument,
 	MEMORY_SECTIONS,
-	parseMemoryDocument,
 	renderMemoryDocument,
 	reviewTargetTokens,
 	type MemoryDocument,
 } from "./memory-entries.js";
 import { loadMemoryDocument, memoryRoomBusy, readArchive } from "./memory-entries-store.js";
+import { askerLeftSignal, cancelFirstRead, clearKeptDiscussion, firstReadAsk, firstReadOnce, keepDiscussionTurns } from "./memorize-discussion-keep.js";
 import { createPersistentAgentInstance, fingerprintL1bSource, refuseOversizedMaintenancePrompt } from "./persistent-agents.js";
+import { ModelUnreachableError } from "./model-call-causes.js";
 import {
 	buildReviewAssessmentPrompt,
 	buildReviewAssessmentRetryPrompt,
@@ -44,7 +44,7 @@ import {
 
 /** The one sentence a room hears when its notes are too large for the model reading them. */
 const REVIEW_OVERFLOW_GUIDANCE =
-	"This room's notes are the material being read and cannot be shortened behind the person's back: choose a larger maintenance model in AI setup, then read the notes again.";
+	"This room's notes are the material being read and cannot be shortened behind the person's back: choose a Memory model that can read more at once in Room settings, Model, then read the notes again.";
 
 const NOTHING_WAS_WRITTEN = "no memory has been written";
 const ASSESSMENT_MAX_CHARS = 20_000;
@@ -54,6 +54,9 @@ const TRANSCRIPT_MAX_MESSAGES = 40;
 
 export interface ReviewWorkerOptions {
 	thinkingLevel?: "low";
+	signal?: AbortSignal;
+	/** A discussion turn or its sign-off names itself, for its usage row and its prompt cache; the first read is the default. */
+	callKind?: "discussion";
 }
 
 export interface ReviewGenerateResult {
@@ -177,48 +180,83 @@ export function registerReviewAssessRoutes(app: FastifyInstance, deps: ReviewAss
 	app.post("/api/persistent-agents/:id/review/assess", async (req, reply) => {
 		try {
 			const { id } = deps.room(String((req.params as any).id ?? "").trim());
+			// The page's Cancel for its own ask: the one thing that ends a first read.
+			if ((req.body as any)?.cancel === true) return { cancelled: cancelFirstRead(createPersistentAgentInstance(id).rootDir, "review", firstReadAsk(req.body)) };
 			const model = deps.modelLock(id);
 			const notes = readNotes(id, model, deps);
 			assertAvailable(notes.availability);
 			const retryFeedback = parseReviewRetryFeedback((req.body as any)?.retryFeedback);
-			const basePrompt = buildReviewAssessmentPrompt(notes.promptInput);
-			const assembly = retryFeedback ? buildReviewAssessmentPrompt({ ...notes.promptInput, retryFeedback }) : basePrompt;
-			refuseOversizedMaintenancePrompt({
-				agentId: id,
-				processLabel: "Review first read",
-				model,
-				promptEstimatedTokens: assembly.telemetry.promptEstimatedTokens,
-				window: deps.resolveModelWindow?.(model),
-				guidance: REVIEW_OVERFLOW_GUIDANCE,
-			});
-			const titles = notes.promptInput.topics.map((topic) => topic.title);
-			const warnings: string[] = [];
-			let text = (await deps.generate(id, assembly.prompt, model, { thinkingLevel: "low" })).text.trim();
-			let parsed = parseReviewAssessment(text, titles);
-			const missing = parsed.warnings.filter((warning) => warning.includes("has no"));
-			if (missing.length > 0) {
-				const retried = (await deps.generate(id, buildReviewAssessmentRetryPrompt(basePrompt.prompt, missing), model, { thinkingLevel: "low" })).text.trim();
-				const reparsed = parseReviewAssessment(retried, titles);
-				if (retried && reparsed.warnings.length < parsed.warnings.length) {
-					text = retried;
-					parsed = reparsed;
-					warnings.push(`the first read was asked again once (first attempt: ${missing.join("; ")})`);
-				} else {
-					warnings.push(`the first read was asked again once (first attempt: ${missing.join("; ")}), but the second was not better, so the first is shown`);
+			// One first read per memory and model, kept for a reload and joined by a
+			// second tab or a reloaded page; Read again reads again; only Cancel ends it.
+			const roomDir = createPersistentAgentInstance(id).rootDir;
+			const fresh = Boolean(retryFeedback) || (req.body as any)?.fresh === true;
+			if (fresh) clearKeptDiscussion(roomDir, "review");
+			return await firstReadOnce(roomDir, model, fingerprintL1bSource(notes.l1b).value, async (signal) => {
+				const basePrompt = buildReviewAssessmentPrompt(notes.promptInput);
+				const assembly = retryFeedback ? buildReviewAssessmentPrompt({ ...notes.promptInput, retryFeedback }) : basePrompt;
+				refuseOversizedMaintenancePrompt({
+					agentId: id,
+					processLabel: "Review first read",
+					model,
+					promptEstimatedTokens: assembly.telemetry.promptEstimatedTokens,
+					window: deps.resolveModelWindow?.(model),
+					guidance: REVIEW_OVERFLOW_GUIDANCE,
+				});
+				const titles = notes.promptInput.topics.map((topic) => topic.title);
+				const warnings: string[] = [];
+				// The first read never blocks Review: a call that fails while the model
+				// answers gives "None." and the missing-read screen, as Memorize's does.
+				// An unreachable model is its notice. A missing read is never kept,
+				// and names no topics, so going on without it tidies every topic.
+				const firstReadMissing = () => ({
+					agentId: id,
+					writesMemory: false as const,
+					availability: notes.availability,
+					assessmentMarkdown: "None.",
+					fields: { ...withMachineFindings(parseReviewAssessment("None.", titles).fields, notes.findings, titles), topics: [] },
+					warnings: [NOTHING_WAS_WRITTEN],
+					source: { l1bFingerprint: fingerprintL1bSource(notes.l1b) },
+					firstReadMissing: true as const,
+				});
+				const ask = async (prompt: string) => {
+					try {
+						return (await deps.generate(id, prompt, model, { thinkingLevel: "low", signal })).text.trim();
+					} catch (error) {
+						if (error instanceof ModelUnreachableError || signal.aborted) throw error;
+						return null;
+					}
+				};
+				let text = await ask(assembly.prompt);
+				if (!text) return firstReadMissing();
+				let parsed = parseReviewAssessment(text, titles);
+				const missing = parsed.warnings.filter((warning) => warning.includes("has no"));
+				if (missing.length > 0) {
+					const retried = (await ask(buildReviewAssessmentRetryPrompt(basePrompt.prompt, missing))) ?? "";
+					const reparsed = parseReviewAssessment(retried, titles);
+					if (retried && reparsed.warnings.length < parsed.warnings.length) {
+						text = retried;
+						parsed = reparsed;
+						warnings.push(`the first read was asked again once (first attempt: ${missing.join("; ")})`);
+					} else {
+						warnings.push(`the first read was asked again once (first attempt: ${missing.join("; ")}), but the second was not better, so the first is shown`);
+					}
 				}
-			}
-			// The machine's findings are filled in after the model's read is parsed,
-			// and their topics join "Topics to tidy" so the tidy is handed them.
-			const fields = withMachineFindings(parsed.fields, notes.findings, titles);
-			return {
-				agentId: id,
-				writesMemory: false,
-				availability: { ...notes.availability, recommendedDepth: recommendedReviewDepth({ overBudget: notes.availability.overBudget, staleOrContradicts: fields.staleOrContradicts, lookAlikeTopics: fields.lookAlikeTopics.length > 0 }) },
-				assessmentMarkdown: text,
-				fields,
-				warnings: [...parsed.warnings, ...warnings, NOTHING_WAS_WRITTEN],
-				source: { l1bFingerprint: fingerprintL1bSource(notes.l1b) },
-			};
+				// A reply in which no section can be read is no first read at all.
+				const sectionsMissing = (read: ReturnType<typeof parseReviewAssessment>) => read.warnings.filter((warning) => warning.includes("has no")).length;
+				if (sectionsMissing(parsed) >= sectionsMissing(parseReviewAssessment("", titles))) return firstReadMissing();
+				// The machine's findings are filled in after the model's read is parsed,
+				// and their topics join "Topics to tidy" so the tidy is handed them.
+				const fields = withMachineFindings(parsed.fields, notes.findings, titles);
+				return {
+					agentId: id,
+					writesMemory: false,
+					availability: { ...notes.availability, recommendedDepth: recommendedReviewDepth({ overBudget: notes.availability.overBudget, staleOrContradicts: fields.staleOrContradicts, lookAlikeTopics: fields.lookAlikeTopics.length > 0 }) },
+					assessmentMarkdown: text,
+					fields,
+					warnings: [...parsed.warnings, ...warnings, NOTHING_WAS_WRITTEN],
+					source: { l1bFingerprint: fingerprintL1bSource(notes.l1b) },
+				};
+			}, { fresh, kind: "review", ask: firstReadAsk(req.body), signal: askerLeftSignal(reply.raw) });
 		} catch (e) {
 			return deps.errorReply(reply, e);
 		}
@@ -243,11 +281,14 @@ export function registerReviewAssessRoutes(app: FastifyInstance, deps: ReviewAss
 				guidance: REVIEW_OVERFLOW_GUIDANCE,
 			});
 			if (!assembly.tokenBudget.canContinue) throw new Error("This discussion has grown too long to carry on. Press Continue to start the tidy with what you have agreed so far.");
-			const generated = await deps.generate(id, assembly.prompt, model, { thinkingLevel: "low" });
+			const generated = await deps.generate(id, assembly.prompt, model, { thinkingLevel: "low", callKind: "discussion" });
+			const message = { role: "assistant" as const, content: generated.text.trim() };
+			// The discussion as it stands, kept beside its first read for a reload.
+			keepDiscussionTurns(createPersistentAgentInstance(id).rootDir, fingerprintL1bSource(notes.l1b).value, [...request.messages, ...(request.userMessage ? [{ role: "user", content: request.userMessage }] : []), message], assembly.tokenBudget, "review");
 			return {
 				agentId: id,
 				writesMemory: false,
-				message: { role: "assistant" as const, content: generated.text.trim() },
+				message,
 				tokenBudget: assembly.tokenBudget,
 				warnings: [assembly.tokenBudget.state === "soft_warning" ? "this discussion is approaching the length the tidy can carry" : "", NOTHING_WAS_WRITTEN].filter(Boolean),
 			};
@@ -274,7 +315,7 @@ export function registerReviewAssessRoutes(app: FastifyInstance, deps: ReviewAss
 				window: deps.resolveModelWindow?.(model),
 				guidance: REVIEW_OVERFLOW_GUIDANCE,
 			});
-			const generated = await deps.generate(id, assembly.prompt, model, { thinkingLevel: "low" });
+			const generated = await deps.generate(id, assembly.prompt, model, { thinkingLevel: "low", callKind: "discussion" });
 			const signoffMarkdown = generated.text.trim();
 			if (!signoffMarkdown) throw new Error("the Review discussion summary came back empty");
 			return {

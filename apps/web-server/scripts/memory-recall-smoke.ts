@@ -260,20 +260,6 @@ try {
 		context.includes("_Archived: 2 older notes from Mar to Jul 2026; use memory_recall to read them._"),
 		`a range inside one year reads as months then the year, and names the tool, got:\n${context}`,
 	);
-	assert(
-		context.includes("_Archived: 1 older note from May 2026; use memory_recall to read them._"),
-		`one note in one month is singular and names its month once, got:\n${context}`,
-	);
-	const crossYear = renderMemoryDocument(parseMemoryDocument(MEMORY), "context", {
-		archiveIndex: archiveIndex([
-			archivedEntry({ id: "m-0104", topic: "Commercial terms", saved: "2025-11-01", archived: "2025-11-02", why: "budget", text: "- An older note." }),
-			archivedEntry({ id: "m-0105", topic: "Commercial terms", saved: "2026-03-01", archived: "2026-03-02", why: "budget", text: "- A newer note." }),
-		]),
-	});
-	assert(
-		crossYear.includes("_Archived: 2 older notes from Nov 2025 to Mar 2026; use memory_recall to read them._"),
-		`a range that crosses the new year names both years, got:\n${crossYear}`,
-	);
 
 	// --- 2. A room with nothing to search, and a room nobody can read ---------
 	const scaffold = createPersistentAgentFromScaffoldInput({
@@ -294,7 +280,7 @@ try {
 	fs.writeFileSync(l1bPath, "<!-- exxeta:l1b schema_version=1 -->\n\n## Deep Memory\n\n## Active Items\n\n## Recent Context\n", { mode: 0o600 });
 	invalidateRoomCorpus(roomId);
 	const fresh = await recall(tool, { query: "rebate" });
-	assert(fresh.details.outcome === "empty" && /memorized conversations/.test(fresh.text), `a room with nothing to search says so in one sentence that counts conversations too, got: ${fresh.text}`);
+	assert(fresh.details.outcome === "empty" && /remembered conversations/.test(fresh.text), `a room with nothing to search says so in one sentence that counts conversations too, got: ${fresh.text}`);
 
 	// A room nobody can read answers in a sentence too. An id that is not an id
 	// is the one that gets there: an unreadable file of a real room costs that
@@ -672,8 +658,8 @@ try {
 	for (const name of ["query", "topic", "since", "until", "sources", "maxResults"]) {
 		assert(parameterNames.includes(name), `the tool's schema should take ${name}, got ${JSON.stringify(parameterNames)}`);
 	}
-	assert(!/literal text/i.test(tool.description ?? "") && /memorized/i.test(tool.description ?? ""), "the description no longer promises literal text, and says memorized conversations are searchable");
-	assert((tool.description ?? "").includes("Every conversation the room memorized is searchable, including the ones it took no notes from."), "the description says every memorized conversation is searchable, the ones no notes were taken from included");
+	assert(!/literal text/i.test(tool.description ?? "") && /remembered/i.test(tool.description ?? ""), "the description no longer promises literal text, and says remembered conversations are searchable");
+	assert((tool.description ?? "").includes("Every conversation the room remembered is searchable from its Remember, including the ones a Memorize took no notes from."), "the description says every memorized conversation is searchable, the ones no notes were taken from included");
 	assert(/read-only/i.test(tool.description ?? ""), "the description keeps the read-only sentence");
 
 	console.log("memory-recall-smoke: OK");

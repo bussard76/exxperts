@@ -4,6 +4,7 @@ import path from "node:path";
 
 const {
 	createPersistentRoomCapabilityPolicy,
+	isFullWorkspacePath,
 	createPersistentRoomDefaultCapabilityPolicy,
 	deletePersistentRoomCapabilityPolicy,
 	deletePersistentRoomDefaultCapabilityPolicy,
@@ -223,6 +224,19 @@ try {
 	expectPolicyError(() => createPersistentRoomCapabilityPolicy({ ...baseInput, root: path.join(homeRoot, ".exxperts") }), "forbidden_root", "the whole state tree");
 	expectPolicyError(() => createPersistentRoomCapabilityPolicy({ ...baseInput, root: siblingProfileRoot }), "forbidden_root", "another profile's tree");
 	expectPolicyError(() => createPersistentRoomCapabilityPolicy({ ...baseInput, root: homeRoot }), "ancestor_of_forbidden_root", "a folder holding the whole state family");
+	expectPolicyError(() => createPersistentRoomCapabilityPolicy({ ...baseInput, root: "Projects/demo" }), "root_not_absolute", "a relative path");
+	expectPolicyError(() => createPersistentRoomCapabilityPolicy({ ...baseInput, root: '""' }), "missing_root", "a pair of quotes alone");
+	for (const [input, full] of [["C:\\Users\\you\\Projects", true], ["c:/Users/you", true], ["\\\\server\\share\\Projects", true], ["\\Projects", false], ["/Projects", false], ["C:Projects", false], ["Projects\\demo", false]] as const) {
+		assert(isFullWorkspacePath(input, "win32") === full, `on Windows ${JSON.stringify(input)} is ${full ? "" : "not "}a full path`);
+	}
+	for (const [input, full] of [["/Users/you/Projects", true], ["Projects/demo", false]] as const) {
+		assert(isFullWorkspacePath(input, "darwin") === full, `on a Mac ${JSON.stringify(input)} is ${full ? "" : "not "}a full path`);
+	}
+	// Windows' "Copy as path" puts the path in double quotes.
+	for (const quoted of [`"${workspaceRoot}"`, ` '${workspaceRoot}' `]) {
+		const fromQuoted = createPersistentRoomCapabilityPolicy({ ...baseInput, root: quoted });
+		assert(fromQuoted.roots[0]?.realpath === fs.realpathSync.native(workspaceRoot), `a quoted path ${JSON.stringify(quoted)} should save the folder inside the quotes`);
+	}
 
 	const symlinkToRepo = path.join(tmp, "repo-link");
 	try {

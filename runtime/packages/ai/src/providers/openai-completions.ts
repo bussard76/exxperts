@@ -31,6 +31,7 @@ import type {
 	ToolResultMessage,
 } from "../types.js";
 import { CitationMarkerStreamFilter } from "../utils/citation-markers.js";
+import { placeCitations, type SentCitation, webLink } from "../utils/citation-offsets.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { headersToRecord } from "../utils/headers.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
@@ -39,6 +40,7 @@ import { isCloudflareProvider, resolveCloudflareBaseUrl } from "./cloudflare.js"
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
 import { buildBaseOptions } from "./simple-options.js";
 import { transformMessages } from "./transform-messages.js";
+import { providerErrorFields } from "../utils/provider-error-fields.js";
 
 /**
  * Check if conversation messages contain tool calls or tool results.
@@ -109,6 +111,19 @@ function resolveCacheRetention(cacheRetention?: CacheRetention): CacheRetention 
 	return "short";
 }
 
+/**
+ * Puts a gateway's citations on the message's one text block, and the loose
+ * ones on the message. The offsets count code points in the message's raw
+ * text, markers included, as for the Responses API.
+ */
+function placeGatewayCitations(output: AssistantMessage, sent: SentCitation[], rawText: string): void {
+	if (sent.length === 0) return;
+	const block = output.content.find((b): b is TextContent => b.type === "text");
+	const placed = placeCitations(sent, block ? [rawText] : [], block?.text ?? "", "codepoint");
+	if (block && placed.citations.length > 0) block.citations = placed.citations;
+	if (placed.sources.length > 0) output.sources = placed.sources;
+}
+
 export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenAICompletionsOptions> = (
 	model: Model<"openai-completions">,
 	context: Context,
@@ -134,6 +149,10 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 			stopReason: "stop",
 			timestamp: Date.now(),
 		};
+		// The text as it arrived, markers included, and the gateway's citations
+		// as sent: placed once the text is in, or the stream is cut short.
+		let rawText = "";
+		const sentCitations: SentCitation[] = [];
 
 		try {
 			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
@@ -276,6 +295,19 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 				return block;
 			};
 
+			// Gateways put the provider's sources on a chunk's delta or on a final
+			// message, whether or not we asked for a search.
+			const addAnnotations = (annotations: unknown) => {
+				if (!Array.isArray(annotations)) return;
+				for (const annotation of annotations) {
+					const entry = annotation as { type?: unknown; url_citation?: { url?: unknown; title?: unknown; start_index?: unknown; end_index?: unknown } } | null;
+					if (entry?.type !== "url_citation" || !entry.url_citation) continue;
+					const cited = entry.url_citation;
+					const link = webLink(cited.url, cited.title);
+					if (link) sentCitations.push({ link, part: 0, start: cited.start_index, end: cited.end_index });
+				}
+			};
+
 			for await (const chunk of openaiStream) {
 				if (!chunk || typeof chunk !== "object") continue;
 
@@ -313,6 +345,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 						choice.delta.content.length > 0
 					) {
 						const block = ensureTextBlock();
+						rawText += choice.delta.content;
 						const delta = textFilter.push(choice.delta.content);
 						if (delta.length > 0) {
 							block.text += delta;
@@ -406,6 +439,8 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 						}
 					}
 
+					addAnnotations((choice.delta as { annotations?: unknown }).annotations);
+
 					const reasoningDetails = (choice.delta as any).reasoning_details;
 					if (reasoningDetails && Array.isArray(reasoningDetails)) {
 						for (const detail of reasoningDetails) {
@@ -420,8 +455,10 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 						}
 					}
 				}
+				addAnnotations((choice as { message?: { annotations?: unknown } }).message?.annotations);
 			}
 
+			placeGatewayCitations(output, sentCitations, rawText);
 			for (const block of blocks) {
 				finishBlock(block);
 			}
@@ -445,11 +482,15 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions", OpenA
 				delete (block as { partialArgs?: string }).partialArgs;
 				delete (block as { streamIndex?: number }).streamIndex;
 			}
+			placeGatewayCitations(output, sentCitations, rawText);
 			output.stopReason = options?.signal?.aborted ? "aborted" : "error";
 			output.errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
+			Object.assign(output, providerErrorFields(error));
 			// Some providers via OpenRouter give additional information in this field.
 			const rawMetadata = (error as any)?.error?.metadata?.raw;
 			if (rawMetadata) output.errorMessage += `\n${rawMetadata}`;
+			const unreadBody = (error as { unreadBody?: unknown })?.unreadBody;
+			if (unreadBody) output.errorMessage += `\n${JSON.stringify(unreadBody)}`;
 			stream.push({ type: "error", reason: output.stopReason, error: output });
 			stream.end();
 		}
@@ -527,12 +568,25 @@ function createClient(
 				}
 			: headers;
 
-	return new OpenAI({
+	return new OpenAIKeepingUnreadBodies({
 		apiKey,
 		baseURL: isCloudflareProvider(model.provider) ? resolveCloudflareBaseUrl(model) : model.baseUrl,
 		dangerouslyAllowBrowser: true,
 		defaultHeaders,
 	});
+}
+
+/**
+ * The library reads a failed answer's words only from its body's "error"
+ * field, so a gateway's {"message":"Forbidden"} reads "403 status code (no
+ * body)". Such a body rides on the error, and its words follow the message.
+ */
+class OpenAIKeepingUnreadBodies extends OpenAI {
+	protected override makeStatusError(status: number, error: object, message: string | undefined, headers: Headers) {
+		const made = super.makeStatusError(status, error, message, headers);
+		if (error && typeof error === "object" && !("error" in error)) Object.assign(made, { unreadBody: error });
+		return made;
+	}
 }
 
 function buildParams(
@@ -591,11 +645,10 @@ function buildParams(
 	// gateway has behind it. The empty object is the "on, your defaults" form of
 	// the chat-completions convention, which is what a proxy passes straight
 	// through; there is nothing here worth tuning per request. What comes back
-	// is ordinary assistant text, because the source annotations ride on the
-	// message rather than the deltas and our delta handling drops them: the
-	// model's own citations are all the reader gets for now. The room's
-	// web_search tool stays available either way, so a model that ignores this
-	// still has a way to look something up.
+	// is assistant text, with the gateway's source annotations kept as the text
+	// block's citations or the message's sources by the stream reader. The
+	// room's web_search tool stays available either way, so a model that
+	// ignores this still has a way to look something up.
 	if (compat.supportsWebSearch) {
 		(params as any).web_search_options = {};
 	}

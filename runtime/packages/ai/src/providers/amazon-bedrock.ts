@@ -45,6 +45,7 @@ import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import { adjustMaxTokensForThinking, buildBaseOptions, clampReasoning } from "./simple-options.js";
 import { transformMessages } from "./transform-messages.js";
+import { providerErrorFields } from "../utils/provider-error-fields.js";
 
 export type BedrockThinkingDisplay = "summarized" | "omitted";
 
@@ -270,6 +271,7 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
 			}
 			output.stopReason = options.signal?.aborted ? "aborted" : "error";
 			output.errorMessage = formatBedrockError(error);
+			Object.assign(output, providerErrorFields(error));
 			stream.push({ type: "error", reason: output.stopReason, error: output });
 			stream.end();
 		}
@@ -563,8 +565,21 @@ function isAnthropicClaudeModel(model: Model<"bedrock-converse-stream">): boolea
 }
 
 /**
+ * Claude ids from Claude 4 on name the family, then the generation: claude-opus-4-8, claude-sonnet-5,
+ * claude-fable-5-1. Matching any family keeps a new one (and a new generation) cached without a list edit.
+ * Hand-written profile names may put the generation first, as Claude 3 ids did: "Claude 4.5 Haiku".
+ */
+const CLAUDE_GENERATION = /claude-(?:[a-z]+-(\d+)(?:-|$)|(\d+)-(?:\d+-)?[a-z])/;
+
+function claudeGeneration(candidate: string): number | undefined {
+	const match = CLAUDE_GENERATION.exec(candidate);
+	return match ? Number(match[1] ?? match[2]) : undefined;
+}
+
+/**
  * Check if the model supports prompt caching.
- * Supported: Claude 3.5 Haiku, Claude 3.7 Sonnet, Claude 4.x models
+ * Supported: Claude 3.5 Haiku, Claude 3.7 Sonnet, every Claude from generation 4 on
+ * (https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html)
  *
  * For base models and system-defined inference profiles the model ID / ARN
  * contains the model name, so we can decide locally.
@@ -584,8 +599,7 @@ function supportsPromptCaching(model: Model<"bedrock-converse-stream">): boolean
 		if (typeof process !== "undefined" && process.env.AWS_BEDROCK_FORCE_CACHE === "1") return true;
 		return false;
 	}
-	// Claude 4.x models (opus-4, sonnet-4, haiku-4)
-	if (candidates.some((s) => s.includes("-4-"))) return true;
+	if (candidates.some((s) => (claudeGeneration(s) ?? 0) >= 4)) return true;
 	// Claude 3.7 Sonnet
 	if (candidates.some((s) => s.includes("claude-3-7-sonnet"))) return true;
 	// Claude 3.5 Haiku

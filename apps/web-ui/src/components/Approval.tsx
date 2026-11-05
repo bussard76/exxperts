@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { approvalPreviewFromItem, type ApprovalPreviewData } from "../approval-preview";
 import type { ChatItem } from "../types";
+import { handOffApprovalSubject, PERSISTENT_ROOM_COMMAND_APPROVAL_TITLE } from "../../../web-server/src/room-approval-titles";
 
 type ApprovalItem = Extract<ChatItem, { kind: "approval" }>;
 
@@ -10,7 +11,7 @@ type ApprovalItem = Extract<ChatItem, { kind: "approval" }>;
  * stealing focus from someone mid-typing, and to hand focus back after a
  * card resolves.
  */
-function composerTextarea(): HTMLTextAreaElement | null {
+export function composerTextarea(): HTMLTextAreaElement | null {
 	return document.querySelector<HTMLTextAreaElement>(".composer-box textarea");
 }
 
@@ -32,7 +33,7 @@ function kbWriteType(title: string): string {
 	return "write";
 }
 
-function approvalMetadata(title: string, detail?: string): string[] {
+export function approvalMetadata(title: string, detail?: string): string[] {
 	if (!detail) return [];
 	const lines = detail.replace(/\r\n/g, "\n").split("\n");
 	const marker = /^(Generated HTML preview|Content preview|Content|Append):\s*(.*)$/i;
@@ -59,7 +60,7 @@ function approvalMetadata(title: string, detail?: string): string[] {
  * real chrome (divider + label chip + quoted block) is stronger anti-spoofing
  * than the text fence: a brief can imitate fact lines, but not app chrome.
  */
-function splitFencedBrief(text?: string): { facts: string; label: string; brief: string } | null {
+export function splitFencedBrief(text?: string): { facts: string; label: string; brief: string } | null {
 	if (!text) return null;
 	const lines = text.replace(/\r\n/g, "\n").split("\n");
 	const fenceAt = lines.findIndex((line) => /^─{3,}.*─{3,}\s*$/.test(line.trim()));
@@ -83,6 +84,34 @@ export function confirmApprovalLabels(item: ApprovalItem): { approve: string; de
 	return fenced ? { approve: "Approve", decline: "Decline" } : { approve: "Yes", decline: "No" };
 }
 
+/** Whether a card still asks: nobody answered it, Stop did not close it, and it did not end with nobody there. */
+export function approvalAsking(item: ApprovalItem): boolean {
+	return !item.done && !item.stopped && !item.unanswered;
+}
+
+/**
+ * The items as the room shows them: a card whose question was not asked on
+ * this connection has ended (the server declines every open question when the
+ * page leaves), so it shows its question only, with no buttons; the step it
+ * asked for says what happened.
+ */
+export function withUnansweredApprovals(items: ChatItem[], live: ReadonlySet<string>): ChatItem[] {
+	if (!items.some((item) => item.kind === "approval" && approvalAsking(item) && !live.has(item.requestId))) return items;
+	return items.map((item) => (item.kind === "approval" && approvalAsking(item) && !live.has(item.requestId) ? { ...item, unanswered: true } : item));
+}
+
+/** A card's answer that said no: "No", "Decline", "Cancel". */
+export function declinedAnswer(done: string | undefined): boolean {
+	return typeof done === "string" && /^(no\b|cancel|decline)/i.test(done);
+}
+
+/** The answer a card takes when the person's message declines it: the words its Deny or Cancel would save. */
+export function declinedAnswerOf(item: ApprovalItem): string {
+	if (item.uiKind === "confirm") return confirmApprovalLabels(item).decline;
+	if (item.uiKind === "input") return "Cancelled";
+	return (item.options ?? []).find((choice) => declinedAnswer(choice)) ?? "Declined";
+}
+
 function ApprovalImpl({ item, onResolve, onPreview, keyboardHint = false }: Props) {
 	const [text, setText] = useState("");
 	const [detailsOpen, setDetailsOpen] = useState(false);
@@ -91,9 +120,10 @@ function ApprovalImpl({ item, onResolve, onPreview, keyboardHint = false }: Prop
 	// mechanics live behind Show details.
 	const fenced = !item.done && !preview ? (splitFencedBrief(item.message) ?? splitFencedBrief(item.detail)) : null;
 
+	const asking = approvalAsking(item);
 	useEffect(() => {
-		if (preview) onPreview?.(preview);
-	}, [item.requestId, preview, onPreview]);
+		if (preview && asking) onPreview?.(preview);
+	}, [item.requestId, asking, preview, onPreview]);
 
 	// A pending card offers its Approve button to the keyboard — but it must
 	// never steal focus from someone typing: a grabbed focus would turn their
@@ -102,7 +132,7 @@ function ApprovalImpl({ item, onResolve, onPreview, keyboardHint = false }: Prop
 	// draft still means someone is mid-thought). Once per card, on mount.
 	const approveRef = useRef<HTMLButtonElement | null>(null);
 	useEffect(() => {
-		if (item.done) return;
+		if (!asking) return;
 		const btn = approveRef.current;
 		if (!btn) return;
 		const active = document.activeElement;
@@ -115,14 +145,43 @@ function ApprovalImpl({ item, onResolve, onPreview, keyboardHint = false }: Prop
 		btn.focus();
 	}, [item.requestId]);
 
+	if (item.stopped) {
+		const commandCard = item.title === PERSISTENT_ROOM_COMMAND_APPROVAL_TITLE;
+		return (
+			<div className="approval-row">
+				<div className="approval-resolved-line approval-unanswered">
+					<span className="approval-resolved-mark" aria-hidden="true">■</span>
+					<span className="approval-resolved-verdict">{commandCard ? "You pressed Stop before answering." : "You pressed Stop before answering:"}</span>
+					{!commandCard && <span className="approval-resolved-title">{item.title}</span>}
+				</div>
+			</div>
+		);
+	}
+
+	if (item.unanswered) {
+		return (
+			<div className="approval-row">
+				<div className="approval-resolved-line approval-unanswered">
+					<span className="approval-resolved-title">{item.title}</span>
+				</div>
+			</div>
+		);
+	}
+
 	if (item.done) {
 		// Resolved approvals fold to one quiet line: the decision is chat
 		// history, not a live card. The verdict comes from the resolution label
 		// ("Yes"/"No"/an option/"Submitted"); an unmapped label falls back to
 		// naming the choice, never hides it.
 		const done = item.done;
-		const declined = /^(no\b|cancel|decline)/i.test(done);
-		const verdict = /^(yes\b|approve)/i.test(done)
+		const declined = declinedAnswer(done);
+		const approved = /^(yes\b|approve)/i.test(done);
+		// The command and hand-off cards ask a question; their line states the answer instead of repeating it.
+		const handOff = handOffApprovalSubject(item.title ?? "");
+		const commandLine = !(approved || declined) ? null
+			: item.title === PERSISTENT_ROOM_COMMAND_APPROVAL_TITLE ? (approved ? "You approved this command." : "You declined this command.")
+				: handOff !== null ? `You ${approved ? "approved" : "declined"} the specialist task: ${handOff}.` : null;
+		const verdict = approved
 			? "You approved:"
 			: declined
 				? "You declined:"
@@ -133,8 +192,8 @@ function ApprovalImpl({ item, onResolve, onPreview, keyboardHint = false }: Prop
 			<div className="approval-row">
 				<div className="approval-resolved-line">
 					<span className="approval-resolved-mark" aria-hidden="true">{declined ? "✕" : "✓"}</span>
-					<span className="approval-resolved-verdict">{verdict}</span>
-					<span className="approval-resolved-title">{item.title}</span>
+					<span className="approval-resolved-verdict">{commandLine ?? verdict}</span>
+					{!commandLine && <span className="approval-resolved-title">{item.title}</span>}
 				</div>
 			</div>
 		);

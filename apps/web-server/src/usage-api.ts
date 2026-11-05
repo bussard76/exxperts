@@ -13,7 +13,8 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { canonicalModelName } from "../../web-ui/src/model-names.js";
+import { calculateCost } from "@exxeta/exxperts-runtime";
+import { canonicalModelName, modelIdDate, providerDisplayName, realModelName } from "../../web-ui/src/model-names.js";
 import { GATEWAY_PROVIDER_ID_PREFIX } from "./openai-compatible-gateways.js";
 import { loadUsage } from "./usage-log.js";
 import type { UsageRow } from "./usage-log.js";
@@ -29,32 +30,34 @@ const PROVIDER_BY_LABEL_PREFIX: Record<string, string> = {
 	"OpenAI / ChatGPT subscription": "openai-codex",
 	"GitHub Copilot": "github-copilot",
 	"Anthropic / Claude": "anthropic",
+	"Claude API key": "anthropic-api-key",
 	OpenAI: "openai",
 	"OpenAI-compatible gateway": "openai-compatible",
 	"Google / Gemini": "google",
 	OpenRouter: "openrouter",
 };
 
-const SOURCE_DISPLAY: Record<string, string> = {
-	"openai-codex": "ChatGPT Plus/Pro",
-	"github-copilot": "GitHub Copilot",
-	anthropic: "Anthropic / Claude",
-	openai: "OpenAI",
-	"openai-compatible": "OpenAI-compatible gateway",
-	google: "Google / Gemini",
-	openrouter: "OpenRouter",
-};
+// A saved gateway's provider id, or the single gateway the app had before those.
+const isGateway = (provider: string): boolean => provider === "openai-compatible" || provider.startsWith(GATEWAY_PROVIDER_ID_PREFIX);
 
 // Grouping builds on the shared naming module: two rows are the same model
-// iff they display as the same canonical name (model-names.ts is the spec).
+// iff they display as the same canonical name (model-names.ts is the spec),
+// and a dated snapshot stays apart from its undated name. A gateway's model is
+// named from its id alone, never from the name its owner saved for it: two
+// gateways can save "Fast" for two different models, and the Wallet counts
+// real models, so a known family joins its row wherever it ran, a Bedrock
+// region's copy included (realModelName).
 // Cached because every request keys thousands of rows.
-const modelGroupCache = new Map<string, { key: string; name: string }>();
-export function modelGroupOf(row: { model?: string; modelLabel?: string; provider?: string }): { key: string; name: string } {
+const modelGroupCache = new Map<string, { key: string; name: string; date?: string }>();
+export function modelGroupOf(row: { model?: string; modelLabel?: string; provider?: string }): { key: string; name: string; date?: string } {
 	const cacheKey = (row.model ?? "") + "|" + (row.modelLabel ?? "") + "|" + (row.provider ?? "");
 	let group = modelGroupCache.get(cacheKey);
 	if (!group) {
-		const name = canonicalModelName(row).name || (row.model ?? "");
-		group = { key: name.toLowerCase(), name };
+		const provider = providerOfRow(row);
+		const real = provider && isGateway(provider) && row.model ? realModelName(row.model) : { name: canonicalModelName(row).name, date: row.model ? modelIdDate(row.model) : null };
+		const name = real.name || (row.model ?? "");
+		const date = real.date;
+		group = date ? { key: `${name.toLowerCase()} (${date})`, name, date } : { key: name.toLowerCase(), name };
 		modelGroupCache.set(cacheKey, group);
 	}
 	return group;
@@ -101,8 +104,8 @@ function priceRow(row: UsageRow, priceOf: (row: UsageRow) => UsagePrice | undefi
 	if (row.cost > 0 || tokensOf(row) === 0) return { cost: row.cost, pricedAt: "turn" };
 	const price = priceOf(row);
 	if (!price || price.input + price.output + price.cacheRead + price.cacheWrite <= 0) return { cost: 0, pricedAt: "none" };
-	const cost = (row.input * price.input + row.output * price.output + row.cacheRead * price.cacheRead + (row.cacheWrite || 0) * price.cacheWrite) / 1_000_000;
-	return { cost, pricedAt: "today" };
+	const usage = { input: row.input, output: row.output, cacheRead: row.cacheRead, cacheWrite: row.cacheWrite || 0, cacheWrite1h: row.cacheWrite1h, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+	return { cost: calculateCost({ cost: price }, usage).total, pricedAt: "today" };
 }
 
 /** Money plus how much of it is read-time estimate or still missing; every aggregate carries it. */
@@ -115,7 +118,7 @@ function tally(agg: PricedTally, priced: { cost: number; pricedAt: PricedAt }): 
 	if (priced.pricedAt === "none") agg.unpricedTurns += 1;
 }
 
-function providerOfRow(row: UsageRow): string | undefined {
+function providerOfRow(row: Pick<UsageRow, "provider" | "modelLabel">): string | undefined {
 	if (row.provider) return row.provider;
 	if (row.modelLabel) {
 		const prefix = row.modelLabel.split(" — ")[0];
@@ -155,12 +158,11 @@ export function registerUsageApi(app: FastifyInstance, deps: UsageApiDeps): void
 		};
 	};
 
-	// A gateway goes by the name its owner gave it, the legacy single-gateway
-	// id included, so the person's own label wins over the curated table there.
-	const isGateway = (provider: string): boolean => provider === "openai-compatible" || provider.startsWith(GATEWAY_PROVIDER_ID_PREFIX);
+	// A gateway goes by the name its owner gave it, so the person's own label
+	// wins over the curated table there.
 	const sourceDisplayName = (provider: string): string =>
 		(isGateway(provider) ? deps.providerDisplayName(provider) : undefined) ??
-		SOURCE_DISPLAY[provider] ??
+		(providerDisplayName(provider) !== provider ? providerDisplayName(provider) : undefined) ??
 		deps.providerDisplayName(provider) ??
 		// A gateway id nothing answers for any more is a gateway that was
 		// removed; its turns still happened and still cost money.
@@ -181,18 +183,28 @@ export function registerUsageApi(app: FastifyInstance, deps: UsageApiDeps): void
 		const groupTurns = new Map<string, number>();
 		const groupNames = new Map<string, string>();
 		const groupRawIds = new Map<string, Set<string>>();
+		const groupDates = new Map<string, string>();
 		for (const r of rows) {
 			if (!r.model) continue;
-			const { key, name } = modelGroupOf(r);
+			const { key, name, date } = modelGroupOf(r);
 			groupTurns.set(key, (groupTurns.get(key) ?? 0) + 1);
 			if (!groupNames.has(key)) groupNames.set(key, name);
+			if (date) groupDates.set(key, date);
 			let raw = groupRawIds.get(key);
 			if (!raw) groupRawIds.set(key, (raw = new Set()));
 			raw.add(r.model);
 		}
+		// A dated snapshot shows its date only beside a model of the same name.
+		const nameCounts = new Map<string, number>();
+		for (const name of groupNames.values()) nameCounts.set(name.toLowerCase(), (nameCounts.get(name.toLowerCase()) ?? 0) + 1);
+		const groupLabel = (key: string): string => {
+			const name = groupNames.get(key) ?? key;
+			const date = groupDates.get(key);
+			return date && (nameCounts.get(name.toLowerCase()) ?? 0) > 1 ? `${name} (${date})` : name;
+		};
 		const models = Array.from(groupTurns.entries())
 			.sort((a, b) => b[1] - a[1])
-			.map(([key, turns]) => ({ id: key, label: groupNames.get(key) ?? key, turns, rawIds: groupRawIds.get(key)?.size ?? 1 }));
+			.map(([key, turns]) => ({ id: key, label: groupLabel(key), turns, rawIds: groupRawIds.get(key)?.size ?? 1 }));
 		const modelParam = String(query.model ?? "all");
 		const model = models.some((m) => m.id === modelParam) ? modelParam : "all";
 		const modelOk = (r: UsageRow) => model === "all" || (r.model ? modelGroupOf(r).key === model : false);
@@ -392,7 +404,9 @@ export function registerUsageApi(app: FastifyInstance, deps: UsageApiDeps): void
 				.filter((r) => modelOk(r) && agentOk(r))
 				.map((r) => {
 					const priced = priceRow(r, priceOf);
-					return { ...r, cost: priced.cost, estimated: priced.pricedAt === "today" };
+					// Named as the Wallet's model rows name it, so a gateway's
+					// turn reads as its real model, not the name saved for it.
+					return { ...r, ...(r.model ? { modelName: modelGroupOf(r).name } : {}), cost: priced.cost, estimated: priced.pricedAt === "today" };
 				})
 				.reverse(),
 		};

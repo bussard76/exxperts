@@ -6,7 +6,8 @@
  * auth store. The UI polls /api/auth/login/status plus the profile status
  * until the provider reports configured.
  */
-import { AuthStorage, isApiKeyLoginProvider, ModelRegistry } from "@exxeta/exxperts-runtime";
+import { ANTHROPIC_API_KEY_PROVIDER, AuthStorage, isApiKeyLoginProvider, ModelRegistry } from "@exxeta/exxperts-runtime";
+import { anthropicKeyNeedsWorkspace } from "./model-not-offered.js";
 
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 const URL_WAIT_TIMEOUT_MS = 15 * 1000;
@@ -41,7 +42,8 @@ export function providerLoginState(): { pending: boolean; provider?: string; url
 	return { pending: true, provider: pending.provider, url: pending.url, instructions: pending.instructions };
 }
 
-export async function startProviderLogin(providerId: string): Promise<{ url: string; instructions?: string | null }> {
+/** `onSignedIn` runs once the new credentials are stored. */
+export async function startProviderLogin(providerId: string, onSignedIn?: () => void): Promise<{ url: string; instructions?: string | null }> {
 	if (!knownOAuthProviderIds().includes(providerId)) {
 		throw new ProviderAuthError(`Unknown OAuth provider: ${providerId}`, 400);
 	}
@@ -92,7 +94,7 @@ export async function startProviderLogin(providerId: string): Promise<{ url: str
 			// a required prompt ends the flow with the reason instead of hanging.
 			onPrompt: async (prompt) => {
 				if (prompt.allowEmpty) return "";
-				throw new Error(`Sign-in needs input that is not available here (${prompt.message}). Use "exxperts cli" and /login instead.`);
+				throw new Error(`Sign-in needs input that is not available here (${prompt.message}).`);
 			},
 			// The flows race the callback server against this promise and tear
 			// the server down when it rejects — the only cancellation hook they
@@ -108,6 +110,7 @@ export async function startProviderLogin(providerId: string): Promise<{ url: str
 		})
 		.then(() => {
 			entry.done = true;
+			onSignedIn?.();
 		})
 		.catch((error: unknown) => {
 			entry.done = true;
@@ -152,7 +155,52 @@ export function saveProviderApiKey(providerId: string, key: string): void {
 	if (!knownApiKeyProviderIds().includes(providerId)) {
 		throw new ProviderAuthError(`Provider does not support API-key sign-in: ${providerId}`, 400);
 	}
+	// The Anthropic provider treats any key holding "sk-ant-oat" as a sign-in
+	// token, so one pasted here would send a subscription through the key.
+	if (providerId === ANTHROPIC_API_KEY_PROVIDER && trimmedKey.includes("sk-ant-oat")) {
+		throw new ProviderAuthError("This looks like a Claude sign-in token, not an API key. Create an API key at console.anthropic.com.", 400);
+	}
 	AuthStorage.create().set(providerId, { type: "api_key", key: trimmedKey });
+}
+
+/** Plain words for a Claude key checked at save: Anthropic refused it, it is outside any workspace, or it could not be checked. */
+export const ANTHROPIC_KEY_REFUSED = "Anthropic did not accept this key. Check it at console.anthropic.com.";
+export const ANTHROPIC_KEY_NO_WORKSPACE = "This key isn't tied to a workspace. In the Anthropic Console, create a key inside a workspace, then add it here.";
+export const ANTHROPIC_KEY_UNCHECKED = "The key is saved. It couldn't be checked with Anthropic just now, so your first message will show whether it works.";
+const ANTHROPIC_KEY_CHECK_TIMEOUT_MS = 10_000;
+
+/**
+ * Asks Anthropic about a Claude key before it is saved, with one cheap call
+ * (the models list, which costs nothing). A refused key and a key outside any
+ * workspace are refused here with their own words, since every call with them
+ * fails; an answer that says neither, or none at all, saves the key with a
+ * notice that it could not be checked. Returns that notice, or null. Other
+ * providers, and a key the save itself refuses, are not asked. The key goes
+ * only into the request's header: never into a message or the log. A check
+ * that fails hands its status and Anthropic's words to `onFailed`, for the
+ * log's codes.
+ */
+export async function checkProviderApiKey(providerId: string, key: string, onFailed?: (failure: unknown) => void): Promise<string | null> {
+	const trimmedKey = key.trim();
+	if (providerId !== ANTHROPIC_API_KEY_PROVIDER || !trimmedKey || trimmedKey.includes("sk-ant-oat")) return null;
+	const configured = ModelRegistry.create(AuthStorage.inMemory()).getAll().find((model) => model.provider === ANTHROPIC_API_KEY_PROVIDER)?.baseUrl;
+	const baseUrl = (configured || "https://api.anthropic.com").replace(/\/+$/, "");
+	let response: Response;
+	try {
+		response = await fetch(`${baseUrl}/v1/models?limit=1`, {
+			headers: { "x-api-key": trimmedKey, "anthropic-version": "2023-06-01" },
+			signal: AbortSignal.timeout(ANTHROPIC_KEY_CHECK_TIMEOUT_MS),
+		});
+	} catch (error) {
+		onFailed?.(error);
+		return ANTHROPIC_KEY_UNCHECKED;
+	}
+	if (response.ok) return null;
+	const words = await response.text().catch(() => "");
+	onFailed?.(new Error(`${response.status} ${words}`));
+	if (response.status === 401 || response.status === 403) throw new ProviderAuthError(ANTHROPIC_KEY_REFUSED, 400);
+	if (response.status === 400 && anthropicKeyNeedsWorkspace(words)) throw new ProviderAuthError(ANTHROPIC_KEY_NO_WORKSPACE, 400);
+	return ANTHROPIC_KEY_UNCHECKED;
 }
 
 export function logoutProvider(providerId: string): void {

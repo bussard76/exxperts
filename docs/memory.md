@@ -5,15 +5,16 @@
 
 ## TL;DR
 
-exxperts has two memory systems, one per surface:
+exxperts keeps its memory in rooms:
 
 | Surface | Memory | Where | Who writes it |
 | --- | --- | --- | --- |
-| **Persistent rooms (web)** | The room's notes, grown through Remember → Memorize → Review | `~/.exxperts/app/personalized-agents/<id>/` | Only you, through approval screens |
-| **CLI (ExxCode)** | Context files + a fact store + session compaction | repo `AGENTS.md`, `~/.exxperts/app/memory.jsonl` | You directly, or the model with your approval |
+| **Persistent rooms** | The room's notes, grown through Remember → Memorize → Review | `~/.exxperts/app/personalized-agents/<id>/` | Only you, through approval screens |
 
-The room memory engine is the product's core; the CLI layers are
-conveniences for the coding workspace.
+The room memory engine is the product's core. A room does not load a
+repo's context files, such as `AGENTS.md` or `CLAUDE.md`. Standing
+conventions go in the instructions (Settings → Instructions, or Room
+settings → Instructions).
 
 ## Room memory: notes, topics, archive
 
@@ -31,17 +32,17 @@ Beside them sit two more things:
 The room can **search what it has written down and what it was told**,
 by itself, when a question is about something that is no longer in
 front of it: the notes in its memory, the notes in its archive, and the
-conversations it has memorized, transcript and all. So a detail that
-was said once and never made it into a note is still answerable: the
-conversation kept it. That holds for every conversation you have
-memorized, including the ones a Memorize took no notes from. A Memorize
-decides what is worth keeping in front of the room every turn, not what
-stays findable, so a row the room recalls from such a conversation says
-**(no notes taken)**: the transcript is all memory kept of it. A
-conversation you have remembered but not yet memorized is still in the
-room's recent memory, so it is already in view and needs no search; one
-you never remembered is not searched at all. The chat shows a chip with
-what the room looked for.
+conversations you have remembered, transcript and all, from the moment
+you remember them. So a detail that was said once and never made it
+into a note is still answerable: the conversation kept it. That holds
+for every conversation you have remembered, memorized or not, including
+the ones a Memorize took no notes from. A Memorize decides what is worth
+keeping in front of the room every turn, not what stays findable, so a
+row the room recalls from such a conversation says **(no notes
+taken)**: the transcript is all memory kept of it. A row from a
+conversation not yet memorized says **(remembered, not yet
+memorized)**. A conversation you never remembered, or forgot, is not
+searched at all. The chat shows a chip with what the room looked for.
 
 The search takes words, names, dates or numbers rather than a literal
 text, in German or English, and the two spellings meet: **Überweisung**
@@ -85,9 +86,9 @@ Gschwendtner invoices, and how much was it?"
 The note in front of the room says nothing about a day or an amount,
 and its instructions tell it to look before it says it does not know.
 It searches its memory for "Gschwendtner invoices paid". While it does,
-the chat shows a chip, **Reading archived notes**, with the words it
-looked for under it; when the rows are in, the chip reads **Read
-archived notes**. Nothing is written or restored by that read.
+the chat shows a chip, **Searching memory**, with the words it looked
+for under it; when the rows are in, the chip reads **Searched
+memory**. Nothing is written or restored by that read.
 
 What comes back is a short list of rows, ten at most unless the room
 asks for more, never more than twenty-five, grouped by where they were
@@ -133,33 +134,38 @@ index, costs tokens or disk on every save, and its misses are harder to
 explain than a word that was not there. The room is told to search
 again in other words before it concludes something is not there; you
 can help it the same way, by asking with the name, the number or the
-date you remember. It also does not search a conversation you have not
-memorized: one you remembered and not yet memorized is still in the
-room's recent memory and needs no search, and one you never remembered
-is not kept for searching at all.
+date you remember. It also does not search a conversation you never
+remembered, or forgot: neither is kept for searching.
 
 Nothing enters or leaves memory without you:
 
 1. **Remember**: at the end of a conversation (the room shows a context
    meter so you know when it is worth doing), a worker proposes a short
    summary of what happened. You can add a steering note; anything you
-   explicitly asked the room to remember is carried through and becomes
-   a pinned note when it is memorized. The default Remember button shows
-   you the proposal before saving; a room set to remember without the
-   preview saves clean proposals straight away and shows you anything
-   questionable. "Remember with options…" always opens the full preview.
-   Remember warns when the list of waiting conversations is nearly full
-   and asks you to Memorize before remembering more.
+   explicitly asked the room to remember is carried through word for word
+   (a summary that left one out gets it back as you said it) and becomes
+   a pinned note when it is memorized. The summary says only what the
+   conversation held, never how it was read or put together. The default
+   Remember button shows you the proposal before saving; a room set to
+   remember without the preview saves it straight away. "Remember with
+   options…" always opens the full preview. Remember warns when the list
+   of waiting conversations is nearly full and asks you to Memorize
+   before remembering more.
 2. **Memorize**: turns the waiting conversations into lasting notes, one
    conversation at a time. A first read says what the conversations hold
    and what needs your call; **Discuss first** lets you answer before
    anything runs. The card fills in as each conversation is read, with
    what it added or changed; you can edit a note on the card and keep
-   any note the room should not let go. A conversation whose reading
-   fails stays waiting for next time, with the reason beside it. When
-   the memory is over its budget, the card shows which notes would move
-   to the archive; **Keep** marks one that must stay, and you can raise
-   the budget from the card so that everything fits.
+   any note the room should not let go. A conversation the Memory model
+   cannot split into notes is kept whole as one note under its topic and
+   reads on the card like any other; when that happens to every
+   conversation of an update, the card says the model could not sort
+   them and offers **Choose another model**. A conversation that could
+   not be read at all (the model could not be reached) waits for the
+   next Memorize. When the memory is over its budget, the card shows
+   which notes would move to the archive; **Keep** marks one that must
+   stay, and you can raise the budget from the card so that everything
+   fits.
 3. **Review**: tidies the notes you already have, topic by topic. Its
    first read lists what the room finds by itself: notes that say the
    same thing twice, notes that disagree with each other (the same words
@@ -190,8 +196,8 @@ raised.
 
 Room settings → **Memory** shows the room's notes by topic with a search
 box. You can add, edit, move, pin and delete notes by hand; deleting
-sends a note to the archive, where you can **Restore** it or **Delete
-for good**. Editing stays open while the room is open in a chat; only a
+sends a note to the archive, where you can **Restore** it or
+**Delete** it for good. Editing stays open while the room is open in a chat; only a
 running answer blocks it. Every hand edit is recorded in History like
 any other change.
 
@@ -205,10 +211,11 @@ stored.
 
 Two per-room switches, off by default, under Saving in **Room settings,
 Memory**: **Remember without the preview** and **Memorize without the
-first read or the card**. A clean update is one with nothing for you to
-weigh. Anything you need to weigh always waits for you, for example a
-note leaving memory or a new note that may disagree with another. You
-can always see what changed afterwards in History.
+first read or the card**. Remember without the preview saves the summary
+as it comes. A Memorize that holds something for you to weigh always
+waits for you, for example a note leaving memory or a new note that may
+disagree with another. You can always see what changed afterwards in
+History.
 
 ## The memory budget
 
@@ -242,15 +249,30 @@ recalled". A room can be above its budget in between,
 for instance after hand edits; it keeps working, reads in a neutral
 colour everywhere, and the next Memorize or Review resolves it.
 
+The room's Memory model must be able to read the whole memory at its
+budget, beside one conversation, in one request: that is what Memorize
+does for every conversation. The smallest window that holds it is about
+47,000 tokens at the smallest budget, 69,000 at the default and 199,000
+at the largest on a Claude model (Claude counts more tokens for the same
+text), and about 31,000, 45,000 and 126,000 on other models. A model
+below that is refused where it is chosen: as the room's Memory model, as
+the default Memory model (the refusal names the first room on the
+default it cannot hold), and when the budget is raised past what the
+room's Memory model holds. If a gateway's window shrinks after it was
+picked, Memorize and Review stop before reading anything, with **Choose
+another model**.
+
 One refusal can meet you at the door: a room whose memory and setup no
 longer fit the usable window of its model refuses to start a
 conversation rather than failing on the first reply. Memory is
 unchanged and nothing is sent to the model. The way out is spelled out
-in the message: open Room settings, Conversation, and choose **Forget**
-(it closes the conversation without using a model and unlocks the room);
-then from Home open Maintain and run **Memorize** if the room has waiting
-conversations, or **Review** to tidy its notes; or pick a model with a
-larger window in Room settings, Model, and open the room again.
+in the message: from Home open Maintain and run **Memorize** if most of
+the memory is recent conversations, or **Review** if most of it is
+long-term notes; or pick a model that can read more at once in Room
+settings, Model. Then open the room again. A conversation that already has
+messages keeps the memory it started with, so a smaller memory reaches
+only the next one: to continue with it, pick a model that can read more
+at once in Room settings, Model, and switch the open conversation to it.
 
 **Upgrading from 0.11.2:** a room keeps everything it has. Its notes
 migrate on the first save, the old "(saved …)" stamps become dates,
@@ -276,49 +298,55 @@ there is no chat-side forget yet.
 ## How well it works, measured
 
 A room answers as well as a model that has the whole history in view,
-with about a fifth of the tokens per question.
+with under a quarter of the tokens per question.
 
 That was measured on LongMemEval-S, a public benchmark of long chat
 histories, on a fixed sample of 50 questions (seed 1). Every question
-comes with a history of its own, about 48 conversations and 115,000
-tokens. For the room, the conversations are Remembered and Memorized
-in the order they were said, and the question is asked in a fresh
-conversation. For the comparison, the whole history is pasted into the
-prompt with the question after it, and there is no memory at all.
-Claude Sonnet 5 answers, runs Memorize and judges, on the benchmark's
-own judging templates.
+comes with a history of its own, about 48 conversations. For the room,
+the conversations are Remembered and Memorized in the order they were
+said, a Memorize after every seven, and the question is asked in a
+fresh conversation. Each Memorize starts with the room's own first
+read, as in the app. For the comparison, the whole history is pasted
+into the prompt with the question after it, and there is no memory at
+all. Claude Sonnet 5 answers, Remembers, runs Memorize and judges, on
+the benchmark's own judging templates.
 
 | | Room memory | Full history in the prompt |
 | --- | --- | --- |
-| Correct of 50 | 43 | 41 |
-| Tokens per question | about 33,000 | about 168,000 |
-| Tokens to build the memory, once per history | about 1.15M | none |
-| Cost per question | about 6 cents | about 42 cents |
-| Cost to build the memory, once per history | about 3.23 dollars, about 7 cents per conversation | nothing |
+| Correct of 50 | 47 | 41 |
+| Tokens per question | about 38,000 | about 168,000 |
+| Tokens to build the memory, once per history | about 1.22M | none |
+| Cost per question | about 12 cents | about 42 cents |
+| Cost to build the memory, once per history | about 3.43 dollars, about 7 cents per conversation | nothing |
 
-43 against 41 correct on 50 questions, which at this sample size is a
-tie. The two cost rows are in dollars at API prices; someone on a
-subscription pays no per-token price.
+47 against 41 correct on 50 questions. At this sample size the
+difference is within chance, so the room is not shown to be better.
+The two cost rows are in dollars at API list prices, computed from the
+token counts the provider reported; someone on a subscription pays no
+per-token price.
 
 By type of question, room memory first and the full history second:
 
 - a fact the user said once: 9 of 9 and 9 of 9
 - a fact the assistant said once: 9 of 9 and 9 of 9
 - temporal reasoning: 8 of 8 and 7 of 8
-- across many sessions: 7 of 8 and 6 of 8
-- knowledge updates: 6 of 8 and 6 of 8
-- personal preferences: 4 of 8 and 4 of 8
+- across many sessions: 8 of 8 and 6 of 8
+- knowledge updates: 7 of 8 and 6 of 8
+- personal preferences: 6 of 8 and 4 of 8
 
 **A projection, not a measurement.** Each history was asked one
 question. Multiplying that one question, the two approaches cost the
-same after about 9 questions to one history. This assumes that every
+same after about 12 questions to one history. This assumes that every
 question costs the same and that nothing is cached between questions;
 questions asked minutes apart would make the full-history side cheaper.
 
 The limits of this result:
 
 - It is 50 questions. A difference under about 7 questions is within
-  chance.
+  chance, so 47 against 41 is not shown to be better.
+- The room was measured in October, on development code between
+  0.14.2 and 0.14.3. The full history was measured in September, on
+  the same model and the same 50 questions.
 - The sample was also the one used during development, so a fresh
   sample is the clean confirmation.
 - The same model answers and judges.
@@ -326,7 +354,7 @@ The limits of this result:
   everything, not project work.
 - It was measured with Memorize on Claude Sonnet 5. Claude's
   recommended memory model is Opus 5.5, which was not measured.
-- Personal preferences are weak with and without memory, because a
+- Personal preferences are the weakest type with and without memory. A
   Memorize is tuned for how work is done, not for personal taste.
 
 A history that outgrows the model's window cannot be pasted in at all.
@@ -334,37 +362,13 @@ A history that outgrows the model's window cannot be pasted in at all.
 How to run it again is in the bench's own
 [README](../apps/web-server/scripts/memory-bench/README.md#published-results).
 
-## CLI memory (ExxCode)
+## Compaction
 
-The coding workspace has three lighter layers:
-
-### Context files
-
-`AGENTS.md` in a repo root is auto-loaded into the session when you run
-the CLI from that repo. Use it for project conventions, personal
-defaults, and anything you keep re-typing. This is the
-highest-leverage, zero-config personalisation for coding sessions.
-
-### Fact store
-
-A long-term fact store at `~/.exxperts/app/memory.jsonl` (append-only
-JSONL, mode 0600), wired in by the `memory` extension:
-
-- the model can propose facts with `memory_note`; you Approve / Edit /
-  Decline;
-- `/remember <text>` saves directly, `/memories` browses, `/forget`
-  deletes;
-- stored facts are injected into the prompt under "Known facts about
-  this user".
-
-### Compaction
-
-When a CLI session approaches the model's context window, the runtime
+When a room's conversation nears its model's context window, the runtime
 compacts older messages into a structured summary and keeps recent
 messages verbatim. Compaction is lossy for the model but the full
-transcript stays on disk. A room's conversation compacts the same way
-when it nears its model's window; Remember is the deliberate,
-human-approved way to keep what matters in the room's memory.
+transcript stays on disk. Remember is the deliberate, human-approved way
+to keep what matters in the room's memory.
 
 ## Privacy
 

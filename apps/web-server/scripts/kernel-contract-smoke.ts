@@ -3,10 +3,11 @@ import os from "node:os";
 import path from "node:path";
 
 // The kernel is a contract, not prose: every room's first tokens. This smoke
-// pins the shape of that contract — section order, the single documentation
-// URL, the capability guardrail, the precedence rescope, the token ceiling,
-// and that every tool name the kernel utters actually exists in the
-// persistent-room tool surface — so a well-meaning wording edit cannot
+// pins the shape of that contract: section order, no URL (the docs links
+// ride the installation section, built at connect), the capability
+// guardrail, the precedence rescope, the token ceiling, and that every tool
+// name the kernel utters actually exists in the persistent-room tool
+// surface, so a well-meaning wording edit cannot
 // silently teach every room something false.
 
 const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "exxeta-kernel-contract-home-"));
@@ -26,7 +27,6 @@ const {
 	PERSISTENT_ROOM_BASH_TOOL_NAME,
 } = await import("../src/persistent-room-tool-policy.js");
 const { READ_SKILL_TOOL_NAME } = await import("../src/persistent-room-skill-tool.js");
-const { DELEGATE_TASK_TOOL_NAME } = await import("../src/persistent-room-delegate-tool.js");
 
 function assert(condition: unknown, message: string): asserts condition {
 	if (!condition) throw new Error(message);
@@ -77,18 +77,10 @@ try {
 		assert(kernel.startsWith("# exxperts — Persistent Agent Platform Kernel"), `${label} should start with the kernel H1`);
 		assert(!kernel.slice(1).includes("\n# "), `${label} should contain exactly one H1-level heading`);
 
-		// 2. The capabilities section exists exactly once, between Platform Identity and Privacy & Compliance.
-		assert(countOccurrences(kernel, "## How Capabilities Reach You") === 1, `${label} should contain How Capabilities Reach You exactly once`);
-		const identityIndex = kernel.indexOf("## Platform Identity");
-		const capabilitiesIndex = kernel.indexOf("## How Capabilities Reach You");
-		const privacyIndex = kernel.indexOf("## Privacy & Compliance");
-		assert(identityIndex !== -1 && privacyIndex !== -1, `${label} should keep Platform Identity and Privacy & Compliance sections`);
-		assert(identityIndex < capabilitiesIndex && capabilitiesIndex < privacyIndex, `${label} should place the capabilities section after Platform Identity and before Privacy & Compliance`);
-
-		// 5. One documentation URL, nothing else that smells like a link.
-		assert(countOccurrences(kernel, "github.com/EXXETA/exxperts") === 1, `${label} should reference the public repo exactly once`);
-		assert(countOccurrences(kernel, "docs/README.md") === 1, `${label} should reference the docs index exactly once`);
-		assert(countOccurrences(kernel, "http") === 1, `${label} should contain exactly one http substring (the docs URL)`);
+		// 5. No link: the kernel is frozen per conversation, so the docs of the
+		// version now running are linked from the installation section instead.
+		assert(countOccurrences(kernel, "http") === 0, `${label} should contain no http substring; the docs links ride the installation section`);
+		assert(countOccurrences(kernel, "This installation section") === 1, `${label} should point at the installation section exactly once`);
 
 		// 6. The provisioning guardrail survives.
 		assert(kernel.includes("provision capabilities for this room"), `${label} should keep the never-provision guardrail`);
@@ -105,12 +97,16 @@ try {
 		// budget. The ceiling binds the no-org kernel: the org section is
 		// user-configured content of arbitrary length, so the org variant is
 		// held to the same ceiling plus whatever the org section itself costs.
+		// The ceiling moved from 2100 to 2200 on purpose, for the Rendering
+		// line that teaches the chart block (about 92 estimated tokens).
 		const kernelTokens = estimateTextTokens(kernel);
 		const orgSectionTokens = label === "org kernel" ? estimateTextTokens(kernelWithOrg) - estimateTextTokens(kernelWithoutOrg) : 0;
-		assert(kernelTokens <= 2100 + orgSectionTokens, `${label} should estimate at most 2100 tokens of product-owned text, got ${kernelTokens - orgSectionTokens}`);
+		assert(kernelTokens <= 2200 + orgSectionTokens, `${label} should estimate at most 2200 tokens of product-owned text, got ${kernelTokens - orgSectionTokens}`);
 
 		// 10. Every tool name the kernel utters exists; workspace advice has left.
 		assert(!kernel.includes("grep"), `${label} should no longer mention grep (workspace advice lives in L2 now)`);
+		// Visual specialists are switched off: the kernel neither offers nor routes to them.
+		assert(!/specialist|delegat/i.test(kernel), `${label} should name no specialist and no delegation`);
 		const knownToolNames = new Set<string>([
 			...PERSISTENT_ROOM_WEB_RESEARCH_TOOL_NAMES,
 			...PERSISTENT_ROOM_SHELF_TOOL_NAMES,
@@ -119,7 +115,6 @@ try {
 			...PERSISTENT_ROOM_LOCAL_FILES_TOOL_NAMES,
 			PERSISTENT_ROOM_BASH_TOOL_NAME,
 			READ_SKILL_TOOL_NAME,
-			DELEGATE_TASK_TOOL_NAME,
 		]);
 		const mentionedToolNames = new Set<string>(kernel.match(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g) ?? []);
 		if (kernel.includes("`mcp`")) mentionedToolNames.add("mcp");
@@ -130,12 +125,6 @@ try {
 			assert(knownToolNames.has(toolName), `${label} mentions tool ${toolName}, which no persistent-room tool constant defines`);
 		}
 	}
-
-	// 3. Org identity appears exactly once, in its slot, and only when configured.
-	assert(countOccurrences(kernelWithOrg, "## Organization Context") === 1, "org kernel should contain the org section exactly once");
-	const orgIndex = kernelWithOrg.indexOf("## Organization Context");
-	assert(kernelWithOrg.indexOf("## Platform Identity") < orgIndex && orgIndex < kernelWithOrg.indexOf("## How Capabilities Reach You"), "org section should sit between Platform Identity and the capabilities section");
-	assert(!kernelWithoutOrg.includes("Organization Context"), "no-org kernel should not contain an org section");
 
 	// 4. The full ordered section list is exactly the contract.
 	assert(JSON.stringify(sectionHeadings(kernelWithoutOrg)) === JSON.stringify(expectedHeadings), `no-org kernel headings drifted: ${sectionHeadings(kernelWithoutOrg).join(" | ")}`);

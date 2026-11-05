@@ -31,11 +31,11 @@
  * the consult-stream.ts / assistant-stream.ts house pattern. Fully testable in
  * plain node: apps/web-server/scripts/task-card-smoke.ts.
  *
- * HARD RULE (Borja): the card FACE shows only high-signal content — title,
+ * HARD RULE: the card FACE shows only high-signal content — title,
  * state, thumbnails/chips, summary. Task ids, store paths, timestamps, model,
  * and usage are kept in state for the V5 panel-viewer / provenance header but
- * are NEVER rendered on the card face. This reducer keeps them; the component
- * (delegation-card.tsx) is what enforces the face contract.
+ * are NEVER rendered on the card face. This reducer keeps them; the components
+ * that render a task are what enforce the face contract.
  */
 
 /** The specialist folder prefix in every store-relative path: `tasks/<taskId>/…`. */
@@ -120,7 +120,7 @@ export interface TaskState {
 	errorMessage: string | null;
 	/**
 	 * Shelf files this run is REVISING in place, named by the server on
-	 * `task_started` (taste pass). The Files panel shows the working state on
+	 * `task_started` (taste pass). The Attachments panel shows the working state on
 	 * the target file's own row instead of adding a row for the run, so an
 	 * Ask-for-changes never looks like it produced a second file. Empty for
 	 * runs that make new files — those keep the working row.
@@ -253,7 +253,7 @@ export function reduceTask(previous: TaskState, action: TaskAction): TaskResult 
 				model: action.model ?? null,
 				reviseTargetNames: (action.reviseTargetNames ?? []).filter((name): name is string => typeof name === "string" && name.length > 0),
 				// A same-id refresh keeps whatever the card has folded to. A NEW task
-				// starts as the pill (Borja, 2026-07-12): the run is run-free by
+				// starts as the pill: the run is run-free by
 				// design, so the default surface is the unobtrusive "working…" pill
 				// and the user expands deliberately.
 				minimized: previous.taskId === action.taskId ? previous.minimized : true,

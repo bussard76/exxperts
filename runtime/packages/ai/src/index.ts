@@ -20,6 +20,7 @@ export type {
 	OpenAICodexResponsesOptions,
 	OpenAICodexWebSocketDebugStats,
 } from "./providers/openai-codex-responses.js";
+export { codexModelNotOnAccount } from "./providers/openai-codex-responses.js";
 export type { OpenAICompletionsOptions } from "./providers/openai-completions.js";
 export type { OpenAIResponsesOptions } from "./providers/openai-responses.js";
 export * from "./providers/register-builtins.js";
@@ -42,5 +43,6 @@ export type {
 	OAuthSelectPrompt,
 } from "./utils/oauth/types.js";
 export * from "./utils/overflow.js";
+export * from "./utils/provider-error-fields.js";
 export * from "./utils/typebox-helpers.js";
 export * from "./utils/validation.js";

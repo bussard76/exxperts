@@ -60,8 +60,9 @@ export function neutralizeSpecialistBlockContent(text: string): string {
 
 /**
  * The pending-handoff queue's taxonomy, in ONE place: a queued block is either
- * a specialist result or a consult handoff — exactly the two families the
- * consent stripper's fence recognisers know (userAuthoredPromptText). The
+ * a specialist result or a consult handoff, exactly the two envelope families
+ * the consent stripper's fence recognisers know (userAuthoredPromptText; its
+ * other fences are the server's notes, never queued). The
  * client's checkpoint counts classify with THIS predicate so the queue
  * taxonomy and the stripper can never drift apart again (a retired third
  * family once lingered in the client filter alone).
@@ -137,7 +138,7 @@ export function buildSpecialistHandoffBlock(input: SpecialistHandoffInput): stri
 		`Task: ${task}`,
 		`Template: ${templateId} v${version} · ran ${ranAt} · ${count} file${count === 1 ? "" : "s"}`,
 		`Source: ephemeral specialist session, no memory access; this room only knows this`,
-		`distilled result; the room's current files are listed in the 'Files in this room' list.`,
+		`distilled result; the room's current files are listed in the 'Attachments in this room' list.`,
 	];
 	const closing = `[/SPECIALIST RESULT: ${templateId}]`;
 

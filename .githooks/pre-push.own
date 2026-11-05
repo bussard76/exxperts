@@ -1,0 +1,3 @@
+#!/bin/sh
+# Project's own pre-push: factory files never reach a pull request to EXXETA/exxperts.
+exec sh tools/exxeta-pr-guard.sh

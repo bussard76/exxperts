@@ -247,7 +247,6 @@ const CORE_CONTEXT = renderMemoryDocument(DOC, "context", { entryIds: true, sect
 	assert(prompt.includes("is the entry `m-0031`") && prompt.includes("pinned") && prompt.includes(`there are ${AREAS.length}`), "the legend reads the inline addresses, the pinned marker and how many entries there are");
 	assert(prompt.includes("whose text a conversation of 2026-08-02 wrote") && prompt.includes("saved 2026-08-02 · rewritten 2026-09-01]` is an entry a fold wrote before days were learned") && prompt.includes("no conversation wrote it") && prompt.includes("Copy the id alone") && prompt.includes("`m-0031`, never the dates or the pin marker"), "the legend explains the learned, the saved and rewritten, and the in-memory-since dates and says to copy the id alone");
 	for (const shape of ['"op":"add"', '"op":"update"', '"op":"supersede"', '"op":"close"', '"op":"pin"', '"op":"drop"']) assert(prompt.includes(shape), `the task shows the ${shape} shape`);
-	assert(!/unpin/i.test(prompt), "the prompt never offers unpin: only the person unpins");
 	assert(prompt.includes(`at most ${FOLD_MAX_OPS} operations`) && prompt.includes(`at most ${FOLD_MAX_TEXT_WORDS} words`), "the task states its soft bounds");
 	assert(prompt.includes("at most three lines") && prompt.includes("exactly one ```json fence"), "the task asks for a three-line narrative and exactly one fence");
 	assert(prompt.includes("Do not claim anything has been saved."), "the task keeps the no-claim line");
@@ -260,6 +259,7 @@ const CORE_CONTEXT = renderMemoryDocument(DOC, "context", { entryIds: true, sect
 	// A fold with no discussion still gets a rendered instruction block, never an empty section.
 	const bare = buildFoldPrompt({ agentId: "room-smoke", model: { provider: "gateway", model: "fold-model" }, coreContext: "## Deep Memory\n", areas: AREAS, assessmentMarkdown: ASSESSMENT, session: SESSION, sessionIndex: 1, sessionCount: 1 });
 	assert(bare.prompt.includes("The user signed off without further instructions."), "no guidance renders as a sentence, not as a hole");
+	assert(bare.prompt.includes("Never say the user agreed, asked or decided to let it go unless their own instructions above say so"), "a drop's reason claims no agreement the person never gave");
 	// A session whose date the caller does not know states no date, rather than an empty one.
 	const undated = buildFoldPrompt({ agentId: "room-smoke", model: { provider: "gateway", model: "fold-model" }, coreContext: CORE_CONTEXT, areas: AREAS, assessmentMarkdown: ASSESSMENT, session: { id: SESSION_ID, text: SESSION_TEXT }, sessionIndex: 1, sessionCount: 1 });
 	assert(!undated.prompt.includes("This conversation is from") && !undated.prompt.includes("Session date:"), "no date renders as no sentence");

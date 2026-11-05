@@ -41,7 +41,7 @@ writePersistentAgentAiProfileState("openai-compatible");
 const { appendArchive, readArchive, restoreMemoryFile } = await import("../src/memory-entries-store.js");
 const { invalidateRoomCorpus } = await import("../src/memory-search-sources.js");
 const { createPersistentRoomMemoryRecallTool } = await import("../src/persistent-room-memory-recall-tool.js");
-const { MEMORY_USE_FILE, MEMORY_USE_MAX_IDS, flushMemoryUse, memoryUsePath, readMemoryUse, recordMemoryUse } = await import("../src/memory-use.js");
+const { MEMORY_USE_FILE, MEMORY_USE_MAX_IDS, flushMemoryUse, readMemoryUse, recordMemoryUse } = await import("../src/memory-use.js");
 
 let passed = 0;
 let failed = 0;
@@ -144,7 +144,6 @@ try {
 	const runtimeDir = path.dirname(sidecarPath);
 
 	await section("1. no recall, no sidecar", () => {
-		check("the sidecar lives under the room's runtime directory", memoryUsePath(roomId) === sidecarPath);
 		check("no file exists before any recall", !fs.existsSync(sidecarPath));
 		const use = readMemoryUse(roomId);
 		check("a room that never recalled reads as no use", Object.keys(use.notes).length === 0 && Object.keys(use.archive).length === 0);
@@ -246,11 +245,9 @@ try {
 		restoreMemoryFile(roomId, {
 			restoredL1b: fs.readFileSync(l1bPath, "utf-8"),
 			snapshotLabel: "undo",
-			writeEventRecord: (recorded) => {
-				fs.mkdirSync(eventsDir, { recursive: true, mode: 0o700 });
+			eventRecord: (recorded) => {
 				const eventRecordPath = path.join(eventsDir, `${recorded.writeId}.json`);
-				fs.writeFileSync(eventRecordPath, JSON.stringify({ writeId: recorded.writeId }), { mode: 0o600 });
-				return { eventRecordPath, eventRelPath: path.relative(path.join(root, roomId), eventRecordPath) };
+				return { eventRecordPath, record: { writeId: recorded.writeId } };
 			},
 		});
 		check("the sidecar's bytes are unchanged by an undo", fs.readFileSync(sidecarPath).equals(sidecarBefore));

@@ -10,6 +10,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { stateHome } from "../../../pi-package/product-state-paths.js";
+import { isCredentialHeaderName } from "./mcp-status.js";
+import { serverHooks } from "./server-hooks.js";
 
 // Non-literal specifiers so tsc never resolves into the adapter's raw .ts
 // sources (same pattern as mcp-status.ts).
@@ -50,6 +52,8 @@ export interface AddMcpServerInput {
 	args?: string[];
 	bearerToken?: string;
 	oauth?: AddMcpServerOAuthInput;
+	/** Extra headers sent with every request, such as a key a server expects in its own header. */
+	headers?: Record<string, string>;
 }
 
 interface ServerEntryShape {
@@ -62,19 +66,47 @@ interface ServerEntryShape {
 	oauth?: { clientId: string; clientSecret?: string; scope?: string };
 }
 
+// Headers the connection itself sets, or that would let a value reshape the
+// request; a custom header may not replace them.
+const RESERVED_HEADERS = new Set(["host", "content-length", "content-type", "accept", "connection", "transfer-encoding", "upgrade", "te", "trailer", "keep-alive", "proxy-authorization", "proxy-connection", "cookie", "mcp-session-id", "mcp-protocol-version", "last-event-id"]);
+const HEADER_NAME_PATTERN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,100}$/;
+const MAX_HEADERS = 20;
+const MAX_HEADER_VALUE_LENGTH = 4096;
+
 /**
- * Figma personal access tokens (figd_…) are rejected when sent as a standard
- * Authorization header — mcp.figma.com answers "figd_ tokens must be passed
- * via X-Figma-Token header, not Authorization". Persist them as that header
- * instead. auth: false also switches off the adapter's OAuth auto-detect, so
- * a bad token reports as a plain rejection instead of a login prompt (Figma's
- * OAuth login only admits allowlisted partner apps anyway).
+ * Custom headers for a remote connector, checked before they reach the
+ * config file: valid names, no line break or other control character in a
+ * value (it could add a header of its own), none of the headers the
+ * connection sets, no name twice, and no Authorization next to the API token
+ * or an OAuth client, which set it themselves.
  */
-function remoteTokenEntry(url: string, token: string): ServerEntryShape {
-	if (token.startsWith("figd_")) {
-		return { url, auth: false, headers: { "X-Figma-Token": token } };
+function validateHeaders(raw: unknown, authorizationSet: boolean): Record<string, string> | undefined {
+	if (raw === undefined || raw === null) return undefined;
+	if (typeof raw !== "object" || Array.isArray(raw)) throw new McpAdminError("Custom headers must be a list of names and values.");
+	const entries = Object.entries(raw as Record<string, unknown>);
+	if (entries.length === 0) return undefined;
+	if (entries.length > MAX_HEADERS) throw new McpAdminError(`A connector can have at most ${MAX_HEADERS} custom headers.`);
+	const headers: Record<string, string> = {};
+	const seen = new Set<string>();
+	for (const [rawName, rawValue] of entries) {
+		const name = rawName.trim();
+		if (!HEADER_NAME_PATTERN.test(name)) throw new McpAdminError(`"${name.slice(0, 40)}" is not a valid header name: use letters, digits and dashes.`);
+		if (typeof rawValue !== "string") throw new McpAdminError(`The ${name} header's value must be text.`);
+		const value = rawValue.trim();
+		const lower = name.toLowerCase();
+		if (RESERVED_HEADERS.has(lower)) throw new McpAdminError(`The ${name} header is set by the connection itself and cannot be changed.`);
+		if (lower === "authorization" && authorizationSet) throw new McpAdminError("Use either the API token or OAuth client, or a custom Authorization header, not both.");
+		if (seen.has(lower)) throw new McpAdminError(`The ${name} header is listed twice.`);
+		if (!value) throw new McpAdminError(`The ${name} header needs a value.`);
+		if (value.length > MAX_HEADER_VALUE_LENGTH) throw new McpAdminError(`The ${name} header's value is too long.`);
+		if (/\p{Cc}/u.test(value)) throw new McpAdminError(`The ${name} header's value contains a line break or another control character.`);
+		// A header carries only Latin-1; a dash or quote pasted from a document
+		// would otherwise pass here and fail only when the connector connects.
+		if (/[^\u0000-\u00ff]/u.test(value)) throw new McpAdminError(`The ${name} header's value contains a character a header cannot carry, such as a typographic dash or quote. Type it again by hand.`);
+		seen.add(lower);
+		headers[name] = value;
 	}
-	return { url, auth: "bearer", bearerToken: token };
+	return headers;
 }
 
 function validateAddInput(input: AddMcpServerInput): { name: string; entry: ServerEntryShape } {
@@ -105,19 +137,27 @@ function validateAddInput(input: AddMcpServerInput): { name: string; entry: Serv
 		if (bearerToken && clientId) {
 			throw new McpAdminError("Provide either an API token or a custom OAuth client, not both.");
 		}
-		if (bearerToken) return { name, entry: remoteTokenEntry(url, bearerToken) };
+		const headers = validateHeaders(input.headers, Boolean(bearerToken || clientId));
+		const withHeaders = headers ? { headers } : {};
+		if (bearerToken) return { name, entry: { url, auth: "bearer", bearerToken, ...withHeaders } };
 		if (clientId) {
 			// Pre-registered client: the adapter's OAuth provider uses it directly
 			// and skips dynamic client registration, which providers like HubSpot
 			// do not support.
 			return {
 				name,
-				entry: { url, auth: "oauth", oauth: { clientId, ...(clientSecret ? { clientSecret } : {}), ...(scope ? { scope } : {}) } },
+				entry: { url, auth: "oauth", oauth: { clientId, ...(clientSecret ? { clientSecret } : {}), ...(scope ? { scope } : {}) }, ...withHeaders },
 			};
 		}
-		return { name, entry: { url } };
+		// A key in its own header is the sign-in: OAuth auto-detect is switched
+		// off, as for one written into the file by hand, or the adapter would
+		// ask for a login the server does not offer. Other headers (a tenant, a
+		// version) leave auto-detect on.
+		if (headers && Object.keys(headers).some(isCredentialHeaderName)) return { name, entry: { url, auth: false, headers } };
+		return { name, entry: { url, ...withHeaders } };
 	}
 	if (input.bearerToken) throw new McpAdminError("API tokens only apply to remote (URL) connectors.");
+	if (input.headers && Object.keys(input.headers).length > 0) throw new McpAdminError("Custom headers only apply to remote (URL) connectors.");
 	if (input.oauth?.clientId) throw new McpAdminError("Custom OAuth clients only apply to remote (URL) connectors.");
 	if (command) {
 		const args = Array.isArray(input.args) ? input.args.map((a) => String(a)).filter((a) => a.trim() !== "") : [];
@@ -130,6 +170,8 @@ export async function addMcpServer(input: AddMcpServerInput): Promise<{ name: st
 	ensureAgentDirEnv();
 	const configMod = await import(ADAPTER_CONFIG);
 	const { name, entry } = validateAddInput(input);
+	const refusal = serverHooks().connectorEntryRefusal?.(entry);
+	if (refusal) throw new McpAdminError(refusal);
 	const merged = configMod.loadMcpConfig();
 	if (merged.mcpServers?.[name]) {
 		throw new McpAdminError(`A connector named "${name}" already exists. Remove it first or pick another name.`, 409);
@@ -357,7 +399,7 @@ async function explainSseFallback(entry: {
 	auth?: "bearer" | "oauth" | false;
 	bearerToken?: string;
 	bearerTokenEnv?: string;
-}): Promise<{ message: string; needsAuth: boolean } | null> {
+}): Promise<{ message: string; needsAuth: boolean; httpStatus: number } | null> {
 	const headers: Record<string, string> = { ...(entry.headers ?? {}) };
 	const token = entry.auth === "bearer" ? (entry.bearerToken ?? (entry.bearerTokenEnv ? process.env[entry.bearerTokenEnv] : undefined)) : undefined;
 	if (token) headers.Authorization = `Bearer ${token}`;
@@ -365,6 +407,7 @@ async function explainSseFallback(entry: {
 	try {
 		const response = await fetch(String(entry.url), {
 			method: "POST",
+			redirect: "manual",
 			headers: {
 				"Content-Type": "application/json",
 				Accept: "application/json, text/event-stream",
@@ -381,11 +424,11 @@ async function explainSseFallback(entry: {
 		const body = (await response.text()).trim();
 		if (response.status === 401 || response.status === 403) {
 			return hasStaticCredentials
-				? { message: `The server rejected the configured token (HTTP ${response.status}${body ? `: ${body}` : ""}). Check that the token is valid.`, needsAuth: false }
-				: { message: `This server requires authentication (HTTP ${response.status}${body ? `: ${body}` : ""}).`, needsAuth: true };
+				? { message: `The server rejected the configured token (HTTP ${response.status}${body ? `: ${body}` : ""}). Check that the token is valid.`, needsAuth: false, httpStatus: response.status }
+				: { message: `This server requires authentication (HTTP ${response.status}${body ? `: ${body}` : ""}).`, needsAuth: true, httpStatus: response.status };
 		}
 		if (!response.ok) {
-			return { message: `The server rejected the connection: HTTP ${response.status}${body ? `: ${body}` : ""}`, needsAuth: false };
+			return { message: `The server rejected the connection: HTTP ${response.status}${body ? `: ${body}` : ""}`, needsAuth: false, httpStatus: response.status };
 		}
 		return null;
 	} catch {
@@ -399,6 +442,8 @@ export interface McpServerTestResult {
 	toolNames?: string[];
 	needsAuth?: boolean;
 	error?: string;
+	/** The status the address answered with, when the test learned it; the page words its next step from it. */
+	httpStatus?: number;
 }
 
 export async function testMcpServer(name: string): Promise<McpServerTestResult> {
@@ -436,6 +481,7 @@ export async function testMcpServer(name: string): Promise<McpServerTestResult> 
 	} catch (e) {
 		let message = (e as Error).message ?? String(e);
 		let needsAuth = /unauthorized|401|needs-auth|oauth|authentication required/i.test(message);
+		let httpStatus: number | undefined;
 		// The adapter probes streamable HTTP first and, when that probe dies
 		// mid-OAuth (Figma refusing client registration, for example), silently
 		// falls back to legacy SSE — whose GET then fails with a status code
@@ -444,14 +490,14 @@ export async function testMcpServer(name: string): Promise<McpServerTestResult> 
 		// plain streamable POST and report that answer instead.
 		if (/SSE error: Non-200 status code/i.test(message) && typeof entry.url === "string") {
 			const explained = await explainSseFallback(entry);
-			if (explained) ({ message, needsAuth } = explained);
+			if (explained) ({ message, needsAuth, httpStatus } = explained);
 		}
 		if (needsAuth) {
 			// A stale tool cache would keep the UI claiming "no login needed";
 			// this connection attempt just proved otherwise.
 			await dropMetadataCacheEntry(name);
 		}
-		return { ok: false, error: trimTransportError(message), needsAuth };
+		return { ok: false, error: trimTransportError(message), needsAuth, ...(httpStatus === undefined ? {} : { httpStatus }) };
 	} finally {
 		try {
 			await manager.closeAll();

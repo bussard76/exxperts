@@ -1,7 +1,10 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
+import { installAnswerCopy } from "./answer-copy";
 import { App } from "./App";
+import { AppErrorBoundary } from "./components/app-error-boundary";
 import { ConfirmDialogHost } from "./components/confirm-dialog";
+import { KeysList } from "./components/keys-list";
 import { SidebarCollapsedAffordance } from "./sidebar-collapse";
 import { installPhoneViewportTracking } from "./phone-viewport";
 
@@ -18,13 +21,20 @@ if (navigator.userAgent.includes("ExxpertsDesktop")) {
 // Phone keyboard/viewport tracking (no-op above the phone breakpoint).
 installPhoneViewportTracking();
 
+// A copy inside an answer leaves the page's look behind.
+installAnswerCopy();
+
 createRoot(document.getElementById("root")!).render(
 	<React.StrictMode>
 		{/* Desktop-only window drag strip (display:none in browsers); a real
 		    element because -webkit-app-region does not apply to pseudo-elements. */}
 		<div className="desktop-drag-strip" aria-hidden="true" />
-		<SidebarCollapsedAffordance />
-		<App />
-		<ConfirmDialogHost />
+		{/* A render error shows one sentence and Reload, not a blank page. */}
+		<AppErrorBoundary>
+			<SidebarCollapsedAffordance />
+			<App />
+			<ConfirmDialogHost />
+			<KeysList />
+		</AppErrorBoundary>
 	</React.StrictMode>,
 );

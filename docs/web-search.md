@@ -19,8 +19,8 @@ be spending your money on a choice you never made, so an API-key connection
 behaves like any other provider: it keeps the built-in search below, and the
 switch above does not apply to it.
 
-**Turning it off.** **AI setup → Web search** has one switch, *Use provider
-search where available*. Unticking it stops the app asking either provider to
+**Turning it off.** **Settings → Web search** has one switch, *Provider search
+where available*. Unticking it stops the app asking either provider to
 search, and every room falls back to the built-in search below. That is the
 setting for deployments that need every search to happen on their own
 infrastructure. It takes effect from the next message, with no restart, in
@@ -59,7 +59,7 @@ Web search is **built in**: with no setup, the `web_search` tool queries
 DuckDuckGo directly (its plain HTML endpoint; no API key, no account).
 DuckDuckGo rate-limits automated queries, and on some networks it blocks
 them outright; when that happens the room shows an honest error naming the
-block. Which backend runs is a setting in the app, under **AI setup → Web
+block. Which backend runs is a setting in the app, under **Settings → Web
 search**. For heavy use, or on a network where DuckDuckGo blocks searches, a
 **local SearXNG container** is the reliable path: it aggregates several
 engines and is not subject to DuckDuckGo's limits. When SearXNG is configured it is always preferred;
@@ -74,7 +74,7 @@ Avoid searching confidential client/internal content.
 
 ### Choosing a backend in the app
 
-Under the provider-search switch, **AI setup → Web search** shows the built-in
+Under the provider-search switch, **Settings → Web search** shows the built-in
 choice and lets you change it: DuckDuckGo (the default, nothing to install),
 your own SearXNG (with a field for its address), or off. A change applies to
 the **next search**; nothing needs restarting, and rooms already in the middle
@@ -84,47 +84,41 @@ This choice covers gateway and custom models, and every room whose model does
 not search for itself. With provider search switched off it covers the Claude
 and ChatGPT rooms too.
 
-The screen and the terminal setup read and write the same file
-(`~/.exxperts/app/web-search.json`). The screen can change anything the setup
-command wrote; the setup command is deliberately more cautious in return, and
-leaves an existing backend choice alone rather than overwriting it (it fills in
-only what has not been chosen). If `EXXETA_SEARCH_PROVIDER` is set for the app,
-that wins over both for the built-in backend, and the screen says so instead of
-showing you a setting that isn't in force.
+The screen keeps its choice in `~/.exxperts/app/web-search.json`. The
+developer script below writes the same file, but leaves an existing backend
+choice alone rather than overwriting it (it fills in only what has not been
+chosen). If `EXXETA_SEARCH_PROVIDER` is set for the app, that wins over both
+for the built-in backend, and the screen says so instead of showing you a
+setting that isn't in force.
 
 The rest of this page covers the optional SearXNG setup. The standard way to
-turn it on, on any install type, is `exxperts setup search`; the setup below
-walks through it, with the script-level detail for developers working from a
-clone.
+turn it on, on any install type, is in the app, under **Settings → Web
+search**; the setup below walks through it, with the script-level detail for
+developers working from a clone.
 
 ## Setup (optional SearXNG)
 
 1. **Install a container engine** (one-time, like installing Node; it can't
    be bundled). Get [Docker Desktop](https://www.docker.com/products/docker-desktop/)
    (macOS/Windows/Linux) or, lighter on macOS, [OrbStack](https://orbstack.dev).
-   Open it so it's running, and set it to **start at login** so search keeps
-   working after reboots.
-2. **Open a new terminal** (so the freshly installed `docker` is found), then
-   run the setup command; it works on every install type. This starts SearXNG
-   *and* writes the config for you (to `~/.exxperts/app/web-search.json`,
-   which both the `exxperts` command and the repo scripts read):
-   ```bash
-   exxperts setup search
-   ```
+   [Colima](https://github.com/abiosoft/colima), Rancher Desktop and, on macOS
+   and Windows, [Podman](https://podman.io) work too. Open it so it's running, and set it to **start at login** so search
+   keeps working after reboots.
+2. **Open Settings → Web search**, choose *Your own SearXNG*, and press
+   **Start one on this computer**. This starts SearXNG *and* writes the
+   config for you (to `~/.exxperts/app/web-search.json`).
    Developers working from a repo clone can call the underlying script
    directly instead: `./scripts/searxng start` (macOS / Linux / Git Bash) or
    `node scripts\searxng.mjs start` (Windows, PowerShell or cmd).
 
-That's it: web search now works in both the web UI and the CLI, however you
-launch them. A running app picks the new config up on its next search, so
-there is nothing to restart. You can confirm it under **AI setup → Web
-search**, which is also where you can switch back to DuckDuckGo or turn
-search off.
+That's it: web search now works in every room. A running app picks the new
+config up on its next search, so there is nothing to restart. The same
+screen is where you can switch back to DuckDuckGo or turn search off.
 
 ## How it works (and keeping it running)
 
 SearXNG runs **inside a container**, and a container only runs while its
-engine (OrbStack or Docker Desktop) is running. So the rule is simple:
+engine (OrbStack, Docker Desktop, Colima or Podman) is running. So the rule is simple:
 
 - **Engine running → search works. Engine quit → search stops.**
 
@@ -136,24 +130,32 @@ effortless:
   reboot the engine starts automatically, and our container is set to
   **restart with it** (`--restart unless-stopped`), so search comes back on
   its own, no command needed.
+- **Podman** does not bring containers back by itself when it restarts: after
+  a reboot, press **Start one on this computer** under Settings → Web search
+  once more.
+- **Colima** only shares your home folder with its containers, so it needs the
+  exxperts data in your home folder (the default).
+- **Updates come by themselves.** Search sites keep changing their pages, so
+  exxperts pins a SearXNG version it has tested and switches on Bing and Yahoo
+  next to SearXNG's defaults. When the app starts, uses the search engine it
+  set up, and finds it running, it brings it to that version and those
+  settings: it downloads the new version first, while the old one keeps
+  answering, then swaps them in a few seconds. A stopped engine catches up
+  the next time you press **Start one on this computer**. Your settings file
+  keeps its secret key; a settings file you wrote yourself (one that lists
+  its own engines, or turns SearXNG's defaults off) is left as it is.
 
 The only time search stops is if the engine is **not running** (someone quit
 it, or it isn't set to start at login). You'll see an error like *"SearXNG is
-not reachable at http://127.0.0.1:8888."* The fix:
-
-```bash
-open -a OrbStack              # macOS (or open Docker Desktop, on any platform)
-exxperts setup search status  # check state: running / stopped / docker unavailable
-```
-
-Other commands: `exxperts setup search stop` and `exxperts setup search start`
-(the default when no subcommand is given). The setup command never overwrites
-an existing config, so re-running `start` is always safe. `exxperts doctor`
-also checks reachability.
+not reachable at http://127.0.0.1:8888."* The fix: start the engine again
+(on macOS, `open -a OrbStack`, or open Docker Desktop on any platform), then
+check **Settings → Web search**, which shows whether the search engine is
+running and offers **Start one on this computer** when it is not. The
+desktop app's **Health Check** also checks reachability.
 
 **From a repo clone.** The underlying helper is cross-platform Node:
-`./scripts/searxng <start|stop|restart|status>` from macOS / Linux / Git Bash,
-or `node scripts\searxng.mjs <start|stop|restart|status>` from PowerShell,
+`./scripts/searxng <start|stop|restart|update|status>` from macOS / Linux / Git Bash,
+or `node scripts\searxng.mjs <start|stop|restart|update|status>` from PowerShell,
 cmd, or Git Bash on Windows. (Docker Desktop with the WSL2 backend works well
 on Windows.)
 

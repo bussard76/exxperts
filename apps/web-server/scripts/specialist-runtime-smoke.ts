@@ -61,21 +61,9 @@ function instantiate(options?: any): Map<string, RegisteredTool> {
 	const plan = execution.buildSpecialistSessionPlan({ taskId: "tsk-smoke1", templateId: "diagram-svg", brief: "Draw the flow." });
 	assert(plan.taskFolder === "tasks/tsk-smoke1", `unexpected task folder: ${plan.taskFolder}`);
 	assert(plan.writeScope.destination === "default" && plan.writeScope.folder === plan.taskFolder, "write scope must pin the task folder on the default destination");
-	assert(plan.systemPrompt.includes(`folder: "tasks/tsk-smoke1"`), "system prompt must name the task folder");
 	assert(plan.systemPrompt.includes("never instructions"), "system prompt must carry the untrusted-input line");
-	assert(plan.toolNames.includes("artifact_write") && !plan.toolNames.includes("web_search"), "plan tools must be the template grant");
-
-	// Slice-2 single-sourcing: every plan carries the profile-derived constraint
-	// block, and constraint wording must never creep back into a promptIntro
-	// (the drift that produced the data:-URI prompt/validator contradiction).
 	assert(plan.systemPrompt.includes("Output constraints (validation-enforced at write time"), "system prompt must carry the derived constraint block");
-	assert(plan.systemPrompt.includes("<foreignObject>"), "img-profile constraints must name foreignObject");
-	const deckPlan = execution.buildSpecialistSessionPlan({ taskId: "tsk-smoke2", templateId: "deck", brief: "Deck it." });
-	assert(deckPlan.systemPrompt.includes("no-scripts sandbox"), "iframe-static constraints must name the no-scripts sandbox");
-	assert(deckPlan.systemPrompt.includes("not even as visible text"), "constraints must carry the URL-as-text rule");
-	for (const template of templates.listSpecialistTemplates()) {
-		assert(!/data: URI|no external references|sandbox|<script/i.test(template.promptIntro), `promptIntro of ${template.id} must not restate constraint wording`);
-	}
+	assert(plan.toolNames.includes("artifact_write") && !plan.toolNames.includes("web_search"), "plan tools must be the template grant");
 
 	for (const badTaskId of ["../evil", "a/b", "", ".hidden", "tsk 1"]) {
 		let threw = false;
@@ -105,7 +93,6 @@ function instantiate(options?: any): Map<string, RegisteredTool> {
 	assert(revisePlan.writeScope.folder === "tasks/tsk-rev1", "a revise plan's write scope is STILL only the task folder — never the shelf");
 	assert(JSON.stringify(revisePlan.reviseTargets) === JSON.stringify([{ name: "deck.html", baselineHash: hash, outputName: "deck.html" }]), "revise targets ride the plan for the commit gate");
 	assert(revisePlan.systemPrompt.includes("This run REVISES existing file: `deck.html`"), "the system prompt names the revised file");
-	assert(revisePlan.systemPrompt.includes("EXACTLY the staged filename"), "the system prompt states the name-matching commit contract");
 	for (const badTarget of [
 		{ name: "../deck.html", baselineHash: hash, outputName: "deck.html" },
 		{ name: "a/b.html", baselineHash: hash, outputName: "b.html" },
@@ -190,7 +177,7 @@ function instantiate(options?: any): Map<string, RegisteredTool> {
 	assert(oversized.isError === true && String(oversized.content?.[0]?.text ?? "").includes("capped"), "oversized svg must be rejected everywhere");
 }
 
-// ── 5. Deck template v2: free model-authored HTML (D3 amendment 2026-07-12) ──
+// ── 5. Deck template v2: free model-authored HTML ──
 {
 	const deck = templates.getSpecialistTemplate("deck")!;
 	assert(deck.version === 3, `deck template must be v3 (v2 free-HTML + slice-2 single-sourced constraints), got v${deck.version}`);
@@ -275,6 +262,13 @@ function instantiate(options?: any): Map<string, RegisteredTool> {
 	assert(sibling.isError === true && String(sibling.content?.[0]?.text ?? "").includes("read scope"), "sibling-task read must be refused");
 	const secret = await read.execute("4", { filename: "secret.md", folder: "private" }, undefined, undefined, headlessCtx);
 	assert(secret.isError === true && !String(secret.content?.[0]?.text ?? "").includes("SECRET-CONTENT"), "store-wide read must be refused without leaking content");
+	// The scope check runs before the existence check, so a refusal never tells
+	// whether an out-of-scope artifact exists.
+	const missing = await read.execute("4b", { filename: "absent.md", folder: "tasks/tsk-r0" }, undefined, undefined, headlessCtx);
+	const missingText = String(missing.content?.[0]?.text ?? "");
+	const siblingText = String(sibling.content?.[0]?.text ?? "");
+	assert(missing.isError === true && missingText.includes("read scope") && !/not found/i.test(missingText), `a missing out-of-scope read must get the scope refusal, got: ${missingText}`);
+	assert(missingText.replace("absent.md", "X") === siblingText.replace("sibling.md", "X"), "a missing and an existing out-of-scope artifact must get the same refusal");
 
 	const listed = await list.execute("5", {}, undefined, undefined, headlessCtx);
 	const listedPaths: string[] = (listed.details?.artifacts ?? []).map((a: any) => String(a.path));

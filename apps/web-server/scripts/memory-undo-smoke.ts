@@ -21,6 +21,7 @@ import os from "node:os";
 import path from "node:path";
 
 import type { AbsorbRunGenerate, AbsorbRunProbe } from "../src/absorb-run.js";
+import { waitEvery } from "./smoke-wait.js";
 
 const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "memory-undo-smoke-home-"));
 const root = path.join(tempHome, ".exxperts", "app", "personalized-agents");
@@ -36,7 +37,7 @@ fs.writeFileSync(path.join(smokeAppDir, "persistent-agent-ai-profile.json"), JSO
 process.env.EXXPERTS_CODING_AGENT_DIR = path.join(tempHome, ".exxperts", "agent");
 process.env.EXXETA_PERSISTENT_AGENTS_ROOT = root;
 
-const { approveAbsorbRun, cancelAbsorbRun, getAbsorbRun, setAbsorbRunBudget, startAbsorbRun } = await import("../src/absorb-run.js");
+const { approveAbsorbRun, cancelAbsorbRun, getAbsorbRun, setAbsorbFoldRateLimitPauseForTests, setAbsorbRunBudget, startAbsorbRun } = await import("../src/absorb-run.js");
 const { createPersistentAgentFromScaffoldInput, createPersistentAgentInstance, fingerprintL1bSource, l1bStateMetrics } = await import("../src/persistent-agents.js");
 const { MEMORY_BUDGET_DEFAULT_TOKENS, readPersistentRoomMaintenanceSettings, writePersistentRoomMaintenanceSettings } = await import("../src/persistent-room-maintenance-settings.js");
 const { renderMemoryContext } = await import("../src/memory-entries.js");
@@ -69,8 +70,6 @@ const OLD_VERSION_ID = "m-0002-v1";
 function assert(condition: unknown, message: string): asserts condition {
 	if (!condition) throw new Error(message);
 }
-
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /** A refusal is a product sentence AND a stable code; both are the contract. */
 function expectRefusal(fn: () => unknown, code: string, sentence: RegExp, label: string): void {
@@ -189,24 +188,16 @@ const downProbe: AbsorbRunProbe = async () => {
 };
 
 const WORKING_STATES = new Set(["prepass", "folding", "budget"]);
+// The unfoldable session's "fetch failed" is a blip, asked again once after
+// the blip's pause (30 s in a real run): here it is asked again at once.
+setAbsorbFoldRateLimitPauseForTests(0);
+
+const waitUntil = waitEvery(2, 60_000);
 
 async function settle(agentId: string, runId: string, label: string) {
-	const deadline = Date.now() + 60_000;
 	let run = getAbsorbRun(agentId, runId);
-	while (WORKING_STATES.has(run.state)) {
-		assert(Date.now() < deadline, `${label}: the run was still in state "${run.state}" after 60 seconds`);
-		await sleep(2);
-		run = getAbsorbRun(agentId, runId);
-	}
+	await waitUntil(() => !WORKING_STATES.has((run = getAbsorbRun(agentId, runId)).state), `${label} leaves prepass, folding and budget`);
 	return run;
-}
-
-async function waitUntil(predicate: () => boolean, label: string): Promise<void> {
-	const deadline = Date.now() + 60_000;
-	while (!predicate()) {
-		assert(Date.now() < deadline, `${label}: the condition never came true within 60 seconds`);
-		await sleep(2);
-	}
 }
 
 /** The limit a card raises to in the rooms below; every room starts at the default. */
@@ -447,7 +438,8 @@ try {
 	assert(saveRow?.kind === "learn" && saveRow?.undone === true, `the history keeps the undone save and marks it undone, got ${JSON.stringify(saveRow)}`);
 
 	// --- The same save twice ---------------------------------------------------
-	expectRefusal(() => undoMemorySave(roomA.agentId, save.saveId, UNDONE_AT), "memory_undo_stale", /has changed since this save/, "undoing the same save twice");
+	const undoneAgain = undoMemorySave(roomA.agentId, save.saveId, UNDONE_AT);
+	assert(undoneAgain.alreadyUndone === true && undoneAgain.undone.saveId === save.saveId, `undoing the same save twice answers that it is undone, got ${JSON.stringify(undoneAgain)}`);
 
 	// =====================================================================
 	// A hand edit after the save: the memory has moved on, so the offer is gone.
@@ -538,7 +530,7 @@ try {
 	assert(reviewHistory.find((event) => event.id === reviewSaveId)?.undone === true, "the history marks the undone Review");
 	assert(reviewHistory.find((event) => event.kind === "undo")?.undoneKind === "review", "the undo row says which kind of save it took back");
 	assert(undoneReview.limitLoweredTo === undefined, "a save of the old Review had no card to raise the limit from, so there is nothing to lower");
-	expectRefusal(() => undoMemorySave(roomB.agentId, reviewSaveId, UNDONE_AT), "memory_undo_stale", /has changed since this save/, "undoing the same Review twice");
+	assert(undoMemorySave(roomB.agentId, reviewSaveId, UNDONE_AT).alreadyUndone === true, "undoing the same Review twice answers that it is undone");
 
 	console.log("memory-undo smoke: PASS");
 } finally {

@@ -171,6 +171,23 @@ describe("Agent", () => {
 		expect(seenMaxTokens).toBeUndefined();
 	});
 
+	it("forwards an explicit cacheRetention to the stream function and omits it by default", async () => {
+		let seen: string | undefined | null = null;
+		const capture = (options?: { cacheRetention?: string }) => {
+			seen = options?.cacheRetention;
+			throw new Error("capture only");
+		};
+
+		const long = new Agent({ cacheRetention: "long", streamFn: (_model, _context, options) => capture(options) });
+		await long.prompt("hello");
+		expect(seen).toBe("long");
+
+		seen = null;
+		const defaulted = new Agent({ streamFn: (_model, _context, options) => capture(options) });
+		await defaulted.prompt("hello");
+		expect(seen).toBeUndefined();
+	});
+
 	it("forwards an explicit maxRetries to the stream function and omits it by default", async () => {
 		let seenMaxRetries: number | undefined | null = null;
 		const capture = (options?: { maxRetries?: number }) => {
@@ -438,6 +455,75 @@ describe("Agent", () => {
 		releaseSlow.resolve();
 		await promptPromise;
 		expect(events.filter((event) => event.type === "tool_execution_update")).toHaveLength(0);
+	});
+
+	it("should skip the rest of a tool batch after abort while a before-hook waits", async () => {
+		const toolSchema = Type.Object({});
+		const hookWaiting = createDeferred();
+		const executed: string[] = [];
+		const hooked: string[] = [];
+		const makeTool = (name: string): AgentTool<typeof toolSchema, undefined> => ({
+			name,
+			label: name,
+			description: name,
+			parameters: toolSchema,
+			async execute() {
+				executed.push(name);
+				return { content: [{ type: "text", text: `${name} ran` }], details: undefined };
+			},
+		});
+		let streamCalls = 0;
+		const agent = new Agent({
+			initialState: { tools: [makeTool("ask_first"), makeTool("read_after")] },
+			// Waits as the room's command card does, and Stop answers it with a refusal.
+			beforeToolCall: async ({ toolCall }, signal) => {
+				hooked.push(toolCall.name);
+				hookWaiting.resolve();
+				if (!signal?.aborted) {
+					await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
+				}
+				return { block: true, reason: "Stopped before answering." };
+			},
+			streamFn: (_model, _context, options) => {
+				const stream = new MockAssistantStream();
+				streamCalls++;
+				queueMicrotask(() => {
+					if (options?.signal?.aborted) {
+						stream.push({ type: "error", reason: "aborted", error: { ...createAssistantMessage(""), stopReason: "aborted" } });
+						return;
+					}
+					stream.push({
+						type: "done",
+						reason: "toolUse",
+						message: createAssistantToolUseMessage([
+							{ type: "toolCall", id: "call-1", name: "ask_first", arguments: {} },
+							{ type: "toolCall", id: "call-2", name: "read_after", arguments: {} },
+						]),
+					});
+				});
+				return stream;
+			},
+		});
+
+		const promptPromise = agent.prompt("ask, then read");
+		await hookWaiting.promise;
+		agent.abort();
+		await promptPromise;
+
+		expect(hooked).toEqual(["ask_first"]);
+		expect(executed).toEqual([]);
+		// Each call keeps one result, so the next request pairs every call.
+		const toolResults = agent.state.messages.filter((message) => message.role === "toolResult");
+		expect(toolResults.map((message) => message.toolCallId)).toEqual(["call-1", "call-2"]);
+		const textOf = (index: number) => {
+			const part = toolResults[index].content[0];
+			return part?.type === "text" ? part.text : "";
+		};
+		expect(textOf(0)).toBe("Stopped before answering.");
+		expect(textOf(1)).toContain("the turn was stopped before it ran");
+		expect(toolResults.every((message) => message.isError)).toBe(true);
+		expect(streamCalls).toBe(2);
+		expect(agent.state.isStreaming).toBe(false);
 	});
 
 	it("should update state with mutators", () => {

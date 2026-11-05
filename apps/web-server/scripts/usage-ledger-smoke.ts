@@ -22,6 +22,7 @@ try {
 	// --- canonical model grouping (spec: model-names.ts) merges raw-id variants
 	assert(modelGroupOf({ model: "claude-opus-4-8" }).key === modelGroupOf({ model: "claude-opus-4.8" }).key, "raw-id variants share a group");
 	assert(modelGroupOf({ model: "claude-opus-4-8" }).name === "Claude Opus 4.8", "group renders the canonical name");
+	assert(modelGroupOf({ model: "claude-sonnet-4-5-20250929" }).key !== modelGroupOf({ model: "claude-sonnet-4-5" }).key && modelGroupOf({ model: "claude-sonnet-4-5-20250929" }).name === "Claude Sonnet 4.5", "a dated snapshot keeps its own row, under its plain name");
 	assert(modelGroupOf({ model: "gpt-5.5" }).key === modelGroupOf({ model: "gpt-5.5", modelLabel: "ChatGPT Plus/Pro — GPT-5.5" }).key, "label eras share a group");
 
 	// --- ledger append + chronological load --------------------------------
@@ -32,7 +33,9 @@ try {
 	appendUsage({ ts: now - 10 * day, agent: "room-a", persona: "business", model: "gpt-5.5", input: 300, output: 30, cacheRead: 0, cacheWrite: 0, cost: 0.03 });
 	// Gateway turns on API keys, all recorded at zero. On the legacy gateway: one
 	// that moved tokens on a model nothing prices even today, one that moved
-	// none at all (an aborted turn: nothing to price). On a live gateway whose
+	// none at all (an aborted turn: nothing to price; older builds wrote such
+	// rows, the app no longer does, and the Wallet still reads the ones on
+	// disk). On a live gateway whose
 	// model has a price on file now: a turn from before the price was read. On
 	// a gateway that was removed since: a turn whose model nobody answers for.
 	appendUsage({ ts: now - 2 * day, agent: "room-b", persona: "business", model: "gateway-model", provider: "openai-compatible", authType: "api_key", input: 400, output: 40, cacheRead: 0, cacheWrite: 0, cost: 0 });
@@ -120,7 +123,7 @@ try {
 	assert(fooSource && fooSource.turns === 1 && Math.abs(fooSource.cost - fooEstimate) < 1e-9 && fooSource.estimatedTurns === 1 && fooSource.unpricedTurns === 0, `the live gateway source is labeled and priced at today's rate, got ${JSON.stringify(fooSource)}`);
 	const oldSource = usage.sources.find((s: any) => s.source === "billed" && s.name === "Removed gateway (gateway-old)");
 	assert(oldSource && oldSource.turns === 1 && oldSource.cost === 0 && oldSource.unpricedTurns === 1, `a gateway nothing answers for reads as removed, got ${JSON.stringify(usage.sources.map((s: any) => s.name))}`);
-	const anthropicSource = usage.sources.find((s: any) => s.source === "billed" && s.name === "Anthropic / Claude");
+	const anthropicSource = usage.sources.find((s: any) => s.source === "billed" && s.name === "Claude");
 	assert(anthropicSource && Math.abs(anthropicSource.cost - 0.02) < 1e-9 && anthropicSource.unpricedTurns === 0 && anthropicSource.estimatedTurns === 0, `a stored-cost source stays exact, got ${JSON.stringify(anthropicSource)}`);
 	const gpt = usage.byModel.find((m: any) => m.id === "gpt-5.5");
 	assert(gpt && gpt.turns === 3, "canonical model group spans eras");
@@ -165,6 +168,75 @@ try {
 	assert(csvUnpriced && col(csvUnpriced, "priced_at") === "none" && col(csvUnpriced, "cost_est_usd") === "0", `csv marks the row nothing prices as none, got ${csvUnpriced}`);
 	const csvStored = lines.find((line) => col(line, "model") === "claude-opus-4-8");
 	assert(csvStored && col(csvStored, "priced_at") === "turn" && col(csvStored, "cost_est_usd") === "0.02", `csv keeps a stored cost as the turn's own, got ${csvStored}`);
+
+	// --- the import at the next start writes no row for a call that brought no answer and moved nothing ---
+	// A failed attempt, a stopped one and an empty answer (a proxy's HTML page): the live path writes none,
+	// so the import must not either. A failed call that moved tokens was paid, and is a row.
+	const zero = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } };
+	const failedDir = path.join(agentsRoot, "room-failed", "runtime", "pi-sessions");
+	fs.mkdirSync(failedDir, { recursive: true });
+	fs.writeFileSync(
+		path.join(failedDir, "c_failed.jsonl"),
+		[
+			JSON.stringify({ type: "session", version: 3, id: "s9", timestamp: iso(now - 3 * day), cwd: "/tmp" }),
+			JSON.stringify({ type: "model_change", id: "m9", parentId: null, timestamp: iso(now - 3 * day), provider: "anthropic", modelId: "claude-haiku-5-5" }),
+			JSON.stringify({ id: "f1", parentId: "m9", timestamp: iso(now - 3 * day + 1000), message: { role: "assistant", stopReason: "error", errorMessage: "529 overloaded", content: [], usage: zero } }),
+			JSON.stringify({ id: "f2", parentId: "f1", timestamp: iso(now - 3 * day + 2000), message: { role: "assistant", stopReason: "aborted", content: [], usage: zero } }),
+			JSON.stringify({ id: "f3", parentId: "f2", timestamp: iso(now - 3 * day + 3000), message: { role: "assistant", stopReason: "stop", content: [], usage: zero } }),
+			JSON.stringify({ id: "f4", parentId: "f3", timestamp: iso(now - 3 * day + 4000), message: { role: "assistant", stopReason: "error", errorMessage: "terminated", content: [{ type: "text", text: "Half an" }], usage: { input: 900, output: 4, cacheRead: 0, cacheWrite: 0, cost: { total: 0.003 } } } }),
+		].join("\n") + "\n",
+	);
+	const restarted = importHistoricalSessionUsage(agentsRoot, () => {});
+	const failedRows = loadUsage().filter((row) => row.agent === "room-failed");
+	assert(restarted?.rows === 1 && failedRows.length === 1 && failedRows[0].input === 900, `after a restart, only the paid failed call is a row, got ${restarted?.rows} imported: ${JSON.stringify(failedRows)}`);
+
+	// --- a gateway's model is the real model behind it, whatever it was saved as ---
+	// Rows as the ledger has always written them: the gateway's name before the
+	// dash, the saved model name after it. The dash is the label's own separator
+	// (splitProviderLabel in model-names.ts), spelled as its code point.
+	const label = (gateway: string, model: string) => `${gateway} \u2014 ${model}`;
+	const named = { agent: "room-names", persona: "business", authType: "api_key" as const, cacheRead: 0, cacheWrite: 0 };
+	// One gateway saves "Fast" for two models, a second gateway saves "Fast" for a
+	// third model and for one of the first gateway's, and a gateway saves a known
+	// family's model under a name of its own.
+	appendUsage({ ...named, ts: now - day, model: "kimi-k2.5", modelLabel: label("Work", "Fast"), provider: "gateway-work", input: 10, output: 1, cost: 0.4 });
+	appendUsage({ ...named, ts: now - day, model: "kimi-k2.5", modelLabel: label("Work", "Fast"), provider: "gateway-work", input: 20, output: 2, cost: 0.1 });
+	appendUsage({ ...named, ts: now - day, model: "glm-4.6", modelLabel: label("Work", "Fast"), provider: "gateway-work", input: 30, output: 3, cost: 0.07 });
+	appendUsage({ ...named, ts: now - day, model: "glm-4.6", modelLabel: label("Home", "Fast"), provider: "gateway-home", input: 40, output: 4, cost: 0.02 });
+	appendUsage({ ...named, ts: now - day, model: "deepseek.v3.2", modelLabel: label("Home", "Fast"), provider: "gateway-home", input: 50, output: 5, cost: 0.03 });
+	appendUsage({ ...named, ts: now - day, model: "claude-opus-4.8", modelLabel: label("Work", "Opus"), provider: "gateway-work", input: 1, output: 1, cost: 0.01 });
+	// A Bedrock gateway's region copies of one model are that model.
+	appendUsage({ ...named, ts: now - day, model: "eu.anthropic.claude-sonnet-4-5-20250929-v1:0", modelLabel: label("Bedrock", "Sonnet EU"), provider: "gateway-bedrock", input: 1, output: 1, cost: 0.01 });
+	appendUsage({ ...named, ts: now - day, model: "anthropic.claude-sonnet-4-5-20250929-v1:0", modelLabel: label("Bedrock", "anthropic.claude-sonnet-4-5-20250929-v1:0"), provider: "gateway-bedrock", input: 1, output: 1, cost: 0.01 });
+	appendUsage({ ...named, ts: now - day, model: "anthropic.claude-opus-4-6-v1", modelLabel: label("Bedrock", "Claude Opus 4.6"), provider: "gateway-bedrock", input: 1, output: 1, cost: 0.01 });
+	appendUsage({ ...named, ts: now - day, model: "au.anthropic.claude-opus-4-6-v1", modelLabel: label("Bedrock", "Opus AU"), provider: "gateway-bedrock", input: 1, output: 1, cost: 0.01 });
+	appendUsage({ ...named, ts: now - day, model: "claude-opus-4-6", provider: "anthropic", input: 1, output: 1, cost: 0.01 });
+	// A known family through two providers, and a dated snapshot beside its undated name.
+	appendUsage({ ...named, ts: now - day, model: "claude-opus-4.8", modelLabel: label("GitHub Copilot", "Claude Opus 4.8"), provider: "github-copilot", authType: "oauth", input: 1, output: 1, cost: 0.01 });
+	appendUsage({ ...named, ts: now - day, model: "claude-sonnet-4-5-20250929", provider: "anthropic", input: 1, output: 1, cost: 0.01 });
+	appendUsage({ ...named, ts: now - day, model: "claude-sonnet-4-5", provider: "anthropic", input: 1, output: 1, cost: 0.01 });
+	const byName = await handlers.get("/api/usage")!({ query: {} });
+	const labels = JSON.stringify(byName.byModel.map((m: any) => m.label));
+	const modelNamed = (name: string) => byName.byModel.filter((m: any) => m.label === name);
+	const filterNamed = (name: string) => byName.models.filter((m: any) => m.label === name);
+	assert(modelNamed("Fast").length === 0 && filterNamed("Fast").length === 0 && modelNamed("Opus").length === 0, `no model reads as a name a gateway saved, got ${labels}`);
+	for (const [name, turns, tokens, cost, models] of [["Kimi K2.5", 2, 33, 0.5, ["kimi-k2.5"]], ["GLM 4.6", 2, 77, 0.09, ["glm-4.6"]], ["DeepSeek V3.2", 1, 55, 0.03, ["deepseek.v3.2"]]] as const) {
+		const row = modelNamed(name);
+		assert(row.length === 1 && row[0].turns === turns && row[0].tokens === tokens && Math.abs(row[0].cost - cost) < 1e-9, `${name} keeps its own turns, tokens and cost, got ${JSON.stringify(row)} among ${labels}`);
+		const filter = filterNamed(name);
+		assert(filter.length === 1 && filter[0].turns === turns, `the model filter offers ${name} once with its own turns, got ${JSON.stringify(byName.models)}`);
+		const scopedByName = await handlers.get("/api/usage")!({ query: { model: filter[0].id } });
+		assert(scopedByName.model === filter[0].id && scopedByName.totals.turns === turns && scopedByName.recent.every((r: any) => (models as readonly string[]).includes(r.model)), `filtering on ${name} shows only its own turns, got ${scopedByName.totals.turns}`);
+	}
+	const opus = modelNamed("Claude Opus 4.8");
+	assert(opus.length === 1 && opus[0].turns === 3, `a known family is one model through a key, a sign-in and a gateway, got ${JSON.stringify(opus)} among ${labels}`);
+	assert(modelNamed("Claude Sonnet 4.5 (29 Sep 2025)").length === 1 && modelNamed("Claude Sonnet 4.5").length === 1, `a dated snapshot reads with its date beside its undated name, got ${labels}`);
+	assert(modelNamed("Claude Sonnet 4.5 (29 Sep 2025)")[0].turns === 3 && modelNamed("Sonnet EU").length === 0, `a Bedrock gateway's region copies join the dated snapshot's row, got ${labels}`);
+	assert(modelNamed("Claude Opus 4.6").length === 1 && modelNamed("Claude Opus 4.6")[0].turns === 3, `Bedrock's Opus 4.6 ids join the Claude key's row, got ${labels}`);
+	// Recent turns name each turn's model as the Wallet's rows do.
+	const recentKimi = byName.recent.find((r: any) => r.model === "kimi-k2.5");
+	const recentSonnet = byName.recent.find((r: any) => r.model === "eu.anthropic.claude-sonnet-4-5-20250929-v1:0");
+	assert(recentKimi?.modelName === "Kimi K2.5" && recentSonnet?.modelName === "Claude Sonnet 4.5", `a recent turn carries its Wallet model name, got ${recentKimi?.modelName} and ${recentSonnet?.modelName}`);
 
 	console.log("usage ledger smoke passed");
 } finally {

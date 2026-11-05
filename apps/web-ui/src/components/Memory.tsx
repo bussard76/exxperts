@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { apiFetch } from "../api";
 import {
 	allRoomsFactsLine,
+	allRoomsNotesShown,
 	ASOF_ERROR,
 	ASOF_READING,
 	asOfChip,
@@ -38,9 +39,11 @@ import {
 	YOU_ARE_VIEWING_HERE,
 	type MemorySaveEvent,
 } from "../memory-surface-copy";
+import { plainMemoryText } from "../memory-v2-copy";
 import { MarkdownRenderer } from "./Markdown";
 import { MemoryChangeFold } from "./memory-change-fold";
 import { MemoryGrowthChart, type GrowthPoint } from "./memory-growth-chart";
+import { shownRoomName } from "../../../web-server/src/room-name";
 
 // The cross-room reading of memory, from /api/memory (read-only). This page
 // says what each room remembers and how full its memory is, in the same words
@@ -48,6 +51,11 @@ import { MemoryGrowthChart, type GrowthPoint } from "./memory-growth-chart";
 // room's own limit line are one measurement, taken server-side of the context
 // render. Nothing on this page writes: editing a note, and taking a save back,
 // belong beside the notes themselves in Room settings.
+
+/** Rooms named only with invisible characters read "Unnamed room" here too. */
+function withShownName<T extends { id: string; displayName: string }>(room: T): T {
+	return { ...room, displayName: shownRoomName(room.displayName) || room.id };
+}
 
 interface Payoff {
 	turns: number;
@@ -77,7 +85,6 @@ interface RoomSummary {
 	needsAbsorb: boolean;
 	series: GrowthPoint[];
 	sessions: number;
-	sessionsCap: number;
 	topics: string[];
 	knows: string[];
 	composition: { deep: number; active: number; recent: number; chronos: number };
@@ -293,7 +300,7 @@ export function Memory({ onMaintain, maintainBlocked, onOpenMemorySettings }: { 
 	const [searching, setSearching] = useState(false);
 	const [askMode, setAskMode] = useState<"ask" | "find">("ask");
 	const [ask, setAsk] = useState("");
-	const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; text: string; sources?: string[] }>>([]);
+	const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; text: string; sources?: string[]; note?: string; provider?: string }>>([]);
 	const [scope, setScope] = useState<Set<string>>(new Set()); // empty = all rooms
 	const [asking, setAsking] = useState(false);
 	const [askError, setAskError] = useState<string | null>(null);
@@ -465,7 +472,7 @@ export function Memory({ onMaintain, maintainBlocked, onOpenMemorySettings }: { 
 			.then((r) => (r.ok ? r.json() : null))
 			.then((d) => {
 				if (cancelled || !d) return;
-				setDigest(d);
+				setDigest(Array.isArray(d.rooms) ? { ...d, rooms: d.rooms.map(withShownName) } : d);
 				try { localStorage.setItem(LAST_VISIT_KEY, String(Date.now())); } catch { /* ignore */ }
 			})
 			.catch(() => {});
@@ -479,7 +486,7 @@ export function Memory({ onMaintain, maintainBlocked, onOpenMemorySettings }: { 
 		const load = () =>
 			apiFetch("/api/memory/overview")
 				.then((r) => (r.ok ? r.json() : Promise.reject(new Error("bad status"))))
-				.then((d) => { if (!cancelled) { setData(d); setLoadError(false); } })
+				.then((d) => { if (!cancelled) { setData(Array.isArray(d?.rooms) ? { ...d, rooms: d.rooms.map(withShownName) } : d); setLoadError(false); } })
 				.catch(() => { if (!cancelled) setLoadError(true); });
 		load();
 		const id = setInterval(load, 8000);
@@ -492,7 +499,7 @@ export function Memory({ onMaintain, maintainBlocked, onOpenMemorySettings }: { 
 		let cancelled = false;
 		apiFetch(`/api/memory/rooms/${encodeURIComponent(selected)}`)
 			.then((r) => (r.ok ? r.json() : null))
-			.then((d) => { if (!cancelled) setDetail(d); })
+			.then((d) => { if (!cancelled) setDetail(d ? withShownName(d) : d); })
 			.catch(() => {});
 		return () => { cancelled = true; };
 	}, [selected]);
@@ -516,7 +523,7 @@ export function Memory({ onMaintain, maintainBlocked, onOpenMemorySettings }: { 
 	const runAsk = (override?: string) => {
 		const q = (override ?? ask).trim();
 		if (!q || asking) return;
-		const history = messages.map((m) => ({ role: m.role, content: m.text }));
+		const history = messages.map((m) => ({ role: m.role, content: m.text, ...(m.provider ? { provider: m.provider } : {}) }));
 		setMessages((prev) => [...prev, { role: "user", text: q }]);
 		setAsk("");
 		setAsking(true);
@@ -532,7 +539,7 @@ export function Memory({ onMaintain, maintainBlocked, onOpenMemorySettings }: { 
 		})
 			.then((r) => r.json())
 			.then((d) => {
-				if (d.ok) setMessages((prev) => [...prev, { role: "assistant", text: d.answer, sources: d.sources ?? [] }]);
+				if (d.ok) setMessages((prev) => [...prev, { role: "assistant", text: d.answer, sources: d.sources ?? [], note: d.note, provider: d.provider }]);
 				else setAskError(d.message || "Couldn't answer that.");
 			})
 			.catch((e) => setAskError(e?.name === "AbortError" ? "That took too long. Try again." : "Request failed. Is the app still running?"))
@@ -567,20 +574,20 @@ export function Memory({ onMaintain, maintainBlocked, onOpenMemorySettings }: { 
 	const waiting = data.rooms.reduce((sum, r) => sum + r.sessions, 0);
 
 	const caughtUp = digest && digest.totals.newCheckpoints === 0;
-	const scopeLabel = scope.size === 0 ? "all exxperts" : `${scope.size} exxpert${scope.size === 1 ? "" : "s"}`;
+	const scopeLabel = scope.size === 0 ? "all rooms" : `${scope.size} room${scope.size === 1 ? "" : "s"}`;
 
 	return (
 		<div className="dashboard">
 			<div className="mem-tabs" role="tablist">
 				<button type="button" role="tab" aria-selected={tab === "overview"} className={tab === "overview" ? "active" : ""} title="What each room knows" onClick={() => setTab("overview")}>Overview</button>
-				<button type="button" role="tab" aria-selected={tab === "hivemind"} className={tab === "hivemind" ? "active" : ""} title="Ask questions across all your rooms' memory" onClick={() => setTab("hivemind")}>HiveMind</button>
+				<button type="button" role="tab" aria-selected={tab === "hivemind"} className={tab === "hivemind" ? "active" : ""} title="Ask questions across all your rooms' memory" onClick={() => setTab("hivemind")}>Ask your rooms</button>
 			</div>
 
 			{tab === "hivemind" && (
 				<>
 					<section className="dash-section">
 						<div className="dash-section-head">
-							<div className="dash-section-label">HiveMind</div>
+							<div className="dash-section-label">Ask your rooms</div>
 							<div className="dash-toggles">
 								{askMode === "ask" && messages.length > 0 && (
 									<button type="button" className="mem-close" onClick={() => { setMessages([]); setAskError(null); }}>New chat</button>
@@ -593,11 +600,11 @@ export function Memory({ onMaintain, maintainBlocked, onOpenMemorySettings }: { 
 							</div>
 						</div>
 						<div className="chart-block">
-							<div className="sub" style={{ marginBottom: 10 }}>{askMode === "ask" ? "Chat across the exxperts you pick. Answers are grounded in your memory, and cite the exxpert each fact comes from." : "Find exact text across every exxpert's memory. Local, no model."}</div>
+							<div className="sub" style={{ marginBottom: 10 }}>{askMode === "ask" ? "Chat across the rooms you pick. Answers are grounded in your memory, and cite the room each fact comes from." : "Find exact text across every room's memory. Local, no model."}</div>
 							{askMode === "ask" && data.rooms.length > 1 && (
 								<div className="mem-scope">
-									<span className="mem-scope-label">Exxperts</span>
-									<button type="button" className={`mem-scope-chip${scope.size === 0 ? " active" : ""}`} title="Answer from every room's memory" onClick={() => setScope(new Set())}>All exxperts</button>
+									<span className="mem-scope-label">Rooms</span>
+									<button type="button" className={`mem-scope-chip${scope.size === 0 ? " active" : ""}`} title="Answer from every room's memory" onClick={() => setScope(new Set())}>All rooms</button>
 									{data.rooms.map((r) => (
 										<button key={r.id} type="button" className={`mem-scope-chip${scope.has(r.id) ? " active" : ""}`} title={`Include or exclude ${r.displayName}'s memory`} onClick={() => toggleScopeRoom(r.id)}>{r.displayName}</button>
 									))}
@@ -617,11 +624,12 @@ export function Memory({ onMaintain, maintainBlocked, onOpenMemorySettings }: { 
 													if (shown.length === 0) return null;
 													return (
 														<div className="mem-source-chips">
-															<span className="mem-source-label">{cited.length > 0 ? "Cited" : `Searched ${shown.length} exxpert${shown.length === 1 ? "" : "s"}`}</span>
+															<span className="mem-source-label">{cited.length > 0 ? "Cited" : `Searched ${shown.length} room${shown.length === 1 ? "" : "s"}`}</span>
 															{shown.map((s) => <span key={s} className="mem-source-chip">{s}</span>)}
 														</div>
 													);
 												})()}
+												{m.note && <div className="sub" style={{ marginTop: 8 }}>{m.note}</div>}
 											</div>
 										)
 									))}
@@ -629,9 +637,9 @@ export function Memory({ onMaintain, maintainBlocked, onOpenMemorySettings }: { 
 							)}
 							<div className="mem-search">
 								{askMode === "ask" ? (
-									<input className="mem-search-input" type="text" placeholder={messages.length ? "Ask a follow-up…" : "Ask a question across your exxperts' memory…"} value={ask} onChange={(e) => setAsk(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runAsk(); }} />
+									<input className="mem-search-input" type="text" placeholder={messages.length ? "Ask a follow-up…" : "Ask your rooms…"} value={ask} onChange={(e) => setAsk(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runAsk(); }} />
 								) : (
-									<input className="mem-search-input" type="search" placeholder="Find exact text across every exxpert…" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runSearch(); }} />
+									<input className="mem-search-input" type="search" placeholder="Find exact text across every room…" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runSearch(); }} />
 								)}
 								<button type="button" className="mem-search-btn" onClick={() => (askMode === "ask" ? runAsk() : runSearch())} disabled={askMode === "ask" && asking}>
 									{askMode === "ask" ? (asking ? "Thinking…" : messages.length ? "Send" : "Ask") : "Find"}
@@ -678,7 +686,7 @@ export function Memory({ onMaintain, maintainBlocked, onOpenMemorySettings }: { 
 									<div className="sub">
 										<strong>{digest.totals.newCheckpoints}</strong> new conversation{digest.totals.newCheckpoints === 1 ? "" : "s"} remembered
 										{digest.totals.newReviews > 0 && <> and <strong>{digest.totals.newReviews}</strong> tidy{digest.totals.newReviews === 1 ? "" : " runs"}</>} across{" "}
-										<strong>{digest.totals.roomsChanged}</strong> exxpert{digest.totals.roomsChanged === 1 ? "" : "s"}
+										<strong>{digest.totals.roomsChanged}</strong> room{digest.totals.roomsChanged === 1 ? "" : "s"}
 										{digest.since > 0 && <> · in the last {fmtAgo(digest.since).replace(" ago", "")}</>}
 									</div>
 									{digest.rooms.length > 0 && (
@@ -703,7 +711,7 @@ export function Memory({ onMaintain, maintainBlocked, onOpenMemorySettings }: { 
 					<section className="dash-section">
 						<div className="dash-section-label">At a glance</div>
 						<div className="mem-glance">
-							<div className="sub">{allRoomsFactsLine({ rooms: t.rooms, notes: t.notes, waiting })}</div>
+							<div className="sub">{allRoomsFactsLine({ rooms: t.rooms, notes: allRoomsNotesShown(data.rooms), waiting })}</div>
 							<div className="mem-comp-legend mem-glance-legend">
 								<span><span className="sw durable" />{MEMORY_TAB_LEGEND[0]}</span>
 								<span><span className="sw items" />{MEMORY_TAB_LEGEND[1]}</span>
@@ -734,15 +742,15 @@ export function Memory({ onMaintain, maintainBlocked, onOpenMemorySettings }: { 
 					)}
 
 					<section className="dash-section">
-						<div className="dash-section-label">Exxperts</div>
-						{data.rooms.length === 0 && <div className="sub">No exxperts yet. Create one to start building memory.</div>}
+						<div className="dash-section-label">Rooms</div>
+						{data.rooms.length === 0 && <div className="sub">No rooms yet. Create one to start building memory.</div>}
 						<div className="mem-cards">
 							{data.rooms.map((r) => {
 								const isSel = selected === r.id;
 								return (
 									<Fragment key={r.id}>
 										<button type="button" className={`mem-card${isSel ? " sel" : ""}`} aria-expanded={isSel} aria-label={`${isSel ? "Collapse" : "Expand"} ${r.displayName}`} onClick={() => setSelected(isSel ? null : r.id)}>
-											<div className="mem-card-head"><div className="mem-card-name">{r.displayName}</div>{r.needsAbsorb && <span className="mem-pill">to memorize</span>}</div>
+											<div className="mem-card-head"><div className="mem-card-name">{r.displayName}</div>{r.needsAbsorb && <span className="mem-pill">To memorize</span>}</div>
 											<MemoryFullBar room={r} />
 											<div className="mem-card-facts">{roomMemoryFactsLine({ notes: r.notes, waiting: r.sessions, lastMemorizedAt: r.lastCheckpointAt })}</div>
 											<div className="mem-card-foot">
@@ -762,9 +770,9 @@ export function Memory({ onMaintain, maintainBlocked, onOpenMemorySettings }: { 
 													    conversation waits, ready to memorize when Memorize is due,
 													    and no chip at all for a settled room. */}
 													{detail.standbyThread
-														? <span className="mem-pill" title="This room has a conversation parked to resume.">standby</span>
+														? <span className="mem-pill" title="This room has a conversation parked to resume.">Standby</span>
 														: detail.needsAbsorb
-															? <span className="mem-pill" title="Remembered conversations are waiting to become notes.">ready to memorize</span>
+															? <span className="mem-pill" title="Remembered conversations are waiting to become notes.">Ready to memorize</span>
 															: null}
 												</div>
 												{detail.description && <div className="sub">{detail.description}</div>}
@@ -960,7 +968,7 @@ export function Memory({ onMaintain, maintainBlocked, onOpenMemorySettings }: { 
 														<>
 															{panelHead(panel.area, panel.full ? FULL_MEMORY_PANEL_SUB : topicPanelSub(panel.area))}
 															<div className="mem-area-content md assistant-markdown">
-																<MarkdownRenderer>{panel.content || (panel.full ? "*This room has no notes yet.*" : "*This topic is empty right now.*")}</MarkdownRenderer>
+																<MarkdownRenderer>{plainMemoryText(panel.content) || (panel.full ? "*This room has no notes yet.*" : "*This topic is empty right now.*")}</MarkdownRenderer>
 															</div>
 														</>
 													) : asOf !== null ? (
@@ -974,7 +982,7 @@ export function Memory({ onMaintain, maintainBlocked, onOpenMemorySettings }: { 
 																<div className="sub">{ASOF_READING}</div>
 															) : (
 																<div className="mem-area-content md assistant-markdown">
-																	<MarkdownRenderer>{past.content || "*This room has no notes yet.*"}</MarkdownRenderer>
+																	<MarkdownRenderer>{plainMemoryText(past.content) || "*This room has no notes yet.*"}</MarkdownRenderer>
 																</div>
 															)}
 														</>
@@ -1016,7 +1024,7 @@ export function Memory({ onMaintain, maintainBlocked, onOpenMemorySettings }: { 
 																			<div className="mem-prov-open">
 																				{s.content && (
 																					<div className="mem-prov-body md assistant-markdown">
-																						<MarkdownRenderer>{s.content}</MarkdownRenderer>
+																						<MarkdownRenderer>{plainMemoryText(s.content)}</MarkdownRenderer>
 																					</div>
 																				)}
 																				{s.approvedAt && (
@@ -1104,7 +1112,7 @@ export function Memory({ onMaintain, maintainBlocked, onOpenMemorySettings }: { 
 															<div className="mem-hist-row">
 																<span className="mem-hist-date">{fmtMemoryMoment(row.ts)}</span>
 																<span className="mem-hist-what">{row.words}</span>
-																{row.undone && <span className="mem-hist-undone">undone</span>}
+																{row.undone && <span className="mem-hist-undone">Undone</span>}
 																{row.diffable && (
 																	<MemoryChangeFold roomId={detail.id} row={row} quiet="mem-close" open={changeOpen === `${detail.id}:${row.key}`} onToggle={() => setChangeOpen((open) => (open === `${detail.id}:${row.key}` ? null : `${detail.id}:${row.key}`))} />
 																)}

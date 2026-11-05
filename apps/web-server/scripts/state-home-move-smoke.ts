@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { authedFetch, SMOKE_AUTH_TOKEN, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer, type AuthedFetchInit } from "./smoke-server-process.js";
+import { authedFetch, SMOKE_AUTH_TOKEN, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer, freePort, symlinkOrSkip, type AuthedFetchInit, waitForServer } from "./smoke-server-process.js";
 
 // Pins the in-app move of the exxperts home (Settings → Profiles → Move):
 //
@@ -33,7 +33,7 @@ function assert(condition: unknown, message: string): asserts condition {
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const webServerDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(webServerDir, "..", "..");
-const port = 26000 + Math.floor(Math.random() * 10000);
+const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
 
 const stateProfiles = createRequire(import.meta.url)(path.join(repoRoot, "bin", "lib", "state-profiles.cjs")) as {
@@ -149,14 +149,15 @@ const unit = path.join(tempRoot, "unit");
 		assert(!fs.existsSync(path.join(home, ".exxperts", "demo")), "the refused alias must not have been created inside the family");
 	}
 	const link = path.join(unit, "alias-link");
-	fs.symlinkSync(path.join(home, ".exxperts"), link, "dir");
 	let failure: Error | null = null;
-	try {
-		stateProfiles.planHomeMove(home, path.join(link, "inside"));
-	} catch (error) {
-		failure = error as Error;
+	if (symlinkOrSkip(path.join(home, ".exxperts"), link, "state-home-move-smoke", "the linked target case", "dir")) {
+		try {
+			stateProfiles.planHomeMove(home, path.join(link, "inside"));
+		} catch (error) {
+			failure = error as Error;
+		}
+		assert(failure !== null && /part of what would move/.test(failure.message), `a symlinked target that lands in the family must be refused, got ${failure?.message}`);
 	}
-	assert(failure !== null && /part of what would move/.test(failure.message), `a symlinked target that lands in the family must be refused, got ${failure?.message}`);
 	// The other direction: a folder that would swallow the family is no home.
 	failure = null;
 	try {
@@ -197,15 +198,16 @@ const unit = path.join(tempRoot, "unit");
 	const realTree = path.join(unit, "linked-real-tree");
 	fs.mkdirSync(path.join(realTree, "app"), { recursive: true });
 	fs.mkdirSync(home, { recursive: true });
-	fs.symlinkSync(realTree, path.join(home, ".exxperts"), "dir");
-	assert(stateProfiles.listStateFamily(home).includes(".exxperts"), "a linked state tree is still a family member: a plan that cannot see it would move nothing and point the home at an empty folder");
-	let failure: Error | null = null;
-	try {
-		stateProfiles.planHomeMove(home, path.join(unit, "linked-target"));
-	} catch (error) {
-		failure = error as Error;
+	if (symlinkOrSkip(realTree, path.join(home, ".exxperts"), "state-home-move-smoke", "the linked home case", "dir")) {
+		assert(stateProfiles.listStateFamily(home).includes(".exxperts"), "a linked state tree is still a family member: a plan that cannot see it would move nothing and point the home at an empty folder");
+		let failure: Error | null = null;
+		try {
+			stateProfiles.planHomeMove(home, path.join(unit, "linked-target"));
+		} catch (error) {
+			failure = error as Error;
+		}
+		assert(failure !== null && /symbolic link/.test(failure.message), `a linked family member must refuse the move with an explanation, got ${failure?.message}`);
 	}
-	assert(failure !== null && /symbolic link/.test(failure.message), `a linked family member must refuse the move with an explanation, got ${failure?.message}`);
 }
 
 // 3. A pointer naming a missing folder fails loudly instead of falling back.
@@ -277,23 +279,6 @@ function spawnServer(): ChildProcessWithoutNullStreams {
 	});
 }
 
-async function waitForServer(server: ChildProcessWithoutNullStreams): Promise<void> {
-	const deadline = Date.now() + 30000;
-	let lastError = "server did not respond";
-	while (Date.now() < deadline) {
-		if (server.exitCode != null) throw new Error(`server exited before startup with code ${server.exitCode}`);
-		try {
-			const response = await fetch(`${baseUrl}/healthz`);
-			if (response.ok) return;
-			lastError = `healthz returned ${response.status}`;
-		} catch (error) {
-			lastError = (error as Error).message;
-		}
-		await new Promise((resolve) => setTimeout(resolve, 150));
-	}
-	throw new Error(`server did not become ready: ${lastError}`);
-}
-
 async function api(route: string, init: AuthedFetchInit = {}): Promise<{ status: number; body: any }> {
 	const response = await authedFetch(`${baseUrl}${route}`, {
 		...init,
@@ -308,7 +293,8 @@ async function applyAndAwaitExit(server: ChildProcessWithoutNullStreams, dir: st
 	const response = await api("/api/settings/state-home/apply", { method: "POST", body: JSON.stringify({ dir }) });
 	assert(response.status === 200 && response.body?.restarting === true, `apply: expected restarting reply, got ${response.status} ${JSON.stringify(response.body)}`);
 	assert(response.body.signInPath === `/auth/session?token=${encodeURIComponent(SMOKE_AUTH_TOKEN)}`, `apply reply must carry the sign-in link, got ${response.body.signInPath}`);
-	const code = await Promise.race([exited, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("server did not exit after apply")), 15000))]);
+	let exitTimer: NodeJS.Timeout | undefined;
+	const code = await Promise.race([exited, new Promise<never>((_, reject) => { exitTimer = setTimeout(() => reject(new Error("server did not exit after apply")), 15000); })]).finally(() => clearTimeout(exitTimer));
 	assert(code === stateProfiles.SWITCH_EXIT_CODE, `server must exit with the sentinel code, got ${code}`);
 	assert(fs.existsSync(stateProfiles.homeMoveIntentPath(loginHome)), "the move intent must be recorded for the supervisor");
 }
@@ -318,7 +304,7 @@ let server: ChildProcessWithoutNullStreams | null = null;
 try {
 	// Leg 1: default home. The payload names it and offers the move.
 	server = spawnServer();
-	await waitForServer(server);
+	await waitForServer(server, baseUrl, 30000);
 	let listing = await api("/api/settings/state-profile");
 	assert(listing.status === 200 && listing.body.home, "the listing must carry the home payload");
 	assert(listing.body.home.dir === loginHome && listing.body.home.source === "default" && listing.body.home.canMove === true, `leg 1 home payload: ${JSON.stringify(listing.body.home)}`);
@@ -341,7 +327,7 @@ try {
 
 	// Leg 2: runs against the new home; profiles work there unchanged.
 	server = spawnServer();
-	await waitForServer(server);
+	await waitForServer(server, baseUrl, 30000);
 	listing = await api("/api/settings/state-profile");
 	assert(listing.body.home.dir === newHome && listing.body.home.source === "setting", `leg 2 home payload: ${JSON.stringify(listing.body.home)}`);
 	assert(listing.body.profiles.some((p: any) => p.name === "Demo A"), "profiles must be listed from the new home");
@@ -360,7 +346,7 @@ try {
 	fs.mkdirSync(path.join(synced, ".exxperts", "app"), { recursive: true });
 	fs.writeFileSync(path.join(synced, ".exxperts", "app", "theirs.txt"), "from the other computer");
 	server = spawnServer();
-	await waitForServer(server);
+	await waitForServer(server, baseUrl, 30000);
 	const adoptPlan = await api("/api/settings/state-home/plan", { method: "POST", body: JSON.stringify({ dir: synced }) });
 	assert(adoptPlan.status === 200 && adoptPlan.body.mode === "adopt" && adoptPlan.body.moving.length === 0, `adopt plan: ${JSON.stringify(adoptPlan.body)}`);
 	await applyAndAwaitExit(server, synced);

@@ -1,5 +1,5 @@
 /**
- * Room-scoped specialist registry (option 4, grill-locked 2026-07-19).
+ * Room-scoped specialist registry.
  *
  * The structural heart of "a delegation belongs to the room, not to the tab
  * that asked for it": specialist bookkeeping — the running set, the cap, the
@@ -56,6 +56,10 @@ export interface SpecialistRegistryEntry {
 	 * makes new files, which keeps the working row it always had.
 	 */
 	reviseTargetNames?: string[];
+	/** The conversation the task was started from. */
+	conversationId?: string;
+	/** Set when that conversation was forgotten: the task is stopped and its result thrown away. */
+	discarded?: boolean;
 }
 
 export interface SpecialistRegistryEntryInput {
@@ -67,6 +71,7 @@ export interface SpecialistRegistryEntryInput {
 	model: unknown;
 	abortController: AbortController;
 	reviseTargetNames?: string[];
+	conversationId?: string;
 }
 
 /** Mirrors the client reducer's TASK_TAIL_CAP: replaying more would be dropped there anyway. */
@@ -122,6 +127,40 @@ export function abortAllSpecialistTasks(roomId: string): number {
 	let aborted = 0;
 	for (const entry of room.tasks.values()) {
 		entry.stoppedByUser = true;
+		entry.abortController.abort();
+		aborted += 1;
+	}
+	return aborted;
+}
+
+/** Running tasks across every room: what a server stop waits for. */
+export function runningSpecialistCountInAllRooms(): number {
+	let count = 0;
+	for (const room of rooms.values()) count += room.tasks.size;
+	return count;
+}
+
+/**
+ * Abort every running task of every room, at a server stop. Not marked
+ * stopped by the person: the task ends with "The task was cancelled.".
+ */
+export function abortSpecialistTasksInAllRooms(): number {
+	let aborted = 0;
+	for (const room of rooms.values()) {
+		for (const entry of room.tasks.values()) {
+			entry.abortController.abort();
+			aborted += 1;
+		}
+	}
+	return aborted;
+}
+
+/** Forget's stop: every running task started from the conversation is aborted, and its result is to be thrown away. */
+export function abortConversationSpecialistTasks(roomId: string, conversationId: string): number {
+	let aborted = 0;
+	for (const entry of rooms.get(roomId)?.tasks.values() ?? []) {
+		if (entry.conversationId !== conversationId) continue;
+		entry.discarded = true;
 		entry.abortController.abort();
 		aborted += 1;
 	}

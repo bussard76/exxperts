@@ -3,8 +3,8 @@
 // before approval writes it. Every adjustment answers with the whole run, so
 // the screen re-renders from the server's numbers and never recomputes one.
 
-import { apiFetch, fetchJson } from "./api";
-import type { AbsorbApprovalResponse, AbsorbDiscussionSignoffResponse, AbsorbProposalSourceMetadata, AbsorbRun, AbsorbRunStart, FoldGuidance, PersistentAgentId } from "./types";
+import { ApiRequestError, apiFetch, fetchJson } from "./api";
+import type { AbsorbApprovalResponse, AbsorbAvailability, AbsorbDiscussionMessage, AbsorbDiscussionSignoffResponse, AbsorbDiscussionTurnResponse, AbsorbProposalSourceMetadata, AbsorbRun, AbsorbRunStart, FoldGuidance, PersistentAgentId } from "./types";
 
 function absorbBase(agentId: PersistentAgentId): string {
 	return `/api/persistent-agents/${encodeURIComponent(agentId)}/absorb`;
@@ -49,7 +49,8 @@ export async function startAbsorbRun(agentId: PersistentAgentId, assessmentMarkd
 		const activeRunId = typeof body.details?.runId === "string" && body.details.runId ? body.details.runId : typeof body.runId === "string" && body.runId ? body.runId : null;
 		throw new AbsorbRunActiveError(message, activeRunId);
 	}
-	throw new Error(message);
+	// The code rides along (a Memory model too small, signed out): the room shows its one notice with the ways out.
+	throw new ApiRequestError(message, res.status, typeof body?.code === "string" ? body.code : undefined, body?.details);
 }
 
 export function fetchAbsorbRun(agentId: PersistentAgentId, runId: string): Promise<AbsorbRun> {
@@ -72,6 +73,15 @@ export function keepAbsorbRunEntries(agentId: PersistentAgentId, runId: string, 
 			...(keep.keepIds ? { keepIds: keep.keepIds } : {}),
 			...(keep.keepTopics ? { keepTopics: keep.keepTopics } : {}),
 		}),
+	});
+}
+
+/** Move a note the one-time sort placed to another topic before Save; the server answers with the run. */
+export function moveAbsorbRunSortedNote(agentId: PersistentAgentId, runId: string, entryId: string, topic: string): Promise<AbsorbRun> {
+	return fetchJson<AbsorbRun>(`${absorbBase(agentId)}/runs/${encodeURIComponent(runId)}/move`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ entryId, topic }),
 	});
 }
 
@@ -119,3 +129,47 @@ export function approveAbsorbRun(agentId: PersistentAgentId, runId: string): Pro
 		body: JSON.stringify({ runId }),
 	});
 }
+
+function absorbBaseUrl(agentId: PersistentAgentId): string {
+	return `/api/persistent-agents/${encodeURIComponent(agentId)}/absorb`;
+}
+
+/**
+ * The first read answers with its own availability, which says nothing about
+ * the limit; the status read does. The assessment step keeps both: the
+ * read's verdict, and the status's limit and pre-pass numbers under it.
+ */
+function withAbsorbStatusFields(availability: AbsorbAvailability, status: AbsorbAvailability | null): AbsorbAvailability {
+	if (!status) return availability;
+	return {
+		...availability,
+		version: availability.version ?? status.version,
+		sessions: availability.sessions ?? status.sessions,
+		budget: availability.budget ?? status.budget,
+		prepass: availability.prepass ?? status.prepass,
+		// The Memory model as the status named it, for the notices that name it.
+		model: availability.model ?? status.model,
+	};
+}
+
+function fetchAbsorbStatus(agentId: PersistentAgentId): Promise<AbsorbAvailability> {
+	return fetchJson<AbsorbAvailability>(`${absorbBaseUrl(agentId)}/status`);
+}
+
+function requestAbsorbDiscussionTurn(agentId: PersistentAgentId, request: { source: AbsorbProposalSourceMetadata; assessmentMarkdown: string; messages: AbsorbDiscussionMessage[]; userMessage: string }): Promise<AbsorbDiscussionTurnResponse> {
+	return fetchJson<AbsorbDiscussionTurnResponse>(`${absorbBaseUrl(agentId)}/discuss`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(request),
+	});
+}
+
+function requestAbsorbDiscussionSignoff(agentId: PersistentAgentId, request: { source: AbsorbProposalSourceMetadata; assessmentMarkdown: string; messages: AbsorbDiscussionMessage[]; userMessage?: string }): Promise<AbsorbDiscussionSignoffResponse> {
+	return fetchJson<AbsorbDiscussionSignoffResponse>(`${absorbBaseUrl(agentId)}/discuss/signoff`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(request),
+	});
+}
+
+export { absorbBaseUrl, fetchAbsorbStatus, requestAbsorbDiscussionSignoff, requestAbsorbDiscussionTurn, withAbsorbStatusFields };

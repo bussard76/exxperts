@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import type { Socket } from "node:net";
 import { fileURLToPath } from "node:url";
-import { authedFetch, SMOKE_AUTH_TOKEN, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer } from "./smoke-server-process.js";
+import { authedFetch, SMOKE_AUTH_TOKEN, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer, freePort, waitForServer } from "./smoke-server-process.js";
 
 // Pins the enrollment + per-device-key unit (src/remote-devices.ts, the
 // enrollment routes, and the device-auth arm of the guard's tunnel branch),
@@ -30,7 +30,7 @@ function assert(condition: unknown, message: string): asserts condition {
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const webServerDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(webServerDir, "..", "..");
-const port = 26000 + Math.floor(Math.random() * 10000);
+const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
 const tunnelHostHeader = `[::1]:${port}`;
 
@@ -40,8 +40,11 @@ fs.mkdirSync(path.join(tempHome, ".exxperts", "app", "personalized-agents"), { r
 
 function tunnelRequest(pathname: string, options: { method?: string; headers?: Record<string, string>; body?: string } = {}): Promise<{ status: number; body: string; headers: http.IncomingHttpHeaders }> {
 	return new Promise((resolve, reject) => {
+		// Its own connection each time: a revoke destroys the device's sockets
+		// and a disable every tunnel socket, and a kept-alive one reused right
+		// after would reset.
 		const req = http.request(
-			{ host: "::1", port, path: pathname, method: options.method ?? "GET", headers: { Host: tunnelHostHeader, ...options.headers } },
+			{ host: "::1", port, path: pathname, method: options.method ?? "GET", agent: false, headers: { Host: tunnelHostHeader, ...options.headers } },
 			(res) => {
 				const chunks: Buffer[] = [];
 				res.on("data", (chunk) => chunks.push(chunk as Buffer));
@@ -85,23 +88,6 @@ function tunnelWsOpen(headers: Record<string, string>): Promise<{ status: number
 		});
 		req.end();
 	});
-}
-
-async function waitForServer(server: ChildProcessWithoutNullStreams): Promise<void> {
-	const deadline = Date.now() + 20000;
-	let lastError = "server did not respond";
-	while (Date.now() < deadline) {
-		if (server.exitCode != null) throw new Error(`server exited before startup with code ${server.exitCode}`);
-		try {
-			const response = await fetch(`${baseUrl}/healthz`);
-			if (response.ok) return;
-			lastError = `healthz returned ${response.status}`;
-		} catch (error) {
-			lastError = (error as Error).message;
-		}
-		await new Promise((resolve) => setTimeout(resolve, 150));
-	}
-	throw new Error(`server did not become ready: ${lastError}`);
 }
 
 async function mintCode(): Promise<string> {
@@ -154,7 +140,7 @@ try {
 	});
 	server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
 	server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
-	await waitForServer(server);
+	await waitForServer(server, baseUrl, 20000);
 
 	// 1. Minting requires a serving remote; the loopback listener has no
 	//    enrollment surface at all (Fastify's own not-found, so the loopback
@@ -249,7 +235,8 @@ try {
 	const wsClosed = new Promise<void>((resolve) => ws.socket!.once("close", () => resolve()));
 	const revoke = await authedFetch(`${baseUrl}/api/remote/devices/revoke`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: deviceId }) });
 	assert(revoke.status === 200, `revoke: expected 200, got ${revoke.status}`);
-	await Promise.race([wsClosed, new Promise((_, reject) => setTimeout(() => reject(new Error("revocation did not close the device's live socket within 5s")), 5000))]);
+	let closeTimer: NodeJS.Timeout | undefined;
+	await Promise.race([wsClosed, new Promise((_, reject) => { closeTimer = setTimeout(() => reject(new Error("revocation did not close the device's live socket within 5s")), 5000); })]).finally(() => clearTimeout(closeTimer));
 	const afterRevoke = await tunnelRequest("/api/persistent-agents", { headers: deviceCookie });
 	assert(afterRevoke.status === 401, `revoked device key: expected 401, got ${afterRevoke.status}`);
 

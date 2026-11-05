@@ -80,7 +80,6 @@ try {
 	const artifacts = await import("../src/scheduled-prompt-background-artifacts.js");
 	const {
 		inspectScheduledPromptBackgroundRunIdempotency,
-		scheduledPromptBackgroundRunArtifactPaths,
 		scheduledPromptBackgroundRunHasInputArtifact,
 		scheduledPromptBackgroundRunHasOutputArtifact,
 	} = artifacts;
@@ -140,6 +139,10 @@ try {
 	const foregroundBlockedChecked = new Set<string>();
 	const failRuns = new Set<string>();
 	const slowRuns = new Set<string>();
+	// Runs whose fake turn waits until it is ended, then fails with the end's reason, as the real turn does.
+	const endlessRuns = new Set<string>();
+	const longRuns = new Set<string>();
+	const signals = new Map<string, AbortSignal>();
 
 	function createRoom(displayName: string): string {
 		const created = createPersistentAgentFromScaffoldInput({ displayName, userName: "Synthetic User", preferredUserAddress: "Synthetic User" });
@@ -190,6 +193,11 @@ try {
 			slowHeartbeatChecked.add(runId);
 		}
 		if (failRuns.has(runId)) throw new Error("synthetic fake execution failure");
+		if (endlessRuns.has(runId)) {
+			await new Promise((_resolve, reject) => input.signal.addEventListener("abort", () => reject(input.signal.reason), { once: true }));
+		}
+		signals.set(runId, input.signal);
+		if (longRuns.has(runId)) await sleep(300);
 
 		const model = input.target.model;
 		assert(model?.provider && model?.model, `${runId}: fake execution requires target model`);
@@ -360,6 +368,86 @@ try {
 	assert(checkpointSummary.processed.some((item: any) => item.runId === checkpointRun.runId && item.finalStatus === "blocked" && item.reason === "prepared_runtime_boundary"), "empty checkpoint boundary should block execution");
 	assert(getPersistentAgentThread(checkpointRoom, checkpointThreadId), "checkpoint boundary must not be retired");
 	assert(!scheduledPromptBackgroundRunHasInputArtifact(readBackgroundRun(checkpointRun.runId)), "blocked checkpoint run must not snapshot input");
+	// The run waits for the conversation Remember prepared, as the pane says: rechecked while it is empty, run once the person has started it.
+	const later = (minutes: number) => new Date(dueNow.getTime() + minutes * 60_000);
+	await processOne("checkpoint-still-empty", { now: later(5) });
+	assert(readBackgroundRun(checkpointRun.runId).status === "blocked" && fakeCalls.get(checkpointRun.runId) === undefined, "while the prepared conversation is empty, the run still waits and does not run");
+	writePersistentAgentThread(checkpointRoom, checkpointThreadId, { state: "standby", origin: "checkpoint", model: modelA, items: [{ kind: "user", id: "first", text: "Good morning." }, { kind: "assistant", id: "first-answer", text: "Good morning.", streaming: false }] });
+	const startedSummary = await processOne("checkpoint-started", { now: later(10) });
+	const startedRun = readBackgroundRun(checkpointRun.runId);
+	assert(startedRun.status === "succeeded" && fakeCalls.get(checkpointRun.runId) === 1 && startedRun.target?.kind === "resume-thread" && startedRun.target.threadId === checkpointThreadId, `once the person started the conversation, the run goes there, late, got ${startedRun.status}/${startedRun.reason} ${JSON.stringify(startedSummary.processed)}`);
+
+	// Only the newest run of a task that met the conversation the room has now comes back: an interval task blocked
+	// once per occurrence runs once, not once per occurrence, and a run blocked on an older conversation stays as it was.
+	const pileRoom = createRoom("Execution Pile-up Room");
+	const pileThreadId = "exec_pile_0001";
+	writePersistentAgentThread(pileRoom, pileThreadId, { state: "standby", origin: "checkpoint", model: modelA, items: [] });
+	const pileJob = addSchedule(pileRoom, "pile job");
+	const pileRuns = ["2026-01-01T00:30:00.000Z", "2026-01-01T00:40:00.000Z", "2026-01-01T00:50:00.000Z"].map((dueAt) => preflight(pileRoom, pileJob.id, dueAt));
+	assert(pileRuns.every((run) => readBackgroundRun(run.runId).status === "blocked"), "each occurrence meets the empty prepared conversation");
+	const olderRoom = createRoom("Execution Older Conversation Room");
+	writePersistentAgentThread(olderRoom, "exec_older_0001", { state: "standby", origin: "checkpoint", model: modelA, items: [] });
+	const olderRun = preflight(olderRoom, addSchedule(olderRoom, "older job").id, "2026-01-01T00:30:00.000Z");
+	assert(readBackgroundRun(olderRun.runId).status === "blocked", "the run meets the older prepared conversation");
+	const started = [{ kind: "user", id: "first", text: "Good morning." }, { kind: "assistant", id: "first-answer", text: "Good morning.", streaming: false }];
+	writePersistentAgentThread(pileRoom, pileThreadId, { state: "standby", origin: "checkpoint", model: modelA, items: started });
+	writePersistentAgentThread(olderRoom, "exec_older_0002", { state: "standby", origin: "home", model: modelA, items: started });
+	persistentAgents.writePersistentAgentRuntimeState(olderRoom, { state: "standby", activeThreadId: "exec_older_0002", model: modelA });
+	for (let minute = 20; minute <= 60; minute += 5) await processOne(`pile-${minute}`, { now: later(minute) });
+	const pileRan = pileRuns.filter((run) => fakeCalls.has(run.runId));
+	assert(pileRan.length === 1 && pileRan[0].runId === pileRuns[2].runId, `the task runs once, its newest run, got ${pileRan.length} run(s): ${pileRuns.map((run) => readBackgroundRun(run.runId).status).join(",")}`);
+	assert(pileRuns.slice(0, 2).every((run) => readBackgroundRun(run.runId).status === "blocked" && readBackgroundRun(run.runId).reason === "superseded_by_later_run"), `the older occurrences end, a later run having taken their place, got ${pileRuns.slice(0, 2).map((run) => readBackgroundRun(run.runId).reason).join(",")}`);
+	assert(!fakeCalls.has(olderRun.runId) && readBackgroundRun(olderRun.runId).status === "blocked" && readBackgroundRun(olderRun.runId).reason === "prepared_conversation_ended", `a run blocked on an older conversation ends with that, got ${readBackgroundRun(olderRun.runId).status}/${readBackgroundRun(olderRun.runId).reason}`);
+
+	// A second Remember or Forget before the person starts the prepared conversation prepares another: the
+	// waiting run follows the room to it, and runs once that one has started.
+	const movedRoom = createRoom("Execution Moved Conversation Room");
+	writePersistentAgentThread(movedRoom, "exec_moved_0001", { state: "standby", origin: "checkpoint", model: modelA, items: [] });
+	const movedRun = preflight(movedRoom, addSchedule(movedRoom, "moved job").id, "2026-01-01T00:30:00.000Z");
+	assert(readBackgroundRun(movedRun.runId).status === "blocked" && readBackgroundRun(movedRun.runId).target?.threadId === "exec_moved_0001", "the run meets the first prepared conversation");
+	writePersistentAgentThread(movedRoom, "exec_moved_0002", { state: "standby", origin: "checkpoint", model: modelA, items: [] });
+	persistentAgents.writePersistentAgentRuntimeState(movedRoom, { state: "standby", activeThreadId: "exec_moved_0002", model: modelA });
+	for (let minute = 70; minute <= 80; minute += 5) await processOne(`moved-${minute}`, { now: later(minute) });
+	assert(readBackgroundRun(movedRun.runId).status === "blocked" && readBackgroundRun(movedRun.runId).reason === "prepared_runtime_boundary" && !fakeCalls.has(movedRun.runId), `the run waits for the newer prepared conversation, got ${readBackgroundRun(movedRun.runId).status}/${readBackgroundRun(movedRun.runId).reason}`);
+	writePersistentAgentThread(movedRoom, "exec_moved_0002", { state: "standby", origin: "checkpoint", model: modelA, items: started });
+	for (let minute = 85; minute <= 95; minute += 5) await processOne(`moved-started-${minute}`, { now: later(minute) });
+	assert(fakeCalls.get(movedRun.runId) === 1 && readBackgroundRun(movedRun.runId).target?.threadId === "exec_moved_0002", `once it has started, the run goes there, got ${readBackgroundRun(movedRun.runId).status}/${readBackgroundRun(movedRun.runId).reason}`);
+
+	// The person presses Remember again and writes in the newer conversation before the next scan: the conversation the
+	// run waited for was closed by Remember, so the run goes to the one the person started, not "ended".
+	const quickRoom = createRoom("Execution Quick Start Room");
+	writePersistentAgentThread(quickRoom, "exec_quick_0001", { state: "standby", origin: "checkpoint", model: modelA, items: [] });
+	const quickRun = preflight(quickRoom, addSchedule(quickRoom, "quick job").id, "2026-01-01T00:30:00.000Z");
+	assert(readBackgroundRun(quickRun.runId).status === "blocked" && readBackgroundRun(quickRun.runId).target?.threadId === "exec_quick_0001", "the run meets the first prepared conversation");
+	persistentAgents.closePersistentAgentThreadForCheckpoint(quickRoom, "exec_quick_0001", "checkpoint_quick_0001");
+	writePersistentAgentThread(quickRoom, "exec_quick_0002", { state: "standby", origin: "checkpoint", model: modelA, items: started });
+	persistentAgents.writePersistentAgentRuntimeState(quickRoom, { state: "standby", activeThreadId: "exec_quick_0002", model: modelA });
+	assert(getPersistentAgentThread(quickRoom, "exec_quick_0001")?.closedReason === "checkpoint", "Remember closed the first prepared conversation");
+	for (let minute = 100; minute <= 110; minute += 5) await processOne(`quick-${minute}`, { now: later(minute) });
+	assert(fakeCalls.get(quickRun.runId) === 1 && readBackgroundRun(quickRun.runId).target?.threadId === "exec_quick_0002", `the run goes to the conversation the person started, got ${readBackgroundRun(quickRun.runId).status}/${readBackgroundRun(quickRun.runId).reason}`);
+
+	// The conversations Remember and Memorize prepare carry a time stamp with a capital T and Z in their ids: a run that
+	// waited for one runs there once the person has started it, never failing on the id.
+	for (const prefix of ["postcp", "postmem"]) {
+		const stampRoom = createRoom(`Execution Stamped ${prefix} Room`);
+		const stampedThreadId = `${prefix}_20261011T150343Z_v5ngbi`;
+		writePersistentAgentThread(stampRoom, stampedThreadId, { state: "standby", origin: prefix === "postcp" ? "checkpoint" : "memento", model: modelA, items: [] });
+		persistentAgents.writePersistentAgentRuntimeState(stampRoom, { state: "standby", activeThreadId: stampedThreadId, model: modelA });
+		const stampedRun = preflight(stampRoom, addSchedule(stampRoom, `${prefix} job`).id, "2026-01-01T00:30:00.000Z");
+		assert(readBackgroundRun(stampedRun.runId).status === "blocked" && readBackgroundRun(stampedRun.runId).target?.threadId === stampedThreadId, `the run meets the ${prefix} conversation, got ${readBackgroundRun(stampedRun.runId).status}/${readBackgroundRun(stampedRun.runId).reason}`);
+		writePersistentAgentThread(stampRoom, stampedThreadId, { state: "standby", origin: prefix === "postcp" ? "checkpoint" : "memento", model: modelA, items: started });
+		for (let minute = 115; minute <= 125; minute += 5) await processOne(`${prefix}-${minute}`, { now: later(minute) });
+		const stampedDone = readBackgroundRun(stampedRun.runId);
+		assert(fakeCalls.get(stampedRun.runId) === 1 && stampedDone.status === "succeeded" && stampedDone.target?.threadId === stampedThreadId, `once the ${prefix} conversation has started, the run goes there, got ${stampedDone.status}/${stampedDone.reason} ${stampedDone.message ?? ""}`);
+	}
+
+	// A run blocked before the update kept no conversation: it ends plainly, never saying a conversation ended.
+	const unrecordedRoom = createRoom("Execution Unrecorded Conversation Room");
+	writePersistentAgentThread(unrecordedRoom, "exec_unrecorded_0001", { state: "standby", origin: "checkpoint", model: modelA, items: [] });
+	const unrecordedRun = preflight(unrecordedRoom, addSchedule(unrecordedRoom, "unrecorded job").id, "2026-01-01T00:30:00.000Z");
+	backgroundRuns.updateBackgroundRun(unrecordedRun.runId, { target: { kind: "none", roomId: unrecordedRoom } as any, now: later(0) });
+	await processOne("unrecorded", { now: later(100) });
+	assert(!fakeCalls.has(unrecordedRun.runId) && readBackgroundRun(unrecordedRun.runId).reason === "prepared_conversation_not_recorded", `a run with no conversation recorded ends plainly, got ${readBackgroundRun(unrecordedRun.runId).status}/${readBackgroundRun(unrecordedRun.runId).reason}`);
 
 	const missingRoom = createRoom("Execution Missing Schedule Room");
 	const missingJob = addSchedule(missingRoom, "missing job");
@@ -398,6 +486,61 @@ try {
 	const slowSummary = await processOne("slow-heartbeat");
 	assert(slowSummary.processed.some((item: any) => item.runId === slowRun.runId && item.finalStatus === "succeeded"), "slow fake execution should succeed");
 	assert(slowHeartbeatChecked.has(slowRun.runId), "slow fake execution should verify heartbeat extension");
+
+	// The time limit, given directly as a shared server's hook gives it: the turn is ended and the run fails with time_limit and
+	// the sentence; without a limit (the desktop) a run longer than that limit still finishes.
+	const limitRoom = createRoom("Execution Time Limit Room");
+	const limitRun = preflight(limitRoom, addSchedule(limitRoom, "limit job").id, "2026-01-01T00:30:00.000Z");
+	endlessRuns.add(limitRun.runId);
+	const limitSummary = await processOne("time-limit", { runLimitMs: 100 });
+	const limitAfter = readBackgroundRun(limitRun.runId);
+	assert(limitSummary.processed.some((item: any) => item.runId === limitRun.runId && item.finalStatus === "failed" && item.reason === "time_limit"), `a run past the limit fails with time_limit, got ${JSON.stringify(limitSummary.processed)}`);
+	assert(limitAfter.message === "exxperts stopped this scheduled task after 1 minute, this server's limit. Split it into smaller tasks, or ask your admin to raise the limit." && limitAfter.error?.code === "time_limit" && !limitAfter.lease, `the run says why it stopped, got ${limitAfter.message}`);
+	const longRoom = createRoom("Execution No Limit Room");
+	const longRun = preflight(longRoom, addSchedule(longRoom, "long job").id, "2026-01-01T00:30:00.000Z");
+	longRuns.add(longRun.runId);
+	await processOne("no-limit");
+	// The desktop registers no hook, so the tick reads no limit and no ending for an interrupted run.
+	const { serverHooks } = await import("../src/server-hooks.js");
+	assert(serverHooks().scheduledRunLimitMs === undefined && serverHooks().retriesInterruptedScheduledRuns === undefined, "the desktop has neither rule");
+	assert(signals.get(longRun.runId)?.aborted === false, "without a limit the turn's signal never ends it");
+	assert(readBackgroundRun(longRun.runId).status === "succeeded", `without a limit a run longer than 100 ms finishes, got ${readBackgroundRun(longRun.runId).status}/${readBackgroundRun(longRun.runId).reason}`);
+	const limitedLongRoom = createRoom("Execution Limited Long Room");
+	const limitedLongRun = preflight(limitedLongRoom, addSchedule(limitedLongRoom, "limited long job").id, "2026-01-01T00:30:00.000Z");
+	longRuns.add(limitedLongRun.runId);
+	await processOne("limit-not-reached", { runLimitMs: 60_000 });
+	assert(readBackgroundRun(limitedLongRun.runId).status === "succeeded", "a run inside its limit finishes");
+
+	// A run whose lease ran out (the server ended while it ran). On a shared server it ends interrupted_by_restart and is not
+	// run again, its next occurrence runs, and a run whose answer had landed still ends already_completed; on the desktop it
+	// is run again, as before.
+	const interruptedAt = later(200);
+	function interrupt(roomId: string, label: string, dueAt: string) {
+		const run = preflight(roomId, addSchedule(roomId, label).id, dueAt);
+		assert(backgroundRuns.claimBackgroundRunLease({ runId: run.runId, workerId: "scheduler-execution:smoke:crashed", now: interruptedAt, leaseMs: 1_000 }), `${label}: claimed by the server that crashed`);
+		return run;
+	}
+	const sharedRoom = createRoom("Execution Interrupted Shared Room");
+	const sharedRun = interrupt(sharedRoom, "interrupted shared", "2026-01-01T00:30:00.000Z");
+	const sharedSummary = await processOne("interrupted-shared", { now: later(210), retriesInterrupted: false });
+	const sharedAfter = readBackgroundRun(sharedRun.runId);
+	assert(sharedSummary.recovered.some((item: any) => item.runId === sharedRun.runId && item.finalStatus === "cancelled" && item.reason === "interrupted_by_restart"), `a shared server ends the interrupted run, got ${JSON.stringify(sharedSummary.recovered)}`);
+	assert(sharedAfter.status === "cancelled" && sharedAfter.message === "exxperts stopped unexpectedly before this scheduled task finished, so it was not run again. Ask in this room if you still need it." && !sharedAfter.lease && !fakeCalls.has(sharedRun.runId), `it is not run again and says why, got ${sharedAfter.status}/${sharedAfter.reason}`);
+	await processOne("interrupted-shared-again", { now: later(215), retriesInterrupted: false });
+	assert(readBackgroundRun(sharedRun.runId).status === "cancelled" && !fakeCalls.has(sharedRun.runId), "a later tick leaves it ended");
+	const nextRun = preflight(sharedRoom, String(sharedRun.source.schedulerJobId), "2026-01-01T00:45:00.000Z");
+	await processOne("interrupted-shared-next", { now: later(220), retriesInterrupted: false });
+	assert(readBackgroundRun(nextRun.runId).status === "succeeded" && fakeCalls.get(nextRun.runId) === 1, `its next occurrence runs, got ${readBackgroundRun(nextRun.runId).status}`);
+	const landedRun = readBackgroundRun(nextRun.runId);
+	updateBackgroundRunStatus(nextRun.runId, "deferred", { reason: "lease_expired", artifacts: landedRun.artifacts, target: landedRun.target, now: later(225) });
+	assert(backgroundRuns.claimBackgroundRunLease({ runId: nextRun.runId, workerId: "scheduler-execution:smoke:crashed", now: later(225), leaseMs: 1_000 }), "the landed run is claimed again by the server that crashed");
+	const landedSummary = await processOne("interrupted-landed", { now: later(230), retriesInterrupted: false });
+	assert(landedSummary.processed.some((item: any) => item.runId === nextRun.runId && item.finalStatus === "succeeded" && item.reason === "already_completed") && fakeCalls.get(nextRun.runId) === 1, `a run whose answer had landed still ends already_completed, got ${JSON.stringify(landedSummary)}`);
+	const desktopRoom = createRoom("Execution Interrupted Desktop Room");
+	const desktopRun = interrupt(desktopRoom, "interrupted desktop", "2026-01-01T00:30:00.000Z");
+	const desktopSummary = await processOne("interrupted-desktop", { now: later(210) });
+	assert(desktopSummary.recovered.some((item: any) => item.runId === desktopRun.runId && item.finalStatus === "deferred" && item.reason === "lease_expired"), `the desktop defers the interrupted run, got ${JSON.stringify(desktopSummary.recovered)}`);
+	assert(readBackgroundRun(desktopRun.runId).status === "succeeded" && fakeCalls.get(desktopRun.runId) === 1, `and runs it again, got ${readBackgroundRun(desktopRun.runId).status}`);
 
 	const allRuns = listBackgroundRuns({ kind: "scheduled-prompt", limit: 1000 });
 	for (const run of allRuns) assertRunNoPromptLeak(run, `stored run ${run.runId}`);

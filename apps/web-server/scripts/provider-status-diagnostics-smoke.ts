@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { authedFetch, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer } from "./smoke-server-process.js";
+import { authedFetch, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer, freePort, waitForServer } from "./smoke-server-process.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -9,7 +9,7 @@ const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "exxperts-provider-status
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const webServerDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(webServerDir, "..", "..");
-const port = 23000 + Math.floor(Math.random() * 10000);
+const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
 const agentDir = path.join(tempHome, ".exxperts", "agent");
 const productAppRoot = path.join(tempHome, ".exxperts", "app");
@@ -24,23 +24,6 @@ function assert(condition: unknown, message: string): asserts condition {
 
 function normalizeForSearch(value: string): string {
 	return value.replace(/\\/g, "/");
-}
-
-async function waitForServer(server: ChildProcessWithoutNullStreams): Promise<void> {
-	const deadline = Date.now() + 15000;
-	let lastError = "server did not respond";
-	while (Date.now() < deadline) {
-		if (server.exitCode != null) throw new Error(`server exited before startup with code ${server.exitCode}`);
-		try {
-			const response = await fetch(`${baseUrl}/healthz`);
-			if (response.ok) return;
-			lastError = `healthz returned ${response.status}`;
-		} catch (error) {
-			lastError = (error as Error).message;
-		}
-		await new Promise((resolve) => setTimeout(resolve, 150));
-	}
-	throw new Error(`server did not become ready: ${lastError}`);
 }
 
 async function requestJson(pathname: string): Promise<{ status: number; body: any }> {
@@ -161,7 +144,7 @@ try {
 	});
 	server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
 	server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
-	await waitForServer(server);
+	await waitForServer(server, baseUrl, 15000);
 
 	const authStatus = await requestJson("/api/auth/status");
 	const aiProfileStatus = await requestJson("/api/persistent-agent-ai-profile");
@@ -212,14 +195,10 @@ try {
 			"anthropic/claude-opus-5-5",
 			"anthropic/claude-fable-5-1",
 			"anthropic/claude-sonnet-5-5",
-			"anthropic/claude-sonnet-5",
-			"anthropic/claude-haiku-4-5",
-			"anthropic/claude-opus-5",
-			"anthropic/claude-opus-4-8",
+			"anthropic/claude-haiku-5-5",
 			"anthropic/claude-fable-5",
-			"anthropic/claude-sonnet-4-6",
-			"anthropic/claude-opus-4-7",
-			"anthropic/claude-opus-4-6",
+			"anthropic/claude-opus-5",
+			"anthropic/claude-sonnet-5",
 		]),
 		`room model options should match approved Claude order, got ${JSON.stringify(roomModelKeys(roomModelStatus.body))}`,
 	);
@@ -228,14 +207,10 @@ try {
 			"Opus 5.5",
 			"Fable 5.1",
 			"Sonnet 5.5",
-			"Sonnet 5",
-			"Haiku 4.5",
-			"Opus 5",
-			"Opus 4.8",
+			"Haiku 5.5",
 			"Fable 5",
-			"Sonnet 4.6",
-			"Opus 4.7",
-			"Opus 4.6",
+			"Opus 5",
+			"Sonnet 5",
 		]),
 		`room model picker labels should be friendly Claude labels, got ${JSON.stringify(compactRoomModelLabels(roomModelStatus.body))}`,
 	);

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { authedFetch, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer } from "./smoke-server-process.js";
+import { authedFetch, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer, freePort, waitForServer } from "./smoke-server-process.js";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -73,11 +73,11 @@ writeLedgerRow("tsk-route2", [{ relativePath: "files/report (2).html", bytes: SH
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const webServerDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(webServerDir, "..", "..");
-const port = 26000 + Math.floor(Math.random() * 10000);
+const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
 
 const EXPECTED_HEADERS: Record<string, string> = {
-	// Hardening pass 2026-07-12: no allow-scripts / script-src — all v1 template
+	// No allow-scripts / script-src — all v1 template
 	// output is static, so a served artifact must have no execution capability.
 	"content-security-policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:",
 	"x-content-type-options": "nosniff",
@@ -89,23 +89,6 @@ function assertArtifactHeaders(headers: Headers, label: string): void {
 	for (const [key, value] of Object.entries(EXPECTED_HEADERS)) {
 		assert(headers.get(key) === value, `${label}: ${key} must equal "${value}", got "${headers.get(key)}"`);
 	}
-}
-
-async function waitForServer(server: ChildProcessWithoutNullStreams): Promise<void> {
-	const deadline = Date.now() + 15000;
-	let lastError = "server did not respond";
-	while (Date.now() < deadline) {
-		if (server.exitCode != null) throw new Error(`server exited before startup with code ${server.exitCode}`);
-		try {
-			const response = await fetch(`${baseUrl}/healthz`);
-			if (response.ok) return;
-			lastError = `healthz returned ${response.status}`;
-		} catch (error) {
-			lastError = (error as Error).message;
-		}
-		await new Promise((resolve) => setTimeout(resolve, 150));
-	}
-	throw new Error(`server did not become ready: ${lastError}`);
 }
 
 // fetch/undici forbid overriding the Host header, so the loopback-guard check
@@ -144,7 +127,7 @@ try {
 	});
 	server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
 	server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
-	await waitForServer(server);
+	await waitForServer(server, baseUrl, 15000);
 
 	// 1. Each legit file: 200, exact MIME, all four headers, exact Content-Length.
 	const legit = [

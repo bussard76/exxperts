@@ -36,13 +36,14 @@ built on top in `apps/` and `pi-package/`.
 
 | Surface | Command | What it is |
 | --- | --- | --- |
-| Web app | `exxperts web` | The primary product: persistent rooms with the full memory lifecycle. |
-| CLI/TUI | `exxperts cli` | The coding workspace (ExxCode) with repo access; rooms are also reachable from the CLI. |
+| Desktop app | open the app | The product: persistent rooms with the full memory lifecycle, in its own window. |
+| Web app | `exxperts` | The same app in your browser, for Linux, Intel Macs, or a terminal install on Mac or Windows. |
 
 ## Anatomy of a room: the prompt layers
 
 A room's system prompt is assembled from four code-owned layers plus the
-user's optional instructions (in `apps/web-server/src/persistent-agents.ts`),
+user's optional instructions (in `apps/web-server/src/persistent-agent-constitution.ts` and
+`persistent-agent-boot.ts`),
 ordered deliberately: primacy for identity, recency for runtime state.
 
 | Layer | Content | Ownership | Updates |
@@ -115,17 +116,15 @@ system **writes**, never the worker.
 Freezes the active thread and asks a compression worker to distill it
 into a proposed summary of the conversation. The default Remember button
 runs a fast path at standard density and shows you the proposal before
-it is saved; a room can be set to save without that preview unless
-something needs your review (Room settings, Memory, **Remember without
-the preview**). "Remember with options…" opens the full flow, where you
+it is saved; a room can be set to save without that preview (Room
+settings, Memory, **Remember without the preview**). The arrow beside Remember opens "Choose what to keep…", the full flow, where you
 choose a density (compact/standard/rich) and can add an optional
 steering note. Things
 you explicitly asked the agent to remember are carried through and
 become pinned notes when the conversation is memorized. Remember runs on
 the room's Memory model and reads the whole conversation: in one pass
 when it fits that model's window, in parts when it does not. Very long
-tool outputs are shortened and counted on the proposal; nothing else is
-cut. On approval, the summary joins the waiting conversations, the thread closes at
+tool outputs are shortened for the reading; nothing else is cut. On approval, the summary joins the waiting conversations, the thread closes at
 a clean boundary, and the previous memory file is archived. Remember
 warns when one more save would fill the room's waiting list; the
 budget behavior behind that is in [`memory.md`](memory.md).
@@ -208,22 +207,22 @@ Rooms get tools through a per-room policy rather than a global grant:
   with no write tools and no Bash says it is read-only
   ([`workspace-and-bash.md`](workspace-and-bash.md)).
 - **Bash**: Full access only, off by default. Each command shows an
-  approval card with the exact command before it runs; the "Bash:
-  asks" / "Bash: auto" chip in the chat header switches a room to run
-  without asking, and auto can only be enabled at the computer, never
+  approval card with the exact command before it runs; the "Ask
+  first" / "Auto" chip under the message box (inside it on a phone)
+  switches a room to run without asking, and auto can only be enabled at the computer, never
   from a remote device. Rooms that had Bash before the card existed
   were switched to auto once, at upgrade, so their behavior did not
   change; every room since starts at asks.
 - **`fetch_url`**: HTTP fetching with SSRF defenses (private-range and
   redirect protection).
 - **Web search**: built in via DuckDuckGo; local SearXNG is the reliable path for heavy use or networks where DuckDuckGo blocks automated queries ([`web-search.md`](web-search.md)).
-- **Files**: documents and outputs a room or its specialists produce,
-  viewable in a sandboxed file viewer; delegated tasks a room runs
-  live in the room's Files panel, with a click-to-watch run view. PDFs
+- **Attachments**: documents you add and outputs a room produced, shown
+  as cards beside the chat and opened in a sandboxed file viewer; files that earlier visual specialists
+  made stay there as ordinary files, marked as made by the room. PDFs
   and Word documents are read through an isolated parser, with page
   counts noted and offset/limit paging like any text file; a scanned
   PDF with no text layer is called out honestly instead of returning
-  nothing. An `.xlsx` added to Files is previewed as a readable table
+  nothing. The room reads an `.xlsx` added to Attachments as a table
   (the legacy `.xls` format stays refused).
 - **`read_skill`**: rooms read the skills enabled for them through this
   tool; skills are the sanctioned way to give rooms new instructions
@@ -247,9 +246,8 @@ approval gates, not process isolation.
 
 Where your file goes: when you attach a file to a room, it is stored
 on your machine under that room's own folder; it is not uploaded
-anywhere. The room can read it, and files you attach or the room
-creates show up in the room's Files panel, where you can download or
-delete them.
+anywhere. The room can read it, and files you attach show up in the
+room's Attachments panel, where you can download, rename or delete them.
 
 ## Security posture
 
@@ -260,9 +258,9 @@ delete them.
   client auth token on API and WebSocket requests (see `SECURITY.md`).
 - Durable memory has no silent write path: every mutation goes through
   the proposal/approval workflow and a server-side fingerprint check.
-  Warning-free proposals from an action you triggered can apply
-  automatically; anything questionable always comes back for a manual
-  approval screen.
+  Proposals from an action you triggered can apply automatically when
+  they hold no decision for you; anything you need to weigh always comes
+  back for a manual approval screen.
 - State directories are created with restrictive modes under
   `~/.exxperts/`.
 
@@ -275,4 +273,4 @@ delete them.
 | `~/.exxperts/app/persistent-room-schedules/`, `background-runs/` | Schedules and their run history |
 | `~/.exxperts/app/usage.jsonl` | Token/cost usage log |
 | `~/.exxperts/app/web-search.json`, `searxng/` | Web-search configuration |
-| `~/.exxperts/agent/` | Embedded runtime state: provider auth, model registry, CLI sessions |
+| `~/.exxperts/agent/` | Embedded runtime state: provider auth, model registry |

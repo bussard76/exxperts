@@ -3,7 +3,6 @@ import path from "node:path";
 import { DEFAULT_PERSISTENT_ROOM_AGENTS_ROOT, persistentAgentRootPath } from "./persistent-room-workspace-policy.js";
 import { listTaskLedgerRecords, rewriteTaskLedgerRecord, type TaskLedgerArtifact, type TaskLedgerRecord } from "./persistent-room-task-ledger.js";
 import {
-	PERSISTENT_ROOM_SHELF_RELATIVE_PREFIX,
 	allocateShelfFilename,
 	isShelfRelativePath,
 	persistentRoomShelfDirPath,
@@ -143,8 +142,7 @@ function readJournal(file: string): RecordMigrationJournal | null {
 }
 
 /**
- * Per-record migration, journaled so it truly heals (review follow-up on the
- * !348 crash-window): the intended shelf name of every file is written to a
+ * Per-record migration, journaled so it truly heals after a crash: the intended shelf name of every file is written to a
  * journal BEFORE any rename. A crash between rename and ledger rewrite then
  * leaves the journal behind, and the re-run finishes the rewrite from it —
  * source gone + journaled shelf name present = the move happened, record the

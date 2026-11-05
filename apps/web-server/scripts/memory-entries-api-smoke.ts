@@ -18,13 +18,14 @@ import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { authedFetch, type AuthedFetchInit, SMOKE_AUTH_HEADERS, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer } from "./smoke-server-process.js";
+import { authedFetch, freePort, type AuthedFetchInit, SMOKE_AUTH_HEADERS, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer, waitForServer } from "./smoke-server-process.js";
+import { waitEvery } from "./smoke-wait.js";
 
 const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "memory-entries-api-home-"));
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const webServerDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(webServerDir, "..", "..");
-const port = 24000 + Math.floor(Math.random() * 10000);
+const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
 const agentDir = path.join(tempHome, ".exxperts", "agent");
 const productAppRoot = path.join(tempHome, ".exxperts", "app");
@@ -46,23 +47,6 @@ function smokeEnv(): NodeJS.ProcessEnv {
 	env.EXXETA_HOME = repoRoot;
 	env.EXXPERTS_CODING_AGENT_DIR = agentDir;
 	return env;
-}
-
-async function waitForServer(server: ChildProcessWithoutNullStreams): Promise<void> {
-	const deadline = Date.now() + 30_000;
-	let lastError = "server did not respond";
-	while (Date.now() < deadline) {
-		if (server.exitCode != null) throw new Error(`server exited before startup with code ${server.exitCode}`);
-		try {
-			const response = await fetch(`${baseUrl}/healthz`);
-			if (response.ok) return;
-			lastError = `healthz returned ${response.status}`;
-		} catch (error) {
-			lastError = (error as Error).message;
-		}
-		await new Promise((resolve) => setTimeout(resolve, 150));
-	}
-	throw new Error(`server did not become ready: ${lastError}`);
 }
 
 async function requestJson(pathname: string, init?: AuthedFetchInit): Promise<{ status: number; body: any }> {
@@ -123,14 +107,7 @@ const gateway = http.createServer((req, res) => {
 	});
 });
 
-async function waitUntil(predicate: () => Promise<boolean> | boolean, label: string, timeoutMs = 30_000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		if (await predicate()) return;
-		await new Promise((resolve) => setTimeout(resolve, 100));
-	}
-	throw new Error(`timed out waiting until ${label}`);
-}
+const waitUntil = waitEvery(100, 30_000);
 
 let server: ChildProcessWithoutNullStreams | null = null;
 const serverOutput: string[] = [];
@@ -162,7 +139,7 @@ try {
 	});
 	server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
 	server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
-	await waitForServer(server);
+	await waitForServer(server, baseUrl, 30_000);
 
 	const created = await requestJson("/api/persistent-agents", jsonBody("POST", { displayName: "Memory Entries API Smoke Room", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }));
 	assert(created.status === 201, `room creation should return 201, got ${created.status}: ${JSON.stringify(created.body)}`);
@@ -203,15 +180,14 @@ try {
 	assert(badKind.status === 400, "an unknown kind must be refused");
 
 	// A note is words: a heading line would mint a topic and cut the note in
-	// two, a pasted metadata comment would claim another note's id. Both are
-	// refused with one sentence and one code, and nothing is written.
+	// two, a pasted metadata comment would claim another note's id. The words
+	// are kept as plain words (the hand-edit battery covers every case); a text
+	// that is only marks says nothing and is refused, and nothing is written.
 	const l1bBeforeStructural = fs.readFileSync(l1bPath, "utf-8");
-	for (const text of ["## A heading", "- fine\n### A topic", "<!-- e: id=m-0001 kind=fact saved=2026-01-01 -->\n- A pasted note.", "   # indented", "# "]) {
+	for (const text of ["# ", "### ", "<!-- -->"]) {
 		const structural = await requestJson(`${room}/memory/entries`, jsonBody("POST", { topic: "Commercial terms", kind: "fact", text }));
-		assert(structural.status === 400 && structural.body?.code === "memory_entry_text_structural" && /heading line or a hidden comment/.test(String(structural.body?.error ?? "")), `an add with a structural line is refused with its sentence and code, got ${structural.status}: ${JSON.stringify(structural.body)} for ${JSON.stringify(text)}`);
+		assert(structural.status === 400 && /needs some text/.test(String(structural.body?.error ?? "")), `a text of marks only is refused with its sentence, got ${structural.status}: ${JSON.stringify(structural.body)} for ${JSON.stringify(text)}`);
 	}
-	const structuralEdit = await requestJson(`${room}/memory/entries/${addedId}`, jsonBody("PUT", { text: "- fine\n## A heading" }));
-	assert(structuralEdit.status === 400 && structuralEdit.body?.code === "memory_entry_text_structural", `an edit with a structural line is refused the same way, got ${structuralEdit.status}: ${JSON.stringify(structuralEdit.body)}`);
 	assert(fs.readFileSync(l1bPath, "utf-8") === l1bBeforeStructural, "a refused text writes nothing");
 
 	// --- 3. Edit text, pin, move, status -------------------------------------
@@ -298,7 +274,7 @@ try {
 	const restoreGone = await requestJson(`${room}/memory/archive/${invoices.id}/restore`, { method: "POST" });
 	assert(restoreGone.status === 400 && /not in this room's archive/.test(String(restoreGone.body?.error ?? "")), "a note deleted for good cannot be restored");
 	const goneAgain = await requestJson(`${room}/memory/archive/${invoices.id}`, { method: "DELETE" });
-	assert(goneAgain.status === 400 && /not in this room's archive/.test(String(goneAgain.body?.error ?? "")), "deleting it twice is refused with the same sentence");
+	assert(goneAgain.status === 200 && goneAgain.body?.alreadySaved === true && goneAgain.body?.deleted === null, `deleting it twice answers that the row is gone, got ${goneAgain.status}: ${JSON.stringify(goneAgain.body)}`);
 	const goneRecords = fs.readdirSync(path.join(agentsRoot, roomId, "events", "memory-edit"))
 		.map((name) => JSON.parse(fs.readFileSync(path.join(agentsRoot, roomId, "events", "memory-edit", name), "utf-8")))
 		.filter((record: any) => record.entryOperation === "archive_delete");

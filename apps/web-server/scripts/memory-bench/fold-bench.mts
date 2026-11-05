@@ -3,7 +3,7 @@
 // The size bench next door asks whether a Memorize run FITS. This one asks
 // whether a fold is RIGHT. It folds a fixture's sessions into a fixture's core
 // memory one at a time, through the product's own fold layer — buildFoldPrompt,
-// parseFoldOps, validateFoldOps, applyFoldOps — and scores the memory that
+// parseFoldOps, decideFoldOps, applyFoldOps — and scores the memory that
 // comes out against the answer key the fixture planted.
 //
 // Two modes, one loop:
@@ -31,7 +31,7 @@
 import {
 	applyFoldOps,
 	buildFoldPrompt,
-	buildFoldUnreadableRetryPrompt,
+	buildFoldRetryPrompt,
 	decideFoldOps,
 	EMPTY_FOLD_GUIDANCE,
 	FOLD_TRIGGER_PROMPT,
@@ -210,7 +210,7 @@ async function runFold(fixture: FoldFixture, generate: FoldGenerator, opts: { pl
 			if (read.unreadable) {
 				run.failed = `unreadable: ${read.unreadable}`;
 				if (attempt === 1) run.firstUnreadable = read.unreadable;
-				prompt = buildFoldUnreadableRetryPrompt(assembly.prompt, read.unreadable === "cut-off");
+				prompt = buildFoldRetryPrompt(assembly.prompt, { kind: "unreadable", cutOff: read.unreadable === "cut-off" });
 				continue;
 			}
 			const decided = decideFoldOps(read.items, areas, { text });

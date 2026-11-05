@@ -5,8 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
-import { authedFetch, SMOKE_AUTH_HEADERS, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer, type AuthedFetchInit } from "./smoke-server-process.js";
+import { authedFetch, SMOKE_AUTH_HEADERS, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer, freePort, type AuthedFetchInit, waitForServer } from "./smoke-server-process.js";
 import { computeSkillFilesDigest, sha256, writeSkillProvenance } from "../src/skills-store.js";
+import { waitForTurnSettled } from "./smoke-turn-settle.js";
 
 // Pins the REAL execution-exposure chain end to end, through a live room
 // session — the seam every other skill smoke stubs. A synthetic gateway
@@ -30,7 +31,7 @@ function assert(condition: unknown, message: string): asserts condition {
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const webServerDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(webServerDir, "..", "..");
-const port = 26000 + Math.floor(Math.random() * 10000);
+const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "exxperts-skill-exposure-"));
@@ -106,27 +107,11 @@ async function requestJson(pathname: string, init: AuthedFetchInit = {}): Promis
 	return { status: response.status, body: text ? JSON.parse(text) : null };
 }
 
-async function waitForServer(server: ChildProcessWithoutNullStreams): Promise<void> {
-	const deadline = Date.now() + 20_000;
-	let lastError = "server did not respond";
-	while (Date.now() < deadline) {
-		if (server.exitCode != null) throw new Error(`server exited before startup with code ${server.exitCode}`);
-		try {
-			const response = await fetch(`${baseUrl}/healthz`);
-			if (response.ok) return;
-			lastError = `healthz returned ${response.status}`;
-		} catch (error) {
-			lastError = (error as Error).message;
-		}
-		await new Promise((resolve) => setTimeout(resolve, 150));
-	}
-	throw new Error(`server did not become ready: ${lastError}`);
-}
-
 const WebSocketImpl: any = (await import("ws")).default;
 
 // Run one prompt turn over the room WS and wait for the assistant's "done",
-// which only arrives after the tool round-trip completed.
+// which only arrives after the tool round-trip completed, then for the turn
+// to settle on the server.
 async function runTurn(agentId: string, conversationId: string): Promise<void> {
 	// Prompting requires the room's current active thread; seed an empty one
 	// under this conversation id first, like the client does on room open.
@@ -152,10 +137,12 @@ async function runTurn(agentId: string, conversationId: string): Promise<void> {
 		// socket on the first tool result races the turn's own finish, whose
 		// final write moves the room's active thread back under the next
 		// conversation's feet and its prompt is refused as not current.
-		// Since 0.13.2 a landing after the switch leaves the pointer alone
-		// (keepRuntimeIfMoved, pinned by conversation-switch-race-smoke); the
-		// wait stays because it is harmless.
+		// A landing after the switch now leaves the pointer alone
+		// (keepRuntimeIfMoved, pinned by conversation-switch-race-smoke), so
+		// this agent_end check is only harmless; the settle wait below is the
+		// one the next conversation needs.
 		if (capturedToolResults.length > before && frames.some((frame) => frame?.type === "event" && frame?.event?.type === "agent_end")) {
+			await waitForTurnSettled(requestJson, agentId, `${conversationId}: the turn has settled before the next seed`);
 			try { socket.close(); } catch {}
 			return;
 		}
@@ -207,7 +194,7 @@ try {
 	});
 	server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
 	server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
-	await waitForServer(server);
+	await waitForServer(server, baseUrl, 20_000);
 
 	// A bash room: localFiles workspace with the bash switch on.
 	const room = await requestJson("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Exposure Room", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
@@ -233,6 +220,7 @@ try {
 	const exposed = capturedToolResults[0];
 	assert(exposed.includes("Run the bundled script to convert documents."), `the tool result must carry the skill body, got: ${exposed.slice(0, 400)}`);
 	assert(exposed.includes(skillDir), `the tool result must carry the on-disk skill dir (the gate must OPEN on a real turn), got: ${exposed.slice(0, 600)}`);
+	assert(exposed.includes("do NOT appear in this room's Attachments panel") && exposed.includes("never the Attachments panel") && !exposed.includes("Files panel"), `the outputs line names the panel as the screen does, got: ${exposed.slice(-700)}`);
 	assert(exposed.includes(JSON.stringify("scripts/convert.py")), `the tool result must list the bundled script, got: ${exposed.slice(0, 600)}`);
 
 	// 2. Revoked: same room, next conversation — the body serves path-free.

@@ -25,7 +25,7 @@ folder, and a fingerprinted event record is written under
 After pulling a version whose release notes mention a new constitution
 template, when you would rather not wait for each room's next open. Running it
 when nothing changed is safe; rooms already on the current template are skipped
-("already up to date").
+("already at template vN, nothing to do").
 
 ## Steps
 
@@ -36,7 +36,7 @@ when nothing changed is safe; rooms already on the current template are skipped
    npm install
    ```
 
-2. **Close all rooms.** Quit any open exxperts web or CLI room sessions. The
+2. **Close all rooms.** Close every room open in a browser window or the desktop app. The
    upgrade refuses to touch a room that is open somewhere or mid-turn, so
    nothing can be corrupted, but closing everything first avoids refusals.
 
@@ -46,8 +46,8 @@ when nothing changed is safe; rooms already on the current template are skipped
    npx tsx apps/web-server/scripts/upgrade-l1a-constitution.ts --dry-run --all
    ```
 
-   Each room prints either `WOULD upgrade constitution v2 -> v3` or
-   `already at template v3, nothing to do`.
+   Each room prints either `WOULD upgrade constitution v3 -> v4` or
+   `already at template v4, nothing to do`.
 
 4. **Run the upgrade:**
 
@@ -70,7 +70,7 @@ when nothing changed is safe; rooms already on the current template are skipped
    head -3 ~/.exxperts/app/personalized-agents/<room-id>/L1a.md
    ```
 
-   The second line should contain `template_version=3`.
+   The second line should contain `template_version=4`.
 
 6. **Use the room normally.** New sessions boot with the upgraded
    constitution immediately. A room session that was saved before the upgrade
@@ -137,7 +137,7 @@ of both versions, so the transition stays auditable either way.
 
 ## Troubleshooting
 
-- `room is currently open on surface "…"`: close that web/CLI session (or
+- `room is currently open on surface "…"`: close the room in that window (or
   wait for the scheduled run to finish) and re-run.
 - `room runtime state is "…"`: the room has an unfinished turn. Open the
   room once, let it settle, close it, and re-run.

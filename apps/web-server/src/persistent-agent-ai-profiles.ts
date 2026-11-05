@@ -1,3 +1,4 @@
+import { providerDisplayName } from "../../web-ui/src/model-names.js";
 import { readBuiltInAiProfilePreferences, type BuiltInAiProfilePreference } from "./built-in-ai-profile-preferences.js";
 import { isCustomAiProfileId, readCustomAiProfiles } from "./custom-ai-profiles.js";
 import {
@@ -10,7 +11,6 @@ import {
 } from "./openai-compatible-gateways.js";
 
 export type BuiltInPersistentAgentAiProfileId = "chatgpt-codex" | "anthropic";
-export type LocalPersistentAgentAiProfileId = "openai-compatible";
 // Widened to string: besides the built-in profiles, users can save any number of
 // OpenAI-compatible gateways (each its own profile) and create custom
 // per-provider profiles ("custom-<providerId>"); membership is validated at
@@ -19,13 +19,6 @@ export type PersistentAgentAiProfileId = string;
 
 export { OPENAI_COMPATIBLE_AI_PROFILE_FILE, OPENAI_COMPATIBLE_AI_PROFILE_ID, OPENAI_COMPATIBLE_PROVIDER_ID };
 export const SCHEDULED_ROOM_MODEL_POLICY_KEY = "scheduledRoom" as const;
-
-export type PersistentAgentAiProcess =
-	| "persistentRoom"
-	| typeof SCHEDULED_ROOM_MODEL_POLICY_KEY
-	| "checkpoint"
-	| "absorb"
-	| "structuralReview";
 
 export type PersistentAgentModelLock = {
 	provider: string;
@@ -67,45 +60,47 @@ export const DEFAULT_PERSISTENT_AGENT_AI_PROFILE_ID = "chatgpt-codex" satisfies 
 export const PERSISTENT_AGENT_AI_PROFILES = {
 	"chatgpt-codex": {
 		id: "chatgpt-codex",
-		label: "ChatGPT Plus/Pro",
+		label: providerDisplayName("openai-codex"),
 		providerId: "openai-codex",
 		providerLabel: "ChatGPT Plus/Pro",
 		description: "ChatGPT subscription profile for persistent-agent room and maintenance workflows.",
 		processes: {
-			// The order OpenAI's Codex app uses; the first entry is the default.
+			// The default first and its 6.1 sibling Terra beside it, then
+			// OpenAI's order on its Codex models page: its recommended models,
+			// then the previous ones.
 			persistentRoom: [
-				{ provider: "openai-codex", model: "gpt-6-sol" },
 				{ provider: "openai-codex", model: "gpt-6.1-sol" },
+				{ provider: "openai-codex", model: "gpt-6.1-terra" },
 				{ provider: "openai-codex", model: "gpt-6-astra" },
 				{ provider: "openai-codex", model: "gpt-6-luna" },
+				{ provider: "openai-codex", model: "gpt-6-sol" },
 				{ provider: "openai-codex", model: "gpt-5.6-sol" },
 				{ provider: "openai-codex", model: "gpt-5.6-terra" },
 				{ provider: "openai-codex", model: "gpt-5.6-luna" },
 			],
-			absorb: { provider: "openai-codex", model: "gpt-6-sol" },
-			structuralReview: { provider: "openai-codex", model: "gpt-6-sol" },
+			absorb: { provider: "openai-codex", model: "gpt-6.1-sol" },
+			structuralReview: { provider: "openai-codex", model: "gpt-6.1-sol" },
 		},
 	},
 	anthropic: {
 		id: "anthropic",
-		label: "Claude",
+		label: providerDisplayName("anthropic"),
 		providerId: "anthropic",
 		providerLabel: "Anthropic / Claude",
 		description: "Claude subscription profile for persistent-agent room and maintenance workflows.",
 		processes: {
-			// Anthropic's tier order, newest first inside a tier; the first entry is the default.
+			// The default first, then Anthropic's order (Fable, Opus, Sonnet, Haiku),
+			// current models before the previous ones. A model that leaves this list
+			// keeps its catalogue row and its name: a conversation started on it
+			// keeps answering, and a new one is refused with a way out.
 			persistentRoom: [
 				{ provider: "anthropic", model: "claude-opus-5-5" },
 				{ provider: "anthropic", model: "claude-fable-5-1" },
 				{ provider: "anthropic", model: "claude-sonnet-5-5" },
-				{ provider: "anthropic", model: "claude-sonnet-5" },
-				{ provider: "anthropic", model: "claude-haiku-4-5" },
-				{ provider: "anthropic", model: "claude-opus-5" },
-				{ provider: "anthropic", model: "claude-opus-4-8" },
+				{ provider: "anthropic", model: "claude-haiku-5-5" },
 				{ provider: "anthropic", model: "claude-fable-5" },
-				{ provider: "anthropic", model: "claude-sonnet-4-6" },
-				{ provider: "anthropic", model: "claude-opus-4-7" },
-				{ provider: "anthropic", model: "claude-opus-4-6" },
+				{ provider: "anthropic", model: "claude-opus-5" },
+				{ provider: "anthropic", model: "claude-sonnet-5" },
 			],
 			absorb: { provider: "anthropic", model: "claude-opus-5-5" },
 			structuralReview: { provider: "anthropic", model: "claude-opus-5-5" },
@@ -115,10 +110,6 @@ export const PERSISTENT_AGENT_AI_PROFILES = {
 
 function cloneModelLock(model: PersistentAgentModelLock): PersistentAgentModelLock {
 	return { provider: model.provider, model: model.model };
-}
-
-export function persistentAgentModelLockKey(model: PersistentAgentModelLock): string {
-	return `${model.provider}/${model.model}`;
 }
 
 export function persistentAgentModelLocksEqual(a: PersistentAgentModelLock, b: PersistentAgentModelLock): boolean {
@@ -208,10 +199,6 @@ export function getPersistentAgentAiProfile(profileId: PersistentAgentAiProfileI
 	const couldBeGateway = profileId === OPENAI_COMPATIBLE_AI_PROFILE_ID || profileId.startsWith(GATEWAY_PROVIDER_ID_PREFIX);
 	if (couldBeGateway && gatewayRead.errors.length > 0) throw new Error(gatewayRead.errors[0]);
 	throw new Error(`unknown persistent-agent AI profile: ${profileId}`);
-}
-
-export function getDefaultPersistentAgentAiProfile(): PersistentAgentAiProfile {
-	return getPersistentAgentAiProfile(DEFAULT_PERSISTENT_AGENT_AI_PROFILE_ID);
 }
 
 export function getPersistentRoomModelLocks(profileId: PersistentAgentAiProfileId = DEFAULT_PERSISTENT_AGENT_AI_PROFILE_ID): PersistentAgentModelLock[] {

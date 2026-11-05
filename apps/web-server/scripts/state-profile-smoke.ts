@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { authedFetch, SMOKE_AUTH_TOKEN, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer, type AuthedFetchInit } from "./smoke-server-process.js";
+import { authedFetch, SMOKE_AUTH_TOKEN, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer, freePort, type AuthedFetchInit, waitForServer } from "./smoke-server-process.js";
 
 // Pins the data-profile unit (pointer + env indirection, NO renames):
 //
@@ -30,7 +30,7 @@ function assert(condition: unknown, message: string): asserts condition {
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const webServerDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(webServerDir, "..", "..");
-const port = 26000 + Math.floor(Math.random() * 10000);
+const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
 
 const stateProfiles = createRequire(import.meta.url)(path.join(repoRoot, "bin", "lib", "state-profiles.cjs")) as {
@@ -145,23 +145,6 @@ function resolvedChromiumPath(profile: string | null): string {
 	return probe.stdout.trim();
 }
 
-async function waitForServer(server: ChildProcessWithoutNullStreams): Promise<void> {
-	const deadline = Date.now() + 30000;
-	let lastError = "server did not respond";
-	while (Date.now() < deadline) {
-		if (server.exitCode != null) throw new Error(`server exited before startup with code ${server.exitCode}`);
-		try {
-			const response = await fetch(`${baseUrl}/healthz`);
-			if (response.ok) return;
-			lastError = `healthz returned ${response.status}`;
-		} catch (error) {
-			lastError = (error as Error).message;
-		}
-		await new Promise((resolve) => setTimeout(resolve, 150));
-	}
-	throw new Error(`server did not become ready: ${lastError}`);
-}
-
 async function api(route: string, init: AuthedFetchInit = {}): Promise<{ status: number; body: any }> {
 	const response = await authedFetch(`${baseUrl}${route}`, {
 		...init,
@@ -177,7 +160,8 @@ async function switchAndAwaitExit(server: ChildProcessWithoutNullStreams, target
 	assert(response.status === 200 && response.body?.restarting === true, `switch to ${JSON.stringify(target)}: expected restarting reply, got ${response.status} ${JSON.stringify(response.body)}`);
 	// Env-pinned tokens never rotate, so the reply's sign-in link carries the pin.
 	assert(response.body.signInPath === `/auth/session?token=${encodeURIComponent(SMOKE_AUTH_TOKEN)}`, `switch reply must carry the sign-in link, got ${response.body.signInPath}`);
-	const code = await Promise.race([exited, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("server did not exit after switch")), 15000))]);
+	let exitTimer: NodeJS.Timeout | undefined;
+	const code = await Promise.race([exited, new Promise<never>((_, reject) => { exitTimer = setTimeout(() => reject(new Error("server did not exit after switch")), 15000); })]).finally(() => clearTimeout(exitTimer));
 	// npx→tsx wrap the server, but both propagate the child's exit code.
 	assert(code === stateProfiles.SWITCH_EXIT_CODE, `server must exit with the sentinel code, got ${code}`);
 	assert(stateProfiles.readActiveProfile(tempHome) === target, `the pointer must name ${JSON.stringify(target)} after the switch`);
@@ -197,7 +181,7 @@ try {
 	// 2. Fresh boot: the standard profile reads as active null; every
 	// .exxperts-* dir is listed.
 	server = spawnServer();
-	await waitForServer(server);
+	await waitForServer(server, baseUrl, 30000);
 	let listing = await api("/api/settings/state-profile");
 	assert(listing.status === 200, `listing: expected 200, got ${listing.status}`);
 	assert(listing.body.active === null, `standard profile must read as active null, got "${listing.body.active}"`);
@@ -231,7 +215,7 @@ try {
 
 	// 6. The new leg runs against the profile via env indirection.
 	server = spawnServer({ profile: "Demo A" });
-	await waitForServer(server);
+	await waitForServer(server, baseUrl, 30000);
 	listing = await api("/api/settings/state-profile");
 	assert(listing.body.active === "Demo A", `active must be "Demo A", got "${listing.body.active}"`);
 	assert(!listing.body.profiles.some((p: any) => p.name === "Demo A"), "the loaded profile must not appear in the switch list");
@@ -263,7 +247,7 @@ try {
 	server = null;
 	assert(!fs.existsSync(stateProfiles.activePointerPath(tempHome)), "switching to standard must remove the pointer");
 	server = spawnServer();
-	await waitForServer(server);
+	await waitForServer(server, baseUrl, 30000);
 	listing = await api("/api/settings/state-profile");
 	assert(listing.body.active === null, "back on the standard profile");
 	assert(fs.readFileSync(sentinel, "utf8") === "my precious data", "the standard tree must be byte-identical after the round trip");
@@ -281,7 +265,7 @@ try {
 	// 9. Unsupervised server (no launcher/desktop/harness): the switch route
 	// fails closed with a reason instead of dying into a dead app.
 	server = spawnServer({ supervised: false });
-	await waitForServer(server);
+	await waitForServer(server, baseUrl, 30000);
 	const unsupervised = await api("/api/settings/state-profile/switch", { method: "POST", body: JSON.stringify({ name: "Demo A" }) });
 	assert(unsupervised.status === 409 && /supervisor/.test(String(unsupervised.body?.error)), `unsupervised switch must 409 with a reason, got ${unsupervised.status} ${JSON.stringify(unsupervised.body)}`);
 	assert(server.exitCode === null, "an unsupervised switch attempt must not exit the server");

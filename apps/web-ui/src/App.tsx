@@ -1,38 +1,33 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Sidebar } from "./components/Sidebar";
-import { AssetsPanel } from "./components/assets-panel";
+import { AttachmentsBrowser, AttachmentsEntry, type AttachmentsView } from "./components/attachments-panel";
 import { AssetViewerFooter } from "./components/asset-viewer-footer";
 import { ToastStack, type ToastView } from "./components/toast-stack";
+import { usePausedSkillsNotice } from "./paused-skills-notice";
 import { readReviseConflicts, reviseConflictSentence } from "../../web-server/src/revise-conflict-notice";
+import { modelNotOnAccountSentence, providerAccountName } from "../../web-server/src/model-not-on-account";
+import { credentialGoneOf, credentialGoneWhy, credentialGoneWords, providerCredentialClause, roomModelUnavailableLine, sharedCredentialState, type CredentialKey } from "../../web-server/src/model-not-offered";
 import { assetDisplayTitle, assetTemplateShortName, projectAssetRows, rowShelfFileName, shelfTruthForRoom, type AssetLedgerRowInput, type AssetRowView, type ShelfFileRowInput } from "./assets-panel";
 import { commitRoomFileDelete, fileToBase64, listRoomFiles, renameRoomFile, roomFileUrl, saveRoomFileToFolder, stageRoomFileDelete, undoRoomFileDelete, uploadRoomFile, type RoomShelfFile } from "./room-files-api";
 import { chooseSystemFolder, fetchPersistentRoomWorkspaceDefault } from "./persistent-room-workspace-api";
+import { shownRoomName } from "../../web-server/src/room-name";
 import { Dashboard } from "./components/Dashboard";
-import { Memory } from "./components/Memory";
-import { InRoomChatShellView } from "./components/in-room-chat";
+import { InRoomChatShellView, stoppedNoticeShows, type ConnectionStopped, type LastMessageEdit } from "./components/in-room-chat";
+import { composerHint } from "./composer-hint";
+import type { FailureLineActions } from "./components/Message";
 import { BashModeChip } from "./components/BashModeChip";
-import { isMacPlatform, roomSettingsChordHint } from "./platform";
-import { CreateRoomPanel } from "./components/create-room-panel";
-import { useEscapeKey } from "./components/use-escape-key";
+import { isMacPlatform, isTouchScreen, roomSettingsChordHint } from "./platform";
 import { confirmChoice, confirmDialog } from "./components/confirm-dialog";
-import { PersistentAgentCard } from "./components/launcher-room-card";
-import { RoomSortControl, ROOM_ARRANGE_HINT_ID, ROOM_SORT_MIN_ROOMS } from "./components/RoomSortControl";
 import { useHomeRoomOrder } from "./use-home-room-order";
-import type { HomeRoomOrderView } from "./home-room-order";
-import { orderRooms, type RoomOrderChoice, type RoomOrderMode } from "../../web-server/src/room-order";
-import { confirmLeavingArrangement, createRoomArrangement, moveByKey, type RoomArrangement } from "./home-room-arrange";
-import { createCardDrag, ROOM_LONG_PRESS_MS, type CardDrag, type CardDragView, type Rect, type SlotLayout } from "./home-room-drag";
-import { arrangeSlots, slotRestBox, useArrangeEdgeScroll, useRoomArrangeMotion } from "./use-room-arrange-motion";
+import { confirmLeavingArrangement } from "./home-room-arrange";
 import { NOTHING_TO_MAINTAIN_SENTENCE, nothingToMaintain } from "./memory-surface-copy";
-import { fmtTokensK } from "./components/RoomMaintenanceSection";
 import { ProductSidebar, type AppearancePreference, type ThemeMode } from "./components/product-shell";
 import { SettingsOverlay, type SettingsSection } from "./components/settings-overlay";
+import { AppearancePane } from "./components/appearance-pane";
 import { isSignInFailure } from "./sign-in-failure";
-import { GroupHeader, PaneHeader } from "./components/pane-header";
-import { roomFilesSentence } from "./components/RoomDangerZone";
-import { WhatsNewDialog } from "./components/whats-new-dialog";
-import { useRemoteClientContext } from "./remote-client-context";
+import { PaneHeader } from "./components/pane-header";
+import { sharedServerReleases, WhatsNewDialog, type WhatsNewSections } from "./components/whats-new-dialog";
+import { fetchRemoteClientContext, sharedServerRole, knownRemoteClientContext, pagePersonProtocols, personHasChanged, refreshRemoteClientContext, reloadForNewPerson, showsComputerOnlyControls, usePersonChanged, useRemoteClientContext } from "./remote-client-context";
 import { RemoteAccessPage } from "./components/remote-access-page";
 import { StateProfileSection } from "./components/state-profile-section";
 import { GlobalInstructionsSection } from "./components/GlobalInstructionsSection";
@@ -40,2822 +35,100 @@ import { ConnectorsPage } from "./components/ConnectorsPage";
 import { WebSearchSettingsSection } from "./components/web-search-settings-section";
 import { SkillsPage } from "./components/SkillsPage";
 import { Preview } from "./components/Preview";
-import { ConnectionLostBanner } from "./components/connection-lost-banner";
+import { ConnectionLostBanner, PersonChangedCover, SignedOutBanner } from "./components/connection-lost-banner";
 import { appendErrorLineOnce, CONNECT_DEADLINE_MS, createConnectionHealthState, msUntilWarn, OPEN_DWELL_MS, reduceConnectionHealth, type ConnectionHealthAction, type ConnectionHealthState } from "./connection-health";
-import { MarkdownRenderer } from "./components/Markdown";
+import { confirmForgetConversation } from "./components/RoomSessionSection";
 import { RoomSettingsModal, type SettingsPane } from "./components/RoomSettingsModal";
-import { AddProviderPanel, ApiKeyForm, ConfigureProfileModal, GatewayApproveModelsModal, GatewayConfigModal, useProviderLogin } from "./components/add-provider-panel";
-import { AiDefaultsGroup } from "./components/ai-defaults-group";
-import { apiErrorCode, apiFetch, fetchJson, isUnexplainedRequestFailure } from "./api";
-import { canonicalModelName, modelDisplayName, modelTooltipName } from "./model-names";
+import { ApiRequestError, apiErrorCode, apiFetch, fetchJson, isServiceUnreachableLine, isUnexplainedRequestFailure, withoutServiceLine } from "./api";
+import { askUntilAnswered, lostUndoLanded, sameNoteWords, SAVE_ANSWER_LOST_SENTENCE, SAVE_NOT_LANDED_SENTENCE, saveAnswerLost, settleLostRunSave, UNDO_NOT_LANDED_SENTENCE } from "./memory-save-answer";
+import { modelNoticeFromError, offersCredentialButton, type ModelNotice, type ModelWait } from "./components/model-notice";
+import { canonicalModelName, modelDisplayName, modelOnProvider, providerDisplayName } from "./model-names";
 import type { ApprovalPreviewData } from "./approval-preview";
-import { describeMaintenanceWarning, formatAbsorbRunSaveError, isStaleMaintenanceMessage, meaningfulMaintenanceWarnings, sectionLabel } from "./maintenance-warnings";
-import { fetchRememberReadEstimate, isPlainRememberSentence, quickRememberBlockers, rememberEstimateSentence, rememberSendsTranscript, rememberProgressSentence, rememberReadSentences, rememberToolOutputSentence, type RememberReadEstimate } from "./remember-read";
-import { AbsorbRunActiveError, approveAbsorbRun, cancelAbsorbRun, fetchAbsorbRun, keepAbsorbRunEntries, resumeAbsorbRun, setAbsorbRunBudget, startAbsorbRun, editAbsorbRunEntry, chooseAbsorbRunBeside } from "./absorb-run-api";
-import { ABSORB_ALL_SUMMARIZED_SENTENCE, ABSORB_CHOOSE_MODEL_LABEL, DISCUSS_FIRST_LABEL, DISCUSS_FIRST_TITLE, maintainChooserFootnote, memorizeChooserText, unsortedHintText, ABSORB_RUN_ACTIVE_ACTION, ABSORB_RUN_ACTIVE_SENTENCE, absorbRunAllSummarized, absorbRunFastPathBlockers, FIRST_READ_MISSING_SENTENCE, AUTOMATIC_APPLY_ON_SENTENCE, absorbRunIsWorking, absorbRunNewTopics, absorbRunSavedSentence, KEEP_DEBOUNCE_MS, keepBatchAction, LIMIT_RAISED_ON_SAVE_SENTENCE, nextKeepIds, nextKeepTopics, overLimitFirstRead, RUN_POLL_INTERVAL_MS, RUN_POLL_LOST_SENTENCE, RUN_POLL_MAX_RETRIES, absorbRunSavedHeadline, absorbRunFullPercent, absorbRunNotesChanged, reviewChangeCounts, reviewRunFastPathBlockers, reviewRunFullPercent, reviewRunIsWorking, REVIEW_RUN_ACTIVE_ACTION, REVIEW_RUN_ACTIVE_SENTENCE } from "./memory-v2-copy";
-import { AbsorbRunCard, AbsorbRunFailedScreen, placeholderAbsorbRun } from "./components/absorb-run-screen";
-import { ReviewCard, ReviewDepthPicker, ReviewFirstReadSections, ReviewRunFailedScreen, ReviewRunProgressScreen, ReviewSavedScreen, reviewPercent, type ReviewUndoState } from "./components/review-screen";
-import { approveReviewRun, cancelReviewRun, editReviewRunEntry, fetchReviewRun, fetchReviewStatus, keepReviewRunEntries, requestReviewAssessment, requestReviewDiscussionSignoff, requestReviewDiscussionTurn, ReviewRunActiveError, setReviewRunBudget, startReviewRun, type ReviewDiscussionMessage } from "./review-api";
+import { approvalAsking, confirmApprovalLabels, declinedAnswerOf, withUnansweredApprovals } from "./components/Approval";
+import { formatAbsorbRunSaveError, logMaintenanceWarnings } from "./maintenance-warnings";
+import { appRouteHash, parseAppRouteHash, type AppRoute } from "./app-route";
+import { isPlainRememberSentence, recentSessionsHeadsUp, REMEMBER_SAVED_REOPEN_SENTENCE, REMEMBER_SAVED_ELSEWHERE_SENTENCE, quickRememberNeedsPreview, rememberRefusedWholeSentence, rememberSendsTranscript, rememberRestartSentence } from "./remember-read";
+import { answerStopNote, couldNotShortenLine, EDIT_REFUSED_LINE, failureLine, isAwayLimitStop, isGatewayFind, isRetryNote, isTurnRunningNote, lineBeforeChooseModel, lineWithMessage, messageSentAgain, NOT_SENT_AGAIN, overflowLineOf, providerSentence, returnedFailureLine, retryNoteLine, isStopLine, STOPPED_FOR_NEXT_LINE, STOPPED_LINE, TURN_RUNNING_LINE, turnEndedLine, turnFailureLine, type CarriedFile, type FailureCause, type GatewayFind, type MessageWhere, type QuotaWay, type RetryFailure, type ReturnedPromptFrame, type TurnFailure } from "./turn-failure-line";
+import { estimateTokens, estimateTokensFromChars, modelTokenFactor } from "../../web-server/src/token-estimate";
+import { AbsorbRunActiveError, approveAbsorbRun, cancelAbsorbRun, fetchAbsorbRun, keepAbsorbRunEntries, resumeAbsorbRun, setAbsorbRunBudget, startAbsorbRun, editAbsorbRunEntry, chooseAbsorbRunBeside, moveAbsorbRunSortedNote, absorbBaseUrl, fetchAbsorbStatus, requestAbsorbDiscussionSignoff, requestAbsorbDiscussionTurn, withAbsorbStatusFields } from "./absorb-run-api";
+import { absorbRunFastPathBlockers, AUTOMATIC_APPLY_ON_SENTENCE, absorbRunIsWorking, KEEP_DEBOUNCE_MS, keepBatchAction, nextKeepIds, nextKeepTopics, RUN_POLL_INTERVAL_MS, RUN_POLL_LOST_SENTENCE, RUN_POLL_MAX_RETRIES, absorbRunNothingToSave, reviewRunFastPathBlockers, reviewRunIsWorking, reviewRunNothingToSave, reviewBudgetOnlyConfirmBody, discussionKeptSentence } from "./memory-v2-copy";
+import { closeSidebarOnPhone, usePhoneWidth } from "./sidebar-collapse";
+import { useEscapeKey } from "./components/use-escape-key";
+import { type ReviewUndoState } from "./components/review-screen";
+import { approveReviewRun, cancelFirstReadAt, cancelReviewRun, editReviewRunEntry, fetchReviewRun, fetchReviewStatus, keepReviewRunEntries, requestFirstRead, reviewBase, requestReviewDiscussionSignoff, requestReviewDiscussionTurn, resumeReviewRun, ReviewRunActiveError, setReviewRunBudget, startReviewRun, type ReviewDiscussionMessage } from "./review-api";
 import { undoMemorySave } from "./memory-entries-api";
-import type { AbsorbApprovalResponse, AbsorbAssessmentResponse, AbsorbAvailability, AbsorbDiscussionMessage, AbsorbDiscussionSignoffResponse, AbsorbDiscussionTokenBudget, AbsorbDiscussionTurnResponse, AbsorbProposalSourceMetadata, AbsorbRun, AuthStatusResponse, ChatItem, CheckpointApprovalResponse, CheckpointProposalResponse, ContextHealthStatus, LoginProviderCatalogEntry, PersistentAgentAiProfileSelectionStatus, PersistentAgentAiProfileStatus, ArchivedPersistentAgentSummary, PersistentAgentArchiveResponse, PersistentAgentCreateRequest, PersistentAgentCreateResponse, PersistentAgentId, PersistentAgentMementoBoundaryResponse, PersistentAgentPurgeResponse, PersistentAgentStatus, PersistentAgentThreadOrigin, PersistentAgentThreadRecord, ReviewAssessmentResponse, ReviewAvailability, ReviewDepth, ReviewDiscussionTokenBudget, ReviewGuidance, ReviewRun, ReviewRunApprovalResponse, RoomModelLockView, WebChatModelOption, WebChatModelStatus } from "./types";
-import type { ConversationSwitchNotice } from "./room-models-api";
-import { archivePersistentRoom, fetchArchivedPersistentRooms, fetchPersistentRoomMaintenanceSettings, purgePersistentRoom, restorePersistentRoom, updatePersistentRoomMaintenanceSettings, type PersistentRoomPurgeError } from "./persistent-room-management-api";
-import { ARRIVAL_REVEAL_PACING, createAssistantStreamState, DEFAULT_REVEAL_PACING, isAssistantStreamActive, outputLimitNoticeForTurn, reduceAssistantStream, type AssistantStreamAction, type AssistantStreamEffect, type AssistantStreamState, type RevealPacing } from "./assistant-stream";
+import type { AbsorbAssessmentResponse, AbsorbAvailability, AbsorbDiscussionMessage, AbsorbRun, AuthStatusResponse, ChatItem, CheckpointApprovalResponse, CheckpointProposalResponse, ContextHealthStatus, PersistentAgentAiProfileSelectionStatus, PersistentAgentArchiveResponse, PersistentAgentCreateRequest, PersistentAgentCreateResponse, PersistentAgentId, PersistentAgentMementoBoundaryResponse, PersistentAgentPurgeResponse, PersistentAgentStatus, PersistentAgentThreadOrigin, PersistentAgentThreadRecord, ReviewAssessmentResponse, ReviewDepth, ReviewRun, RoomModelLock, RoomModelLockView, WebChatModelOption, WebChatModelStatus } from "./types";
+import { conversationSwitchRefusal, switchConversationModel, withStoredSwitchLines, withSwitchLine, type ConversationSwitchNotice } from "./room-models-api";
+import { archivePersistentRoom, fetchPersistentRoomMaintenanceSettings, purgePersistentRoom, updatePersistentRoomMaintenanceSettings, type PersistentRoomPurgeError } from "./persistent-room-management-api";
+import { createAssistantStreamState, isAssistantStreamActive, outputLimitNoticeForTurn, partDrawnAtOnce, reduceAssistantStream, seenOfOpenAnswer, type AssistantStreamAction, type AssistantStreamEffect, type AssistantStreamState } from "./assistant-stream";
+import { readTurnEndedBy } from "../../web-server/src/turn-ended-by";
+import { isAnswerPartId, keyOfId, readShownPrompt } from "../../web-server/src/thread-items-by-id";
+import { thinkingTextStore } from "./thinking-text-store";
 import { consultStack, createConsultState, reduceConsult, type ConsultAction, type ConsultExchange, type ConsultState } from "./consult-stream";
 import { createTaskState, reduceTask, type TaskAction, type TaskState } from "./task-stream";
 import { ConsultDock } from "./components/delegation-card";
 import { TaskRunView } from "./components/task-run-view";
 import { ArtifactViewer } from "./components/ArtifactViewer";
-import { EffortControl } from "./components/EffortControl";
-import { ChevronDownIcon, GearIcon, PaperclipIcon, TrashIcon } from "./components/icons";
+import { ModelPickControl } from "./components/model-pick-control";
+import { ModelSwitchWindow } from "./components/model-switch-window";
+import { GearIcon, PaperclipIcon, TrashIcon } from "./components/icons";
 // The handoff grammar + queue helpers are the ONE shared source of truth, imported
 // straight from the server workspace's pure module (no node/server deps; vite
 // bundles it) so transfer here and the checkpoint formatter there agree exactly.
 import { buildConsultHandoffBlockFromStack, composeOutgoingPromptWithHandoffs, readConsultHandoffQueue, type ConsultHandoffExchange } from "../../web-server/src/consult-handoff";
 import { isSpecialistHandoffBlock } from "../../web-server/src/specialist-handoff";
-import type { MentionCandidateRoom } from "./mention-popover";
+import { resolveLeadingMention, type MentionCandidateRoom } from "./mention-popover";
+import { boxWithHandBack, bubbleIdOf, QUEUE_REFUSED_FILES, QUEUE_REFUSED_TOO_LONG, cutSettling, firstConsult, handBackAll, heldFromPage, keptChanges, laterIds, nextBatch, nextConsult, queuedBubbles, queuedForAnswer, readMessageIds, readMessageList, reduceOutgoing, type ListedMessage, type OutgoingAction, type OutgoingMessage } from "./outgoing-messages";
+import { fitsHeldLimits } from "../../web-server/src/held-message-limits";
+import { currentDraftStartedAt, messageDeclinesQuestion } from "./question-keys";
+import { deriveTrailingConsultIds, endLiveThinking, frameItemId, failureKindOf, formatDirectResumeError, hasUserInput, hasUserVisibleTurn, leftByFailedAttempt, type MaintainTarget, newConversationId, nid, PendingRemovals, type PersistentAgentTarget, type PersistentAgentThread, type PersistentChatConfig, reconnectedThread, type SessionUsage, stopWorkInFlight, threadRecordToLocalThread, threadSaveBody, withoutStopLineUnderStoppedCard, ZERO_USAGE } from "./room-thread-items";
+import { clampRightPaneWidth, equalSplitPaneWidth, getDefaultKnowledgePaneWidth, KNOWLEDGE_PANE_WIDTH_STORAGE_KEY } from "./right-pane-width";
+import { WORKSPACE_NUDGE_STORAGE_PREFIX, type WorkspaceHint, workspaceHintOf } from "./workspace-nudge";
+import { releaseStaged, type SentMessage, STAGED_IMAGE_EXTENSIONS, type StagedAttachment, TEXT_FILE_EXTENSIONS } from "./composer-staging";
+import { readEffortPayload } from "./room-effort";
+import { createPersistentAgent, fetchPersistentAgentStatuses } from "./room-list-api";
+import { AiProfileSwitcherSection, type CurrentModel, nameInput, NO_CURRENT_MODEL, type RegistryModel } from "./components/ai-profile-switcher";
+import { Landing } from "./components/landing";
+import { MemoryShell } from "./components/memory-shell";
+import { AssetDeleteDialog, type ExportCollision, ExportCollisionDialog, FileDeleteDialog, SaveAsDialog } from "./components/room-file-dialogs";
+import { TaskStoreGcBanner, TaskStoreGcDialog, type TaskStoreGcView } from "./components/task-store-gc";
+import { ABSORB_LOADING_MESSAGES, ABSORB_WAITING_MESSAGES, type AbsorbWorkflowState, assessmentRetryFeedback, type CheckpointDensity, CLOSED_ABSORB_WORKFLOW, CLOSED_REVIEW_WORKFLOW, missingFirstRead, missingReviewFirstRead, REVIEW_LOADING_MESSAGES, REVIEW_WAITING_MESSAGES, reviewAssessmentRetryFeedback, type ReviewWorkflowState } from "./maintain-workflow-state";
+import { formatAbsorbWorkflowError, formatMaintenanceDraftError, formatRememberError, formatReviewApprovalError, formatReviewWorkflowError, REMEMBER_OTHER_CONVERSATION_OPEN, ROOM_MOVED_ON_SENTENCE, roomFilledBy } from "./maintenance-errors";
+import { AbsorbWorkflowShell, MaintainChooserShell, type MaintainConfirm, MaintainConfirmDialog, ReviewWorkflowShell } from "./components/maintain-workflow-screens";
+import { type CheckpointApprovalEditFields, checkpointEditsKey, checkpointFieldsOf, CheckpointPreviewShell, CheckpointSplitButton, sameCheckpointFields } from "./components/remember-dialog";
 
 type MainView = "home" | "chat" | "dashboard" | "memory";
-type CheckpointDensity = "compact" | "standard" | "rich";
-// "running", "run_card" and "run_failed" are the Memorize v2 steps: propose
-// starts a run the client polls instead of returning a finished draft.
-type AbsorbWorkflowStep = "closed" | "checking" | "assessing" | "assessment" | "discussing" | "signing_off" | "proposing" | "running" | "run_card" | "run_failed" | "approving" | "saved" | "unavailable" | "error";
-type ReviewWorkflowStep = "closed" | "checking" | "assessing" | "assessment" | "discussing" | "signing_off" | "running" | "run_card" | "run_failed" | "approving" | "saved" | "unavailable" | "error";
-type AbsorbWorkflowState = {
-	step: AbsorbWorkflowStep;
-	target: MaintainTarget | null;
-	availability: AbsorbAvailability | null;
-	/** The conversations waiting, from the status read at the start; the card shell lists them before the run reports. */
-	conversations?: { id: string; title: string; date: string }[];
-	assessment: AbsorbAssessmentResponse | null;
-	approvalResult: AbsorbApprovalResponse | null;
-	discussionMessages?: AbsorbDiscussionMessage[];
-	discussionTokenBudget?: AbsorbDiscussionTokenBudget | null;
-	discussionSending?: boolean;
-	// Non-fatal server notes from a successful turn; rendered amber, never red.
-	discussionWarnings?: string | null;
-	// Disclosures from the signoff that produced the current draft (a trimmed
-	// summary, a shortened transcript): rendered on the proposal screen, never dropped.
-	signoffWarnings?: string[];
-	assessmentHandoff?: AbsorbDiscussionSignoffResponse["assessmentHandoff"] | null;
-	// Room setting known up front so automation is disclosed BEFORE the write,
-	// not after (the flow otherwise promises "nothing is saved yet").
-	fastPathEnabled?: boolean;
-	fastPathApplied?: boolean;
-	fastPathBlockedReasons?: string[];
-	// Memorize v2: the run this flow is watching. runId is known from the 202
-	// answer, the run itself from the first poll that lands.
-	runId?: string | null;
-	run?: AbsorbRun | null;
-	// A keep toggle, a budget change or an approval is in flight: the card's
-	// actions are disarmed so two requests never race over one run.
-	runBusy?: boolean;
-	// Set once the poll retries ran out; the run may well still be going.
-	runPollError?: string | null;
-	// A previous run this room never finished, which is refusing the next one.
-	// Its id is the only thing that can stop it from here.
-	activeRunConflictId?: string | null;
-	// The first read's raise-the-limit action is writing the room setting and
-	// reading the status back.
-	limitRaising?: boolean;
-	// The limit the room had before the first read raised it: sent with the
-	// run so its save records the raise and an undo takes the limit back. The
-	// original value survives a second raise; a new Memorize starts without it.
-	limitRaisedFrom?: number;
-	error: string | null;
-};
-
-const CLOSED_ABSORB_WORKFLOW: AbsorbWorkflowState = {
-	step: "closed",
-	target: null,
-	availability: null,
-	assessment: null,
-	approvalResult: null,
-	error: null,
-};
-
-type ReviewWorkflowState = {
-	step: ReviewWorkflowStep;
-	target: MaintainTarget | null;
-	// What the room says about its notes, from the first read that landed.
-	availability: ReviewAvailability | null;
-	// Why Review cannot start, in the server's own words.
-	unavailableReason?: string | null;
-	assessment: ReviewAssessmentResponse | null;
-	// How far this tidy goes. Null follows the room's own recommendation, and
-	// the request then carries whatever the picker is showing.
-	depth?: ReviewDepth | null;
-	// What the person agreed in the discussion, carried into the tidy.
-	guidance?: ReviewGuidance | null;
-	discussionMessages?: ReviewDiscussionMessage[];
-	discussionTokenBudget?: ReviewDiscussionTokenBudget | null;
-	discussionSending?: boolean;
-	// Non-fatal server notes from a successful turn; rendered amber, never red.
-	discussionWarnings?: string | null;
-	// Disclosures from the sign-off that started this tidy (a shortened
-	// transcript, a trimmed summary): rendered on the card, never dropped.
-	signoffWarnings?: string[];
-	// Room setting known up front so automation is disclosed BEFORE the write,
-	// not after (the flow otherwise promises "nothing is saved yet").
-	fastPathEnabled?: boolean;
-	fastPathApplied?: boolean;
-	fastPathBlockedReasons?: string[];
-	// The tidy this flow is watching. runId is known from the answer that starts
-	// it, the run itself from the first poll that lands.
-	runId?: string | null;
-	run?: ReviewRun | null;
-	// A keep toggle, a limit change or an approval is in flight: the card's
-	// actions are disarmed so two requests never race over one tidy.
-	runBusy?: boolean;
-	// Set once the poll retries ran out; the tidy may well still be going.
-	runPollError?: string | null;
-	// A previous tidy this room never finished, which is refusing the next one.
-	// Its id is the only thing that can stop it from here.
-	activeRunConflictId?: string | null;
-	approvalResult: ReviewRunApprovalResponse | null;
-	// Undo of the save this screen reports: in flight, done, or refused with a reason.
-	undo?: ReviewUndoState;
-	error: string | null;
-};
-
-const CLOSED_REVIEW_WORKFLOW: ReviewWorkflowState = {
-	step: "closed",
-	target: null,
-	availability: null,
-	assessment: null,
-	approvalResult: null,
-	error: null,
-};
-
-// The same for the Review first read, whose parser words a missing section its
-// own way; the read's prompt only accepts those sentences back.
-function reviewAssessmentRetryFeedback(assessment: { warnings: string[] } | null | undefined): string[] | undefined {
-	const feedback = (assessment?.warnings ?? []).filter((warning) => /^the first read has no "/.test(warning));
-	return feedback.length ? feedback : undefined;
-}
-
-// Reassess carries the parser's own findings on the current assessment (raw
-// server vocabulary, which is what the worker prompt expects) so the regenerated
-// assessment fixes the named sections instead of re-rolling blind.
-/**
- * The first read the client stands in when the request for one failed without
- * the server saying why, or when a room that saves without the card started
- * Memorize without one: "None.", like the server's own missing first read,
- * with no source, so there is nothing to discuss and Continue goes on without.
- */
-function missingFirstRead(agentId: PersistentAgentId, availability: AbsorbAvailability, why: "unreachable" | "skipped" = "unreachable"): AbsorbAssessmentResponse {
-	return {
-		agentId,
-		writesMemory: false,
-		process: { type: "absorb-consolidation-worker", model: availability.model ?? { provider: "", model: "" } },
-		availability,
-		assessmentMarkdown: "None.",
-		fields: { whatToRemember: [], whatToForget: [], stableMemoryChanges: { deepMemory: [], activeItems: [], recentContext: "" }, needsJudgment: [] },
-		warnings: [],
-		firstReadMissing: why,
-	};
-}
-
-function assessmentRetryFeedback(assessment: { warnings: string[] } | null | undefined): string[] | undefined {
-	const feedback = (assessment?.warnings ?? []).filter((warning) => warning.startsWith("assessment missing"));
-	return feedback.length ? feedback : undefined;
-}
-
-
-const CHECKPOINT_REMEMBER_MAX_CHARS = 500;
-const ABSORB_WAITING_MESSAGES = [
-	"Absorbing wisdom…",
-	"Meditating on recent conversations…",
-	"Letting the lessons settle…",
-	"Filing memories where they belong…",
-	"Distilling what mattered…",
-	"Choosing what to carry forward…",
-	"Turning conversations into notes…",
-	"Beepbopping memory…",
-];
-const REVIEW_WAITING_MESSAGES = [
-	"Finding dense signal…",
-	"Pruning the bonsai…",
-	"Weighing every memory…",
-	"Folding duplicates together…",
-	"Tightening the threads…",
-	"Checking what still rings true…",
-	"Letting go of the stale bits…",
-	"Polishing what stays…",
-];
-const REVIEW_LOADING_MESSAGES = [
-	"Reading the notes…",
-	"Sorting the topics…",
-	"Walking the archive shelves…",
-	"Looking for stale threads…",
-	"Measuring density and drift…",
-	"Listening for what still matters…",
-];
-const ABSORB_LOADING_MESSAGES = [
-	"Connecting to the Matrix…",
-	"Inferencing really hard…",
-	"Listening for memory signal…",
-	"Sorting signal from glitter…",
-	"Compressing the universe gently…",
-	"Asking the neurons to focus…",
-	"Untangling recent conversations…",
-	"Finding the good bits…",
-	"Meditating on what happened…",
-	"Rereading the recent chapters…",
-	"Looking for lessons worth keeping…",
-	"Dusting off the archive shelves…",
-];
-const CHECKPOINT_DENSITY_OPTIONS: Array<{ id: CheckpointDensity; label: string; budget: string }> = [
-	{ id: "compact", label: "Compact", budget: "Just the essentials" },
-	{ id: "standard", label: "Standard", budget: "The decisions and threads that matter" },
-	{ id: "rich", label: "Rich", budget: "A fuller record of the session" },
-];
-type PersistentAgentThread = {
-	state: "live" | "standby";
-	agentId: PersistentAgentId;
-	displayName: string;
-	conversationId: string;
-	model: WebChatModelOption;
-	items: ChatItem[];
-};
-// A just-created room is not in the room list yet; its create answer brings
-// the model rows along.
-type PersistentAgentTarget = { id: PersistentAgentId; displayName?: string; models?: PersistentAgentStatus["models"] };
-type MaintainTarget = { agentId: PersistentAgentId; displayName: string };
-type PersistentChatConfig = Pick<PersistentAgentThread, "agentId" | "displayName" | "conversationId" | "model"> | null;
-
-interface SessionUsage {
-	turns: number;
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-	cost: number;
-	totalTokens: number;
-	/** What the last turn LEFT BEHIND, when the provider measured it separately from what it cost. */
-	contextTokens: number | null;
-}
-
-function threadRecordToLocalThread(record: PersistentAgentThreadRecord, fallbackDisplayName = "Persistent room"): PersistentAgentThread {
-	if (record.state === "closed") throw new Error("This room thread is closed and cannot be resumed.");
-	const model: WebChatModelOption = { provider: record.model.provider, model: record.model.model, label: record.model.label || `${record.model.provider}/${record.model.model}` };
-	return {
-		state: record.state === "active" ? "live" : "standby",
-		agentId: record.agentId,
-		displayName: fallbackDisplayName,
-		conversationId: record.threadId,
-		model,
-		items: settleLoadedItems(Array.isArray(record.items) ? record.items as ChatItem[] : []).filter((item) => !isSavedModelWaitLine(item)),
-	};
-}
-
-// Older builds wrote the "signed out" or "no longer offered" refusal into the
-// conversation as a red line. The room says it once, in the notice above the
-// composer, so a saved copy is not shown again.
-const SAVED_MODEL_WAIT_LINE = /is signed out, so this conversation cannot continue on |^This room's (?:memory )?model, .+, is (?:signed out|no longer offered)\./;
-function isSavedModelWaitLine(item: ChatItem): boolean {
-	return item.kind === "system" && item.level === "error" && SAVED_MODEL_WAIT_LINE.test(String(item.text ?? ""));
-}
 
 /**
- * A thread on disk can carry a reply mid-flight: the browser saves while an
- * answer streams (the `streaming` mark lets a reload draw the caret in the
- * right place), and if that tab died before its next save the mark stays.
- * Opened later, nothing is streaming any more: such a segment is shown as
- * settled, and one that never received a character (the slot reserved for
- * a reply the moment its message ended) is dropped rather than shown as a
- * permanent "…". A turn still cooking is reattached separately and rebuilds
- * its tail from the anchor, so this loses nothing live.
+ * This window's hold on the room's running turn. "reconnecting": the
+ * connection dropped and the turn goes on at the server, so the answer waits
+ * for the replay instead of being called cut. "elsewhere": another window took
+ * the room, so this one shows what it had, stops saving and offers Open here.
  */
-function settleLoadedItems(items: ChatItem[]): ChatItem[] {
-	const settled: ChatItem[] = [];
-	for (const item of items) {
-		if (item.kind === "assistant" && item.streaming) {
-			if (!String(item.text ?? "").trim()) continue;
-			settled.push({ ...item, streaming: false });
-			continue;
-		}
-		settled.push(item);
-	}
-	return settled;
-}
+type TurnLink = "live" | "reconnecting" | "elsewhere";
 
-// Consult MR-5: reconstruct which consult items still show the pending hint when
-// a thread is restored — the `count` most recent consult items in the transcript,
-// since each un-consumed transfer contributes exactly one queued block and one
-// (trailing) consult item.
-function deriveTrailingConsultIds(items: ChatItem[], count: number): Set<string> {
-	const ids = new Set<string>();
-	if (count <= 0) return ids;
-	for (let i = items.length - 1; i >= 0 && ids.size < count; i--) {
-		const item = items[i];
-		if (item.kind === "consult") ids.add(item.id);
-	}
-	return ids;
-}
+const ROOM_ELSEWHERE_SENTENCE = "This room is now open in another window.";
 
-const ZERO_USAGE: SessionUsage = {
-	turns: 0,
-	input: 0,
-	output: 0,
-	cacheRead: 0,
-	cacheWrite: 0,
-	cost: 0,
-	totalTokens: 0,
-	contextTokens: null,
-};
+/** Said in the working dot's place while the room shortens a long conversation. */
+const SHORTENING_LINE = "Shortening the conversation so far…";
 
-let __nextId = 1;
-const nid = () => `i_${Date.now().toString(36)}_${__nextId++}_${Math.random().toString(36).slice(2, 7)}`;
+// While the answer is frozen for the person's message, what still arrives of it does not show.
+const FROZEN_STREAM_ACTIONS: ReadonlySet<AssistantStreamAction["type"]> = new Set(["message_start", "part_id", "delta", "text_end", "message_end", "break", "tick"]);
+// How long a held pick keeps asking while the server still says its answer runs, after the page saw it end.
+const SWITCH_ANSWERING_RETRY_MS = 30_000;
+// How often a switch whose answer was lost asks again where the conversation stands.
+const SWITCH_READ_RETRY_MS = 1_000;
 
-// The reveal band is a taste knob, not physics: `localStorage.setItem(
-// "exxperts.revealSpeed", "brisk" | "arrival" | "instant")` overrides the
-// default reading-speed band without a rebuild (reload to apply). Cached —
-// useRef initializer expressions run on every render and this reads
-// localStorage.
-let cachedRevealPacing: RevealPacing | null = null;
-function readRevealPacing(): RevealPacing {
-	if (cachedRevealPacing) return cachedRevealPacing;
-	let pacing = DEFAULT_REVEAL_PACING;
-	try {
-		const value = localStorage.getItem("exxperts.revealSpeed");
-		if (value === "brisk") pacing = { ...DEFAULT_REVEAL_PACING, minCharsPerSec: 90, maxCharsPerSec: 150 };
-		if (value === "arrival") pacing = ARRIVAL_REVEAL_PACING;
-		if (value === "instant") pacing = { ...DEFAULT_REVEAL_PACING, minCharsPerSec: 1e6, maxCharsPerSec: 1e6 };
-	} catch {}
-	cachedRevealPacing = pacing;
-	return pacing;
-}
-const newConversationId = () => `c_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
-const DIRECT_RESUME_INCOMPATIBLE_MODEL_MESSAGE = "This standby thread is locked to a model that is not available in the active AI profile. Select a compatible AI profile to resume it.";
-
-function formatDirectResumeError(error: unknown): string {
-	const message = error instanceof Error ? error.message : String(error ?? "");
-	if (/model is not approved/i.test(message)) return DIRECT_RESUME_INCOMPATIBLE_MODEL_MESSAGE;
-	return message || "Could not resume this standby thread.";
-}
 
 /**
- * A tool call that was in flight when its turn ended will never get a result:
- * the toolResult event that would settle it is exactly what the abort or the
- * failure prevented. Left alone it spins forever, in the transcript and on
- * disk, its bundle keeps claiming the room is still reading, and the reply's
- * copy button waits on it. Stopped rather than failed, because the tool
- * itself did nothing wrong.
+ * Editing the newest message: its bubble is a box (`editing`, with the text
+ * the bubble shows), or the edit was sent and the server has not taken or
+ * refused it yet (`sent`: the edited bubble, the items it replaces, the new
+ * bubble and its text).
  */
-function stopRunningToolItems(items: ChatItem[]): ChatItem[] {
-	return items.some((it) => it.kind === "tool" && it.status === "running")
-		? items.map((it) => (it.kind === "tool" && it.status === "running" ? { ...it, status: "stopped" as const } : it))
-		: items;
-}
-
-function hasUserInput(items: ChatItem[]): boolean {
-	return items.some((item) => item.kind === "user" && item.text.trim().length > 0);
-}
-
-const MAINTAIN_BLOCKED_BY_OPEN_CONVERSATION = "Remember or Forget the open conversation first, then Maintain becomes available.";
-
-function hasUserVisibleTurn(items: ChatItem[]): boolean {
-	return items.some((item) => (item.kind === "user" || item.kind === "assistant") && item.text.trim().length > 0);
-}
-// A stored width means the user dragged the divider. The old key also captured
-// auto-persisted defaults, which would mask the equal-split open size forever,
-// so the key is bumped once instead of migrating those values.
-const KNOWLEDGE_PANE_WIDTH_STORAGE_KEY = "exxperts.rightPane.width";
-const WORKSPACE_NUDGE_STORAGE_PREFIX = "exxperts.workspaceNudgeDismissed.";
-const RIGHT_PANE_MIN_WIDTH = 360;
-// Keep at least this much of the workbench for the chat column when the pane
-// grows; without it a wide pane can squeeze the chat (a 1fr track) to zero.
-const RIGHT_PANE_MIN_CHAT_WIDTH = 360;
-const RIGHT_PANE_RESIZER_WIDTH = 8;
-
-function getRightPaneMaxWidth(hostWidth?: number) {
-	// Clamp against the workbench (chat + divider + pane) when we can measure
-	// it; the window is only a bootstrap fallback (initial state, no ref yet).
-	if (typeof hostWidth === "number" && hostWidth > 0) {
-		return Math.floor(hostWidth - RIGHT_PANE_RESIZER_WIDTH - RIGHT_PANE_MIN_CHAT_WIDTH);
-	}
-	if (typeof window === "undefined") return 820;
-	return Math.floor(window.innerWidth * 0.7);
-}
-
-function clampRightPaneWidth(width: number, hostWidth?: number) {
-	const max = Math.max(RIGHT_PANE_MIN_WIDTH, getRightPaneMaxWidth(hostWidth));
-	return Math.max(RIGHT_PANE_MIN_WIDTH, Math.min(max, Math.round(width)));
-}
-
-function getDefaultKnowledgePaneWidth() {
-	if (typeof window === "undefined") return 520;
-	return clampRightPaneWidth(window.innerWidth * 0.5);
-}
-
-function equalSplitPaneWidth(hostWidth?: number) {
-	// The pane opens sharing the workbench with the chat half and half; the
-	// sidebar sits outside the workbench, so this splits what they share.
-	if (typeof hostWidth === "number" && hostWidth > 0) {
-		return clampRightPaneWidth(Math.floor((hostWidth - RIGHT_PANE_RESIZER_WIDTH) / 2), hostWidth);
-	}
-	return getDefaultKnowledgePaneWidth();
-}
-
-function fmtTok(n: number): string {
-	if (n < 1000) return String(n);
-	if (n < 10_000) return (n / 1000).toFixed(1) + "k";
-	if (n < 1_000_000) return Math.round(n / 1000) + "k";
-	return (n / 1_000_000).toFixed(1) + "M";
-}
-function fmtCost(n: number): string {
-	if (n === 0) return "$0";
-	if (n < 0.01) return "<$0.01";
-	return "$" + n.toFixed(2);
-}
-
-function authSourceLabel(source?: AuthStatusResponse["providers"][number]["source"], label?: string): string {
-	if (source === "stored") return "stored locally";
-	if (source === "environment") return `environment variable${label ? `: ${label}` : ""}`;
-	if (source === "runtime") return label || "runtime override";
-	if (source === "fallback") return label || "custom provider config";
-	if (source === "models_json_key" || source === "models_json_command") return label || "models.json";
-	return "not connected";
-}
-
-
-// Home asks for AI setup only when no room could run: nothing set up yet, or
-// no provider signed in. A room whose own pick is signed out runs on the
-// default meanwhile and says so in its Model pane.
-function homeAiProfileStatus(modelStatus: WebChatModelStatus | null, aiProfileStatus: PersistentAgentAiProfileSelectionStatus | null): { message: string; ready: boolean | undefined } | null {
-	if (!modelStatus && !aiProfileStatus) return null;
-	const configured = aiProfileStatus ? aiProfileStatus.state.source !== "default" : true;
-	if (!configured) return { message: "AI setup needed", ready: false };
-	const anyReady = modelStatus?.providers ? modelStatus.providers.some((provider) => provider.ready) : aiProfileStatus?.profiles.some((profile) => profile.ready);
-	return { message: "AI setup needed", ready: anyReady };
-}
-
-function compactDateTime(value: string | null | undefined): string {
-	if (!value) return "none yet";
-	const date = new Date(value);
-	if (Number.isNaN(date.getTime())) return value;
-	const now = new Date();
-	const sameDay = date.toDateString() === now.toDateString();
-	const yesterday = new Date(now);
-	yesterday.setDate(now.getDate() - 1);
-	const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-	if (sameDay) return `today ${time}`;
-	if (date.toDateString() === yesterday.toDateString()) return `yesterday ${time}`;
-	return date.toLocaleDateString([], { month: "short", day: "numeric" });
-}
-
-function memoryLevelLabel(level: PersistentAgentStatus["memoryStatus"]["recentContextLevel"]): string {
-	if (level === "hard_cap") return "hard cap reached";
-	if (level === "at_soft_cap") return "soft cap reached";
-	if (level === "approaching_soft_cap") return "consolidation soon";
-	if (level === "empty") return "empty";
-	return "healthy";
-}
-
-function fetchPersistentAgentStatuses(): Promise<PersistentAgentStatus[]> {
-	return fetchJson<PersistentAgentStatus[]>("/api/persistent-agents");
-}
-
-function createPersistentAgent(request: PersistentAgentCreateRequest): Promise<PersistentAgentCreateResponse> {
-	return fetchJson<PersistentAgentCreateResponse>("/api/persistent-agents", {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify(request),
-	});
-}
-
-function absorbBaseUrl(agentId: PersistentAgentId): string {
-	return `/api/persistent-agents/${encodeURIComponent(agentId)}/absorb`;
-}
-
-/**
- * The first read answers with its own availability, which says nothing about
- * the limit; the status read does. The assessment step keeps both: the
- * read's verdict, and the status's limit and pre-pass numbers under it.
- */
-function withAbsorbStatusFields(availability: AbsorbAvailability, status: AbsorbAvailability | null): AbsorbAvailability {
-	if (!status) return availability;
-	return {
-		...availability,
-		version: availability.version ?? status.version,
-		sessions: availability.sessions ?? status.sessions,
-		budget: availability.budget ?? status.budget,
-		prepass: availability.prepass ?? status.prepass,
-		// The Memory model as the status named it, for the notices that name it.
-		model: availability.model ?? status.model,
-	};
-}
-
-function fetchAbsorbStatus(agentId: PersistentAgentId): Promise<AbsorbAvailability> {
-	return fetchJson<AbsorbAvailability>(`${absorbBaseUrl(agentId)}/status`);
-}
-
-function requestAbsorbAssessment(agentId: PersistentAgentId, options?: { retryFeedback?: string[] }): Promise<AbsorbAssessmentResponse> {
-	return fetchJson<AbsorbAssessmentResponse>(`${absorbBaseUrl(agentId)}/assess`, {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify(options?.retryFeedback?.length ? { retryFeedback: options.retryFeedback } : {}),
-	});
-}
-
-function requestAbsorbDiscussionTurn(agentId: PersistentAgentId, request: { source: AbsorbProposalSourceMetadata; assessmentMarkdown: string; messages: AbsorbDiscussionMessage[]; userMessage: string }): Promise<AbsorbDiscussionTurnResponse> {
-	return fetchJson<AbsorbDiscussionTurnResponse>(`${absorbBaseUrl(agentId)}/discuss`, {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify(request),
-	});
-}
-
-function requestAbsorbDiscussionSignoff(agentId: PersistentAgentId, request: { source: AbsorbProposalSourceMetadata; assessmentMarkdown: string; messages: AbsorbDiscussionMessage[]; userMessage?: string }): Promise<AbsorbDiscussionSignoffResponse> {
-	return fetchJson<AbsorbDiscussionSignoffResponse>(`${absorbBaseUrl(agentId)}/discuss/signoff`, {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify(request),
-	});
-}
-
-// Registry rows spell a model as { provider, model, label }; the shared naming
-// module takes { provider, model, modelLabel }. One adapter, so every surface
-// here goes through the same canonical implementation instead of its own.
-type RegistryModel = { label?: string; model: string; provider?: string };
-function nameInput(model: RegistryModel) {
-	return { model: model.model, modelLabel: model.label, provider: model.provider };
-}
-function registryModelName(model: RegistryModel): string {
-	return modelDisplayName(nameInput(model)) || model.model;
-}
-function registryModelTooltip(model: RegistryModel): string {
-	return modelTooltipName(nameInput(model)) || model.model;
-}
-
-// A comma-separated model list where each name carries its provider on hover.
-type CurrentModel = { name: string; provider: string | null };
-const NO_CURRENT_MODEL: CurrentModel = { name: "", provider: null };
-
-function ModelNameList({ models }: { models: RegistryModel[] }) {
-	return (
-		<>
-			{models.map((model, index) => (
-				<span key={`${model.provider ?? ""}/${model.model}/${index}`}>
-					{index > 0 ? ", " : ""}
-					<span title={registryModelTooltip(model)}>{registryModelName(model)}</span>
-				</span>
-			))}
-		</>
-	);
-}
-
-// A provider's models in product vocabulary: the ones its rooms may pick, and
-// the connection. Which model runs memory work is the rooms' choice (the
-// defaults above, or Room settings, Model), not the provider's.
-function AiProfileModelsDetail({ profile }: { profile: PersistentAgentAiProfileStatus }) {
-	const roomModels = profile.processes?.persistentRoom.models ?? [];
-	return (
-		<div className="ai-profile-models" role="presentation">
-			<div className="ai-profile-models-row"><span>Rooms</span><span>{roomModels.length > 0 ? <ModelNameList models={roomModels} /> : "no room models listed"}</span></div>
-			<div className="ai-profile-models-row"><span>Connection</span><span>{profile.provider.configured ? `signed in · ${authSourceLabel(profile.provider.source, profile.provider.label)}` : "not signed in"}</span></div>
-		</div>
-	);
-}
-
-/** The profile row's management popover, rendered through a portal to <body>.
- *  The rows live inside scroll containers (the settings modal's content pane,
- *  the onboarding page) that clip an in-place absolute menu at the fold; the
- *  portal escapes every ancestor clip and containing-block trap (the modal
- *  backdrop's backdrop-filter would otherwise capture position:fixed). The
- *  menu hangs right-aligned under its anchor and flips above it when the
- *  viewport bottom would cut it; a ResizeObserver re-measures when the
- *  contents swap (the remove-confirm is taller than the item list). */
-function AiProfileRowMenu({ anchorRef, onDismiss, children }: { anchorRef: React.RefObject<HTMLElement | null>; onDismiss: () => void; children: ReactNode }) {
-	const menuRef = useRef<HTMLSpanElement>(null);
-	const [pos, setPos] = useState<{ top: number | undefined; bottom: number | undefined; left: number } | null>(null);
-	useLayoutEffect(() => {
-		function measure() {
-			const menu = menuRef.current;
-			const anchor = anchorRef.current;
-			if (!menu || !anchor) return;
-			const rect = anchor.getBoundingClientRect();
-			const height = menu.offsetHeight;
-			const spaceBelow = window.innerHeight - rect.bottom - 12;
-			const spaceAbove = rect.top - 12;
-			const up = height > spaceBelow && spaceAbove > spaceBelow;
-			const left = Math.max(8, Math.min(rect.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 8));
-			const next = up
-				? { top: undefined, bottom: window.innerHeight - rect.top + 6, left }
-				: { top: rect.bottom + 6, bottom: undefined, left };
-			setPos((prev) => (prev && prev.top === next.top && prev.bottom === next.bottom && prev.left === next.left ? prev : next));
-		}
-		measure();
-		// Content swaps (confirm state) change the height; window scrolls and
-		// resizes move the anchor. The capture-phase scroll listener sees the
-		// modal pane's scrolls too.
-		const observer = new ResizeObserver(measure);
-		if (menuRef.current) observer.observe(menuRef.current);
-		window.addEventListener("resize", measure);
-		window.addEventListener("scroll", measure, true);
-		return () => {
-			observer.disconnect();
-			window.removeEventListener("resize", measure);
-			window.removeEventListener("scroll", measure, true);
-		};
-	}, [anchorRef]);
-	return createPortal(
-		<>
-			<span className="ai-profile-menu-backdrop" onClick={onDismiss} />
-			<span
-				className="ai-profile-menu"
-				role="menu"
-				ref={menuRef}
-				style={pos ? { top: pos.top, bottom: pos.bottom, left: pos.left } : { visibility: "hidden" }}
-			>
-				{children}
-			</span>
-		</>,
-		document.body,
-	);
-}
-
-function AiProfileSwitcherSection({ status, authStatus, onRefresh, onRefreshAuth, onSignedIn, focus }: { status: PersistentAgentAiProfileSelectionStatus | null; authStatus: AuthStatusResponse | null; onRefresh: () => void; onRefreshAuth: () => void; /** A sign-in or a key was just saved here. */ onSignedIn?: () => void; focus?: { providerId: string } | null }) {
-	// On a remote device the provider/gateway setup routes are local-only
-	// (remote-route-policy is the truth), so those controls render as facts
-	// with one honest line instead of failing per tap.
-	const remoteClient = useRemoteClientContext();
-	const remoteSetupLocked = remoteClient.remote;
-	const [addProviderOpen, setAddProviderOpen] = useState(false);
-	const [error, setError] = useState<string | null>(null);
-	const [modelsOpenId, setModelsOpenId] = useState<string | null>(null);
-	const [editProfile, setEditProfile] = useState<PersistentAgentAiProfileStatus | null>(null);
-	// Opened to sign a provider in again (a room stopped on it): its row is
-	// brought into view once the rows are there, once per request.
-	const focusedRef = useRef<typeof focus>(null);
-	useEffect(() => {
-		if (!focus || focusedRef.current === focus || !status) return;
-		const row = document.querySelector(`[data-provider-id="${CSS.escape(focus.providerId)}"]`);
-		if (!row) return;
-		focusedRef.current = focus;
-		row.scrollIntoView({ block: "center" });
-	}, [focus, status]);
-	// Which gateway the modal is for: gateways are plural now, so "open" is not
-	// enough to know whose base URL or model set is being edited.
-	const [gatewayEdit, setGatewayEdit] = useState<{ id: string; label: string } | null>(null);
-	const [gatewayApproveId, setGatewayApproveId] = useState<string | null>(null);
-	const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
-	// The trigger of the open menu, captured at click time: the portaled
-	// popover positions itself off this element's live rect.
-	const menuAnchorRef = useRef<HTMLElement | null>(null);
-	const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
-	const [removing, setRemoving] = useState(false);
-	const [keyProfileId, setKeyProfileId] = useState<string | null>(null);
-	const [loginCatalog, setLoginCatalog] = useState<LoginProviderCatalogEntry[] | null>(null);
-
-	// Refetched when the profile SET changes (not on every status refresh):
-	// setting up a gateway or custom provider adds catalog entries the
-	// auth-type lookup must know about.
-	const profileSetKey = status?.profiles.map((profile) => profile.id).join(",") ?? "";
-	useEffect(() => {
-		fetchJson<{ providers: LoginProviderCatalogEntry[] }>("/api/auth/providers")
-			.then((result) => setLoginCatalog(result.providers))
-			.catch(() => {});
-	}, [profileSetKey]);
-
-	// OAuth is the default when the catalog has not loaded — that keeps the
-	// built-in subscription rows' labels sensible even if the lookup fails.
-	function providerUsesOAuth(providerId: string): boolean {
-		const entry = loginCatalog?.find((provider) => provider.id === providerId);
-		return entry ? entry.authTypes.includes("oauth") : true;
-	}
-
-	function providerAcceptsApiKey(providerId: string): boolean {
-		const entry = loginCatalog?.find((provider) => provider.id === providerId);
-		return entry?.authTypes.includes("api_key") ?? false;
-	}
-
-	// Browser sign-in shares the same state machine as the Add-provider panel
-	// (URL + device-code instructions + 2s polling live in useProviderLogin).
-	// API-key providers (OpenAI-compatible gateways, custom providers) get an
-	// inline key form instead.
-	const login = useProviderLogin(() => {
-		onRefresh();
-		onRefreshAuth();
-		onSignedIn?.();
-	});
-
-	async function signIn(profile: PersistentAgentAiProfileStatus) {
-		setError(null);
-		// Resolve the auth type from the live catalog even when the initial
-		// fetch has not landed yet, so API-key providers are never misrouted
-		// into the OAuth flow.
-		let catalog = loginCatalog;
-		if (!catalog) {
-			try {
-				catalog = (await fetchJson<{ providers: LoginProviderCatalogEntry[] }>("/api/auth/providers")).providers;
-				setLoginCatalog(catalog);
-			} catch {}
-		}
-		const entry = catalog?.find((provider) => provider.id === profile.provider.id);
-		if (entry && !entry.authTypes.includes("oauth")) {
-			setKeyProfileId(keyProfileId === profile.id ? null : profile.id);
-			return;
-		}
-		await login.signIn(profile.provider.id);
-	}
-
-	async function saveApiKey(profile: PersistentAgentAiProfileStatus, key: string) {
-		setError(null);
-		try {
-			await fetchJson("/api/auth/api-key", {
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ provider: profile.provider.id, key }),
-			});
-			setKeyProfileId(null);
-			onRefresh();
-			onRefreshAuth();
-			onSignedIn?.();
-		} catch (e) {
-			setError((e as Error).message);
-		}
-	}
-
-	async function signOut(profile: PersistentAgentAiProfileStatus) {
-		setError(null);
-		try {
-			await fetchJson("/api/auth/logout", {
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ provider: profile.provider.id }),
-			});
-			onRefresh();
-			onRefreshAuth();
-		} catch (e) {
-			setError((e as Error).message);
-		}
-	}
-
-	function closeMenu() {
-		setMenuOpenId(null);
-		setConfirmRemoveId(null);
-	}
-	useEscapeKey(closeMenu, menuOpenId !== null);
-	// A key row is a transient surface like the menu above it, and closes the
-	// same way. Without this it could only be escaped by reloading the page.
-	useEscapeKey(() => setKeyProfileId(null), keyProfileId !== null);
-	// Removing a provider disconnects it: profile, approved models, and the
-	// stored credential all go. Built-ins cannot be removed, only signed out.
-	async function removeProfile(profile: PersistentAgentAiProfileStatus) {
-		setRemoving(true);
-		setError(null);
-		try {
-			// Removing one gateway leaves every other gateway's models and key alone.
-			const url = profile.kind === "gateway"
-				? `/api/persistent-agent-ai-profiles/gateways/${encodeURIComponent(profile.id)}`
-				: `/api/persistent-agent-ai-profiles/custom/${encodeURIComponent(profile.id)}`;
-			await fetchJson(url, { method: "DELETE" });
-			closeMenu();
-			onRefresh();
-			onRefreshAuth();
-		} catch (e) {
-			setError((e as Error).message);
-		} finally {
-			setRemoving(false);
-		}
-	}
-	const emptyCard = (
-		<div className="ai-profile-card">
-			<p className="cli-note ai-profile-card-empty">Profile status is still loading.</p>
-		</div>
-	);
-	return (
-		<section className="ai-setup-section ai-profile-switcher-section" aria-label="AI setup">
-			<PaneHeader
-				title="AI setup"
-				line="Your providers, and the models rooms use until they set their own."
-				actions={!remoteSetupLocked && (
-					<button className="rs-btn add-provider-toggle" type="button" aria-expanded={addProviderOpen} onClick={() => setAddProviderOpen((value) => !value)}>Add provider</button>
-				)}
-			/>
-			<AiDefaultsGroup refreshKey={(status?.profiles ?? []).map((profile) => `${profile.id}:${profile.ready ? 1 : 0}:${profile.processes?.persistentRoom.models.length ?? 0}`).join(",")} />
-			<div className="settings-group">
-			<GroupHeader kicker="Providers" />
-			{status ? (
-				status.profiles.length > 0 ? (
-					<div className="ai-profile-card">
-						<div className="ai-profile-rows">
-							{status.profiles.map((profile) => {
-								const roomModelCount = profile.processes?.persistentRoom.models.length ?? 0;
-								const roomModelsLabel = `${roomModelCount} room model${roomModelCount === 1 ? "" : "s"}`;
-								const signingIn = login.signingInProvider === profile.provider.id;
-								// One quiet subline per row, describing the row's own state.
-								// "Setup needed" is reserved for signed-in-but-still-broken.
-								const signedInWithOAuth = authStatus?.providers.find((provider) => provider.id === profile.provider.id)?.signedInWithOAuth;
-								const subline = signingIn
-									? "finish signing in in your browser…"
-									: profile.ready
-										? signedInWithOAuth === false ? "key saved" : "signed in"
-										: profile.provider.configured
-											? "setup needed"
-											// The models toggle beside the row already carries the count;
-											// repeating it here read as a glitch, loudest on phones where
-											// the toggle wraps directly under this line.
-											: "signed out";
-								const sublineWarn = !signingIn && profile.provider.configured && !profile.ready;
-								const modelsOpen = modelsOpenId === profile.id;
-								return (
-									<div key={profile.id} data-provider-id={profile.provider.id} className={`ai-profile-row-group${modelsOpen ? " open" : ""}${keyProfileId === profile.id ? " key-open" : ""}`}>
-										<div className={`ai-profile-row${profile.ready ? "" : " notready"}`}>
-											<span className="ai-profile-main">
-												<span className="ai-profile-text">
-													<span className="ai-profile-name">{profile.label}</span>
-													<span className={`ai-profile-sub sub-default${sublineWarn ? " warn" : ""}`}>{subline}</span>
-												</span>
-											</span>
-											<span className="ai-profile-side">
-												{roomModelCount > 0 && (
-													<button
-														className="ai-profile-models-toggle"
-														aria-expanded={modelsOpen}
-														title="Show or hide this profile's models"
-														onClick={() => setModelsOpenId(modelsOpen ? null : profile.id)}
-													>
-														{roomModelsLabel} <span className="disclosure-chevron" aria-hidden="true" />
-													</button>
-												)}
-												{signingIn ? (
-													<button className="ai-profile-foot-link" onClick={() => void login.cancel()} title="Stop this sign-in attempt">Cancel</button>
-												) : (
-													<>
-														{/* The key row carries its own Cancel now, for every row rather
-														    than only the not-ready ones, so this offers the way IN and the
-														    form offers the way out. */}
-														{!profile.ready && keyProfileId !== profile.id && !remoteSetupLocked && (
-															<button className="rs-btn ai-profile-signin" disabled={login.signingInProvider !== null} onClick={() => void signIn(profile)}>
-																{providerUsesOAuth(profile.provider.id) ? "Sign in" : "Add API key"}
-															</button>
-														)}
-														{/* Management stays reachable in every state — broken (expired
-														    token, missing model) AND fully signed out. A signed-out custom
-														    profile must still offer Remove, or the row becomes a dead end;
-														    items that need a credential gate themselves below. */}
-													{!remoteSetupLocked && <span className="ai-profile-menu-anchor">
-														<button
-															className="ai-profile-menu-btn"
-															aria-haspopup="menu"
-															aria-expanded={menuOpenId === profile.id}
-															aria-label={`Manage ${profile.label}`}
-															title={`Manage ${profile.label}: models, keys, sign-out`}
-															onClick={(e) => { if (menuOpenId === profile.id) { closeMenu(); } else { menuAnchorRef.current = e.currentTarget; setMenuOpenId(profile.id); setConfirmRemoveId(null); setKeyProfileId(null); } }}
-														>···</button>
-														{menuOpenId === profile.id && (
-															<AiProfileRowMenu anchorRef={menuAnchorRef} onDismiss={closeMenu}>
-																{confirmRemoveId === profile.id ? (
-																	<>
-																		<span className="ai-profile-menu-confirm">Remove {profile.label}? This {profile.provider.configured ? "signs out and deletes" : "deletes"} its models.</span>
-																		<button className="ai-profile-menu-item danger" role="menuitem" disabled={removing} onClick={() => void removeProfile(profile)}>{removing ? "Removing…" : "Remove"}</button>
-																		<button className="ai-profile-menu-item" role="menuitem" disabled={removing} onClick={() => setConfirmRemoveId(null)} title="Cancel — keep this profile">Keep it</button>
-																	</>
-																) : (
-																	<>
-																		{/* A toggle, not an opener: a 0-room-model profile renders no
-																		    "N room models" collapse control, so without the Hide branch
-																		    the opened panel would be uncloseable. */}
-																		<button className="ai-profile-menu-item" role="menuitem" onClick={() => { setModelsOpenId(modelsOpen ? null : profile.id); closeMenu(); }}>{modelsOpen ? "Hide models" : "View models"}</button>
-																		{profile.kind === "custom" && (
-																			<button className="ai-profile-menu-item" role="menuitem" onClick={() => { setEditProfile(profile); closeMenu(); }} title="Choose which models rooms may use">Approve models</button>
-																		)}
-																		{profile.kind === "gateway" && (
-																			<>
-																				{/* Approve models edits the model set only; Edit gateway
-																				    owns the base URL and API key. */}
-																				<button className="ai-profile-menu-item" role="menuitem" onClick={() => { setGatewayApproveId(profile.id); closeMenu(); }} title="Choose which models rooms may use">Approve models</button>
-																				<button className="ai-profile-menu-item" role="menuitem" onClick={() => { setGatewayEdit({ id: profile.id, label: profile.label }); closeMenu(); }} title="Change the gateway URL or API key">Edit gateway</button>
-																			</>
-																		)}
-																		{/* A subscription sign-in is renewed by signing in again; only a
-																		    key is replaced. Switching a subscription row to a key is Sign
-																		    out, then Add key. */}
-																		{profile.provider.configured && authStatus?.providers.find((provider) => provider.id === profile.provider.id)?.signedInWithOAuth ? (
-																			<button className="ai-profile-menu-item" role="menuitem" onClick={() => { closeMenu(); void signIn(profile); }}>Sign in again</button>
-																		) : providerAcceptsApiKey(profile.provider.id) && profile.provider.configured && (
-																			<button className="ai-profile-menu-item" role="menuitem" onClick={() => { setKeyProfileId(profile.id); closeMenu(); }}>Replace API key</button>
-																		)}
-																		{/* No credential stored → nothing to sign out of. */}
-																		{profile.provider.configured && (
-																			<button className="ai-profile-menu-item" role="menuitem" onClick={() => { closeMenu(); void signOut(profile); }}>Sign out</button>
-																		)}
-																		{profile.kind !== "builtin" && (
-																			<button className="ai-profile-menu-item danger" role="menuitem" onClick={() => setConfirmRemoveId(profile.id)}>
-																				{profile.kind === "gateway" ? "Remove gateway…" : "Remove provider…"}
-																			</button>
-																		)}
-																	</>
-																)}
-															</AiProfileRowMenu>
-														)}
-													</span>}
-													</>
-												)}
-											</span>
-										</div>
-										{signingIn && login.instructions && (
-											<div className="add-provider-instructions ai-profile-signin-instructions">{login.instructions}</div>
-										)}
-										{keyProfileId === profile.id && (
-											<ApiKeyForm className="ai-profile-key-form" placeholder={`${profile.label} API key or token`} onSave={(key) => saveApiKey(profile, key)} onCancel={() => setKeyProfileId(null)} />
-										)}
-										{modelsOpen && <AiProfileModelsDetail profile={profile} />}
-									</div>
-								);
-							})}
-						</div>
-					</div>
-				) : (
-					emptyCard
-				)
-			) : (
-				emptyCard
-			)}
-			</div>
-			{/* The providers to add open under the list (the header's Add
-			    provider button). One key form at a time across the whole page:
-			    the panel closes the row form when it opens its own, and closes
-			    its own when a row opens one. The signature is how the panel
-			    learns this list moved: removing a gateway profile here deletes
-			    the gateway the panel lists below, and a renamed one would keep
-			    its old name there. A string rather than the status object, so a
-			    refetch that changed nothing costs no fetch. */}
-			{remoteSetupLocked ? (
-				<p className="cli-note">Providers and gateways are set up on the computer itself.</p>
-			) : (
-				<AddProviderPanel
-					open={addProviderOpen}
-					onOpenChange={setAddProviderOpen}
-					onProfilesChanged={() => { onRefresh(); onRefreshAuth(); }}
-					onKeyFormOpen={() => setKeyProfileId(null)}
-					keyFormBlocked={keyProfileId !== null}
-					profilesSignature={(status?.profiles ?? []).map((profile) => `${profile.id}:${profile.label}`).join("|")}
-				/>
-			)}
-			{status?.state.message && <p className="cli-note">{status.state.message}</p>}
-			{status?.customProfiles?.errors?.map((message) => <p key={message} className="cli-note">{message}</p>)}
-			{(error ?? login.error) && <div className="checkpoint-proposal-error" role="alert">{error ?? login.error}</div>}
-			{editProfile && (
-				<ConfigureProfileModal
-					providerId={editProfile.provider.id}
-					providerName={editProfile.label}
-					existingProfile={editProfile}
-					allowRemove={editProfile.kind === "custom"}
-					onClose={() => setEditProfile(null)}
-					onSaved={() => { onRefresh(); onRefreshAuth(); }}
-				/>
-			)}
-			{gatewayEdit && (
-				<GatewayConfigModal
-					gatewayId={gatewayEdit.id}
-					knownLabel={gatewayEdit.label}
-					onClose={() => setGatewayEdit(null)}
-					onSaved={() => { onRefresh(); onRefreshAuth(); }}
-				/>
-			)}
-			{gatewayApproveId && (
-				<GatewayApproveModelsModal
-					gatewayId={gatewayApproveId}
-					onClose={() => setGatewayApproveId(null)}
-					onSaved={() => { onRefresh(); onRefreshAuth(); }}
-				/>
-			)}
-		</section>
-	);
-}
-
-// Exported for the jsdom probe of arrange mode (a probe outside the app renders the real screen); the app itself never imports it.
-export function Landing({ roomOrder, onChooseRoomOrder, onArrangingChange, onOpenSettings, onOpenDashboard, onOpenMemory, onOpenPersistentAgent, onResumePersistentAgent, onMaintainPersistentAgent, onCreatePersistentAgent, onArchiveRoom, onPurgeRoom, onMementoForget, modelStatus, persistentAgentStatuses, persistentThread, persistentLive, persistentResumeError, onRefreshPersistentAgent, theme, appearance, onSetAppearance, aiProfileStatus: aiProfileSelection, backgroundReadyRooms, purgingRooms, unresumableRooms }: { roomOrder: HomeRoomOrderView; onChooseRoomOrder: (choice: RoomOrderChoice) => Promise<boolean>; /** Told whenever arrange mode has unsaved moves or stops having them, and false when the screen goes; the app asks the leave question at its own exits. */ onArrangingChange: (dirty: boolean) => void; onOpenSettings: (section?: SettingsSection) => void; onOpenDashboard: () => void; onOpenMemory: () => void; onOpenPersistentAgent: (status: PersistentAgentStatus) => Promise<void> | void; onResumePersistentAgent: (status: PersistentAgentStatus) => Promise<void> | void; onMaintainPersistentAgent: (target: MaintainTarget) => void; onCreatePersistentAgent: (request: PersistentAgentCreateRequest) => Promise<PersistentAgentCreateResponse>; onArchiveRoom: (agentId: PersistentAgentId, confirmation: string) => Promise<PersistentAgentArchiveResponse>; onPurgeRoom: (agentId: PersistentAgentId, confirmation: string) => Promise<PersistentAgentPurgeResponse>; onMementoForget: (agentId: PersistentAgentId) => void; modelStatus: WebChatModelStatus | null; persistentAgentStatuses: PersistentAgentStatus[]; persistentThread: PersistentAgentThread | null; persistentLive: boolean; persistentResumeError: string | null; onRefreshPersistentAgent: () => void; theme: ThemeMode; appearance: AppearancePreference; onSetAppearance: (pref: AppearancePreference) => void; aiProfileStatus: PersistentAgentAiProfileSelectionStatus | null; backgroundReadyRooms?: ReadonlySet<PersistentAgentId>; purgingRooms?: ReadonlySet<PersistentAgentId>; unresumableRooms?: ReadonlySet<PersistentAgentId> }) {
-	const [createOpen, setCreateOpen] = useState(false);
-	useEscapeKey(() => setCreateOpen(false), createOpen);
-	const [settingsRoomId, setSettingsRoomId] = useState<PersistentAgentId | null>(null);
-	const [settingsRoomPane, setSettingsRoomPane] = useState<SettingsPane | undefined>(undefined);
-	// The modal must track the LIVE status for its room: a snapshot taken when
-	// it opened could carry stale mid-stream inFlight/working flags and e.g.
-	// keep Memento disabled forever (the home screen's arrival refreshes the
-	// statuses once, home-room-order.ts, not while the modal is open), and
-	// onRefresh must be able to update what the open modal shows.
-	const settingsRoom = settingsRoomId ? persistentAgentStatuses.find((status) => status.id === settingsRoomId) ?? null : null;
-	const openRoomSettings = (status: PersistentAgentStatus, pane?: SettingsPane): void => {
-		setSettingsRoomId(status.id);
-		setSettingsRoomPane(pane);
-		onRefreshPersistentAgent();
-	};
-
-	// The ONE ordering (room-order.ts). While the saved order is withheld
-	// (home-room-order.ts: on every arrival, until that arrival's read has
-	// settled) nothing is drawn in the grid, the "New room" card included, so
-	// no card appears in one place and moves to another. With no rooms there
-	// is nothing to order and the empty state shows at once, as it always did.
-	const roomStatuses = persistentAgentStatuses;
-	const orderedRoomStatuses = roomOrder.order ? orderRooms(persistentAgentStatuses, roomOrder.order, roomOrder.lastUsed) : [];
-	const gridDrawn = roomOrder.order !== null || roomStatuses.length === 0;
-
-	// Arrange mode. The arrangement itself is home-room-arrange.ts (plain,
-	// immutable); this screen holds it as ONE piece of state that dies with
-	// the screen. While arranging the grid is drawn from the arrangement, not
-	// from the saved order: the cards are the set at entry, minus rooms gone
-	// meanwhile (retain, below). Save is one choice handed to the controller
-	// (mode custom + the ids); Cancel and Escape drop the arrangement, and
-	// nothing is written. Moves, Cancel and Escape are not taken while a save
-	// is in flight: what was sent is what closes, and a write already sent
-	// cannot be cancelled.
-	const [arrangement, setArrangement] = useState<RoomArrangement | null>(null);
-	const [announcement, setAnnouncement] = useState("");
-	const arranging = arrangement !== null;
-	const arrangeDirty = arrangement?.dirty() ?? false;
-	const onArrangingChangeRef = useRef(onArrangingChange);
-	onArrangingChangeRef.current = onArrangingChange;
-	useEffect(() => { onArrangingChangeRef.current(arrangeDirty); }, [arrangeDirty]);
-	useEffect(() => () => onArrangingChangeRef.current(false), []);
-	useEffect(() => {
-		if (!arrangement) return;
-		const kept = arrangement.retain(new Set(persistentAgentStatuses.map((status) => status.id)));
-		if (kept !== arrangement) setArrangement(kept);
-	}, [arrangement, persistentAgentStatuses]);
-	// The live region is emptied whenever arrange mode closes (Cancel, Escape,
-	// a Save that landed): a sentence identical to the last one announced is
-	// not a change to the DOM and would be read by nobody, and the same
-	// position can come round again in a later arrange session.
-	const startArranging = (): void => setArrangement(createRoomArrangement(orderedRoomStatuses.map((status) => status.id)));
-	const cancelArranging = (): void => { if (!roomOrder.saving) { setAnnouncement(""); setArrangement(null); } };
-	// Registered once for the whole arrange session, never re-registered: the
-	// Escape stack is in enabling order, so an entry pushed again after a
-	// failed save would sit above an overlay opened during the save (the
-	// guide, Settings) and take the Escape meant for it. While saving the
-	// handler itself does nothing.
-	useEscapeKey(cancelArranging, arranging);
-	async function saveArrangement(): Promise<void> {
-		if (!arrangement || roomOrder.saving) return;
-		if (await onChooseRoomOrder({ mode: "custom", customOrder: arrangement.ids() })) { setAnnouncement(""); setArrangement(null); }
-	}
-	// Custom with nothing arranged yet opens arrange mode on the order on
-	// screen and writes nothing: Save is the first write, and a Cancel leaves
-	// the saved mode as it was. With an arrangement saved, Custom is a choice
-	// like any other.
-	const chooseMode = (mode: RoomOrderMode): Promise<boolean> => {
-		if (mode === "custom" && roomOrder.order && roomOrder.order.mode !== "custom" && roomOrder.order.customOrder.length === 0) {
-			startArranging();
-			return Promise.resolve(true);
-		}
-		return onChooseRoomOrder({ mode });
-	};
-	// The keyboard: each card is focusable while arranging, and a key moves
-	// the focused card (moveByKey: the arrows one place, Home and End to the
-	// ends), animated like a drag. The focus stays with the moved card: it is
-	// found again after the render, because the card's DOM node moves with it
-	// and a moved node loses focus. No key is taken while a card is held or a
-	// save is in flight.
-	const pendingFocusRef = useRef<string | null>(null);
-	// The ONE name a room has in arrange mode: its display name, and its id
-	// as well when another room shows the same name, so two rooms' cards
-	// never share a label and two consecutive moves never produce the same
-	// announcement (a repeated sentence is no change to the live region).
-	const arrangeName = (status: PersistentAgentStatus): string => `${status.displayName || status.id}${hasDuplicateDisplayName(status) ? ` (room ${status.id})` : ""}`;
-	// The ONE announcement of a move, whichever way it was made (a key, a drop).
-	const announceMoved = (status: PersistentAgentStatus, next: RoomArrangement): void => setAnnouncement(`${arrangeName(status)}, position ${next.positionOf(status.id)} of ${next.count()}`);
-	const moveByKeyboard = (status: PersistentAgentStatus, event: React.KeyboardEvent<HTMLDivElement>): void => {
-		if (!arrangement || event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-		const next = moveByKey(arrangement, status.id, event.key);
-		if (next === null) return;
-		event.preventDefault(); // the arrows, Home and End are the card's while it has the focus, not the page's scroll
-		if (next === arrangement || roomOrder.saving || cardDrag.activeId() !== null) return;
-		pendingFocusRef.current = status.id;
-		setArrangement(next);
-		announceMoved(status, next);
-	};
-	useLayoutEffect(() => {
-		const pending = pendingFocusRef.current;
-		if (!pending) return;
-		pendingFocusRef.current = null;
-		const slot = arrangeSlots(gridRef.current).find((element) => element.dataset.arrangeSlot === pending);
-		slot?.focus({ preventScroll: true });
-		slot?.scrollIntoView({ block: "nearest" }); // a card moved off screen (End) is brought into view
-	}, [arrangement]);
-	const statusById = new Map(persistentAgentStatuses.map((status) => [status.id, status]));
-	const leaveGuarded = (leave: () => void) => (): void => { if (confirmLeavingArrangement(arrangeDirty)) leave(); };
-	// Dragging a card (slice 4). The gesture is home-room-drag.ts;
-	// this screen feeds it the pointer events of the card's slot (the wrapper
-	// around the card, whose own controls are inert while arranging) and the
-	// slots' boxes at rest, and draws what it says: while a card is held the grid is
-	// the arrangement as it would be after the drop (a moveTo preview, nothing
-	// written), so the others step aside and the gap is where it lands; the
-	// motion is use-room-arrange-motion.ts. The preview is drawn with the
-	// slots' CSS order, never by moving them in the DOM: a moved node loses
-	// the pointer capture (and the drag with it), and the focus. A drop ends
-	// in ONE moveTo and the same announcement as a button move; focus stays
-	// where it was. A finger or a pen picks a card up with a long press (the
-	// timer is this screen's, the rule the module's); moving sooner scrolls
-	// the page, and once a card is held the page does not scroll under the
-	// finger (touchmove is refused while held, and the long press's menu is
-	// refused while arranging). Near the top or bottom edge a held card
-	// scrolls the page slowly (use-room-arrange-motion.ts). Escape while a card is
-	// held puts it back and nothing else: its entry is enabled only while held,
-	// so it sits above arrange mode's and leaves the stack with the drag. A
-	// gesture the browser takes away (pointercancel, a lost capture) puts the
-	// card back too, as does the card's room vanishing or arrange mode closing
-	// under it (Escape, Enter on the focused Cancel, a save landing), for a
-	// press not yet held as well, whose handle unmounts with its release still
-	// to come; left in the module, the next session's first move would lift
-	// the card pressed before. Another pointer changes nothing while one
-	// holds a card: its release and its cancel are its own. A press while a save is in flight starts nothing, and a drop that
-	// lands during one is refused, as a key is.
-	const cardDragRef = useRef<CardDrag | null>(null);
-	if (!cardDragRef.current) cardDragRef.current = createCardDrag();
-	const cardDrag = cardDragRef.current;
-	const [dragView, setDragView] = useState<CardDragView | null>(null);
-	const dragging = dragView !== null;
-	const gridRef = useRef<HTMLElement | null>(null);
-	// The held card's box on screen at the press: it is drawn where the pointer carries it from there.
-	const grabRef = useRef<{ id: string; box: Rect } | null>(null);
-	const slotLayout = (heldId: string): SlotLayout => {
-		const grid = gridRef.current;
-		// In the order drawn: the preview's CSS order, the DOM's where none is set (a stable sort).
-		const slotElements = arrangeSlots(grid).sort((a, b) => Number(a.style.order || 0) - Number(b.style.order || 0));
-		const gridBox = grid?.getBoundingClientRect();
-		return {
-			slots: grid ? slotElements.map((element) => slotRestBox(grid, element, gridBox)) : [],
-			held: slotElements.findIndex((element) => element.dataset.arrangeSlot === heldId),
-		};
-	};
-	const pointOf = (event: React.PointerEvent): { x: number; y: number } => ({ x: event.clientX, y: event.clientY });
-	const longPressRef = useRef<number | null>(null);
-	const stopLongPress = (): void => { if (longPressRef.current !== null) window.clearTimeout(longPressRef.current); longPressRef.current = null; };
-	useEffect(() => stopLongPress, []);
-	// The pressing pointer and where it is, for the edge scroll.
-	const pointerRef = useRef<{ id: number; x: number; y: number } | null>(null);
-	const cancelDrag = (pointerId?: number): void => { cardDrag.cancel(pointerId); if (cardDrag.activeId() === null) stopLongPress(); setDragView(cardDrag.view()); };
-	const cancelByPointer = (event: React.PointerEvent<HTMLDivElement>): void => cancelDrag(event.pointerId);
-	const pressCard = (status: PersistentAgentStatus, event: React.PointerEvent<HTMLDivElement>): void => {
-		if (!arrangement || roomOrder.saving) return;
-		if (!cardDrag.press(status.id, pointOf(event), event.pointerType, event.button, event.pointerId)) return;
-		event.currentTarget.setPointerCapture(event.pointerId);
-		pointerRef.current = { id: event.pointerId, ...pointOf(event) };
-		const box = event.currentTarget.getBoundingClientRect();
-		grabRef.current = { id: status.id, box: { left: box.left, top: box.top, width: box.width, height: box.height } };
-		if (event.pointerType === "mouse") return;
-		const pointerId = event.pointerId;
-		stopLongPress();
-		longPressRef.current = window.setTimeout(() => { longPressRef.current = null; const held = cardDrag.hold(pointerId, slotLayout); if (held) setDragView(held); }, ROOM_LONG_PRESS_MS);
-	};
-	const carryCard = (event: React.PointerEvent<HTMLDivElement>): void => {
-		if (event.pointerId === pointerRef.current?.id) pointerRef.current = { id: event.pointerId, ...pointOf(event) };
-		setDragView(cardDrag.move(pointOf(event), event.pointerId, slotLayout));
-		if (cardDrag.activeId() === null) stopLongPress(); // a finger that moved before the long press: the page scrolls
-	};
-	const dropCard = (event: React.PointerEvent<HTMLDivElement>): void => {
-		// The drop is read first: releasing the capture may end the gesture (lostpointercapture) before a release read after it could land.
-		const landed = cardDrag.release(pointOf(event), event.pointerId, slotLayout);
-		if (cardDrag.activeId() === null) stopLongPress();
-		setDragView(cardDrag.view()); // null once the gesture ended; still the held card when another pointer went up
-		try { event.currentTarget.releasePointerCapture(event.pointerId); } catch {}
-		if (!landed || !arrangement || roomOrder.saving) return;
-		const status = statusById.get(landed.id);
-		const next = arrangement.moveTo(landed.id, landed.position);
-		if (!status || next === arrangement) return;
-		setArrangement(next);
-		announceMoved(status, next);
-	};
-	useEscapeKey(cancelDrag, dragging);
-	useEffect(() => {
-		const active = cardDrag.activeId(); // pressed or held: a press under the threshold is a gesture too
-		if (active !== null && (!arrangement || arrangement.positionOf(active) === null)) cancelDrag();
-	}, [arrangement, dragView]);
-	useEffect(() => {
-		if (!dragging) return;
-		const onScroll = (): void => { setDragView(cardDrag.scrolled(slotLayout)); };
-		// Registered by hand: React's touchmove is passive and could not refuse the page's scroll.
-		const onTouchMove = (event: TouchEvent): void => { if (event.cancelable) event.preventDefault(); };
-		document.addEventListener("scroll", onScroll, { capture: true, passive: true });
-		document.addEventListener("touchmove", onTouchMove, { passive: false });
-		return () => {
-			document.removeEventListener("scroll", onScroll, { capture: true });
-			document.removeEventListener("touchmove", onTouchMove);
-		};
-	}, [dragging]);
-	useArrangeEdgeScroll(gridRef, dragging, pointerRef);
-	const arrangedStatuses = arrangement ? arrangement.ids().map((id) => statusById.get(id)).filter((status): status is PersistentAgentStatus => status !== undefined) : null;
-	// While a card is held, the arrangement after its drop, drawn by each slot's CSS order. The orders are
-	// negative so the "New room" card (order 0) stays last.
-	const preview = arrangement && dragView ? arrangement.moveTo(dragView.id, dragView.position) : null;
-	const previewOrder = (id: string): number | undefined => (preview ? (preview.positionOf(id) ?? 0) - 1 - preview.count() : undefined);
-	const grab = grabRef.current;
-	useRoomArrangeMotion(gridRef, arranging, dragView && grab?.id === dragView.id ? { id: dragView.id, grab: grab.box, dx: dragView.dx, dy: dragView.dy } : null);
-	const displayNameCounts = roomStatuses.reduce((counts, status) => {
-		const key = (status.displayName || "").trim().toLocaleLowerCase();
-		if (!key) return counts;
-		counts.set(key, (counts.get(key) ?? 0) + 1);
-		return counts;
-	}, new Map<string, number>());
-	const hasDuplicateDisplayName = (status: PersistentAgentStatus): boolean => {
-		const key = (status.displayName || "").trim().toLocaleLowerCase();
-		return key ? (displayNameCounts.get(key) ?? 0) > 1 : false;
-	};
-	const aiProfileStatus = homeAiProfileStatus(modelStatus, aiProfileSelection);
-	const providerLabels = Object.fromEntries((modelStatus?.providers ?? []).map((provider) => [provider.id, provider.label]));
-	// A room is created to be talked to: after Create, enter it the way its
-	// card's Enter would, on the room's conversation model. Without a model
-	// that can run (no provider signed in) the new card simply waits on Home.
-	const openCreatedRoom = (created: PersistentAgentCreateResponse | null): void => {
-		setCreateOpen(false);
-		onRefreshPersistentAgent();
-		if (created?.status?.models?.conversation.effective) void onOpenPersistentAgent(created.status);
-	};
-
-	return (
-		<div className="landing-shell with-product-sidebar">
-			<ProductSidebar onHome={() => {}} onSettings={onOpenSettings} onDashboard={leaveGuarded(onOpenDashboard)} onMemory={leaveGuarded(onOpenMemory)} theme={theme} appearance={appearance} onSetAppearance={onSetAppearance} active="home" />
-			<div className="landing home-page">
-			<section className="landing-hero">
-				<div className={`landing-hero-head${arranging ? " is-arranging" : ""}`}>
-					<div>
-						<h1>Your rooms.</h1>
-						<p>{roomStatuses.length === 0 ? "Create your first room to get started." : "Pick up where you left off, or start a new room."}</p>
-					</div>
-					<div className="landing-hero-actions">
-						{roomOrder.order && (arranging || roomStatuses.length >= ROOM_SORT_MIN_ROOMS) && (
-							<RoomSortControl order={roomOrder.order} saving={roomOrder.saving} saveError={roomOrder.saveError} onChoose={chooseMode} onArrange={startArranging} arranging={arrangement ? { onSave: () => void saveArrangement(), onCancel: cancelArranging } : null} />
-						)}
-						<div className="room-arrange-live" role="status" aria-live="polite">{announcement}</div>
-					</div>
-				</div>
-				{aiProfileStatus && aiProfileStatus.ready === false && (
-					<button type="button" className="home-ai-profile-status setup-needed" onClick={() => onOpenSettings("ai-setup")} title="Open Settings to finish AI setup">
-						{aiProfileStatus.message}
-					</button>
-				)}
-				{persistentResumeError && (
-					<div className="home-resume-error" role="alert">{persistentResumeError}</div>
-				)}
-			</section>
-			<section ref={gridRef} className={`landing-grid${roomStatuses.length === 0 ? " landing-grid--empty" : ""}${arranging ? " is-arranging" : ""}`} aria-label="exxperts entry points">
-				{(arrangedStatuses ?? orderedRoomStatuses).map((status, index, list) => {
-					const card = <PersistentAgentCard key={status.id} status={status} arranging={arranging} unresumable={unresumableRooms?.has(status.id) ?? false} thread={persistentThread?.agentId === status.id ? persistentThread : null} live={persistentLive && persistentThread?.agentId === status.id} duplicateDisplayName={hasDuplicateDisplayName(status)} backgroundReady={backgroundReadyRooms?.has(status.id) ?? false} purging={purgingRooms?.has(status.id) ?? false} onEnter={onOpenPersistentAgent} onResume={onResumePersistentAgent} onMaintain={onMaintainPersistentAgent} onOpenSettings={() => openRoomSettings(status)} onOpenModelSettings={() => openRoomSettings(status, "model")} providerLabels={providerLabels} />;
-					if (!arrangedStatuses) return card;
-					const held = dragView?.id === status.id;
-					return (
-						<div
-							className={`room-arrange-slot${held ? " is-dragging" : ""}`}
-							key={status.id}
-							data-arrange-slot={status.id}
-							style={{ order: previewOrder(status.id) }}
-							tabIndex={0}
-							role="button"
-							aria-roledescription="movable room"
-							aria-label={`${arrangeName(status)}, position ${index + 1} of ${list.length}`}
-							aria-describedby={ROOM_ARRANGE_HINT_ID}
-							onKeyDown={(event) => moveByKeyboard(status, event)}
-							onPointerDown={(event) => pressCard(status, event)}
-							onPointerMove={carryCard}
-							onPointerUp={dropCard}
-							onPointerCancel={cancelByPointer}
-							onLostPointerCapture={cancelByPointer}
-							onContextMenu={(event) => event.preventDefault()}
-						>
-							{card}
-						</div>
-					);
-				})}
-				{gridDrawn && (
-					<button type="button" className="landing-card add-room-card" disabled={arranging} onClick={() => setCreateOpen(true)} aria-label="Create a new room">
-						<span className="add-room-plus" aria-hidden="true">+</span>
-						<span className="add-room-label">New room</span>
-					</button>
-				)}
-			</section>
-			{!arranging && <ArchivedRoomsSection activeRoomCount={roomStatuses.length} onRestored={onRefreshPersistentAgent} />}
-			</div>
-			{createOpen && (
-				<div className="room-settings-overlay create-room-overlay" role="dialog" aria-modal="true" aria-label="Create room" onClick={() => setCreateOpen(false)}>
-					<div className="room-settings-modal create-room-modal" onClick={(e) => e.stopPropagation()}>
-						<div className="room-settings-head">
-							<div className="room-settings-title-block">
-								<div className="room-settings-title-row">
-									<h2>Create a room</h2>
-								</div>
-							</div>
-							<button className="icon-btn" onClick={() => setCreateOpen(false)} aria-label="Close">Close</button>
-						</div>
-						<div className="room-settings-body">
-							<CreateRoomPanel onCreate={onCreatePersistentAgent} initialOpen variant="section" onCreated={openCreatedRoom} onCancel={() => setCreateOpen(false)} />
-						</div>
-					</div>
-				</div>
-			)}
-			{settingsRoom && (
-				<RoomSettingsModal status={settingsRoom} initialPane={settingsRoomPane} onClose={() => setSettingsRoomId(null)} onArchive={onArchiveRoom} onPurge={onPurgeRoom} onRefresh={onRefreshPersistentAgent} onMementoForget={() => onMementoForget(settingsRoom.id)} onOpenSkillsLibrary={() => onOpenSettings("skills")} onOpenConnectors={() => onOpenSettings("connectors")} />
-			)}
-		</div>
-	);
-}
-
-// Archived rooms live below the grid, folded away: they left Home on purpose,
-// so they only take up one line until asked. Hidden entirely when empty —
-// but a FAILED load is not "empty": this section is the only way back to an
-// archived room, so a fetch failure shows itself with a retry.
-function ArchivedRoomsSection({ activeRoomCount, onRestored }: { activeRoomCount: number; onRestored: () => void }) {
-	const [rooms, setRooms] = useState<ArchivedPersistentAgentSummary[] | null>(null);
-	const [loadFailed, setLoadFailed] = useState(false);
-	const [retryNonce, setRetryNonce] = useState(0);
-	const [open, setOpen] = useState(false);
-	const [armedId, setArmedId] = useState<PersistentAgentId | null>(null);
-	const [busy, setBusy] = useState<{ id: PersistentAgentId; action: "restore" | "purge" } | null>(null);
-	const [error, setError] = useState<string | null>(null);
-	const [note, setNote] = useState<string | null>(null);
-	// Set by this section's own restore/delete right before they trigger a
-	// refetch: their status note must survive that one refetch, while any
-	// OTHER cause (a room archived elsewhere, a retry) clears stale notes.
-	const keepNoteThroughRefetchRef = useRef(false);
-	useEscapeKey(() => setArmedId(null), armedId !== null);
-
-	// The active-room count changing means a room was archived, restored, or
-	// created somewhere — refetch so this section and the grid never disagree.
-	useEffect(() => {
-		if (keepNoteThroughRefetchRef.current) {
-			keepNoteThroughRefetchRef.current = false;
-		} else {
-			setNote(null);
-			setError(null);
-		}
-		let cancelled = false;
-		fetchArchivedPersistentRooms()
-			.then((rows) => {
-				if (cancelled) return;
-				setRooms(rows);
-				setLoadFailed(false);
-			})
-			.catch(() => { if (!cancelled) setLoadFailed(true); });
-		return () => { cancelled = true; };
-	}, [activeRoomCount, retryNonce]);
-
-	async function restoreRoom(room: ArchivedPersistentAgentSummary): Promise<void> {
-		setBusy({ id: room.id, action: "restore" });
-		setArmedId(null);
-		setError(null);
-		setNote(null);
-		const name = room.displayName || room.id;
-		try {
-			const response = await restorePersistentRoom(room.id);
-			setRooms((rows) => (rows ?? []).filter((row) => row.id !== room.id));
-			const parts = [`${name} is back on Home.`];
-			if (response.enabledSchedules > 0) parts.push(`Its ${response.enabledSchedules} scheduled task${response.enabledSchedules === 1 ? "" : "s"} resume${response.enabledSchedules === 1 ? "s" : ""} at the usual time${response.enabledSchedules === 1 ? "" : "s"}.`);
-			if (response.missedOnceSchedules > 0) parts.push(`${response.missedOnceSchedules} one-time task${response.missedOnceSchedules === 1 ? "" : "s"} missed ${response.missedOnceSchedules === 1 ? "its" : "their"} time while archived and need${response.missedOnceSchedules === 1 ? "s" : ""} a new one.`);
-			if (response.scheduleNotice) parts.push(response.scheduleNotice);
-			setNote(parts.join(" "));
-			keepNoteThroughRefetchRef.current = true;
-			onRestored();
-		} catch (e) {
-			setError((e as Error).message || "Failed to restore room.");
-		} finally {
-			setBusy(null);
-		}
-	}
-
-	async function deleteForever(room: ArchivedPersistentAgentSummary): Promise<void> {
-		if (armedId !== room.id) {
-			setArmedId(room.id);
-			setError(null);
-			setNote(null);
-			return;
-		}
-		setBusy({ id: room.id, action: "purge" });
-		setError(null);
-		try {
-			// Direct call: an archived room has no card, draft, badge, or bound
-			// session for the App-level purge handler to clean up.
-			const response = await purgePersistentRoom(room.id, `DELETE ${room.id} FOREVER`);
-			setRooms((rows) => (rows ?? []).filter((row) => row.id !== room.id));
-			setNote(
-				response.failed.length > 0
-					? `${room.displayName || room.id} was deleted, but ${response.failed.length} item${response.failed.length === 1 ? "" : "s"} on this machine could not be removed.`
-					: `${room.displayName || room.id} was deleted from this machine.`,
-			);
-		} catch (e) {
-			setError((e as Error).message || "Failed to delete room.");
-		} finally {
-			setBusy(null);
-			setArmedId(null);
-		}
-	}
-
-	// A failed load with nothing cached must not read as "no archived rooms".
-	if (loadFailed && (!rooms || rooms.length === 0)) {
-		return (
-			<section className="archived-rooms" aria-label="Archived rooms">
-				<div className="archived-rooms-note" role="alert">
-					Archived rooms could not be loaded.
-					<button type="button" className="rs-quiet archived-rooms-retry" onClick={() => setRetryNonce((n) => n + 1)}>Try again</button>
-				</div>
-			</section>
-		);
-	}
-	// The note must survive the last row disappearing, so the section only
-	// hides once the list is empty AND there is nothing left to say.
-	if (!rooms || (rooms.length === 0 && !note && !error)) return null;
-
-	const archivedDate = (archivedAt: number): string => new Date(archivedAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
-
-	return (
-		<section className="archived-rooms" aria-label="Archived rooms">
-			{rooms.length > 0 && (
-				<button type="button" className="archived-rooms-summary" aria-expanded={open} title="Show or hide archived rooms" onClick={() => { setOpen((v) => !v); setArmedId(null); }}>
-					<span className="archived-rooms-title">Archived rooms ({rooms.length})</span>
-					<span className="archived-rooms-toggle" aria-hidden="true">{open ? "▾" : "▸"}</span>
-				</button>
-			)}
-			{open && rooms.length > 0 && (
-				<div className="archived-rooms-panel">
-					{rooms.map((room) => (
-						<div key={room.id} className="archived-room-row">
-							<div className="archived-room-main">
-								<span className="archived-room-name" {...(room.archivedReason ? { title: room.archivedReason } : {})}>{room.displayName || room.id}</span>
-								<span className="archived-room-meta">
-									archived {archivedDate(room.archivedAt)} · {room.counts.memories} {room.counts.memories === 1 ? "memory" : "memories"} · {room.counts.files} file{room.counts.files === 1 ? "" : "s"}
-								</span>
-								{armedId === room.id && (
-									<span className="archived-room-meta archived-room-armed" role="alert">
-										Delete {room.displayName || room.id} forever? {roomFilesSentence(room.counts)}Everything is removed from this machine.
-									</span>
-								)}
-							</div>
-							<div className="archived-room-actions">
-								{armedId === room.id && <button type="button" className="rs-quiet" disabled={busy?.id === room.id} onClick={() => setArmedId(null)} title="Cancel — keep this room archived">Keep it</button>}
-								<button type="button" className="rs-btn" disabled={busy?.id === room.id} title="Bring this room back to Home" onClick={() => void restoreRoom(room)}>
-									{busy?.id === room.id && busy.action === "restore" ? "Restoring…" : "Restore"}
-								</button>
-								<button type="button" className="rs-btn rs-btn-danger" disabled={busy?.id === room.id} title="Erase this room and its files from this machine" onClick={() => void deleteForever(room)}>
-									{busy?.id === room.id && busy.action === "purge" ? "Deleting…" : "Delete forever"}
-								</button>
-							</div>
-						</div>
-					))}
-				</div>
-			)}
-			{note && <p className="archived-rooms-note" role="status">{note}</p>}
-			{error && <div className="workspaces-error archived-rooms-note">{error}</div>}
-		</section>
-	);
-}
-
-function MemoryShell({ onHome, onSettings, onDashboard, onMaintain, maintainBlocked, onOpenMemorySettings, theme, appearance, onSetAppearance }: { onHome: () => void; onSettings: (section?: SettingsSection) => void; onDashboard: () => void; onMaintain: (target: MaintainTarget) => void; maintainBlocked?: (agentId: PersistentAgentId) => string | null; onOpenMemorySettings: (target: { agentId: string; displayName: string }) => void; theme: ThemeMode; appearance: AppearancePreference; onSetAppearance: (pref: AppearancePreference) => void }) {
-	return (
-		<div className="landing-shell with-product-sidebar">
-			<ProductSidebar onHome={onHome} onSettings={onSettings} onDashboard={onDashboard} onMemory={() => {}} theme={theme} appearance={appearance} onSetAppearance={onSetAppearance} active="memory" />
-			<div className="landing dashboard-page">
-				<section className="landing-hero">
-					<h1>Memory.</h1>
-					<p>What your rooms remember, and how full their memory is.</p>
-				</section>
-				<Memory onMaintain={onMaintain} maintainBlocked={maintainBlocked} onOpenMemorySettings={onOpenMemorySettings} />
-			</div>
-		</div>
-	);
-}
-
-// In-flow replacement for the browser confirm at the Maintain flow's sensitive
-// moments: same visual language as the rest of the product, Escape cancels.
-type MaintainConfirm = { title: string; body: string; confirmLabel: string; cancelLabel: string; onConfirm: () => void };
-
-function MaintainConfirmDialog({ confirm, onClose }: { confirm: MaintainConfirm; onClose: () => void }) {
-	useEscapeKey(onClose, true);
-	return (
-		<div className="checkpoint-preview-backdrop maintain-confirm-backdrop" role="dialog" aria-modal="true" aria-label={confirm.title}>
-			<section className="checkpoint-input-card maintain-confirm-card">
-				<h2>{confirm.title}</h2>
-				<p>{confirm.body}</p>
-				<div className="checkpoint-preview-actions">
-					<button className="rs-btn" onClick={onClose}>{confirm.cancelLabel}</button>
-					<button className="rs-btn rs-btn-primary" autoFocus onClick={() => { onClose(); confirm.onConfirm(); }}>{confirm.confirmLabel}</button>
-				</div>
-			</section>
-		</div>
-	);
-}
-
-// A composer-staged attachment (files UI slice): already uploaded to the shelf
-// and parsed, waiting to ride the next message. The chip is the visible proof
-// the drop worked and carries the HONEST parse state before the user commits.
-type StagedAttachment = {
-	/** The allocated shelf name (collision rule already applied). Empty while uploading. */
-	name: string;
-	/** Chip key while the upload is in flight (the name is not known yet). */
-	stageId: string;
-	bytes: number;
-	extension: string;
-	status: "uploading" | "ready" | "failed";
-	/** "34 pages" · "image · stored…" · a parse-failure reason. */
-	parseNote: string;
-	pages?: number;
-	/**
-	 * A local object URL of the picture, set only for images: the composer
-	 * shows a staged picture AS a picture, before the upload has even landed.
-	 * Owned by the entry — every path that drops the entry revokes it
-	 * (releaseStaged), or the blob stays pinned in memory for the page's life.
-	 */
-	previewUrl?: string;
-};
-
-// The extensions the composer previews as a thumbnail tile (the same set the
-// bubble thumbnails use), for a file whose mime type the browser left blank.
-const STAGED_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]);
-
-/** Free the preview object URLs of entries leaving the staged row. */
-function releaseStaged(entries: readonly StagedAttachment[]): void {
-	for (const entry of entries) if (entry.previewUrl) URL.revokeObjectURL(entry.previewUrl);
-}
-
-// Export collision (assets contract §5): the three-button flow. Replace is the
-// destructive choice; Keep both auto-suffixes server-side; no filename typing.
-type ExportCollision = { fileName: string; place?: string; onReplace: () => void; onKeepBoth: () => void };
-
-function ExportCollisionDialog({ collision, onClose }: { collision: ExportCollision; onClose: () => void }) {
-	useEscapeKey(onClose, true);
-	return (
-		<div className="checkpoint-preview-backdrop maintain-confirm-backdrop" role="dialog" aria-modal="true" aria-label="File already exists">
-			<section className="checkpoint-input-card maintain-confirm-card">
-				<h2>File already exists</h2>
-				<p>A file called “{collision.fileName}” is already in {collision.place ?? "the chosen folder"}.</p>
-				<div className="checkpoint-preview-actions">
-					<button className="rs-btn" autoFocus onClick={onClose}>Cancel</button>
-					<button className="rs-btn" onClick={() => { onClose(); collision.onKeepBoth(); }} title="Save with a new name; the existing file stays">Keep both</button>
-					<button className="rs-btn rs-btn-danger" onClick={() => { onClose(); collision.onReplace(); }} title="Overwrite the existing file">Replace</button>
-				</div>
-			</section>
-		</div>
-	);
-}
-
-// Per-task delete confirm (assets contract §4): destructive-styled, names the
-// task, cancel is the safe default.
-function AssetDeleteDialog({ title, onDelete, onCancel }: { title: string; onDelete: () => void; onCancel: () => void }) {
-	useEscapeKey(onCancel, true);
-	return (
-		<div className="checkpoint-preview-backdrop maintain-confirm-backdrop" role="dialog" aria-modal="true" aria-label="Delete task files">
-			<section className="checkpoint-input-card maintain-confirm-card">
-				<h2>Delete “{title}”?</h2>
-				<p>This removes its files for good. Snapshots you downloaded or saved to a folder stay.</p>
-				<div className="checkpoint-preview-actions">
-					<button className="rs-btn" autoFocus onClick={onCancel}>Cancel</button>
-					<button className="rs-btn rs-btn-danger" onClick={onDelete}>Delete</button>
-				</div>
-			</section>
-		</div>
-	);
-}
-
-// Unified delete (files-management slice): the informed confirm for files
-// whose loss costs more than a re-upload — room-made files (the room's work)
-// and files the room already read this session. Cancel is the safe default.
-function FileDeleteDialog({ fileName, reason, onDelete, onCancel }: { fileName: string; reason: string; onDelete: () => void; onCancel: () => void }) {
-	useEscapeKey(onCancel, true);
-	return (
-		<div className="checkpoint-preview-backdrop maintain-confirm-backdrop" role="dialog" aria-modal="true" aria-label="Delete file">
-			<section className="checkpoint-input-card maintain-confirm-card">
-				<h2>Delete “{fileName}”?</h2>
-				<p>{reason} Snapshots you downloaded or saved to a folder stay.</p>
-				<div className="checkpoint-preview-actions">
-					<button className="rs-btn" autoFocus onClick={onCancel}>Cancel</button>
-					<button className="rs-btn rs-btn-danger" onClick={onDelete}>Delete</button>
-				</div>
-			</section>
-		</div>
-	);
-}
-
-// 💾 Save… filename step (files-management slice): pre-filled with the shelf
-// name, editable before the folder picker opens; the export and its collision
-// flow key off the chosen name.
-function SaveAsDialog({ shelfName, onSave, onCancel }: { shelfName: string; onSave: (name: string) => void; onCancel: () => void }) {
-	const [draft, setDraft] = useState(shelfName);
-	useEscapeKey(onCancel, true);
-	const commit = () => {
-		const name = draft.trim();
-		if (name) onSave(name);
-	};
-	return (
-		<div className="checkpoint-preview-backdrop maintain-confirm-backdrop" role="dialog" aria-modal="true" aria-label="Save file as">
-			<section className="checkpoint-input-card maintain-confirm-card">
-				<h2>Save a snapshot</h2>
-				<p>Pick the file name; you choose the folder next.</p>
-				<input
-					className="save-as-input"
-					value={draft}
-					autoFocus
-					aria-label="File name"
-					onFocus={(e) => {
-						const dot = draft.lastIndexOf(".");
-						e.currentTarget.setSelectionRange(0, dot > 0 ? dot : draft.length);
-					}}
-					onChange={(e) => setDraft(e.target.value)}
-					onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } }}
-				/>
-				<div className="checkpoint-preview-actions">
-					<button className="rs-btn" onClick={onCancel}>Cancel</button>
-					<button className="rs-btn rs-btn-primary" disabled={!draft.trim()} onClick={commit}>Choose folder…</button>
-				</div>
-			</section>
-		</div>
-	);
-}
-
-interface TaskStoreGcView {
-	totalBytes: number;
-	thresholdBytes: number;
-	proposal: { candidates: { taskId: string; title?: string; startedAt?: string; bytes: number }[]; reclaimBytes: number } | null;
-}
-
-function fmtMb(bytes: number): string {
-	return `${(bytes / 1_000_000).toFixed(bytes >= 100_000_000 ? 0 : 1)} MB`;
-}
-
-// Store-wide GC surfaces (assets contract §4): a quiet banner on Home once the
-// safety valve's threshold is crossed, and the approval dialog that names
-// exactly what would go. Nothing is deleted without the explicit confirm.
-function TaskStoreGcBanner({ assessment, onReview, onDismiss }: { assessment: TaskStoreGcView; onReview: () => void; onDismiss: () => void }) {
-	if (!assessment.proposal) return null;
-	return (
-		<div className="task-store-gc-banner" role="status">
-			<span>Old specialist files are taking up {fmtMb(assessment.totalBytes)} — {fmtMb(assessment.proposal.reclaimBytes)} can be freed safely.</span>
-			<button className="rs-btn" onClick={onReview} title="See which old task folders would be deleted">Review</button>
-			<button className="icon-btn" aria-label="Dismiss" title="Dismiss — nothing is deleted" onClick={onDismiss}>✕</button>
-		</div>
-	);
-}
-
-function TaskStoreGcDialog({ assessment, busy, onConfirm, onClose }: { assessment: TaskStoreGcView; busy: boolean; onConfirm: () => void; onClose: () => void }) {
-	useEscapeKey(onClose, true);
-	const proposal = assessment.proposal;
-	if (!proposal) return null;
-	return (
-		<div className="checkpoint-preview-backdrop maintain-confirm-backdrop" role="dialog" aria-modal="true" aria-label="Review task-store cleanup">
-			<section className="checkpoint-input-card maintain-confirm-card task-store-gc-card">
-				<h2>Free up task storage</h2>
-				<p>These {proposal.candidates.length} are from old work no conversation refers to anymore. Deleting them frees {fmtMb(proposal.reclaimBytes)} — your Files and saved snapshots stay.</p>
-				<div className="task-store-gc-list">
-					{proposal.candidates.map((candidate) => (
-						<div key={candidate.taskId} className="task-store-gc-row">
-							<span className="task-store-gc-title">{candidate.title || candidate.taskId}</span>
-							<span className="task-store-gc-meta">{candidate.startedAt ? new Date(candidate.startedAt).toLocaleDateString() : "—"} · {fmtMb(candidate.bytes)}</span>
-						</div>
-					))}
-				</div>
-				<div className="checkpoint-preview-actions">
-					<button className="rs-btn" autoFocus disabled={busy} onClick={onClose}>Cancel</button>
-					<button className="rs-btn rs-btn-danger" disabled={busy} onClick={onConfirm}>{busy ? "Deleting…" : `Delete ${proposal.candidates.length} task folders`}</button>
-				</div>
-			</section>
-		</div>
-	);
-}
-
-// The leave-guard dialog and the native beforeunload prompt lived here until
-// option 4 (2026-07-19): both warned about the leave-abort, and the abort is
-// gone — a delegation belongs to the room, not to the tab that asked for it.
-
-function MaintainChooserShell({ target, roomStatus, onAbsorb, onDiscussFirst, onPrune, onReturn, returnLabel }: { target: MaintainTarget; roomStatus: PersistentAgentStatus | null; onAbsorb: () => void; onDiscussFirst: () => void; onPrune: () => void; onReturn: () => void; returnLabel: string }) {
-	useEscapeKey(onReturn, true);
-	const memoryStatus = roomStatus?.memoryStatus ?? null;
-	const memoryBudget = roomStatus?.memoryBudget ?? null;
-	const waiting = memoryStatus?.recentContextCount ?? null;
-	const sessionBlockCap = roomStatus?.recentContext?.blockCap ?? 20;
-	const nothingWaiting = waiting === 0;
-	// A room that saves a clean update without the card starts Memorize
-	// without a first read; Discuss first is its way to one.
-	const automatic = roomStatus?.fastPathSecondApproval === true;
-	// The belt for a deep link: the card and maintainBlockedReason already
-	// keep Maintain closed on a room whose memory is still its scaffold.
-	const nothingToReview = nothingToMaintain(memoryStatus);
-	const unsorted = memoryStatus?.unsortedAfterReread ?? 0;
-	const fullPercent = memoryBudget && memoryBudget.budgetTokens > 0 ? Math.round((memoryBudget.reviewTargetEstimatedTokens / memoryBudget.budgetTokens) * 100) : null;
-	const overLimit = fullPercent !== null && fullPercent > 100;
-	// One recommendation at a time: waiting conversations come first, because
-	// Memorize also makes room; a full room with nothing waiting points at Review.
-	const recommended: "memorize" | "review" | null = waiting !== null && waiting > 0 ? "memorize" : overLimit ? "review" : null;
-	const waitingWords = waiting === null ? null : waiting === 0 ? "Nothing waiting to be memorized" : <><strong>{waiting}</strong> {waiting === 1 ? "conversation" : "conversations"} waiting to be memorized</>;
-	const fullWords = fullPercent === null ? null : overLimit ? <>memory is <strong className="over">above its budget</strong></> : <>memory <strong>{fullPercent}%</strong> full</>;
-	const statusTitle = memoryBudget ? `The memory budget is set in Room settings: ${fmtTokensK(memoryBudget.reviewTargetEstimatedTokens)} of ${fmtTokensK(memoryBudget.budgetTokens)} tokens in use. Chat keeps working until the room holds ${sessionBlockCap} waiting conversations.` : undefined;
-	const memorizeCard = (
-		<button type="button" className={`maintain-action${recommended === "memorize" ? " recommended" : ""}`} disabled={nothingWaiting} title={nothingWaiting ? "Have a conversation with this room first." : undefined} onClick={onAbsorb}>
-			<span className="maintain-action-body">
-				<span className="maintain-action-head">
-					<span className="maintain-action-title">Memorize</span>
-					{recommended === "memorize" && <span className="maintain-action-tag">Recommended</span>}
-				</span>
-				<span className="maintain-action-text">{nothingWaiting
-					? `Nothing to memorize yet. Have a conversation with ${target.displayName} first.`
-					: memorizeChooserText(waiting ?? 0, automatic)}</span>
-			</span>
-			<span className="maintain-action-go" aria-hidden="true">Start</span>
-		</button>
-	);
-	return (
-		<div className="absorb-workspace maintain-workspace" aria-label="Memory maintenance chooser">
-			<header className="absorb-workspace-header">
-				<div>
-					<p className="card-kicker">{target.displayName}</p>
-					<h1>Memory.</h1>
-					{(waitingWords || fullWords)
-						? <p className="maintain-status" title={statusTitle}>{waitingWords}{waitingWords && fullWords ? " · " : ""}{fullWords}</p>
-						: <p>What {target.displayName} remembers, and how to keep it in shape.</p>}
-				</div>
-				<button className="rs-btn" onClick={onReturn}>{returnLabel}</button>
-			</header>
-			<main className="absorb-workspace-main maintain-workspace-main">
-				<div className="maintain-chooser-column">
-					<section className="maintain-actions" aria-label="Memory maintenance workflows">
-						{automatic ? (
-							// Discuss first sits beside the card, never inside it: the card is one button.
-							// The row around them starts Memorize too, as its shading says; a click on a
-							// child is that child's own, so nothing fires twice.
-							<div className="maintain-action-row" onClick={(event) => { if (event.target === event.currentTarget && !nothingWaiting) onAbsorb(); }}>
-								{memorizeCard}
-								<button type="button" className="rs-btn maintain-action-aside" disabled={nothingWaiting} title={DISCUSS_FIRST_TITLE} onClick={(event) => { event.stopPropagation(); onDiscussFirst(); }}>{DISCUSS_FIRST_LABEL}</button>
-							</div>
-						) : memorizeCard}
-						<button type="button" className={`maintain-action${recommended === "review" ? " recommended" : ""}`} disabled={nothingToReview} title={nothingToReview ? NOTHING_TO_MAINTAIN_SENTENCE : "Tidy this room's notes"} onClick={onPrune}>
-							<span className="maintain-action-body">
-								<span className="maintain-action-head">
-									<span className="maintain-action-title">Review</span>
-									{recommended === "review" && <span className="maintain-action-tag">Recommended</span>}
-								</span>
-								<span className="maintain-action-text">{nothingToReview
-									? NOTHING_TO_MAINTAIN_SENTENCE
-									: "Make the notes shorter and clearer, and move what is finished or stale to the archive. You see every change before it is saved and can undo it after."}</span>
-							</span>
-							<span className="maintain-action-go" aria-hidden="true">Start</span>
-						</button>
-					</section>
-					{unsorted > 0 && (
-						<div className="maintain-hint">
-							<p>{unsortedHintText(unsorted)}</p>
-							<button type="button" className="rs-btn" disabled={nothingToReview} onClick={onPrune}>Review</button>
-						</div>
-					)}
-					<p className="maintain-footnote">{maintainChooserFootnote(automatic)}</p>
-				</div>
-			</main>
-		</div>
-	);
-}
-
-type CheckpointApprovalEditFields = { sessionArc: string; body: string; parked: string };
-
-function buildApprovedRecentContextMarkdown(proposal: CheckpointProposalResponse, fields: CheckpointApprovalEditFields): string {
-	const heading = proposal.proposedRecentContext.split(/\r?\n/)[0]?.trim() || `### RC-DRAFT | ${fields.parked.trim().toLowerCase() === "none" ? "CLOSED" : "OPEN"} | ${new Date().toISOString().slice(0, 10)} | ${proposal.preview.title}`;
-	return `${heading}\n\n**Session arc:** ${fields.sessionArc.trim()}\n\n**Body:**\n${fields.body.trim()}\n\n**Parked:**\n${fields.parked.trim() || "None"}\n`;
-}
-
-
-
-function ReviewWorkflowShell({ state, loadingMessage, waitingMessage, keepIds, onStopAbandonedRun, onAbort, onDiscuss, onSendDiscussionMessage, onContinueFromDiscussion, onContinueWithoutDiscussion, onContinue, onBackToAssessment, onReassess, onRestart, onSetDepth, onCancelRun, onToggleRunKeep, onToggleRunKeepTopic, onRaiseRunBudget, onEditRunEntry, onSaveRun, onRunBackToAssessment, onUndo, returnLabel }: { state: ReviewWorkflowState; loadingMessage: string; waitingMessage: string; keepIds: string[]; onStopAbandonedRun: () => void; onAbort: () => void; onDiscuss: () => void; onSendDiscussionMessage: (message: string) => void; onContinueFromDiscussion: () => void; onContinueWithoutDiscussion: () => void; onContinue: () => void; onBackToAssessment: () => void; onReassess: () => void; onRestart: () => void; onSetDepth: (depth: ReviewDepth) => void; onCancelRun: () => void; onToggleRunKeep: (entryIds: string[], next: boolean) => void; onToggleRunKeepTopic: (section: "Deep Memory" | "Active Items", topic: string, next: boolean) => void; onRaiseRunBudget: (budgetTokens: number) => void; onEditRunEntry: (entryId: string, text: string) => Promise<void>; onSaveRun: () => void; onRunBackToAssessment: () => void; onUndo: () => void; returnLabel: string }) {
-	if (state.step === "closed") return null;
-	const loading = state.step === "checking" || state.step === "assessing";
-	const availability = state.availability;
-	const assessment = state.assessment;
-	const run = state.run ?? null;
-	const discussionMessages = state.discussionMessages ?? [];
-	const discussionBudget = state.discussionTokenBudget;
-	const targetLabel = state.target?.displayName ?? "this room";
-	const undo: ReviewUndoState = state.undo ?? { busy: false, done: false, error: null };
-	const topicCount = availability?.topics ?? 0;
-	// A first read that named stale notes is why the deeper tidy is offered
-	// first, so the picker says so in the same words the read used.
-	const staleFlagged = (assessment?.fields.staleOrContradicts.length ?? 0) > 0;
-	const lookAlike = (assessment?.fields.lookAlikeTopics?.length ?? 0) > 0;
-	const disagreeing = assessment?.fields.disagree?.length ?? 0;
-	const savedCounts = reviewChangeCounts(run?.changes ?? []);
-	const savedBudget = state.approvalResult?.memoryBudget;
-	const savedPercent = savedBudget ? reviewPercent(savedBudget.reviewTargetEstimatedTokens, savedBudget.budgetTokens) : run ? reviewRunFullPercent(run) : 0;
-	const savedOver = savedBudget ? savedBudget.overBudget : run?.budget.overBudgetAfter === true;
-	const stepLine = loading
-		? "Reading the notes…"
-		: state.step === "assessment" || state.step === "discussing"
-			? "Step 1 of 2 · a first read of what the notes need"
-			: state.step === "running" || state.step === "run_card" || state.step === "signing_off" || state.step === "run_failed"
-				? `Step 2 of 2 · what changes in ${targetLabel}'s memory`
-				: state.step === "approving"
-					? "Saving…"
-					: state.step === "saved"
-						? (undo.done ? "Undone" : "Saved")
-						: `Tidying what ${targetLabel} knows.`;
-	return (
-		<div className="absorb-workspace maintain-workspace review-workspace" aria-label="Review workflow">
-			<header className={`absorb-workspace-header${state.step === "discussing" ? " compact" : ""}`}>
-				<div>
-					<p className="card-kicker">{targetLabel}</p>
-					<h1>Review.</h1>
-					<p>{stepLine}</p>
-				</div>
-				{state.step === "approving" ? (
-					<button className="rs-btn" disabled title="The changes are being saved and cannot be cancelled.">Saving…</button>
-				) : state.step === "assessment" || state.step === "run_card" || state.step === "running" ? null : (
-					// The first read, the working screen and the card keep a single
-					// Cancel in their own action row instead of a duplicate header exit.
-					<button className="rs-btn" onClick={onAbort}>{state.step === "saved" || state.step === "unavailable" || state.step === "error" ? returnLabel : "Cancel"}</button>
-				)}
-			</header>
-			<main className="absorb-workspace-main">
-				<section className="checkpoint-input-card absorb-workflow-card">
-					{loading ? (
-						<div className="checkpoint-generating-state absorb-loading-state">
-							<h2>{loadingMessage}</h2>
-							<span className="spinner spinner-lg" />
-							<p>{topicCount > 0 ? `Reading the notes in ${topicCount} ${topicCount === 1 ? "topic" : "topics"}. This usually takes a minute or two.` : "Reading the notes. This usually takes a minute or two."}</p>
-						</div>
-					) : state.step === "unavailable" ? (
-						<div className="checkpoint-proposal-page absorb-unavailable-state">
-							<div className="checkpoint-input-heading">
-								<h2>Review cannot start yet</h2>
-								<p>{state.unavailableReason || "This room's notes cannot be tidied right now. Nothing was changed. Try again in a moment."}</p>
-							</div>
-							<div className="checkpoint-preview-actions">
-								<button className="rs-btn" onClick={onAbort}>{returnLabel}</button>
-								<button className="rs-btn rs-btn-primary" onClick={onRestart}>Back to Maintain</button>
-							</div>
-						</div>
-					) : state.step === "signing_off" || state.step === "approving" ? (
-						<div className="checkpoint-generating-state absorb-loading-state">
-							<h2>{state.step === "approving" ? "Saving…" : "Reading the discussion back…"}</h2>
-							<span className="spinner spinner-lg" />
-							<p>{state.step === "approving" ? "A copy of today's memory is kept, then the tidied notes are saved." : "What you agreed is folded into the tidy."}</p>
-							{state.step === "approving" && <p>This step finishes on its own and cannot be cancelled.</p>}
-						</div>
-					) : state.step === "running" ? (
-						run ? (
-							<>
-								{state.runPollError && <div className="checkpoint-proposal-error" role="alert">{state.runPollError}</div>}
-								<ReviewRunProgressScreen run={run} onCancel={onCancelRun} />
-							</>
-						) : (
-							<div className="checkpoint-generating-state absorb-loading-state">
-								<h2>{waitingMessage}</h2>
-								<span className="spinner spinner-lg" />
-								<p>The notes are tidied topic by topic. Every note keeps its date and anything you pinned. Nothing is saved until you approve.</p>
-								{state.runPollError && <div className="checkpoint-proposal-error" role="alert">{state.runPollError}</div>}
-								<div className="checkpoint-preview-actions">
-									<button className="rs-btn" onClick={onCancelRun} title="Stop this tidy and return to the first read. Nothing is saved.">Cancel</button>
-								</div>
-							</div>
-						)
-					) : state.step === "run_failed" ? (
-						<ReviewRunFailedScreen error={state.error ?? "The tidy could not be finished."} onBack={onRunBackToAssessment} onRetry={onContinue} />
-					) : state.step === "run_card" && run ? (
-						<ReviewCard
-							run={run}
-							roomName={targetLabel}
-							keepIds={keepIds}
-							busy={state.runBusy === true}
-							error={state.error}
-							fastPathBlockedReasons={state.fastPathBlockedReasons}
-							onToggleKeep={onToggleRunKeep}
-							onToggleKeepTopic={onToggleRunKeepTopic}
-							onRaiseBudget={onRaiseRunBudget}
-							onEditEntry={onEditRunEntry}
-							onCancel={onCancelRun}
-							onBack={onRunBackToAssessment}
-							backLabel="Back"
-							onSave={onSaveRun}
-						/>
-					) : state.step === "saved" && state.approvalResult ? (
-						<ReviewSavedScreen
-							roomName={targetLabel}
-							counts={savedCounts}
-							percent={savedPercent}
-							over={savedOver}
-							archivedEntries={state.approvalResult.archivedEntries}
-							archivedForBudget={state.approvalResult.archivedForBudget}
-							rebasedOnto={state.approvalResult.rebasedOnto}
-							limitRaised={state.approvalResult.budgetRaisedTo !== undefined}
-							warnings={[
-								...(state.fastPathApplied ? ["This room saves memory updates on its own, so these changes were saved without a second look."] : []),
-								...(state.signoffWarnings ?? []),
-								...state.approvalResult.warnings,
-							]}
-							undo={undo}
-							onUndo={onUndo}
-							onReturn={onAbort}
-							returnLabel={returnLabel}
-						/>
-					) : state.step === "error" ? (
-						<div className="checkpoint-proposal-page absorb-error-state">
-							<div className="checkpoint-input-heading">
-								<h2>Review could not start</h2>
-								<p>No memory was changed. You can start Maintain again right away.</p>
-							</div>
-							{state.error && <div className="checkpoint-proposal-error" role="alert">{state.error}</div>}
-							<div className="checkpoint-preview-actions">
-								<button className="rs-btn" onClick={onAbort}>{returnLabel}</button>
-								<button className="rs-btn rs-btn-primary" onClick={onRestart}>Start Maintain again</button>
-							</div>
-						</div>
-					) : state.step === "discussing" && assessment ? (
-						<div className="checkpoint-proposal-page absorb-discussion-page review-discussion-page">
-							<MaintenanceDiscussion
-								assessmentMarkdown={assessment.assessmentMarkdown}
-								aside={<ReviewFirstReadSections fields={assessment.fields} compact />}
-								generateLabel="Continue →"
-								backLabel="Back"
-								messages={discussionMessages}
-								budget={discussionBudget}
-								warnings={state.discussionWarnings ?? null}
-								error={state.error}
-								sending={Boolean(state.discussionSending)}
-								emptyHint="Tell the room what to keep as it is, what to shorten, and what to move to the archive. The tidy follows what you say here."
-								placeholder="Your answer or instruction…"
-								onSend={onSendDiscussionMessage}
-								onBack={onBackToAssessment}
-								onGenerate={onContinueFromDiscussion}
-								onDraftWithoutDiscussion={onContinueWithoutDiscussion}
-							/>
-						</div>
-					) : assessment ? (
-						<div className="checkpoint-proposal-page absorb-assessment-page review-assessment-page">
-							<div className="checkpoint-input-heading checkpoint-proposal-heading">
-								<h2>What {targetLabel}'s notes need</h2>
-								<p>A first read{topicCount > 0 ? ` of ${topicCount} ${topicCount === 1 ? "topic" : "topics"}` : ""}.</p>
-							</div>
-							{state.error && <div className="checkpoint-proposal-error" role="alert">{state.error}</div>}
-							{state.activeRunConflictId && (
-								<div className="absorb-help-note absorb-run-conflict-note">
-									<span>{REVIEW_RUN_ACTIVE_SENTENCE}</span>
-									<button className="rs-btn" onClick={onStopAbandonedRun} title="Stop the tidy this room is still holding, then start this one.">{REVIEW_RUN_ACTIVE_ACTION}</button>
-								</div>
-							)}
-							<div className="absorb-assessment-grid absorb-assessment-flow">
-								<ReviewFirstReadSections fields={assessment.fields} />
-							</div>
-							{availability && (
-								<ReviewDepthPicker availability={availability} staleFlagged={staleFlagged} lookAlike={lookAlike} disagreeing={disagreeing} chosen={state.depth ?? availability.recommendedDepth} onChoose={onSetDepth} />
-							)}
-							{assessment.fields.needsYourCall.length > 0 && <p className="absorb-help-note">Answer these in Discuss first, and the tidy follows your answers. Continue lets the room decide on its own.</p>}
-							{meaningfulMaintenanceWarnings(assessment.warnings).length > 0 && <div className="checkpoint-proposal-warnings">{meaningfulMaintenanceWarnings(assessment.warnings).map((warning) => <div key={warning}>{warning}</div>)}</div>}
-							<div className="checkpoint-preview-actions">
-								<button className="rs-btn" onClick={onAbort}>Cancel</button>
-								<button className="rs-btn" onClick={onReassess} title="Read the notes again, asking the room to fix what this read got wrong. Nothing is saved.">Read again</button>
-								<button className={`rs-btn${assessment.fields.needsYourCall.length > 0 ? " rs-btn-primary" : ""}`} onClick={onDiscuss} title="Talk the first read through before anything is tidied. The discussion itself is not saved.">Discuss first</button>
-								<button className={`rs-btn${assessment.fields.needsYourCall.length > 0 ? "" : " rs-btn-primary"}`} onClick={onContinue} title="Tidy the notes and show every change before saving">Continue →</button>
-							</div>
-							{state.fastPathEnabled && <p className="checkpoint-footnote">{AUTOMATIC_APPLY_ON_SENTENCE} · a clean tidy is saved without a second look</p>}
-						</div>
-					) : null}
-				</section>
-			</main>
-		</div>
-	);
-}
-
-function AbsorbWorkflowShell({ state, loadingMessage, waitingMessage, keepIds, onStopAbandonedRun, onAbort, onDiscuss, onSendDiscussionMessage, onGenerateFromDiscussion, onGenerate, onBackToAssessment, onReassess, onDraftWithoutDiscussion, onRestart, onCancelRun, onToggleRunKeep, onToggleRunKeepTopic, onRaiseRunBudget, onRaiseLimitBeforeRun, onReviewFirst, onEditRunEntry, onChooseRunBeside, onApproveRun, onRunBackToAssessment, onResumeRun, onChooseModel, returnLabel }: { state: AbsorbWorkflowState; loadingMessage: string; waitingMessage: string; keepIds: string[]; onStopAbandonedRun: () => void; onAbort: () => void; onDiscuss: () => void; onSendDiscussionMessage: (message: string) => void; onGenerateFromDiscussion: () => void; onGenerate: () => void; onBackToAssessment: () => void; onReassess: () => void; onDraftWithoutDiscussion: () => void; onRestart: () => void; onCancelRun: () => void; onToggleRunKeep: (entryIds: string[], next: boolean) => void; onToggleRunKeepTopic: (section: "Deep Memory" | "Active Items", topic: string, next: boolean) => void; onRaiseRunBudget: (budgetTokens: number) => void; onRaiseLimitBeforeRun: (budgetTokens: number) => void; onReviewFirst: () => void; onEditRunEntry: (entryId: string, text: string) => Promise<void>; onChooseRunBeside: (entryId: string, choice: "replace" | "keep-both") => Promise<void>; onApproveRun: () => void; onRunBackToAssessment: () => void; onResumeRun: () => void; onChooseModel: () => void; returnLabel: string }) {
-	if (state.step === "closed") return null;
-	const loading = state.step === "checking" || state.step === "assessing";
-	const availability = state.availability;
-	const assessment = state.assessment;
-	const discussionMessages = state.discussionMessages ?? [];
-	const discussionBudget = state.discussionTokenBudget;
-	const targetLabel = state.target?.displayName ?? "this room";
-	// The card shell shown from Continue until the run reports: the first read's
-	// conversations, all waiting, so no loading screen sits between the two.
-	const shellSessions = state.conversations ?? state.availability?.sessions ?? state.assessment?.availability.sessions ?? null;
-	const shellRun = state.target && shellSessions ? placeholderAbsorbRun(state.target.agentId, shellSessions) : null;
-	const stepLine = loading
-		? "Reading the waiting conversations…"
-		: state.step === "assessment" || state.step === "discussing"
-			? "Step 1 of 2 · a first read of what the waiting conversations hold"
-			: state.step === "running" || state.step === "run_card" || state.step === "proposing"
-				? `Step 2 of 2 · what ${targetLabel} will keep`
-				: state.step === "approving"
-					? "Saving…"
-					: state.step === "saved"
-						? "Saved"
-						: `What ${targetLabel} keeps from its conversations.`;
-	return (
-		<div className="absorb-workspace maintain-workspace" aria-label="Memory absorption workflow">
-			<header className={`absorb-workspace-header${state.step === "discussing" ? " compact" : ""}`}>
-				<div>
-					<p className="card-kicker">{targetLabel}</p>
-					<h1>Memorize.</h1>
-					<p>{stepLine}</p>
-				</div>
-				{state.step === "approving" ? (
-					<button className="rs-btn" disabled title="The memory update is being written and cannot be cancelled.">Updating memory…</button>
-				) : state.step === "assessment" || state.step === "running" || state.step === "run_card" ? null : (
-					// Assessment, the run screens and the proposal keep a single Cancel
-					// in their action row instead of a duplicate header exit.
-					<button className="rs-btn" onClick={onAbort}>{state.step === "saved" || state.step === "unavailable" || state.step === "error" ? returnLabel : "Cancel"}</button>
-				)}
-			</header>
-			<main className="absorb-workspace-main">
-				<section className="checkpoint-input-card absorb-workflow-card">
-				{loading ? (
-					<div className="checkpoint-generating-state absorb-loading-state">
-						<h2>{loadingMessage}</h2>
-						<span className="spinner spinner-lg" />
-						<p>{state.step === "assessing" && availability ? `Reading ${availability.recentContextEntryCount} waiting ${availability.recentContextEntryCount === 1 ? "conversation" : "conversations"}. This usually takes under a minute.` : "Reading the waiting conversations. This usually takes under a minute."}</p>
-					</div>
-				) : state.step === "unavailable" && availability ? (
-					(() => {
-						const copy = absorbUnavailableCopy(availability);
-						return (
-							<div className="checkpoint-proposal-page absorb-unavailable-state">
-								<div className="checkpoint-input-heading">
-									<h2>{copy.heading}</h2>
-									<p>{copy.body}</p>
-								</div>
-								{copy.detail && (
-									<details className="absorb-candidate-disclosure absorb-detail-disclosure">
-										<summary>Technical detail</summary>
-										<p>{copy.detail}</p>
-									</details>
-								)}
-								<div className="checkpoint-preview-actions">
-									<button className="rs-btn" onClick={onAbort}>{returnLabel}</button>
-									<button className="rs-btn rs-btn-primary" onClick={onRestart}>Back to Maintain</button>
-								</div>
-							</div>
-						);
-					})()
-								) : (state.step === "proposing" || state.step === "signing_off") && shellRun ? (
-					<AbsorbRunCard run={shellRun} roomName={targetLabel} working headline={state.step === "signing_off" ? "Reading the discussion back…" : "Starting…"} keepIds={[]} busy={false} error={null} onToggleKeep={() => {}} onToggleKeepTopic={() => {}} onRaiseBudget={() => {}} onApprove={() => {}} onCancel={onAbort} onBackToAssessment={onAbort} />
-				) : state.step === "proposing" || state.step === "approving" || state.step === "signing_off" ? (
-					<div className="checkpoint-generating-state absorb-loading-state">
-						<h2>{state.step === "approving" ? "Saving to memory…" : state.step === "signing_off" ? "Reading the discussion back…" : "Starting…"}</h2>
-						<span className="spinner spinner-lg" />
-						<p>{state.step === "approving" ? "A copy of today's memory is kept, then the notes are saved." : state.step === "signing_off" ? "What you agreed becomes instructions for the memorize." : "Each conversation is read on its own and turned into notes."}</p>
-						{state.step === "approving" && <p>This step finishes on its own and cannot be cancelled.</p>}
-					</div>
-				) : state.step === "running" ? (
-					state.run ? (
-						<>
-							{state.runPollError && <div className="checkpoint-proposal-error" role="alert">{state.runPollError}</div>}
-							<AbsorbRunCard run={state.run} roomName={targetLabel} working keepIds={keepIds} busy={false} error={null} onToggleKeep={onToggleRunKeep} onToggleKeepTopic={onToggleRunKeepTopic} onRaiseBudget={onRaiseRunBudget} onEditEntry={onEditRunEntry} onApprove={onApproveRun} onCancel={onCancelRun} onBackToAssessment={onRunBackToAssessment} />
-						</>
-					) : shellRun ? (
-						<>
-							{state.runPollError && <div className="checkpoint-proposal-error" role="alert">{state.runPollError}</div>}
-							<AbsorbRunCard run={shellRun} roomName={targetLabel} working headline="Starting…" keepIds={[]} busy={false} error={null} onToggleKeep={() => {}} onToggleKeepTopic={() => {}} onRaiseBudget={() => {}} onApprove={() => {}} onCancel={onCancelRun} onBackToAssessment={onRunBackToAssessment} />
-						</>
-					) : (
-						<div className="checkpoint-generating-state absorb-loading-state">
-							<h2>Starting…</h2>
-							<span className="spinner spinner-lg" />
-							<p>Each conversation is read on its own and turned into notes.</p>
-							{state.runPollError && <div className="checkpoint-proposal-error" role="alert">{state.runPollError}</div>}
-							<div className="checkpoint-preview-actions">
-								<button className="rs-btn" onClick={onCancelRun} title="Stop this memory update and return to the assessment. Nothing is saved.">Cancel</button>
-							</div>
-						</div>
-					)
-				) : state.step === "run_failed" ? (
-					<AbsorbRunFailedScreen error={state.error ?? "The memory update could not be finished."} onBackToAssessment={onRunBackToAssessment} onRetry={onGenerate} />
-				) : state.step === "run_card" && state.run ? (
-					<AbsorbRunCard
-						run={state.run}
-						roomName={targetLabel}
-						memoryModel={availability?.model}
-						fastPathBlockedReasons={state.fastPathBlockedReasons}
-						keepIds={keepIds}
-						busy={state.runBusy === true}
-						error={state.error}
-						onToggleKeep={onToggleRunKeep}
-						onToggleKeepTopic={onToggleRunKeepTopic}
-						onRaiseBudget={onRaiseRunBudget}
-						onEditEntry={onEditRunEntry}
-						onChooseBeside={onChooseRunBeside}
-						onApprove={onApproveRun}
-						onCancel={onCancelRun}
-						onBackToAssessment={onRunBackToAssessment}
-						onResume={onResumeRun}
-						onChooseModel={onChooseModel}
-					/>
-				) : state.step === "saved" && state.approvalResult && state.run ? (
-					<div className="checkpoint-proposal-page checkpoint-saved-page absorb-saved-state">
-						<div className="checkpoint-input-heading checkpoint-proposal-heading">
-							<h2>{absorbRunSavedHeadline(state.approvalResult, targetLabel)}</h2>
-							<p>{absorbRunSavedSentence({ ...state.approvalResult, newTopics: absorbRunNewTopics(state.run) })} Memory is {absorbRunFullPercent(state.run)}% full.</p>
-							{state.approvalResult.budgetRaisedTo !== undefined && <p>{LIMIT_RAISED_ON_SAVE_SENTENCE}</p>}
-							{state.fastPathApplied && <p className="absorb-fast-path-note">This room applies memory updates automatically, so this update was saved without a second look.</p>}
-						</div>
-						{/* Saved without a second look, so the notice the card would have shown is shown here. */}
-						{state.fastPathApplied && absorbRunAllSummarized(state.run) && (
-							<div className="absorb-help-note absorb-run-summaries-note" role="status">
-								<p>{ABSORB_ALL_SUMMARIZED_SENTENCE}</p>
-								<div className="absorb-run-note-actions"><button className="rs-btn" onClick={onChooseModel}>{ABSORB_CHOOSE_MODEL_LABEL}</button></div>
-							</div>
-						)}
-						<div className="absorb-review-strip">
-							<div className="absorb-review-status"><span>Conversations</span><strong>{(state.approvalResult.foldedSessions?.length ?? 0)} of {state.run.progress.total}</strong></div>
-							<div className="absorb-review-status"><span>Notes</span><strong>{absorbRunNotesChanged(state.run)} added or updated</strong></div>
-							{(state.approvalResult.archivedEntries ?? 0) > 0 && <div className="absorb-review-status"><span>Archive</span><strong>{state.approvalResult.archivedEntries} {state.approvalResult.archivedEntries === 1 ? "note" : "notes"}</strong></div>}
-							<div className="absorb-review-status"><span>Memory</span><strong>{absorbRunFullPercent(state.run)}% full</strong></div>
-						</div>
-						{state.approvalResult.warnings.length > 0 && <div className="checkpoint-proposal-warnings">{state.approvalResult.warnings.map((warning) => <div key={warning}>{warning}</div>)}</div>}
-						<p className="checkpoint-footnote">The previous memory is kept, so this update can be undone from Room settings → Memory.</p>
-						<div className="checkpoint-preview-actions">
-							<button className="rs-btn rs-btn-primary" onClick={onAbort}>{returnLabel}</button>
-						</div>
-					</div>
-				) : state.step === "error" ? (
-					<div className="checkpoint-proposal-page absorb-error-state">
-						<div className="checkpoint-input-heading">
-							<h2>Memorizing could not start</h2>
-							<p>No memory was changed. You can start Maintain again right away.</p>
-						</div>
-						{state.error && <div className="checkpoint-proposal-error" role="alert">{state.error}</div>}
-						<div className="checkpoint-preview-actions">
-							<button className="rs-btn" onClick={onAbort}>{returnLabel}</button>
-							<button className="rs-btn rs-btn-primary" onClick={onRestart}>Start Maintain again</button>
-						</div>
-					</div>
-				) : state.step === "discussing" && assessment ? (
-					<div className="checkpoint-proposal-page absorb-discussion-page">
-						<MaintenanceDiscussion
-							assessmentMarkdown={assessment.assessmentMarkdown}
-							aside={<AbsorbFirstReadSections fields={assessment.fields} compact />}
-							generateLabel="Continue →"
-							backLabel="Back"
-							messages={discussionMessages}
-							budget={discussionBudget}
-							warnings={state.discussionWarnings ?? null}
-							error={state.error}
-							sending={Boolean(state.discussionSending)}
-							emptyHint="Answer the questions on the left, or tell the room what to keep, let go, or file under another topic. The update follows what you say here."
-							placeholder="Your answer or instruction…"
-							onSend={onSendDiscussionMessage}
-							onBack={onBackToAssessment}
-							onGenerate={onGenerateFromDiscussion}
-							onDraftWithoutDiscussion={onDraftWithoutDiscussion}
-						/>
-					</div>
-				) : assessment ? (
-					<div className="checkpoint-proposal-page absorb-assessment-page">
-						<div className="checkpoint-input-heading checkpoint-proposal-heading">
-							<h2>{assessment.availability.recentContextEntryCount === 1 ? "What this conversation holds" : `What these ${assessment.availability.recentContextEntryCount} conversations hold`}</h2>
-							<p>{assessment.firstReadMissing ? FIRST_READ_MISSING_SENTENCE : "A first read."}</p>
-						</div>
-						{state.error && <div className="checkpoint-proposal-error" role="alert">{state.error}</div>}
-						{state.activeRunConflictId && (
-							<div className="absorb-help-note absorb-run-conflict-note">
-								<span>{ABSORB_RUN_ACTIVE_SENTENCE}</span>
-								<button className="rs-btn" onClick={onStopAbandonedRun} title="Stop the update this room is still holding, then draft this one.">{ABSORB_RUN_ACTIVE_ACTION}</button>
-							</div>
-						)}
-						{availability?.prepass?.demotionRequired && availability.budget && (() => {
-							// A room already over its limit is told so before anything runs,
-							// with the two other ways out of it: a higher limit, written at
-							// once because it is the person's explicit choice, or a Review.
-							const over = overLimitFirstRead({ reviewTargetTokens: availability.budget.reviewTargetTokens, budgetTokens: availability.budget.budgetTokens, entriesOverBudget: availability.prepass.entriesOverBudget });
-							const raising = state.limitRaising === true;
-							return (
-								<div className="absorb-over-limit-block" role="status">
-									<h3>{over.headline}</h3>
-									<p>{over.sentence}</p>
-									<div className="absorb-over-limit-actions">
-										<button className="rs-btn" disabled={raising} onClick={() => onRaiseLimitBeforeRun(over.raise.target)} title="Write this budget to Room settings now, then read the room again.">{raising ? "Raising…" : over.raise.label}</button>
-										<button className="rs-btn" disabled={raising} onClick={onReviewFirst} title="Leave this first read and open Review on the same room. Nothing is saved.">{over.reviewLabel}</button>
-									</div>
-								</div>
-							);
-						})()}
-						{!assessment.firstReadMissing && (
-							<div className="absorb-assessment-grid absorb-assessment-flow">
-								<AbsorbFirstReadSections fields={assessment.fields} />
-							</div>
-						)}
-						{assessment.firstReadMissing && (assessment.waitingConversations?.length ?? 0) > 0 && (
-							<div className="absorb-run-change-groups absorb-first-read-waiting">
-								{assessment.waitingConversations!.map((conversation, index) => (
-									<div className="absorb-run-change-group absorb-run-conversation plain" key={`${conversation.date}-${conversation.title}-${index}`}>
-										<span className="absorb-run-session-head">
-											<strong>{conversation.title}</strong>
-											{conversation.date && <span className="absorb-run-session-date">{conversation.date}</span>}
-										</span>
-									</div>
-								))}
-							</div>
-						)}
-						{assessment.fields.needsJudgment.length > 0 && <p className="absorb-help-note">Answer these in Discuss first, and the update follows your answers. Continue lets the room decide on its own.</p>}
-						{meaningfulMaintenanceWarnings(assessment.warnings).length > 0 && <div className="checkpoint-proposal-warnings">{meaningfulMaintenanceWarnings(assessment.warnings).map((warning) => <div key={warning}>{warning}</div>)}</div>}
-						<div className="checkpoint-preview-actions">
-							<button className="rs-btn" onClick={onAbort}>Cancel</button>
-							<button className="rs-btn" onClick={onReassess} title={assessment.firstReadMissing ? "Read the conversations again. Nothing is saved." : "Read the conversations again, asking the model to fix what this read got wrong. Nothing is saved."}>Read again</button>
-							{/* A first read the client could not ask for has no source, so nothing to discuss. */}
-							{assessment.source && <button className={`rs-btn${assessment.fields.needsJudgment.length > 0 ? " rs-btn-primary" : ""}`} onClick={onDiscuss} title="Answer the questions and give instructions first; the discussion itself is not saved">Discuss first</button>}
-							<button className={`rs-btn${assessment.fields.needsJudgment.length > 0 ? "" : " rs-btn-primary"}`} onClick={onGenerate} title="Memorize the conversations and show what the room will keep">Continue →</button>
-						</div>
-						{state.fastPathEnabled && <p className="checkpoint-footnote">{AUTOMATIC_APPLY_ON_SENTENCE} · a clean update is saved without a second look</p>}
-					</div>
-				) : null}
-				</section>
-			</main>
-		</div>
-	);
-}
-
-// Shared discussion surface for the Memorize and Review workflows,
-// styled to mirror the in-room chat (user bubbles right, rendered markdown
-// left) without coupling to the room components.
-// Mirrors the server's request caps on the discussion routes
-// (persistent-agents.ts parse*DiscussionMessages): a transcript past these is
-// rejected before any worker runs, so the composer shows where it stands
-// instead of letting the user find the wall on send.
-const DISCUSSION_MAX_MESSAGES = 40;
-const DISCUSSION_MAX_TRANSCRIPT_CHARS = 80000;
-const DISCUSSION_MAX_MESSAGE_CHARS = 12000;
-
-function compactCount(value: number): string {
-	return value >= 1000 ? `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}k` : String(value);
-}
-
-function MaintenanceDiscussion({ assessmentMarkdown, aside, generateLabel = "Draft memory update", backLabel = "Back to assessment", messages, budget, warnings, error, sending, emptyHint, placeholder, onSend, onBack, onGenerate, onDraftWithoutDiscussion }: { assessmentMarkdown: string; aside?: ReactNode; generateLabel?: string; backLabel?: string; messages: Array<{ role: string; content: string }>; budget: { state: string; canContinue: boolean } | null | undefined; warnings: string | null; error: string | null; sending: boolean; emptyHint: string; placeholder: string; onSend: (text: string) => void; onBack: () => void; onGenerate: () => void; onDraftWithoutDiscussion: () => void }) {
-	const [input, setInput] = useState("");
-	const transcriptRef = useRef<HTMLElement | null>(null);
-	const transcriptChars = messages.reduce((total, message) => total + message.content.length, 0);
-	const transcriptFull = messages.length >= DISCUSSION_MAX_MESSAGES || transcriptChars >= DISCUSSION_MAX_TRANSCRIPT_CHARS;
-	const canContinue = (!budget || budget.canContinue) && !transcriptFull;
-	const counterTone = transcriptFull ? " full" : messages.length >= DISCUSSION_MAX_MESSAGES * 0.75 || transcriptChars >= DISCUSSION_MAX_TRANSCRIPT_CHARS * 0.75 ? " near" : "";
-	useEffect(() => {
-		const el = transcriptRef.current;
-		if (el) el.scrollTop = el.scrollHeight;
-	}, [messages.length, sending]);
-	function send() {
-		const text = input.trim();
-		if (!text || !canContinue || sending) return;
-		setInput("");
-		onSend(text);
-	}
-	const panel = (
-		<div className="absorb-discussion-panel">
-			{!aside && <div className="absorb-help-note">Temporary discussion. Discarded if you abort.</div>}
-			{!aside && (
-				<details className="absorb-candidate-disclosure absorb-detail-disclosure absorb-assessment-summary">
-					<summary>Initial assessment</summary>
-					<MarkdownPreview body={assessmentMarkdown} />
-				</details>
-			)}
-			{budget?.state === "soft_warning" && <div className="checkpoint-proposal-warnings">This discussion is approaching its token limit. Draft the memory update from it soon.</div>}
-			{budget?.state === "hard_stop" && <div className="checkpoint-proposal-error" role="alert">This discussion reached its token limit. Draft the memory update from it, or leave the discussion.</div>}
-			{warnings && <div className="checkpoint-proposal-warnings">{warnings}</div>}
-			{error && <div className="checkpoint-proposal-error" role="alert">{error}</div>}
-			{(error || !canContinue) && !sending && (
-				// The way out that always exists: the draft from the assessment alone.
-				// The discussion stays in memory, so it is still there behind
-				// "Back to discussion" on the proposal screen.
-				<div className="absorb-discussion-remedy">
-					<span>{aside ? "You can still continue without this discussion; what you wrote here stays available from the update." : "You can still draft from the assessment alone; this discussion is kept and stays available from the draft."}</span>
-					<button className="rs-btn" onClick={onDraftWithoutDiscussion} title={aside ? "Continue from the first read alone, leaving this discussion out. Nothing is saved until you approve." : "Draft the memory update from the initial assessment, leaving this discussion out. Nothing is saved until you approve."}>{aside ? "Continue without the discussion" : "Draft without the discussion"}</button>
-				</div>
-			)}
-			<section className="absorb-discussion-transcript" aria-label="Discussion transcript" ref={transcriptRef}>
-				{messages.length === 0 && !sending ? <p className="absorb-discussion-empty">{emptyHint}</p> : <div className="absorb-discussion-messages">
-					{messages.map((message, index) => (
-						<div className={`absorb-discussion-message ${message.role}`} key={`${index}-${message.role}-${message.content.slice(0, 24)}`}>
-							{message.role === "assistant" ? <MarkdownRenderer>{message.content}</MarkdownRenderer> : <p>{message.content}</p>}
-						</div>
-					))}
-					{sending && <div className="absorb-discussion-message assistant pending" aria-live="polite"><span className="spinner" /> Thinking…</div>}
-				</div>}
-			</section>
-			<div className="absorb-discussion-composer">
-				<div className="absorb-discussion-box">
-					<textarea
-						value={input}
-						onChange={(e) => setInput(e.target.value)}
-						onKeyDown={(e) => {
-							if (e.key === "Enter" && !e.shiftKey) {
-								e.preventDefault();
-								send();
-							}
-						}}
-						placeholder={canContinue ? placeholder : "Discussion limit reached"}
-						disabled={sending || !canContinue}
-						maxLength={DISCUSSION_MAX_MESSAGE_CHARS}
-						rows={2}
-					/>
-					<div className="absorb-discussion-box-bottom">
-						<div className={`absorb-discussion-counter${counterTone}`} aria-live="polite">
-							{aside ? (messages.length > 0 ? "When you are done, press Continue →. " : "Nothing here is saved; what you agree goes into the notes. ") : ""}
-							{messages.length} of {DISCUSSION_MAX_MESSAGES} messages · {compactCount(transcriptChars)} of {compactCount(DISCUSSION_MAX_TRANSCRIPT_CHARS)} characters
-							{input.length >= DISCUSSION_MAX_MESSAGE_CHARS * 0.75 ? ` · this message ${compactCount(input.length)} of ${compactCount(DISCUSSION_MAX_MESSAGE_CHARS)}` : ""}
-							{transcriptFull ? " · limit reached: go on or go back" : ""}
-						</div>
-						<button className="absorb-discussion-send" aria-label="Send" title={sending ? "Waiting for the reply…" : "Send"} disabled={!input.trim() || sending || !canContinue} onClick={send}>↑</button>
-					</div>
-				</div>
-				<div className="absorb-discussion-actions">
-					<button className="rs-btn" title="Return to the first read. This discussion is not saved anywhere; memory is unchanged." onClick={onBack}>{backLabel}</button>
-					<button className="rs-btn rs-btn-primary absorb-discussion-generate" disabled={sending || messages.length === 0} title={messages.length === 0 ? "Send at least one message first" : "Go on with what you said here"} onClick={onGenerate}>{generateLabel}</button>
-				</div>
-			</div>
-		</div>
-	);
-	if (!aside) return panel;
-	return (
-		<div className="absorb-discussion-split">
-			<aside className="absorb-discussion-aside" aria-label="The first read">
-				<p className="absorb-discussion-aside-label">The first read, before this discussion. What you agree here goes into the update, not into this list.</p>
-				{aside}
-			</aside>
-			{panel}
-		</div>
-	);
-}
-
-// Assessment bullets carry inline markdown (e.g. **must-keep** markers) —
-// render it instead of showing raw asterisks.
-function BulletList({ items }: { items: string[] }) {
-	if (items.length === 0) return <p>None</p>;
-	return <ul className="absorb-bullet-list">{items.map((item, index) => <li key={`${index}-${item}`}><MarkdownRenderer>{item}</MarkdownRenderer></li>)}</ul>;
-}
-
-/** The first read, as the Memorize screens show it: on its own page and beside the discussion. */
-function AbsorbFirstReadSections({ fields, compact = false }: { fields: AbsorbAssessmentResponse["fields"]; compact?: boolean }) {
-	// The first read says what is worth keeping and what is not; where each
-	// note lands is shown on the card, note by note, once the run has read the
-	// conversations, so the model's rough filing plan is not shown twice.
-	return (
-		<>
-			<AssessmentSection title="Worth remembering" items={fields.whatToRemember} wide={!compact} />
-			<AssessmentSection title="Can be let go" items={fields.whatToForget} wide={!compact} />
-			{fields.needsJudgment.length > 0 && <AssessmentSection title="Needs your call" items={fields.needsJudgment} wide={!compact} />}
-		</>
-	);
-}
-
-function AssessmentSection({ title, items, wide = false }: { title: string; items: string[]; wide?: boolean }) {
-	return (
-		<section className={`absorb-assessment-section${wide ? " wide" : ""}`}>
-			<h3>{title}</h3>
-			<BulletList items={items} />
-		</section>
-	);
-}
-
-function MarkdownPreview({ body }: { body: string }) {
-	const lines = body.split(/\r?\n/);
-	const blocks: JSX.Element[] = [];
-	let listItems: string[] = [];
-	function flushList(key: string) {
-		if (listItems.length === 0) return;
-		blocks.push(<ul key={key}>{listItems.map((item, index) => <li key={`${index}-${item}`}>{renderInlineMarkdown(item)}</li>)}</ul>);
-		listItems = [];
-	}
-	lines.forEach((line, index) => {
-		const trimmed = line.trim();
-		if (!trimmed) {
-			flushList(`list-${index}`);
-			return;
-		}
-		const listMatch = trimmed.match(/^[-*]\s+(.+)$/);
-		if (listMatch) {
-			listItems.push(listMatch[1]);
-			return;
-		}
-		flushList(`list-${index}`);
-		const headingMatch = trimmed.match(/^(#{1,4})\s+(.+)$/);
-		if (headingMatch) {
-			const level = Math.min(headingMatch[1].length + 3, 6);
-			const Heading = `h${level}` as keyof JSX.IntrinsicElements;
-			blocks.push(<Heading key={index}>{headingMatch[2]}</Heading>);
-			return;
-		}
-		blocks.push(<p key={index}>{renderInlineMarkdown(trimmed)}</p>);
-	});
-	flushList("list-final");
-	return <div className="absorb-markdown-preview">{blocks.length ? blocks : <p>None</p>}</div>;
-}
-
-function renderInlineMarkdown(text: string) {
-	const parts = text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
-	return parts.map((part, index) => part.startsWith("**") && part.endsWith("**") ? <strong key={index}>{part.slice(2, -2)}</strong> : <span key={index}>{part}</span>);
-}
-
-// Provider wording for a rejected or missing credential. Applied only to a
-// worker failure's own detail, never to arbitrary messages, so "token limit"
-// or a room called "oauth" cannot trip it.
-function isMaintenanceSignInFailure(detail: string): boolean {
-	return /authentication_error|permission_error|unauthori[sz]ed|\b40[13]\b|api[ -]?key|oauth|token (?:has |is )?(?:expired|invalid|revoked)|invalid[_ ]token|not (?:logged|signed) in|credential/i.test(detail);
-}
-
-// First line only, capped: a provider error can be a whole JSON body.
-function shortenWorkerFailureDetail(detail: string): string {
-	const line = detail.split("\n")[0].trim();
-	return line.length > 160 ? `${line.slice(0, 157)}…` : line;
-}
-
-// Request-level rejections and worker refusals used to reach the screen as
-// the server's own words — field names ("assessmentHandoff.text is too
-// large"), agent ids, token counts. Every one of them now has a sentence that
-// says what happened, that memory is unchanged, and what to do from the
-// screen the user is on. Returns null for messages the caller formats itself.
-function formatMaintenanceRequestError(message: string): string | null {
-	if (/assessmentHandoff\.text is too large/i.test(message)) return "The discussion summary handed to the drafting step was too long, so the draft was not generated. No memory was updated. Draft without the discussion, or go back to the assessment.";
-	if (/assessmentMarkdown is too large/i.test(message)) return "The assessment is too long for the next step. No memory was updated. Get a shorter one: Reassess from the assessment screen, or start Maintain again.";
-	if (/discussion (transcript|messages) (is|are) too large/i.test(message)) return "This discussion has reached its size limit. Generate the proposal from what you have, or go back to the assessment.";
-	if (/(discussion message \d+ content|userMessage) is too large/i.test(message)) return "That message is too long (12,000 characters max). Shorten it and send again.";
-	if (/userMessage is required/i.test(message)) return "Type a message first.";
-	if (/prompt for .+ is too large for the locked model/i.test(message)) {
-		// Memorize's guidance offers Review as the shrink path; Review's own
-		// guidance cannot (Review is what overflowed), so it only offers a model.
-		const remedy = /run Review to shrink/i.test(message)
-			? "Run Review to shrink stable memory, or choose a memory model with a larger window in Room settings, Model, then try again."
-			: "Choose a memory model with a larger window in Room settings, Model, then run it again.";
-		const discussion = /discussion/i.test(message) ? " — the discussion itself was already shortened as far as it goes" : "";
-		return `This room's memory is too large for the maintenance model to read in one request${discussion}. No memory was updated. ${remedy}`;
-	}
-	if (/Request failed \(413\)|FST_ERR_CTP_BODY_TOO_LARGE|body is too large|Payload Too Large/i.test(message)) return "The request was too large for the server to accept. No memory was updated. Try again with a shorter discussion, or draft from the assessment alone.";
-	const httpStatus = /Request failed \((\d+)\)/.exec(message);
-	if (httpStatus) return `The server could not complete this step (HTTP ${httpStatus[1]}). No memory was updated. Try again in a moment.`;
-	// A worker turn that ended in the session's own error (F1). The sign-in
-	// class gets the one remedy that helps; anything else keeps its detail so a
-	// transient provider failure and a setup problem stay distinguishable.
-	// Before the worker surfaced this, every such failure read "empty reply".
-	const workerFailed = /^.+? failed: ([\s\S]+)$/.exec(message);
-	const noApiKey = /^No API key found for/i.test(message);
-	if (workerFailed || noApiKey) {
-		const detail = shortenWorkerFailureDetail(workerFailed?.[1] ?? message);
-		if (noApiKey || isMaintenanceSignInFailure(detail)) return "The maintenance model's sign-in is missing or no longer valid. No memory was updated. Sign in again in AI setup, then run this step again.";
-		return `The maintenance model could not respond (${detail}). No memory was updated. Try again; if it repeats, check the model and its sign-in in AI setup.`;
-	}
-	if (/was aborted before it answered/i.test(message)) return "This step was stopped before the maintenance model answered. No memory was updated. Run it again.";
-	if (/produced no text/i.test(message)) return "The maintenance model returned an empty reply. No memory was updated. Try again.";
-	if (/model not found/i.test(message)) return "The maintenance model set in the AI profile is not available. No memory was updated. Check AI setup.";
-	if (/was cut off at the model's output limit|came back at \d+ characters after \d+ attempt/i.test(message)) return message;
-	// The Review ops refusal is written server-side as one product sentence with its remedy; wrapping it would state the non-mutation twice.
-	if (/^The Review draft could not be built/.test(message)) return message;
-	// Last line of defence: a bare field-name rejection never reaches the screen as-is.
-	if (/^[A-Za-z][\w.]* (is|are) (required|too large|invalid)/.test(message) || /must be (user|one of)/.test(message)) return `The server rejected this request (${message}). No memory was updated. Restart Maintain; if it repeats, this is a bug worth reporting.`;
-	return null;
-}
-
-function formatAbsorbWorkflowError(message: string): string {
-	if (isStaleMaintenanceMessage(message)) return "Memory changed while this workflow was open. No memory was updated. Please restart Maintain to review the latest memory state.";
-	const request = formatMaintenanceRequestError(message);
-	if (request) return request;
-	if (/token budget exceeded|token limit|hard_stop/i.test(message)) return "This discussion reached its token limit. Draft the memory update from it if you can, or abort and restart Maintain.";
-	return message;
-}
-
-// The unavailable screens branch on the server's reason: the entry-count story
-// is only true for missing context, and "this unlocks on its own" is false for
-// profile or setup problems. The raw server message stays reachable in a
-// collapsed technical-detail disclosure.
-function absorbUnavailableCopy(availability: AbsorbAvailability): { heading: string; body: string; detail: string | null } {
-	if (availability.reason === "insufficient_recent_context" || availability.reason === "missing_recent_context") {
-		return {
-			heading: "Nothing waiting to be memorized",
-			body: availability.recentContextEntryCount === 0
-				? "This room has no waiting conversations. Have a conversation and use Remember; Memorize unlocks on its own."
-				: `Memorize needs at least ${availability.minimumRecentContextEntries} waiting ${availability.minimumRecentContextEntries === 1 ? "conversation" : "conversations"}. This room has ${availability.recentContextEntryCount}.`,
-			detail: null,
-		};
-	}
-	if (availability.reason === "not_ready") {
-		return {
-			heading: "Memorizing cannot start yet",
-			body: "This room is not ready for maintenance right now. No memory was changed. Try again in a moment, or check the room on the launcher.",
-			detail: availability.message || null,
-		};
-	}
-	return {
-		heading: "Memorizing cannot start yet",
-		body: "Memorizing cannot run for this room right now. No memory was changed. If this persists, check the room's AI profile in AI setup.",
-		detail: availability.message || availability.error || null,
-	};
-}
-
-// Mirrors RECENT_CONTEXT_HARD_CAP in persistent-agents.ts: the 10th remembered
-// session is where Memorize is due. The room keeps working — it still chats and
-// still saves sessions — until the block cap below, which mirrors
-// RECENT_CONTEXT_BLOCK_CAP and is where the room can hold no more.
-const RECENT_SESSIONS_CAP = 10;
-const RECENT_SESSIONS_BLOCK_CAP = 20;
-
-// Remember runs inside the room, where Maintain is not reachable — so its
-// failures must say what to do, not echo the engine's 409.
-function formatRememberError(message: string): string {
-	// Remember's own refusals are already written for the person: pass them through.
-	if (isPlainRememberSentence(message)) return message;
-	if (/not ready: needs_absorb/i.test(message)) return `This room is holding ${RECENT_SESSIONS_BLOCK_CAP} remembered sessions, which is as many as it can hold. Nothing was saved. Memorize them first: leave the room, then use Maintain → Memorize from Home, and come back to Remember.`;
-	if (isStaleMaintenanceMessage(message)) return "Memory changed while this proposal was open. Nothing was saved. Generate the proposal again to work from the latest memory state.";
-	return formatMaintenanceRequestError(message) ?? message;
-}
-
-function recentSessionsHeadsUp(remaining: number | null | undefined): string | null {
-	if (typeof remaining !== "number") return null;
-	if (remaining >= RECENT_SESSIONS_CAP) return `Memorize is due for this room (${remaining} of ${RECENT_SESSIONS_BLOCK_CAP} remembered sessions). Run it from Home → Maintain; chatting and remembering keep working until the room reaches ${RECENT_SESSIONS_BLOCK_CAP}.`;
-	if (remaining === RECENT_SESSIONS_CAP - 1) return `Heads-up: one more Remember makes Memorize due for this room (${RECENT_SESSIONS_CAP} remembered sessions). Run it from Home → Maintain when it is.`;
-	return null;
-}
-
-// Draft failures land back on the assessment screen, so the copy reassures
-// that the assessment survived and points at the Draft action on that screen.
-function formatMaintenanceDraftError(message: string): string {
-	if (isStaleMaintenanceMessage(message)) return "Memory changed while this workflow was open. No memory was updated. Restart Maintain to work from the latest memory state.";
-	const request = formatMaintenanceRequestError(message);
-	if (request) return request;
-	return `The memory update draft could not be generated. No memory was updated and your assessment is untouched. Details: ${message}`;
-}
-
-// Review's own failures, in the room's words: what happened, whether anything
-// was saved, and the one thing to do next. The server's refusals are already
-// product-worded, so an unmapped one is passed straight through.
-function formatReviewWorkflowError(message: string): string {
-	if (isStaleMaintenanceMessage(message)) return "The memory changed while Review was open. Nothing was saved. Start Review again to read the notes as they are now.";
-	const request = formatMaintenanceRequestError(message);
-	if (request) return request;
-	if (/token budget exceeded|token limit|hard_stop/i.test(message)) return "This discussion is as long as it can be. Continue from what you have said, or go back to the first read.";
-	return message;
-}
-
-// A save that failed lands back on the card, so the way out it names is the one
-// that screen has: reading the notes again from the start.
-function formatReviewApprovalError(message: string): string {
-	if (isStaleMaintenanceMessage(message)) return "The memory changed while this tidy was open. Nothing was saved. Start Review again to read the notes as they are now.";
-	const request = formatMaintenanceRequestError(message);
-	if (request) return request;
-	return `These changes could not be saved. The memory is unchanged and this tidy is still here. Details: ${message}`;
-}
-
-function CheckpointPreviewShell({ chat, itemCount, rememberText, density, proposal, loading, progress, onCancelGenerate, error, approvalLoading, approvalError, approvalResult, quickRequested, quickBlockedReasons, consultRunning, taskRunning, pendingConsultHandoffCount, pendingTaskHandoffCount, onRememberTextChange, onDensityChange, onGenerate, onApprove, onDiscard, onContinueAfterCheckpoint, onRestAfterCheckpoint, onClose }: { chat: NonNullable<PersistentChatConfig>; itemCount: number; rememberText: string; density: CheckpointDensity; proposal: CheckpointProposalResponse | null; loading: boolean; progress: { read: number; of: number } | null; onCancelGenerate: () => void; error: string | null; approvalLoading: boolean; approvalError: string | null; approvalResult: CheckpointApprovalResponse | null; quickRequested: boolean; quickBlockedReasons: string[] | null; consultRunning: boolean; taskRunning: boolean; pendingConsultHandoffCount: number; pendingTaskHandoffCount: number; onRememberTextChange: (text: string) => void; onDensityChange: (density: CheckpointDensity) => void; onGenerate: () => void; onApprove: (approvedRecentContext: string) => void; onDiscard: () => void; onContinueAfterCheckpoint: () => void; onRestAfterCheckpoint: () => void; onClose: () => void }) {
-	const [showFullEntry, setShowFullEntry] = useState(false);
-	const [editing, setEditing] = useState(false);
-	const [approvedFields, setApprovedFields] = useState<CheckpointApprovalEditFields>({ sessionArc: "", body: "", parked: "None" });
-	// One pass or N parts, said before anything is generated. Asked once when
-	// the dialog opens; a failed estimate just leaves the line out.
-	const [readEstimate, setReadEstimate] = useState<RememberReadEstimate | null>(null);
-	useEffect(() => {
-		let cancelled = false;
-		setReadEstimate(null);
-		fetchRememberReadEstimate(chat.agentId, chat.conversationId).then((estimate) => { if (!cancelled) setReadEstimate(estimate); }, () => {});
-		return () => { cancelled = true; };
-	}, [chat.agentId, chat.conversationId]);
-	// While the proposal generates, Escape does not close the dialog: Cancel
-	// does, and says what it does. Closing would leave a paid request running.
-	useEscapeKey(() => {
-		if (editing) setEditing(false);
-		else onClose();
-	}, !approvalLoading && !loading);
-	useEffect(() => {
-		setShowFullEntry(false);
-		setEditing(false);
-		setApprovedFields({
-			sessionArc: proposal?.fields.sessionArc ?? "",
-			body: proposal?.fields.body ?? "",
-			parked: proposal?.fields.parked?.trim() || "None",
-		});
-	}, [proposal]);
-	const approvedDraft = proposal ? buildApprovedRecentContextMarkdown(proposal, approvedFields) : "";
-	// Rendered review view: the draft without its RC-DRAFT header line — that
-	// line is engine framing; the saved entry (approvedDraft) keeps it.
-	const renderedDraft = approvedDraft.split(/\r?\n/).slice(1).join("\n").trim();
-	const displayWarnings = proposal ? meaningfulMaintenanceWarnings(proposal.warnings) : [];
-	// Why the one-click path landed on the preview instead of saving: blockers
-	// already listed as warnings above are not repeated, so what remains is the
-	// review-first notice and the gate's own reasons (e.g. incomplete draft).
-	const quickFallbackNotices = quickRequested && quickBlockedReasons ? quickBlockedReasons.filter((reason) => !displayWarnings.includes(reason)) : [];
-	const approvalReady = Boolean(approvedFields.sessionArc.trim() && approvedFields.body.trim() && approvedFields.parked.trim());
-	function updateApprovedField(field: keyof CheckpointApprovalEditFields, value: string) {
-		setApprovedFields((current) => ({ ...current, [field]: value }));
-	}
-	async function confirmDiscard() {
-		const ok = await confirmDialog({
-			title: "Discard this memory proposal?",
-			body: "It has not been saved. If you discard it, you return to the active thread and the proposal is lost.",
-			confirmLabel: "Discard",
-			danger: true,
-		});
-		if (ok) onDiscard();
-	}
-	// Consult MR-5 checkpoint-time honesty (§2.3): one-line notices, NOT gates —
-	// they never block the checkpoint, they just tell the truth about consults.
-	const consultHonestyNotices: string[] = [];
-	if (consultRunning) consultHonestyNotices.push("A consult is still running; remembering will discard it.");
-	// Task parity (visuals V6): unlike a discarded consult, a task's files persist —
-	// the honest copy says what is and is not lost. The consult line below is the
-	// §2.3 locked verbatim string; the queue holds both block kinds, so each kind
-	// gets its own line.
-	if (taskRunning) consultHonestyNotices.push("A specialist task is still running; its result won't be part of what you remember (artifacts already written stay on disk).");
-	if (pendingConsultHandoffCount > 0) consultHonestyNotices.push("A transferred consult hasn't entered memory yet; it will carry into the fresh conversation.");
-	if (pendingTaskHandoffCount > 0) consultHonestyNotices.push("A transferred task result hasn't entered memory yet; it will carry into the fresh conversation.");
-	const honestyNoticesNode = consultHonestyNotices.length > 0 ? (
-		<div className="checkpoint-consult-notices" role="status">
-			{consultHonestyNotices.map((notice) => <div key={notice}>{notice}</div>)}
-		</div>
-	) : null;
-	return (
-		<div className="checkpoint-preview-backdrop" role="dialog" aria-modal="true" aria-label="Remember this conversation">
-			<section className="checkpoint-input-card">
-				{loading ? (
-					<div className="checkpoint-generating-state">
-						<span className="spinner" />
-						<p className="card-kicker">Remember</p>
-						<h2>Drafting memory proposal…</h2>
-						<p>{rememberProgressSentence(progress)} Nothing is saved yet.</p>
-						<div className="checkpoint-preview-actions">
-							<button className="rs-btn" onClick={onCancelGenerate}>Cancel</button>
-						</div>
-					</div>
-				) : quickRequested && !quickBlockedReasons?.length && approvalLoading && !approvalResult ? (
-					<div className="checkpoint-generating-state">
-						<span className="spinner" />
-						<p className="card-kicker">Remember</p>
-						<h2>Saving memory…</h2>
-						<p>The proposal came back clean, so it is being saved to {chat.displayName}’s Recent Context.</p>
-					</div>
-				) : approvalResult ? (
-					<div className="checkpoint-proposal-page checkpoint-saved-page">
-						<div className="checkpoint-input-heading">
-							<p className="card-kicker">Remembered</p>
-							<h2>Memory updated</h2>
-							<p>This conversation is now part of {chat.displayName}’s memory. You can pick up right where you left off.</p>
-						</div>
-						{recentSessionsHeadsUp(approvalResult.recentContextEntryCount) && <div className="checkpoint-proposal-warnings checkpoint-sessions-headsup" role="status">{recentSessionsHeadsUp(approvalResult.recentContextEntryCount)}</div>}
-						{approvalResult.warnings.length > 0 && <div className="checkpoint-proposal-warnings">{approvalResult.warnings.map((warning) => <div key={warning}>{warning}</div>)}</div>}
-						<div className="checkpoint-preview-actions">
-							<button className="rs-btn rs-btn-primary" onClick={onContinueAfterCheckpoint} title="Stay in this room on a fresh thread">Continue working</button>
-							<button className="rs-btn" onClick={onRestAfterCheckpoint}>Return Home</button>
-						</div>
-					</div>
-				) : proposal ? (
-					<div className="checkpoint-proposal-page">
-						<div className="checkpoint-input-heading checkpoint-proposal-heading">
-							<p className="card-kicker">Memory proposal · not saved</p>
-							<h2>Review what {chat.displayName} will remember</h2>
-						</div>
-						<div className="checkpoint-proposal-result standalone">
-							{!editing && (
-								<div className="checkpoint-proposal-summary">
-									<h3 className="checkpoint-entry-title">{proposal.preview.title}</h3>
-									<div className="checkpoint-proposal-arc"><MarkdownRenderer>{proposal.preview.summary}</MarkdownRenderer></div>
-									{proposal.preview.keyPoints.length > 0 && (
-										<ul>
-											{proposal.preview.keyPoints.map((point, index) => <li key={`${index}-${point}`}><MarkdownRenderer>{point}</MarkdownRenderer></li>)}
-										</ul>
-									)}
-								</div>
-							)}
-							{!editing && (
-								<div className="checkpoint-proposal-meta-row">
-									<div className="checkpoint-input-meta subtle">
-										{proposal.preview.hasParkedItems && <span>includes parked items</span>}
-										<span>~{proposal.estimatedTokens} tokens</span>
-										{/* C4: Remember never moves the review-target budget, so its honest
-										    pre-approval number is the intake fill — while the user can still
-										    act on it (the cap heads-up used to appear only after saving). */}
-										{typeof proposal.compressionTelemetry?.recentContextEntryCount === "number" && (
-											<span>{proposal.compressionTelemetry.recentContextEntryCount} of {RECENT_SESSIONS_CAP} recent sessions used</span>
-										)}
-									</div>
-									{showFullEntry ? (
-										<div className="checkpoint-review-actions">
-											<button className="rs-btn" onClick={() => setShowFullEntry(false)}>Hide full entry</button>
-											<button className="rs-btn" onClick={() => setEditing(true)} title="Edit the entry before saving">Edit</button>
-										</div>
-									) : (
-										<button className="rs-btn checkpoint-full-entry-trigger" onClick={() => setShowFullEntry(true)}>Show full entry</button>
-									)}
-								</div>
-							)}
-							{!editing && proposal.rememberRead && <p className="checkpoint-read-note">{rememberReadSentences(proposal.rememberRead).join(" ")}</p>}
-							{editing ? (
-								<div className="checkpoint-edit-field checkpoint-structured-editor">
-									<span className="checkpoint-field-label">Edit the entry before saving</span>
-									{/* The C4 sight line stays up while editing: edits can't change the
-									    count, and Save remains one click away from this sub-state. */}
-									{typeof proposal.compressionTelemetry?.recentContextEntryCount === "number" && (
-										<div className="checkpoint-input-meta subtle"><span>{proposal.compressionTelemetry.recentContextEntryCount} of {RECENT_SESSIONS_CAP} recent sessions used</span></div>
-									)}
-									<label>
-										<span>Session arc</span>
-										<textarea value={approvedFields.sessionArc} onChange={(e) => updateApprovedField("sessionArc", e.target.value)} rows={4} />
-									</label>
-									<label>
-										<span>Body</span>
-										<textarea value={approvedFields.body} onChange={(e) => updateApprovedField("body", e.target.value)} rows={14} />
-									</label>
-									<label>
-										<span>Parked / Open items</span>
-										<textarea value={approvedFields.parked} onChange={(e) => updateApprovedField("parked", e.target.value)} rows={5} />
-									</label>
-									<button className="rs-btn" onClick={() => setEditing(false)}>Done editing</button>
-								</div>
-							) : showFullEntry ? (
-								<div className="checkpoint-full-review">
-									<div className="checkpoint-full-entry checkpoint-full-entry-rendered">
-										<MarkdownRenderer>{renderedDraft}</MarkdownRenderer>
-									</div>
-								</div>
-							) : null}
-							{(displayWarnings.length > 0 || quickFallbackNotices.length > 0) && <div className="checkpoint-proposal-warnings">{[...displayWarnings, ...quickFallbackNotices].map((warning) => <div key={warning}>{warning}</div>)}</div>}
-							{approvalError && <div className="checkpoint-proposal-error" role="alert">{approvalError}</div>}
-						</div>
-						{honestyNoticesNode}
-						<div className="checkpoint-preview-actions">
-							<button className="rs-btn rs-btn-primary" disabled={approvalLoading || !approvalReady} onClick={() => onApprove(approvedDraft)}>{approvalLoading ? "Saving…" : "Save to memory"}</button>
-							<button className="rs-btn" disabled={approvalLoading} onClick={() => void confirmDiscard()} title="Throw away this draft. Nothing is saved">Discard</button>
-						</div>
-					</div>
-				) : (
-					<>
-						<div className="checkpoint-input-heading">
-							<p className="card-kicker">Remember</p>
-							<h2>What should carry forward?</h2>
-							<p>Choose how much to keep, and add anything specific you want this room to remember from this thread.</p>
-						</div>
-						<div className="checkpoint-density-group" aria-label="How much should this room keep?">
-							<div className="checkpoint-field-label">How much should this room keep?</div>
-							<div className="checkpoint-density-options">
-								{CHECKPOINT_DENSITY_OPTIONS.map((option) => (
-									<button key={option.id} className={`checkpoint-density-option ${density === option.id ? "selected" : ""}`} onClick={() => onDensityChange(option.id)}>
-										<strong>{option.label}</strong>
-										<span>{option.budget}</span>
-									</button>
-								))}
-							</div>
-						</div>
-						<label className="checkpoint-remember-field">
-							<div className="checkpoint-field-row">
-								<span className="checkpoint-field-label">What do you want to remember?</span>
-								<em>{rememberText.length}/{CHECKPOINT_REMEMBER_MAX_CHARS}</em>
-							</div>
-							<textarea
-								value={rememberText}
-								maxLength={CHECKPOINT_REMEMBER_MAX_CHARS}
-								onChange={(e) => onRememberTextChange(e.target.value.slice(0, CHECKPOINT_REMEMBER_MAX_CHARS))}
-								placeholder="Optional. Add the key nuance, decision, or thread that should not be lost."
-								rows={4}
-							/>
-						</label>
-						{readEstimate && <p className="checkpoint-read-note">{rememberEstimateSentence(readEstimate)}</p>}
-						{error && <div className="checkpoint-proposal-error" role="alert">{error}</div>}
-						{honestyNoticesNode}
-						<div className="checkpoint-preview-actions">
-							<button className="rs-btn" onClick={onClose}>Close</button>
-							<button className="rs-btn rs-btn-primary" disabled={itemCount === 0} onClick={onGenerate}>Generate memory proposal</button>
-						</div>
-					</>
-				)}
-			</section>
-		</div>
-	);
-}
-
-
-// Reasoning-effort capability as the server reports it. A server that predates
-// the control simply omits it, and the composer then shows no pill at all.
-//
-// `ladder` is the model's own dial: one rung per distinct effort, each carrying
-// the provider's name for it. A server that predates the ladder sends only the
-// token list, so one is built from it where every rung is its own label.
-function readEffortPayload(raw: any): { level: string; ladder: Array<{ level: string; label: string }> } | null {
-	if (typeof raw?.level !== "string" || !raw.level) return null;
-	const ladder = Array.isArray(raw?.ladder)
-		? raw.ladder
-				.filter((rung: any) => typeof rung?.level === "string" && rung.level && typeof rung?.label === "string" && rung.label)
-				.map((rung: any) => ({ level: String(rung.level), label: String(rung.label) }))
-		: Array.isArray(raw?.supported)
-			? raw.supported
-					.filter((entry: unknown) => typeof entry === "string" && entry)
-					.map((entry: string) => ({ level: entry, label: entry }))
-			: [];
-	if (ladder.length === 0) return null;
-	return { level: raw.level, ladder };
-}
-
-function CheckpointSplitButton({ hasUserInput, inFlight, skipsPreview, onQuickCheckpoint, onOpenFullCheckpoint }: { hasUserInput: boolean; inFlight: boolean; skipsPreview: boolean; onQuickCheckpoint: () => void; onOpenFullCheckpoint: () => void }) {
-	const [menuOpen, setMenuOpen] = useState(false);
-	const rootRef = useRef<HTMLDivElement | null>(null);
-	useEffect(() => {
-		if (!menuOpen) return;
-		function onPointerDown(event: PointerEvent) {
-			if (rootRef.current && !rootRef.current.contains(event.target as Node)) setMenuOpen(false);
-		}
-		function onKeyDown(event: KeyboardEvent) {
-			if (event.key === "Escape") setMenuOpen(false);
-		}
-		document.addEventListener("pointerdown", onPointerDown);
-		document.addEventListener("keydown", onKeyDown);
-		return () => {
-			document.removeEventListener("pointerdown", onPointerDown);
-			document.removeEventListener("keydown", onKeyDown);
-		};
-	}, [menuOpen]);
-	const checkpointTitle = inFlight ? "Stop or wait for the current response before remembering" : hasUserInput ? (skipsPreview ? "Saves without the preview unless something needs your review" : "Proposes what to remember from this conversation, for you to review") : "Send a message before remembering";
-	return (
-		<div className="checkpoint-split" ref={rootRef}>
-			<button className="icon-btn checkpoint-split-main" title={checkpointTitle} disabled={!hasUserInput || inFlight} onClick={() => { setMenuOpen(false); onQuickCheckpoint(); }}>Remember</button>
-			<button className="icon-btn checkpoint-split-toggle" title="More ways to remember" aria-haspopup="menu" aria-expanded={menuOpen} aria-label="More ways to remember" disabled={inFlight} onClick={() => setMenuOpen((open) => !open)}><ChevronDownIcon /></button>
-			{menuOpen && (
-				<div className="checkpoint-split-menu" role="menu">
-					<button role="menuitem" title={hasUserInput ? "Choose summary density and add a steering note, then review before saving" : "Send a message before remembering"} disabled={!hasUserInput} onClick={() => { setMenuOpen(false); onOpenFullCheckpoint(); }}>Remember with options…</button>
-				</div>
-			)}
-		</div>
-	);
-}
+type LastMessageEditState =
+	| { phase: "editing"; id: string; text: string }
+	| { phase: "sent"; replaces: string; oldIds: string[]; newId: string; text: string };
 
 export function App() {
 	const [view, setView] = useState<MainView>("home");
@@ -2912,30 +185,53 @@ export function App() {
 	// the computer records durably; the GET stays readable remotely because
 	// the window is purely informative. Shown on Home only, never over a
 	// room. Any failure here means no window, never a broken app.
-	const [whatsNew, setWhatsNew] = useState<{ version: string; entries: string[] } | null>(null);
+	const [whatsNew, setWhatsNew] = useState<{ version: string; sections: WhatsNewSections } | null>(null);
 	useEffect(() => {
 		let cancelled = false;
 		void (async () => {
 			try {
-				const data = await fetchJson<{ version: string; entries: string[] | null; show: boolean }>("/api/whats-new");
-				if (cancelled || !data.show || !data.version || !data.entries || data.entries.length === 0) return;
+				const data = await fetchJson<{ version: string; sections: WhatsNewSections | null; show: boolean }>("/api/whats-new");
+				if (cancelled || !data.show || !data.version || !data.sections) return;
+				let seenMark: string | null = null;
 				try {
-					if (localStorage.getItem("exxperts.whats-new-seen") === data.version) return;
+					seenMark = localStorage.getItem("exxperts.whats-new-seen");
 				} catch {}
-				setWhatsNew({ version: data.version, entries: data.entries });
+				if (seenMark === data.version) return;
+				// Only on a shared server: elsewhere the server's record governs, and a
+				// mark written under the earlier rule can be later than what it showed.
+				const sections = (await fetchRemoteClientContext()).sharedServer ? sharedServerReleases(data.sections, seenMark) : data.sections;
+				if (cancelled || sections.major.length + sections.minor.length === 0) return;
+				setWhatsNew({ version: data.version, sections });
 			} catch {}
 		})();
 		return () => { cancelled = true; };
 	}, []);
+	// A remote device never sees the Remote access section: the server refuses
+	// the admin routes there regardless. Nor does a shared server, which is no
+	// one's own computer.
+	const clientContext = useRemoteClientContext();
+	// Another person signed in on this server: nothing of this page may go on talking as the first one.
+	const personChanged = usePersonChanged();
+	useEffect(() => {
+		if (!personChanged) return;
+		suppressReconnectRef.current = true;
+		cancelScheduledReconnect();
+		cancelScheduledHomeReconnect();
+		if (persistTimerRef.current !== null) {
+			window.clearTimeout(persistTimerRef.current);
+			persistTimerRef.current = null;
+		}
+		try { wsRef.current?.close(); } catch {}
+	}, [personChanged]);
+	const computerOnlyControls = showsComputerOnlyControls(clientContext);
+	// On a shared server the seen POST is not offered either: the browser's
+	// own record above is the only one.
 	const dismissWhatsNew = (): void => {
 		if (!whatsNew) return;
 		try { localStorage.setItem("exxperts.whats-new-seen", whatsNew.version); } catch {}
-		void apiFetch("/api/whats-new/seen", { method: "POST" }).catch(() => {});
+		if (!clientContext.sharedServer) void apiFetch("/api/whats-new/seen", { method: "POST" }).catch(() => {});
 		setWhatsNew(null);
 	};
-	// A remote device never sees the Remote access section: the server refuses
-	// the admin routes there regardless.
-	const remoteClient = useRemoteClientContext().remote;
 	// "system" follows the OS setting via prefers-color-scheme. The old
 	// "exxperts.theme" key is read as a fallback so an explicit pre-appearance
 	// choice of light/dark survives the rename; users who never chose follow
@@ -2958,13 +254,18 @@ export function App() {
 	}, []);
 	const theme: ThemeMode = appearance === "system" ? (systemDark ? "dark" : "light") : appearance;
 	const [items, setItems] = useState<ChatItem[]>([]);
+	// The questions asked on the current connection: only these can still be answered.
+	const liveApprovalIdsRef = useRef<Set<string>>(new Set());
+	const [liveApprovalIds, setLiveApprovalIds] = useState<ReadonlySet<string>>(() => new Set());
+	const shownItems = useMemo(() => withUnansweredApprovals(items, liveApprovalIds), [items, liveApprovalIds]);
 	const [composerResetNonce, setComposerResetNonce] = useState(0);
+	const closedByFullSaveRef = useRef(false);
 	// V6 iterate affordance: a one-shot composer prefill. Set together with a
 	// nonce bump (the composer re-seeds its draft from initialDraftValue on a
 	// nonce change); cleared by every OTHER nonce bump site so a stale prefill
 	// never resurrects after send/reset.
 	const [composerPrefill, setComposerPrefill] = useState("");
-	// A draft typed in a room survives leaving and coming back (community #13).
+	// A draft typed in a room survives leaving and coming back.
 	// In-memory and text-only by design: staged attachments already persist on
 	// the room shelf, and nothing about an unsent message belongs on disk.
 	// Captured on a plain leave, restored on the next open/resume; forget flows
@@ -2984,10 +285,48 @@ export function App() {
 	// everything that gates an action keeps reading `connected` alone.
 	const [socketSwapping, setSocketSwapping] = useState(false);
 	const socketSwapTimerRef = useRef<number | null>(null);
+	// A room socket from its opening until the server has caught it up: its
+	// ready, and the replay of a running answer when one follows. Until then
+	// the page cannot tell the room is answering, so the server's status says.
+	const [catchingUp, setCatchingUpState] = useState(false);
+	const catchingUpRef = useRef(false);
+	const setCatchingUp = (value: boolean) => {
+		catchingUpRef.current = value;
+		setCatchingUpState(value);
+	};
 	// The only connection state the user is ever shown: a sustained, confirmed
 	// inability to reach the engine, past a grace window, after retries that
 	// really failed. False through boot and through every ordinary swap.
 	const [connectionWarning, setConnectionWarning] = useState(false);
+	// Signed out, not lost: on a shared server a sign-in that ran out also
+	// ends the connection. Before saying it is lost, the page asks once
+	// whether the person is still signed in; a 401 sends it to sign in
+	// (apiFetch). Any other answer, or none at all (an outage, a restart),
+	// is a real loss and the text shows. On this computer it shows at once.
+	const [signInChecked, setSignInChecked] = useState(false);
+	// A 401 the redirect did not act on (it never goes twice within 15 s): the
+	// session ended, and the banner says so with a way to sign in.
+	const [sessionEnded, setSessionEnded] = useState(false);
+	// Whether the first failed attempt of this outage has already asked.
+	const signInProbedRef = useRef(false);
+	// Each check has a number; only the newest one's answer counts, so an older one that comes back late cannot undo it.
+	const signInProbeSeqRef = useRef(0);
+	async function askIfSignedIn(): Promise<void> {
+		const mine = ++signInProbeSeqRef.current;
+		try {
+			const res = await apiFetch("/api/auth/status");
+			if (mine === signInProbeSeqRef.current) setSessionEnded(res.status === 401);
+			void res.body?.cancel();
+		} catch {}
+	}
+	useEffect(() => {
+		setSignInChecked(false);
+		if (!connectionWarning || !clientContext.sharedServer) return;
+		let cancelled = false;
+		void askIfSignedIn().finally(() => { if (!cancelled) setSignInChecked(true); });
+		return () => { cancelled = true; };
+	}, [connectionWarning, clientContext.sharedServer]);
+	const showConnectionLost = connectionWarning && (!clientContext.sharedServer || signInChecked);
 	// Room WS auto-reconnect: "reconnecting" while backoff attempts run,
 	// "failed" once the attempt cap is reached (only the manual Reconnect
 	// affordance or a tab re-focus starts a new cycle). The pill copy follows
@@ -2995,20 +334,53 @@ export function App() {
 	const [roomReconnectState, setRoomReconnectState] = useState<"idle" | "reconnecting" | "failed">("idle");
 	// The provider the open conversation is locked to, once the server said it
 	// is signed out ("" when the server did not name it); null otherwise.
-	const [signedOutProvider, setSignedOutProvider] = useState<string | null>(null);
+	// The provider the room was refused for at opening, with its key's state when it is a key connection.
+	const [signedOut, setSignedOut] = useState<{ provider: string; key?: CredentialKey } | null>(null);
+	const signedOutProvider = signedOut?.provider ?? null;
+	const signedOutProviderRef = useRef(signedOutProvider);
+	signedOutProviderRef.current = signedOutProvider;
 	// The room's model is no longer offered: stopped like a signed-out
 	// provider, but no sign-in brings it back, so the notice offers only
 	// another model.
 	const [roomModelNotOffered, setRoomModelNotOffered] = useState(false);
+	// Another window moved this room to a new conversation: this one offers Reload, and sends nothing until then.
+	const [roomMovedOn, setRoomMovedOn] = useState(false);
+	const [turnLink, setTurnLinkState] = useState<TurnLink>("live");
+	const turnLinkRef = useRef<TurnLink>("live");
+	// Counts the waits through a dropped connection: a check begun in one wait never ends a later one.
+	const reconnectWaitRef = useRef(0);
+	const setTurnLink = (link: TurnLink) => {
+		if (link === "reconnecting" && turnLinkRef.current !== "reconnecting") reconnectWaitRef.current += 1;
+		turnLinkRef.current = link;
+		setTurnLinkState(link);
+	};
 	// A turn failed on the sign-in (a key that is gone or refused, a failed
 	// refresh) while the socket stayed up: the same one notice, until a
 	// sign-in in AI setup, the next message, or the conversation moves. The
 	// server reads the sign-ins again before every message, so the next send
 	// after a sign-in runs on it.
-	const [turnSignedOutProvider, setTurnSignedOutProvider] = useState<string | null>(null);
+	const [turnSignedOut, setTurnSignedOut] = useState<{ provider: string; key?: CredentialKey } | null>(null);
+	const turnSignedOutProvider = turnSignedOut?.provider ?? null;
 	const [busy, setBusy] = useState(false);
 	const [turnCancelling, setTurnCancelling] = useState(false);
 	const [turnInterruptedNote, setTurnInterruptedNote] = useState<string | null>(null);
+	// The room is shortening the conversation (from compaction_start to its end), which can take tens of seconds.
+	const [shortening, setShortening] = useState(false);
+	const [lastEdit, setLastEditState] = useState<LastMessageEditState | null>(null);
+	// Set with the state, not at the next render: the server's answer to a sent edit can arrive before that render.
+	const lastEditRef = useRef(lastEdit);
+	const setLastEdit = (next: LastMessageEditState | null) => {
+		lastEditRef.current = next;
+		setLastEditState(next);
+	};
+	// The message that can no longer be edited, by its bubble's id: the server said so when the room opened, the conversation was shortened since, or an edit of it was refused. A newer message is not held by it.
+	const [editBlockedId, setEditBlockedId] = useState<string | null>(null);
+	// An answer that starts meanwhile (another window), or the connection lost, ends an open edit as it was.
+	// A sent edit the server neither took nor refused when the room is idle again (it answered the prompt with an error) is over too: nothing stays dimmed.
+	useEffect(() => {
+		if (busy || !connected) cancelEdit();
+		if (!busy && lastEditRef.current?.phase === "sent") setLastEdit(null);
+	}, [busy, connected]);
 	const [sessionVersion, setSessionVersion] = useState(0);
 	const [usage, setUsage] = useState<SessionUsage>(ZERO_USAGE);
 	const [contextHealth, setContextHealth] = useState<ContextHealthStatus | null>(null);
@@ -3017,13 +389,61 @@ export function App() {
 	// Null until a room says so, and while a server predating the control runs.
 	const [roomEffort, setRoomEffort] = useState<{ level: string; ladder: Array<{ level: string; label: string }> } | null>(null);
 	const roomEffortRef = useRef<{ level: string; ladder: Array<{ level: string; label: string }> } | null>(null);
+	// A model picked for the open conversation, shown as its model until the
+	// room confirms or refuses the switch: "waiting" while the room answers
+	// (the switch goes when the answer ends), "sending" once it is asked. A
+	// reload drops it, so the control never names a model the room did not get.
+	// `level`: an effort set on the picked model's dial meanwhile. It lives here
+	// so it goes wherever the pick goes, and reaches the room only as the pick takes over.
+	const [heldModelPick, setHeldModelPick] = useState<{ agentId: string; conversationId: string; lock: RoomModelLock; phase: "waiting" | "sending"; level?: string } | null>(null);
+	const heldModelPickRef = useRef(heldModelPick);
+	heldModelPickRef.current = heldModelPick;
+	// For the pick handler, which runs outside the render that computed it.
+	const roomInFlightRef = useRef(false);
+	// Switch requests on the wire, per conversation: a later pick in the same
+	// conversation waits for them, so the last pick is the one that stays. The
+	// tick redraws when one starts and re-runs the held-pick effect when one ends.
+	const switchesInFlightRef = useRef(new Map<string, number>());
+	// The model each conversation's newest switch goes to, while one is on the wire: the box names it.
+	const switchingToRef = useRef(new Map<string, RoomModelLock>());
+	const [switchesTick, setSwitchesTick] = useState(0);
+	// Conversations whose switch was written but answered with a failure: no
+	// writer of the page saves their lines until it has read what the switch
+	// stored (savePersistentAgentThread and the pagehide save ask savesHeldFor).
+	const switchOutcomeUnknownRef = useRef(new Set<string>());
+	const savesHeldFor = (agentId: string, conversationId: string) => switchOutcomeUnknownRef.current.has(`${agentId}\n${conversationId}`);
+	const switchesInFlightFor = (agentId: string, conversationId: string) => switchesInFlightRef.current.get(`${agentId}\n${conversationId}`) ?? 0;
+	// A model change the room has not settled holds every turn of this
+	// conversation where it goes out (sendMessage, continueAfterFailure), so no
+	// answer runs on the model being left: a held pick, or a switch still on the
+	// wire, which outlives the held pick when the page leaves and comes back.
+	function modelChangePendingFor(chat: PersistentChatConfig): boolean {
+		if (!chat) return false;
+		return heldPickFor(chat) !== null || switchesInFlightFor(chat.agentId, chat.conversationId) > 0;
+	}
+	function heldPickFor(chat: PersistentChatConfig) {
+		const held = heldModelPickRef.current;
+		return chat && held && held.agentId === chat.agentId && held.conversationId === chat.conversationId ? held : null;
+	}
+	// The model panel opens from its control and from the chat's "Choose another model".
+	const [modelPanelOpen, setModelPanelOpen] = useState(false);
+	// The switch window, for a model this conversation is too long for.
+	const [modelSwitchAsk, setModelSwitchAsk] = useState<{ agentId: string; conversationId: string; lock: RoomModelLock; name: string } | null>(null);
+	// The model the next conversation continues on once this Remember saves:
+	// sent with every proposal of this Remember, and kept by the server with
+	// its job, which hands it back after a reload.
+	const rememberContinueOnRef = useRef<{ agentId: string; conversationId: string; lock: RoomModelLock } | null>(null);
 	// V5: the right pane is a single slot with two possible occupants — the
 	// approval preview and the artifact viewer. One state value = last-click-wins
 	// by construction; the pane header always names the occupant.
 	type RightPaneOccupant =
 		| { kind: "preview"; data: ApprovalPreviewData }
-		| { kind: "artifactViewer"; taskId: string; templateLabel: string; artifact: { relativePath: string; extension: string }; asset?: AssetRowView }
-		// The run view (status grammar, 2026-07-18): the live task's stream in the
+		| { kind: "artifactViewer"; taskId: string; templateLabel: string; artifact: { relativePath: string; extension: string }; asset?: AssetRowView; backTo?: AttachmentsView }
+		// The room's Attachments: the panel in this slot, or the gallery over the
+		// chat with the slot free, so a file opened there sits beside it. A file
+		// opened from them carries the view it goes back to (backTo).
+		| { kind: "attachments"; view: AttachmentsView }
+		// The run view: the live task's stream in the
 		// same pane slot; renders from taskState and swaps to the artifact viewer
 		// in place when the run ends.
 		| { kind: "taskRun"; taskId: string };
@@ -3033,14 +453,11 @@ export function App() {
 	const rightPaneRef = useRef<RightPaneOccupant | null>(null);
 	rightPaneRef.current = rightPane;
 	const [artifactMaximized, setArtifactMaximized] = useState(false);
+	const attachmentsScrollRef = useRef(0);
 	// Bumped when a finished revise rewrote the bytes behind the OPEN viewer's
 	// files/<name> route — the URL doesn't change, so the frame key must.
 	const [viewerReloadNonce, setViewerReloadNonce] = useState(0);
 	const [exportNotice, setExportNotice] = useState<{ kind: "success" | "error"; text: string } | null>(null);
-	// The done-moment toast (status grammar, 2026-07-18): fires once when a task
-	// ends and nothing else is already showing the result; top-right, ~6 s,
-	// click opens the viewer. The rail's green dot is the durable signal.
-	const [taskDoneToast, setTaskDoneToast] = useState<{ taskId: string; title: string; kind: "done" | "error"; templateLabel: string; artifact: { relativePath: string; extension: string } | null } | null>(null);
 	// Desktop app only: the done-moment also reaches the OS notification
 	// center when the window is hidden (close-to-tray) or unfocused, where the
 	// in-app toast cannot be seen. Clicking navigates to exxperts://focus, the
@@ -3079,7 +496,7 @@ export function App() {
 	// every event that can change them — server truth, no client cache.
 	const [assetLedgerRows, setAssetLedgerRows] = useState<AssetLedgerRowInput[]>([]);
 	const [assetDeleteConfirm, setAssetDeleteConfirm] = useState<AssetRowView | null>(null);
-	// Files UI slice: the room's shelf listing (user-added rows + composer truth)
+	// The room's shelf listing (user-added rows + composer truth)
 	// and the composer's staged attachments — files already uploaded and parsed,
 	// waiting to ride the next message. The chip shows the honest parse state.
 	const [roomShelfFiles, setRoomShelfFiles] = useState<RoomShelfFile[]>([]);
@@ -3087,13 +504,15 @@ export function App() {
 	const stagedAttachmentsRef = useRef<StagedAttachment[]>([]);
 	useEffect(() => { stagedAttachmentsRef.current = stagedAttachments; }, [stagedAttachments]);
 	// Store-wide GC (contract §4): assessed once per app load; the safety valve
-	// stays silent below its threshold.
+	// stays silent below its threshold. Not on a shared server: it lists every
+	// room's tasks, so it is not asked for there.
 	const [gcAssessment, setGcAssessment] = useState<TaskStoreGcView | null>(null);
 	const [gcReviewOpen, setGcReviewOpen] = useState(false);
 	const [gcBusy, setGcBusy] = useState(false);
 	useEffect(() => {
 		void (async () => {
 			try {
+				if ((await fetchRemoteClientContext()).sharedServer) return;
 				const res = await apiFetch("/api/task-store/gc");
 				if (!res.ok) return;
 				const data = await res.json().catch(() => null);
@@ -3105,7 +524,9 @@ export function App() {
 	}, []);
 	// Low-churn shim: the existing preview call sites keep working unchanged.
 	const preview = rightPane?.kind === "preview" ? rightPane.data : null;
-	const setPreview = (data: ApprovalPreviewData | null) => setRightPane(data ? { kind: "preview", data } : null);
+	// Clearing keeps the room's Attachments: a dropped connection is no reason to
+	// lose them, and leaving the room closes them itself.
+	const setPreview = (data: ApprovalPreviewData | null) => setRightPane((pane) => (data ? { kind: "preview", data } : pane?.kind === "attachments" || (pane?.kind === "artifactViewer" && pane.backTo) ? pane : null));
 
 	// The room settings wheel in the topbar opens the same modal the launcher
 	// card's wheel opens. Declared here because the Escape handler below has to
@@ -3116,35 +537,37 @@ export function App() {
 	// button's tooltip: read on entering the room and whenever Room settings
 	// (where it is changed) closes.
 	const [rememberSkipsPreview, setRememberSkipsPreview] = useState(false);
-	// First-open workspace nudge: a room with no workspace configured gets one
-	// dismissible in-room notice pointing at workspace settings. The dismissal
-	// is remembered per room in localStorage, so it never comes back.
-	const [workspaceNudgeRoomId, setWorkspaceNudgeRoomId] = useState<PersistentAgentId | null>(null);
+	const [workspaceHint, setWorkspaceHint] = useState<WorkspaceHint | null>(null);
 
 	// Escape closes the artifact/run pane, the keyboard twin of clicking its X
-	// or the selected rail row. A maximized pane restores first (one Escape per
+	// or the selected card. A maximized pane restores first (one Escape per
 	// step), and any open dialog above the pane (delete confirm, export
 	// collision, file-delete confirm, Save-as prompt, room settings) owns Escape
 	// until dismissed — one Escape, one layer.
-	useEffect(() => {
-		const paneOpen = rightPane?.kind === "artifactViewer" || rightPane?.kind === "taskRun";
-		if (!paneOpen || assetDeleteConfirm || exportCollision || fileDeleteConfirm || saveAsPrompt || roomSettingsOpen) return;
-		function onKeyDown(event: KeyboardEvent) {
-			if (event.key !== "Escape") return;
-			// A dialog that is not in this component's state (the expanded
-			// diagram viewer) owns Escape the same way: one Escape, one layer.
-			if (document.querySelector('[aria-modal="true"]')) return;
-			if (artifactMaximized) setArtifactMaximized(false);
-			else setRightPane(null);
-		}
-		document.addEventListener("keydown", onKeyDown);
-		return () => document.removeEventListener("keydown", onKeyDown);
-	}, [rightPane, artifactMaximized, assetDeleteConfirm, exportCollision, fileDeleteConfirm, saveAsPrompt, roomSettingsOpen]);
+	// As an Escape layer it keeps that Escape from the room's own keys too: the
+	// composer's Stop and a waiting question's deny.
+	const paneTakesEscape = rightPane?.kind === "artifactViewer" || rightPane?.kind === "taskRun" || rightPane?.kind === "attachments";
+	useEscapeKey(() => {
+		// A dialog that is not in this component's state (the expanded
+		// diagram viewer) owns Escape the same way: one Escape, one layer.
+		if (document.querySelector('[aria-modal="true"]')) return;
+		if (artifactMaximized) setArtifactMaximized(false);
+		else if (rightPane?.kind === "attachments" && rightPane.view === "gallery") setRightPane({ kind: "attachments", view: "panel" });
+		else closePaneFile();
+	}, paneTakesEscape && !assetDeleteConfirm && !exportCollision && !fileDeleteConfirm && !saveAsPrompt && !roomSettingsOpen);
 	const [conversationId, setConversationId] = useState<string>(() => newConversationId());
 	const [authStatus, setAuthStatus] = useState<AuthStatusResponse | null>(null);
 	const [modelStatus, setModelStatus] = useState<WebChatModelStatus | null>(null);
+	// The socket's handlers outlive the render that made them: they read the provider names here.
+	const modelStatusRef = useRef(modelStatus);
+	modelStatusRef.current = modelStatus;
 	const [aiProfileStatus, setAiProfileStatus] = useState<PersistentAgentAiProfileSelectionStatus | null>(null);
+	// Which providers are gateways, for the socket's handlers.
+	const aiProfileStatusRef = useRef(aiProfileStatus);
+	aiProfileStatusRef.current = aiProfileStatus;
 	const [persistentAgentStatuses, setPersistentAgentStatuses] = useState<PersistentAgentStatus[]>([]);
+	// Whether the open room has nothing in memory yet, for the socket's handlers: set from the room's status each render.
+	const roomMemoryEmptyRef = useRef(false);
 	// The saved order of the home screen. Every rule about it (withheld on each
 	// arrival until that arrival's read settles, reads and saves never
 	// overlapping, a save from an earlier visit remembered and not drawn, a
@@ -3155,7 +578,7 @@ export function App() {
 	// question with it (home-room-arrange.ts, the ONE sentence).
 	const roomArrangeDirtyRef = useRef(false);
 	const [persistentAgentStatus, setPersistentAgentStatus] = useState<PersistentAgentStatus | null>(null);
-	// Community #14 slice 2: rooms observed finishing a response WITHOUT us
+	// Rooms observed finishing a response WITHOUT us
 	// inside (left mid-generation, or found in flight from outside). When a
 	// status refresh later shows such a room settled with a completed turn,
 	// its card gets a "response ready" badge until the room is opened. Session-
@@ -3167,13 +590,15 @@ export function App() {
 	// treat the open room as "cooking with nobody inside" and fire the
 	// done-moment toast at the user sitting in front of the answer.
 	const refreshPersistentAgentStatusRef = useRef<() => Promise<void>>(async () => {});
+	// The room this tab just left, while the server may not have seen its socket close yet.
+	const leftRoomRef = useRef<{ id: string; at: number } | null>(null);
 	const refreshSetupStatusRef = useRef<() => void>(() => {});
 	refreshSetupStatusRef.current = () => {
 		void refreshAuthStatus();
 		void refreshAiProfileStatus();
 	};
 	const [backgroundReadyRooms, setBackgroundReadyRooms] = useState<ReadonlySet<PersistentAgentId>>(new Set());
-	// Rooms with a purge in flight (community #10): the delete endpoint may be
+	// Rooms with a purge in flight: the delete endpoint may be
 	// retrying for a few seconds after an in-room delete, and the card must not
 	// offer a door into a room that is about to stop existing.
 	const [purgingRooms, setPurgingRooms] = useState<ReadonlySet<PersistentAgentId>>(new Set());
@@ -3184,44 +609,59 @@ export function App() {
 	const [backgroundDoneToast, setBackgroundDoneToast] = useState<{ agentId: PersistentAgentId; displayName: string } | null>(null);
 	const [persistentThread, setPersistentThread] = useState<PersistentAgentThread | null>(null);
 	const [persistentChat, setPersistentChat] = useState<PersistentChatConfig>(null);
+	// Another conversation holds none of this one's edit.
+	useEffect(() => {
+		setLastEdit(null);
+		setEditBlockedId(null);
+	}, [persistentChat?.agentId, persistentChat?.conversationId]);
 	const [persistentResumeError, setPersistentResumeError] = useState<string | null>(null);
-	// Rooms whose memory did not fit their locked model's window at open: their
-	// standby thread cannot be resumed, so it must not keep Maintain disabled —
-	// Maintain (after Forget) is the way out the refusal names.
-	const [memoryOverflowRooms, setMemoryOverflowRooms] = useState<ReadonlySet<PersistentAgentId>>(new Set());
-	// Entering a room checks whether the workspace nudge is due there: only for
-	// rooms with NO workspace default, and only until it was dismissed once.
+	/** Bumped when the page reconnects after an outage: what failed meanwhile is asked for again. */
+	const [serviceBack, setServiceBack] = useState(0);
+	// Entering a room checks whether a folder hint is due there.
 	const workspaceNudgeAgentId = persistentChat?.agentId ?? null;
 	// The same policy fetch answers a second question: does this room's
-	// workspace default have Bash on? That fact gates the header's bash-mode
-	// chip — false (also the failed-fetch answer) simply means no chip.
+	// workspace default have Bash on? That fact gates the composer's
+	// command-mode chip: false (also the failed-fetch answer) simply means no chip.
 	const [roomBashEnabled, setRoomBashEnabled] = useState(false);
+	const phoneWidth = usePhoneWidth();
 	useEffect(() => {
-		setWorkspaceNudgeRoomId(null);
+		// Another room's hint goes; this room's stays until an answer replaces
+		// it, so a re-check that fails never hides a folder still missing.
+		setWorkspaceHint((hint) => (hint?.roomId === workspaceNudgeAgentId ? hint : null));
 		setRoomBashEnabled(false);
 		if (!workspaceNudgeAgentId) return;
-		let dismissed = false;
-		try { dismissed = localStorage.getItem(WORKSPACE_NUDGE_STORAGE_PREFIX + workspaceNudgeAgentId) !== null; } catch {}
 		let cancelled = false;
-		void fetchPersistentRoomWorkspaceDefault(workspaceNudgeAgentId)
-			.then((response) => {
-				if (cancelled) return;
-				setRoomBashEnabled(response.policy?.workspaceAccessMode === "localFiles" && response.policy?.bashEnabled === true);
-				if (!dismissed && response.policy === null) setWorkspaceNudgeRoomId(workspaceNudgeAgentId);
-			})
-			// The nudge is a nicety and the chip fails to hidden: a failed
-			// lookup just means neither shows.
-			.catch(() => {});
-		return () => { cancelled = true; };
+		const check = () => {
+			void fetchPersistentRoomWorkspaceDefault(workspaceNudgeAgentId)
+				.then((response) => {
+					if (cancelled) return;
+					setRoomBashEnabled(response.policy?.workspaceAccessMode === "localFiles" && response.policy?.bashEnabled === true);
+					setWorkspaceHint(workspaceHintOf(workspaceNudgeAgentId, response));
+				})
+				// The hint is a nicety and the chip fails to hidden: a failed
+				// lookup leaves both as they stand.
+				.catch(() => {});
+		};
+		check();
+		// A folder can go or come back outside the page, in Finder, so
+		// returning to the page asks again, without a reload.
+		const recheck = () => { if (document.visibilityState === "visible") check(); };
+		window.addEventListener("focus", recheck);
+		document.addEventListener("visibilitychange", recheck);
+		return () => {
+			cancelled = true;
+			window.removeEventListener("focus", recheck);
+			document.removeEventListener("visibilitychange", recheck);
+		};
 		// roomSettingsOpen: closing the settings modal re-checks, so a workspace
-		// set through the gear icon retires a nudge that was never dismissed —
+		// set through the gear icon retires a hint that was never dismissed,
 		// and the chip appears or disappears with a Bash toggle saved there.
 	}, [workspaceNudgeAgentId, roomSettingsOpen]);
 	function dismissWorkspaceNudge(): void {
-		if (workspaceNudgeRoomId) {
-			try { localStorage.setItem(WORKSPACE_NUDGE_STORAGE_PREFIX + workspaceNudgeRoomId, "1"); } catch {}
+		if (workspaceHint) {
+			try { localStorage.setItem(WORKSPACE_NUDGE_STORAGE_PREFIX + workspaceHint.roomId, "1"); } catch {}
 		}
-		setWorkspaceNudgeRoomId(null);
+		setWorkspaceHint(null);
 	}
 	// Name and provider move as one value: the face shows the name alone, the
 	// tooltip adds the provider, and the two can never drift apart.
@@ -3232,20 +672,32 @@ export function App() {
 	function setCurrentModelFromName(input: { model?: string; modelLabel?: string; provider?: string }, fallback = "") {
 		const canonical = canonicalModelName(input);
 		setCurrentModelState({ name: canonical.name || fallback, provider: canonical.provider ?? null });
+		if (input.provider && input.model && canonical.name) setRunningModelName({ provider: input.provider, model: input.model, name: canonical.name });
 	}
+	// The name the server's own frames give the model the room runs, keyed by
+	// that model: the model control shows it while the providers list loads,
+	// where a stored conversation's label can be a bare id.
+	const [runningModelName, setRunningModelName] = useState<{ provider: string; model: string; name: string } | null>(null);
 	const [checkpointPreviewOpen, setCheckpointPreviewOpen] = useState(false);
 	const [checkpointRememberText, setCheckpointRememberText] = useState("");
 	const [checkpointDensity, setCheckpointDensity] = useState<CheckpointDensity>("standard");
 	const [checkpointProposal, setCheckpointProposal] = useState<CheckpointProposalResponse | null>(null);
+	// The person's edits to the proposal: closing the dialog keeps them; Save, Discard or Generate again let them go.
+	const [checkpointEdits, setCheckpointEdits] = useState<{ key: string; fields: CheckpointApprovalEditFields } | null>(null);
+	const checkpointFields = checkpointProposal ? (checkpointEdits?.key === checkpointEditsKey(checkpointProposal) ? checkpointEdits.fields : checkpointFieldsOf(checkpointProposal)) : { sessionArc: "", body: "", parked: "" };
 	const [checkpointProposalLoading, setCheckpointProposalLoading] = useState(false);
 	// The running proposal request: Cancel aborts it, and the server stops the
 	// worker when the request closes.
 	const checkpointProposalAbortRef = useRef<AbortController | null>(null);
 	// How far the server has read, polled while the proposal generates.
-	const [checkpointProgress, setCheckpointProgress] = useState<{ read: number; of: number } | null>(null);
+	const [checkpointProgress, setCheckpointProgress] = useState<{ read: number; of: number; wait?: ModelWait } | null>(null);
 	const [checkpointProposalError, setCheckpointProposalError] = useState<string | null>(null);
+	// The Memory model cannot be reached: the one notice, with its ways out.
+	const [checkpointProposalNotice, setCheckpointProposalNotice] = useState<ModelNotice | null>(null);
 	const [checkpointApprovalLoading, setCheckpointApprovalLoading] = useState(false);
 	const [checkpointApprovalError, setCheckpointApprovalError] = useState<string | null>(null);
+	/** Bumped after a reconnect: the room looks up its Remember again. */
+	const [rememberLookupNonce, setRememberLookupNonce] = useState(0);
 	const [checkpointApprovalResult, setCheckpointApprovalResult] = useState<CheckpointApprovalResponse | null>(null);
 	const [checkpointQuickRequested, setCheckpointQuickRequested] = useState(false);
 	const [checkpointQuickBlockedReasons, setCheckpointQuickBlockedReasons] = useState<string[] | null>(null);
@@ -3263,6 +715,31 @@ export function App() {
 	// reset bumped it in the meantime (otherwise a slow LLM response reopens the
 	// full-screen workspace, and fast-path could even write memory after cancel).
 	const maintainRunRef = useRef(0);
+	// The first read in flight: leaving Maintain, a newer read, or going on to the run cancels it on the
+	// server, which stops it only then; a reload or a dropped connection never does. A request cut off
+	// without an answer leaves its read running there, so its ask is kept: Read again joins that read
+	// under the same ask, and a Cancel still reaches it.
+	const firstReadRef = useRef<{ agentId: PersistentAgentId; kind: "memorize" | "review"; ask: string; controller: AbortController; cut?: boolean } | null>(null);
+	function askFirstRead<T>(agentId: PersistentAgentId, kind: "memorize" | "review", request: (ask: { ask: string; signal: AbortSignal }) => Promise<T>): Promise<T> {
+		const cut = firstReadRef.current?.cut && firstReadRef.current.agentId === agentId && firstReadRef.current.kind === kind ? firstReadRef.current : null;
+		if (!cut) cancelFirstRead();
+		const current = { agentId, kind, ask: cut?.ask ?? `a_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`, controller: new AbortController() };
+		firstReadRef.current = current;
+		return request({ ask: current.ask, signal: current.controller.signal }).then((answer) => {
+			if (firstReadRef.current === current) firstReadRef.current = null;
+			return answer;
+		}, (error: unknown) => {
+			if (firstReadRef.current === current) firstReadRef.current = isUnexplainedRequestFailure(error) ? { ...current, cut: true } : null;
+			throw error;
+		});
+	}
+	function cancelFirstRead(): void {
+		const current = firstReadRef.current;
+		firstReadRef.current = null;
+		if (!current) return;
+		current.controller.abort();
+		void cancelFirstReadAt((current.kind === "review" ? reviewBase : absorbBaseUrl)(current.agentId), current.ask).catch(() => {});
+	}
 	// The run id whose resting state has already been handled: the poll that
 	// brought it in is the only one that acts on it.
 	const absorbRunSettledRef = useRef<string | null>(null);
@@ -3314,11 +791,19 @@ export function App() {
 	// lock-bounce error frame is judged at event time, not render time).
 	const roomReconnectStateRef = useRef<"idle" | "reconnecting" | "failed">("idle");
 	const reconnectAttemptRef = useRef(0);
+	// A deliberate stand-down (the room is still answering): the trying stops on a shared server too.
+	const reconnectStoodDownRef = useRef(false);
 	// When the current outage began (first scheduled retry), null while connected.
 	const reconnectStartedAtRef = useRef<number | null>(null);
 	const reconnectTimerRef = useRef<number | null>(null);
 	// "Connected again" after an outage; the toast clears itself.
 	const [reconnectedNotice, setReconnectedNotice] = useState<number | null>(null);
+	// The room stood down to wait on a sign-in or another model, not on the
+	// connection: the ready that ends the wait is no reconnect to announce.
+	const roomWaitsOnChoiceRef = useRef(false);
+	// The conversations this window sent a Remember save for: a later Save that
+	// finds the entry already saved landed from here, not from another window.
+	const checkpointSavesSentRef = useRef(new Set<string>());
 	// Deliberate socket closes (navigation resets, leaving the room) must not
 	// trigger the auto-reconnect; these paths arm the flag and the WS effect
 	// clears it when it builds the next socket.
@@ -3341,6 +826,11 @@ export function App() {
 	// rebuilds itself with the same shape of backoff the room socket uses.
 	const homeReconnectTimerRef = useRef<number | null>(null);
 	const homeReconnectAttemptRef = useRef(0);
+	// Set once the app has unmounted (a render error swaps in the error
+	// boundary's screen). The app's own teardown closes its socket, and that
+	// close, or a try whose request was out, arrives after: neither ladder may
+	// go on trying or setting state in a tree that is gone.
+	const unmountedRef = useRef(false);
 	// When the page last went hidden, so waking up can tell a laptop that slept
 	// through an outage from a user flicking between tabs. Only the former may
 	// reset the backoff ladder; the latter would pin it at one second.
@@ -3348,26 +838,27 @@ export function App() {
 	// A level chosen while the socket was not OPEN. Kept with its room so a
 	// choice made in one room can never be delivered to the next, and flushed
 	// when that room binds again, so the pick is never silently lost.
-	const pendingEffortRef = useRef<{ agentId: PersistentAgentId; level: string } | null>(null);
+	const pendingEffortRef = useRef<{ agentId: PersistentAgentId; conversationId: string; level: string } | null>(null);
 	const busyRef = useRef(busy);
 	const turnCancellingRef = useRef(turnCancelling);
 	const turnInterruptedNoteRef = useRef<string | null>(turnInterruptedNote);
 	const toolByIdRef = useRef<Map<string, string>>(new Map());
-	const hiddenRoutineToolByIdRef = useRef<Map<string, { name: string; args: any }>>(new Map());
+	// A provider's own search, by its id: the step's item id, the server's in a keyed turn.
+	const serverToolByIdRef = useRef<Map<string, string>>(new Map());
+	// `itemId`: the server's id for the call's step, so a hidden call's error card carries it.
+	const hiddenRoutineToolByIdRef = useRef<Map<string, { name: string; args: any; itemId?: string }>>(new Map());
 	const retrievalActivityIdRef = useRef<string | null>(null);
+	// The thinking items of the message being written, by content block: one each,
+	// so each keeps its own words (blocks in a row are drawn as one row, ThoughtGroup).
+	const thinkingRowByBlockRef = useRef<Map<number, { id: string; startedAt: number }>>(new Map());
 	const itemsRef = useRef(items);
 	// All assistant text flows through one explicit state machine — see
 	// assistant-stream.ts. The refs here are only the host glue: the machine
 	// state, the scheduled tick handle, and the transient system lines the
 	// retry flow swaps in and out.
 	const streamStateRef = useRef<AssistantStreamState>(createAssistantStreamState());
-	const revealPacingRef = useRef<RevealPacing>(readRevealPacing());
-	// The answer is fully received but its tail is still appearing (the
-	// reducer's draining phase). The turn's chrome (Stop, the header spinner,
-	// the composer placeholder, Remember) keeps saying "working" until it is
-	// done; nothing server-side reads this. Set only when it flips.
-	const [revealing, setRevealing] = useState(false);
-	const revealingRef = useRef(false);
+	// The answer a reconnect's replay drew in one paint: the blocks drawn then do not fade in.
+	const [answerDrawnAtOnceId, setAnswerDrawnAtOnceId] = useState<string | null>(null);
 	// The consult (DelegationCard) client state machine — see consult-stream.ts.
 	// The ref is the source of truth the WS closures read; the state drives the
 	// docked card / folded pill render.
@@ -3376,11 +867,6 @@ export function App() {
 	// The specialist-task card state machine (visuals V4) — see task-stream.ts.
 	const [taskState, setTaskState] = useState<TaskState>(createTaskState);
 	const taskStateRef = useRef<TaskState>(taskState);
-	// Iterate chip-chat (§5 amendment): pending = the frame is out and the
-	// approval card / launch is in flight; notice = the last ok:false reason.
-	// Both reset when the fresh task's task_started supersedes the card.
-	const [taskIteratePending, setTaskIteratePending] = useState(false);
-	const [taskIterateNotice, setTaskIterateNotice] = useState<string | null>(null);
 	// Consult MR-5 pending-transfer queue (§2, §2.3): handoff blocks that ride the
 	// user's NEXT prompt (not a memory-write path — the block enters the session
 	// JSONL like any user text). The ref is the synchronous source the send path
@@ -3406,11 +892,54 @@ export function App() {
 	// window: segments the replay rebuilds are dated by the turn, not by the
 	// moment this session caught up.
 	const reattachStartedAtRef = useRef<number | null>(null);
+	// How far the server's clock runs ahead of this browser's, as the reattach frame or the last live step's start showed it.
+	const serverClockAheadRef = useRef(0);
 	const streamErrorLineIdRef = useRef<string | null>(null);
-	// One output-limit line per turn. Turn frames replay on reattach (#33), so
+	// One output-limit line per turn. Turn frames replay on reattach, so
 	// the guard has to survive the same message_end arriving twice.
 	const outputLimitNoticeShownRef = useRef(false);
 	const retryNoticeIdRef = useRef<string | null>(null);
+	const returnedPromptPendingRef = useRef(false);
+	// The failure line whose Try again continues its turn, from the click until the server starts that turn or turns it down.
+	const continuedLineRef = useRef<string | null>(null);
+	// The items each conversation lost on purpose (a message handed back to the box), until a save names them: handBack.
+	const pendingRemovalsRef = useRef(new PendingRemovals());
+	// A retried attempt's parts the page took off the screen. The retry may write under their ids again, at any time
+	// until the server's turn ends, which this page cannot know for sure: they are never named as removed, only left
+	// out of a saved copy this tab takes on, unless the server landed them (savedWithoutRetriedParts).
+	const retriedPartsRef = useRef(new PendingRemovals());
+	// The card each transferred answer's queue entry belongs to: a reconnect keeps an entry only this tab holds by its card.
+	const handoffCardByEntryRef = useRef(new Map<string, string>());
+	// The newest turn's key (thread-items-by-id.ts): the id this page sent it with, or the one its replayed parts name. Only its parts take a Stop's count.
+	const turnKeyRef = useRef<string | null>(null);
+	// The last turn's end said the server's stop cut it: such an answer keeps the connection-lost note at the close.
+	const turnCutByStopRef = useRef(false);
+	// Messages sent while the room answers, until the room has them (outgoing-messages.ts). The ref is what the send and frame paths read.
+	const [outgoing, setOutgoing] = useState<OutgoingMessage[]>([]);
+	const outgoingRef = useRef<OutgoingMessage[]>(outgoing);
+	// Edits on a message the running answer holds, by id, with its text, until the server answers; a new connection's ready says which it took out.
+	const editsAskedRef = useRef(new Map<string, string>());
+	function dispatchOutgoing(action: OutgoingAction): void {
+		const before = outgoingRef.current;
+		const next = reduceOutgoing(before, action);
+		outgoingRef.current = next;
+		setOutgoing(next);
+		// The server keeps what only this page has, so a reload or a closed window loses none; another conversation's stay with it.
+		const ws = wsRef.current;
+		if (action.type === "clear" || !ws || ws.readyState !== WebSocket.OPEN) return;
+		const { hold, drop } = keptChanges(before, next);
+		if (hold.length) ws.send(JSON.stringify({ type: "hold", messages: hold }));
+		for (const id of drop) ws.send(JSON.stringify({ type: "held_drop", id }));
+	}
+	// The person pressed Stop in this turn: what the server hands back after it is theirs, never sent on.
+	const stopByPersonRef = useRef(false);
+	// The answer stopped at the words on screen for the person's message: what still arrives of it waits here,
+	// and goes on screen only when the server says the message waits instead (`cut` false); after a cut it never shows.
+	const answerFreezeRef = useRef<{ backlog: AssistantStreamAction[]; cut: boolean } | null>(null);
+	// The cut came before anything of the answer showed: no line under it.
+	const cutQuietRef = useRef(false);
+	// The model whose call failed last, named by the retry note that follows it.
+	const failedTurnModelNameRef = useRef("");
 	const persistentChatRef = useRef<PersistentChatConfig>(persistentChat);
 	// The room's socket belongs to a conversation, not to its model: a model
 	// that changes under an open conversation (the ready frame, a switch, an
@@ -3422,9 +951,8 @@ export function App() {
 	// (openArtifactViewer attaches the row to whatever entry path opened it).
 	const assetRowsRef = useRef<AssetRowView[]>([]);
 	const openAssetRowRef = useRef<((row: AssetRowView) => void) | null>(null);
-	// Assets panel data: fetch the room-wide REST list (room-scoped history,
-	// 2026-07-18 grill: rows survive Memento and checkpoint — both only mint a
-	// new conversation). The stale-guard is per-room; a thread switch within the
+	// Assets panel data: fetch the room-wide REST list (rows survive Memento
+	// and checkpoint — both only mint a new conversation). The stale-guard is per-room; a thread switch within the
 	// same room keeps the rows it already has.
 	const refreshAssetRows = useCallback(async () => {
 		const chat = persistentChatRef.current;
@@ -3500,7 +1028,7 @@ export function App() {
 			setExportNotice({ kind: "error", text: (e as Error).message || "The file could not be added." });
 		}
 	}, [refreshRoomFiles]);
-	// Community #52: a file pasted into the composer (a screenshot, a copied
+	// A file pasted into the composer (a screenshot, a copied
 	// picture, a document copied from the file manager) stages through the
 	// SAME path the 📎 uses — same upload, same chip, same refusals. The only
 	// extra work is a name for clipboard images: they arrive as anonymous
@@ -3535,7 +1063,7 @@ export function App() {
 			await commitRoomFileDelete(chat.agentId, staged.name, token);
 		} catch {
 			// If the delete fails the file simply stays on the shelf — visible in
-			// Files, never silently lost.
+			// Attachments, never silently lost.
 		}
 		void refreshRoomFiles();
 	}, [refreshRoomFiles]);
@@ -3546,7 +1074,7 @@ export function App() {
 		if (!chat) return;
 		try {
 			const uploaded = await uploadRoomFile(chat.agentId, file.name, await fileToBase64(file));
-			setExportNotice({ kind: "success", text: `${uploaded.name} is in this room's Files.` });
+			setExportNotice({ kind: "success", text: `${uploaded.name} is in this room's Attachments.` });
 			void refreshRoomFiles();
 		} catch (e) {
 			setExportNotice({ kind: "error", text: (e as Error).message || "The file could not be added." });
@@ -3626,6 +1154,8 @@ export function App() {
 		if (!persistentChat) setRoomSettingsOpen(false);
 	}, [persistentChat]);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
+	// The rooms an "@Room question" can name, as last rendered, for the send path.
+	const mentionCandidatesRef = useRef<MentionCandidateRoom[]>([]);
 	const attachFileInputRef = useRef<HTMLInputElement>(null);
 	const workbenchRef = useRef<HTMLDivElement>(null);
 
@@ -3657,10 +1187,13 @@ export function App() {
 		return () => window.removeEventListener("focus", onFocus);
 	}, []);
 
+	// The three start-up reads keep an answer only when it is OK: a refusal's
+	// body ({ error, code }) is not a status, and stored as one it would break
+	// the screens that read it. The last good answer stays.
 	async function refreshAuthStatus() {
 		try {
-			const status = await apiFetch("/api/auth/status").then((r) => r.json()) as AuthStatusResponse;
-			setAuthStatus(status);
+			const res = await apiFetch("/api/auth/status");
+			if (res.ok) setAuthStatus(await res.json() as AuthStatusResponse);
 		} catch {}
 		// Model availability is derived from provider auth, so every auth
 		// transition must invalidate it too. Most importantly the fresh
@@ -3672,8 +1205,9 @@ export function App() {
 
 	async function refreshModelStatus(options?: { rethrow?: boolean }) {
 		try {
-			const status = await apiFetch("/api/persistent-agent-room/model-status").then((r) => r.json()) as WebChatModelStatus;
-			setModelStatus(status);
+			const res = await apiFetch("/api/persistent-agent-room/model-status");
+			if (!res.ok) throw new Error(`The model status could not be read (${res.status}).`);
+			setModelStatus(await res.json() as WebChatModelStatus);
 		} catch (e) {
 			// Background refreshes stay quiet; a caller that just changed what
 			// the model list depends on must not report success over stale data.
@@ -3683,8 +1217,8 @@ export function App() {
 
 	async function refreshAiProfileStatus() {
 		try {
-			const status = await apiFetch("/api/persistent-agent-ai-profile").then((r) => r.json()) as PersistentAgentAiProfileSelectionStatus;
-			setAiProfileStatus(status);
+			const res = await apiFetch("/api/persistent-agent-ai-profile");
+			if (res.ok) setAiProfileStatus(await res.json() as PersistentAgentAiProfileSelectionStatus);
 		} catch {}
 	}
 
@@ -3709,15 +1243,20 @@ export function App() {
 		// the callers that own the current room's queue pass it (send/transfer via
 		// the debounced persist, the boundary carries/clears). Reconciliation saves
 		// for other threads omit it, so they never clobber a stored queue.
+		// While a lost switch's outcome is unknown the stored conversation wins: it is read, not overwritten.
+		if (savesHeldFor(thread.agentId, thread.conversationId)) return await fetchPersistentAgentThread(thread.agentId as PersistentAgentId, thread.conversationId);
+		// The removals this request names; a hand-back after it started waits for the next save.
+		const removed = pendingRemovalsRef.current.forSave(thread.agentId, thread.conversationId);
 		const res = await apiFetch(`/api/persistent-agents/${encodeURIComponent(thread.agentId)}/threads/${encodeURIComponent(thread.conversationId)}`, {
 			method: "PUT",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ state, origin, model: thread.model, items: nextItems, ...(pendingHandoffs !== undefined ? { pendingHandoffs } : {}) }),
+			body: threadSaveBody({ state, origin, model: thread.model, items: nextItems, pendingHandoffs, removed }),
 		});
 		// The server refuses the body before the handler runs, so the stored
 		// conversation is the one from the last save that was accepted.
 		if (res.status === 413) throw new Error("This conversation is too large to save. What was saved before is kept.");
 		if (!res.ok) throw await persistentAgentResponseError(res, `Failed to save persistent-agent thread (${res.status})`);
+		pendingRemovalsRef.current.clear(thread.agentId, thread.conversationId, removed);
 		const body = await res.json() as { thread: PersistentAgentThreadRecord; runtime: PersistentAgentStatus["runtime"] };
 		applyPersistentRuntime(thread.agentId, body.runtime);
 		return body.thread;
@@ -3810,6 +1349,10 @@ export function App() {
 			const statuses = await fetchPersistentAgentStatuses();
 			const activeStatuses = Array.isArray(statuses) ? statuses : [];
 			setPersistentAgentStatuses(activeStatuses);
+			// A read served before the server saw the left room's socket close shows it locked by this app: read once more.
+			const left = leftRoomRef.current;
+			leftRoomRef.current = null;
+			if (left && Date.now() - left.at < 10_000 && activeStatuses.some((status) => status.id === left.id && status.activeLock?.surface === "web")) window.setTimeout(() => void refreshPersistentAgentStatusRef.current(), 1000);
 			if (typeof onFetched === "function") onFetched(activeStatuses);
 			// Background-generation bookkeeping (community #14): note rooms
 			// cooking without us inside; when one settles with a completed turn,
@@ -3833,7 +1376,7 @@ export function App() {
 					// The done moment, observed live: toast in the app, and in the
 					// desktop shell the same event reaches the OS notification
 					// center and tray badge when the window is hidden or unfocused.
-					const displayName = status.displayName?.trim() || "This room";
+					const displayName = shownRoomName(status.displayName) || "This room";
 					setBackgroundDoneToast({ agentId: status.id, displayName });
 					notifyDesktop(`${displayName} finished a response`, "The answer is saved in the room's conversation.");
 				}
@@ -3862,13 +1405,13 @@ export function App() {
 				if (persistentThread) setPersistentThread(null);
 				return;
 			}
-			// A room finishing a detached response (community #14) is NOT an
+			// A room finishing a detached response is NOT an
 			// abandoned active thread: reconciling it back to standby here would
 			// race the server-side landing write. Leave it alone until it settles.
 			if (resumableStatus.activeThread?.inFlight) return;
 			if ((resumableStatus.runtime.state === "standby" || resumableStatus.runtime.state === "active") && resumableStatus.runtime.activeThreadId && (!persistentThread || persistentThread.agentId === resumableStatus.id)) {
 				const record = await fetchPersistentAgentThread(resumableStatus.id, resumableStatus.runtime.activeThreadId);
-				const localThread = { ...threadRecordToLocalThread(record, resumableStatus.displayName || resumableStatus.id), state: "standby" as const };
+				const localThread = { ...threadRecordToLocalThread(record, shownRoomName(resumableStatus.displayName) || resumableStatus.id), state: "standby" as const };
 				const preparedBoundary = resumableStatus.activeThread?.preparedByBoundary ?? (resumableStatus.activeThread?.preparedByCheckpoint ? "checkpoint" : null);
 				if (preparedBoundary) {
 					if (resumableStatus.runtime.state === "active") void savePersistentAgentThread(localThread, "standby", preparedBoundary, localThread.items);
@@ -3896,7 +1439,7 @@ export function App() {
 	// Having left, a failed archive reports on the Home banner and keeps the
 	// draft it parked, instead of failing into silence.
 	async function archivePersistentAgentRoom(agentId: PersistentAgentId, confirmation: string): Promise<PersistentAgentArchiveResponse> {
-		const roomName = persistentAgentStatuses.find((status) => status.id === agentId)?.displayName || agentId;
+		const roomName = shownRoomName(persistentAgentStatuses.find((status) => status.id === agentId)?.displayName) || agentId;
 		const leavingBoundRoom = persistentChat?.agentId === agentId;
 		if (leavingBoundRoom && persistentRoomInFlight) {
 			// Leaving now would detach the turn into background cooking, and the
@@ -3966,7 +1509,7 @@ export function App() {
 	// reports on the Home banner, refreshes the card's stale lock, and keeps
 	// the draft it parked, instead of failing into silence.
 	async function purgePersistentAgentRoom(agentId: PersistentAgentId, confirmation: string): Promise<PersistentAgentPurgeResponse> {
-		const roomName = persistentAgentStatuses.find((status) => status.id === agentId)?.displayName || agentId;
+		const roomName = shownRoomName(persistentAgentStatuses.find((status) => status.id === agentId)?.displayName) || agentId;
 		const leavingBoundRoom = persistentChat?.agentId === agentId;
 		if (leavingBoundRoom && persistentRoomInFlight) {
 			// Leaving now would detach the turn into background cooking, and the
@@ -4059,22 +1602,39 @@ export function App() {
 		try {
 			// The debounced persist owns the current live room — carry its queue so a
 			// transfer (enqueue) or a send (clear) reaches the thread record.
-			if (persistentChat) await savePersistentAgentThread(persistentChat, "active", "unknown", items, pendingHandoffsRef.current);
+			// A window another window took the room from saves nothing: the room's conversation goes on there.
+			// Nor does a room waiting to reconnect: its list may lack what another window wrote meanwhile, and the
+			// server keeps a save's own items whole, so the reconnect's save of the merged list goes first.
+			if (persistentChat && !closedByFullSaveRef.current && turnLinkRef.current !== "elsewhere" && roomReconnectStateRef.current !== "reconnecting") await savePersistentAgentThread(persistentChat, "active", "unknown", items, pendingHandoffsRef.current);
 		} catch {}
 	}
 
-	// While some room is finishing a response with nobody inside (community
-	// #14), keep the statuses fresh so the card flips from working to
+	// While some room is finishing a response with nobody inside, keep the
+	// statuses fresh so the card flips from working to
 	// "response ready" without waiting for a window refocus. Scoped: only
 	// polls while such a room exists. Being inside a DIFFERENT room no longer
 	// stands the poll down (slice 3) — the done-moment toast has to fire there
 	// too; the refresh itself skips the open room and never reconciles while a
 	// room is bound, so the landing write stays unraced.
+	// A Maintain save polls too: the server waits for a turn, and the screen says so.
+	// A Home card greyed by a lock held elsewhere polls as well: nothing tells
+	// this page when that lock goes (a room closed in another window, or a
+	// reload whose first read beat the server freeing the old window's lock),
+	// so a Home that keeps focus would stay greyed. That read skips a hidden
+	// page, which shows no card; the turn and Maintain reads do not, because
+	// the done-moment notification is for a hidden window.
+	const maintainSaving = absorbWorkflow.step === "approving" || reviewWorkflow.step === "approving";
+	const roomTurnInFlight = (agentId?: string) => persistentAgentStatuses.some((status) => status.id === agentId && status.activeThread?.inFlight === true);
 	useEffect(() => {
-		if (!persistentAgentStatuses.some((status) => status.activeThread?.inFlight && status.id !== persistentChat?.agentId)) return;
-		const id = window.setInterval(() => { void refreshPersistentAgentStatus(); }, 5_000);
+		const turnElsewhere = persistentAgentStatuses.some((status) => status.activeThread?.inFlight && status.id !== persistentChat?.agentId);
+		const lockShownOnHome = view === "home" && persistentAgentStatuses.some((status) => !!status.activeLock && status.id !== persistentChat?.agentId);
+		if (!maintainSaving && !turnElsewhere && !lockShownOnHome) return;
+		const id = window.setInterval(() => {
+			if (!maintainSaving && !turnElsewhere && document.hidden) return;
+			void refreshPersistentAgentStatus();
+		}, maintainSaving ? 2_000 : 5_000);
 		return () => window.clearInterval(id);
-	}, [persistentAgentStatuses, persistentChat]);
+	}, [persistentAgentStatuses, persistentChat, maintainSaving, view]);
 
 	useEffect(() => { itemsRef.current = items; }, [items]);
 	// No deps on purpose: the function closes over most of the room state, so
@@ -4083,6 +1643,18 @@ export function App() {
 	useEffect(() => { persistentChatRef.current = persistentChat; }, [persistentChat]);
 	useEffect(() => { busyRef.current = busy; }, [busy]);
 	useEffect(() => { turnCancellingRef.current = turnCancelling; }, [turnCancelling]);
+	// A message handed back stops coming back once the person clears it from the box.
+	// Heard on the document: the box comes and goes with the room, and is made anew when reset.
+	useEffect(() => {
+		const onInput = (event: Event) => {
+			const area = textareaRef.current;
+			if (!area || event.target !== area || !returnedPromptPendingRef.current || area.value.trim()) return;
+			returnedPromptPendingRef.current = false;
+			sendReturnedPromptHandled(false);
+		};
+		document.addEventListener("input", onInput);
+		return () => document.removeEventListener("input", onInput);
+	}, []);
 	useEffect(() => { turnInterruptedNoteRef.current = turnInterruptedNote; }, [turnInterruptedNote]);
 	useEffect(() => { roomEffortRef.current = roomEffort; }, [roomEffort]);
 
@@ -4238,8 +1810,8 @@ export function App() {
 	// where rAF pauses and nothing is being watched so the reveal just drains).
 	// ------------------------------------------------------------------
 
-	function applyStreamUpserts(upserts: Map<string, { text: string; streaming: boolean }>, s: ChatItem[]): ChatItem[] {
-		let next = s;
+	function applyStreamUpserts(upserts: Map<string, { text: string; streaming: boolean }>, s: ChatItem[], drops: ReadonlySet<string> = new Set()): ChatItem[] {
+		let next = drops.size ? s.filter((it) => !(it.kind === "assistant" && drops.has(it.id))) : s;
 		for (const [id, u] of upserts) {
 			if (next.some((it) => it.id === id && it.kind === "assistant")) {
 				next = next.map((it) => (it.id === id && it.kind === "assistant" ? { ...it, text: u.text, streaming: u.streaming } : it));
@@ -4252,15 +1824,42 @@ export function App() {
 
 	function commitStreamState(state: AssistantStreamState) {
 		streamStateRef.current = state;
-		const draining = state.phase === "draining";
-		if (draining !== revealingRef.current) {
-			revealingRef.current = draining;
-			setRevealing(draining);
+	}
+
+	/**
+	 * The answer parts the stream took back. An echo's are named as removed in the next saves. A retried attempt's
+	 * are only remembered (retriedPartsRef): the retry may write under the same ids, which forgets them.
+	 */
+	function streamDropsOf(effects: AssistantStreamEffect[]): Set<string> {
+		const dropped = effects.flatMap((effect) => (effect.kind === "drop" ? [effect] : []));
+		const chat = persistentChatRef.current;
+		if (chat) {
+			const of = (why: "echo" | "retried") => dropped.flatMap((effect) => (effect.why === why ? [effect.id] : []));
+			pendingRemovalsRef.current.add(chat.agentId, chat.conversationId, of("echo"));
+			retriedPartsRef.current.add(chat.agentId, chat.conversationId, of("retried"));
+			const written = effects.flatMap((effect) => (effect.kind === "upsert" ? [effect.id] : []));
+			if (written.length) retriedPartsRef.current.clear(chat.agentId, chat.conversationId, written);
 		}
+		return new Set(dropped.map((effect) => effect.id));
+	}
+
+	/**
+	 * A saved copy this tab takes on, less the copies an earlier save left of a retried attempt's parts. A part the
+	 * server landed is the retry's and stays. This tab's next save then lacks the rest, so the server drops them too.
+	 */
+	function savedWithoutRetriedParts(chat: { agentId: string; conversationId: string }, saved: ChatItem[]): ChatItem[] {
+		const retired = new Set(retriedPartsRef.current.all(chat.agentId, chat.conversationId));
+		return retired.size ? saved.filter((item) => !retired.has(item.id) || item.landed === true) : saved;
 	}
 
 	function dispatchStream(action: AssistantStreamAction): AssistantStreamEffect[] {
-		const { state, effects } = reduceAssistantStream(streamStateRef.current, action, revealPacingRef.current);
+		if (action.type === "new_turn" || action.type === "reset") answerFreezeRef.current = null;
+		const freeze = answerFreezeRef.current;
+		if (freeze && FROZEN_STREAM_ACTIONS.has(action.type)) {
+			if (!freeze.cut) freeze.backlog.push(action);
+			return [];
+		}
+		const { state, effects } = reduceAssistantStream(streamStateRef.current, action);
 		commitStreamState(state);
 		const upserts = new Map<string, { text: string; streaming: boolean }>();
 		for (const effect of effects) {
@@ -4268,7 +1867,8 @@ export function App() {
 			else if (effect.kind === "schedule_tick") scheduleStreamTick();
 			else if (effect.kind === "warn") console.warn(effect.message, effect.detail ?? "");
 		}
-		if (upserts.size) setItems((s) => applyStreamUpserts(upserts, s));
+		const drops = streamDropsOf(effects);
+		if (upserts.size || drops.size) setItems((s) => applyStreamUpserts(upserts, s, drops));
 		return effects;
 	}
 
@@ -4319,15 +1919,16 @@ export function App() {
 	// this), with no interrupt note. Safe to call when idle.
 	function flushAssistantStream() {
 		cancelStreamTick();
-		const { state, effects } = reduceAssistantStream(streamStateRef.current, { type: "flush", now: performance.now() }, revealPacingRef.current);
+		const { state, effects } = reduceAssistantStream(streamStateRef.current, { type: "flush", now: performance.now() });
 		commitStreamState(state);
 		const upserts = new Map<string, { text: string; streaming: boolean }>();
 		for (const effect of effects) {
 			if (effect.kind === "upsert") upserts.set(effect.id, { text: effect.text, streaming: effect.streaming });
 			else if (effect.kind === "warn") console.warn(effect.message, effect.detail ?? "");
 		}
-		if (upserts.size) {
-			const update = (s: ChatItem[]) => applyStreamUpserts(upserts, s);
+		const drops = streamDropsOf(effects);
+		if (upserts.size || drops.size) {
+			const update = (s: ChatItem[]) => applyStreamUpserts(upserts, s, drops);
 			itemsRef.current = update(itemsRef.current);
 			setItems(update);
 		}
@@ -4336,6 +1937,17 @@ export function App() {
 	// The retrying note and the error-line pointer are transient per-connection
 	// state: a teardown mid-retry would otherwise leave "retrying…" in the
 	// transcript forever.
+	/** Removes this turn's failure line, so the turn ends with one line. A line from an earlier turn stays. */
+	function dropTurnFailureLine() {
+		const lineId = streamErrorLineIdRef.current;
+		streamErrorLineIdRef.current = null;
+		if (!lineId) return;
+		setItems((s) => {
+			const at = s.findIndex((it) => it.id === lineId);
+			return at > s.map((it) => it.kind).lastIndexOf("user") ? s.filter((it) => it.id !== lineId) : s;
+		});
+	}
+
 	function clearTransientStreamNotes() {
 		streamErrorLineIdRef.current = null;
 		outputLimitNoticeShownRef.current = false;
@@ -4367,8 +1979,9 @@ export function App() {
 		// Reattach catch-up: everything buffered so far is text that already
 		// exists server-side — drain it on a 0ms timer (same transport as the
 		// hidden-tab path, which keeps the dispatch out of the reducer's own
-		// effect loop) instead of pacing it like fresh tokens.
-		if (reattachReplayDrainRef.current) {
+		// effect loop) instead of pacing it like fresh tokens. After Stop the
+		// same: text that arrives before the abort lands is shown as it comes.
+		if (reattachReplayDrainRef.current || turnCancellingRef.current) {
 			if (streamTickRafRef.current !== null) {
 				window.cancelAnimationFrame(streamTickRafRef.current);
 				streamTickRafRef.current = null;
@@ -4420,13 +2033,14 @@ export function App() {
 		const onPageHide = () => {
 			flushAssistantStream();
 			const chat = persistentChatRef.current;
-			if (!chat) return;
+			if (!chat || closedByFullSaveRef.current || turnLinkRef.current === "elsewhere" || savesHeldFor(chat.agentId, chat.conversationId)) return;
 			try {
 				void apiFetch(`/api/persistent-agents/${encodeURIComponent(chat.agentId)}/threads/${encodeURIComponent(chat.conversationId)}`, {
 					method: "PUT",
 					headers: { "content-type": "application/json" },
 					keepalive: true,
-					body: JSON.stringify({ state: "active", origin: "unknown", model: chat.model, items: itemsRef.current, pendingHandoffs: pendingHandoffsRef.current }),
+					// Its answer is never read, so it clears no removal: a later save names them again.
+					body: threadSaveBody({ state: "active", origin: "unknown", model: chat.model, items: itemsRef.current, pendingHandoffs: pendingHandoffsRef.current, removed: pendingRemovalsRef.current.forSave(chat.agentId, chat.conversationId) }),
 				});
 			} catch {}
 		};
@@ -4438,7 +2052,7 @@ export function App() {
 		};
 	}, []);
 
-	// --- Room WS auto-reconnect (offline-forever fix, 2026-07-20) ------------
+	// --- Room WS auto-reconnect ---------------------------------------------
 	// A dropped room socket used to stay dead until a manual page refresh:
 	// onclose only flipped `connected`, and nothing ever rebuilt the socket.
 	// Reconnect = a programmatic Resume — the same steps as
@@ -4452,11 +2066,16 @@ export function App() {
 	// scheduled then outlived the uncovering (measured: 24 s late after a
 	// 36 s outage). A background tab's timers are throttled by the browser
 	// anyway, and the loop gives up after two minutes of outage; the banner
-	// then offers Reconnect. The attempt cap is a backstop only, and the value
-	// a stand-down (room_cooking) jumps to.
+	// then offers Reconnect. The attempt cap is a backstop only.
 	const RECONNECT_MAX_ATTEMPTS = 60;
 	const RECONNECT_GIVE_UP_MS = 120_000;
 	const RECONNECT_MAX_DELAY_MS = 5_000;
+	// A shared server comes back by itself (a long stop, an upgrade), so a
+	// room there keeps trying past the give-up, about every 15 s plus a random
+	// spread: every open room dialling at once is what a returning server
+	// does not need.
+	const RECONNECT_SHARED_DELAY_MS = 15_000;
+	const RECONNECT_SHARED_SPREAD_MS = 5_000;
 
 	/** How long room chrome keeps quiet about a socket being replaced. */
 	const SWAP_QUIET_MS = 800;
@@ -4469,10 +2088,68 @@ export function App() {
 	// note was a lie and is rewritten to this honest one.
 	const CONNECTION_LOST_NOTE = "Response interrupted: the connection was lost.";
 	const CONNECTION_LOST_COOKING_NOTE = "Connection lost - the response continues in the background and will be here when you return.";
+	/** The line a turn's answer gets when the connection was lost before it had any text (thinking, or a step). */
+	const isConnectionLostLine = (item: ChatItem) => item.kind === "system" && (item.text === CONNECTION_LOST_NOTE || item.text === CONNECTION_LOST_COOKING_NOTE);
 
 	function setRoomReconnect(state: "idle" | "reconnecting" | "failed") {
 		roomReconnectStateRef.current = state;
 		setRoomReconnectState(state);
+		// The room stopped trying: only now is the answer known to be cut off here.
+		if (state === "failed" && turnLinkRef.current === "reconnecting") endReconnectingTurn(CONNECTION_LOST_NOTE);
+	}
+
+	/** A turn this window waited on through a dropped connection is over here: with `note`, the answer says why. */
+	function endReconnectingTurn(note: string | null) {
+		setTurnLink("live");
+		// The interrupt puts what arrived but was not yet shown on screen, above the note.
+		if (note) markCurrentAssistantInterrupted(note);
+		else flushAssistantStream();
+		setBusy(false);
+		busyRef.current = false;
+	}
+
+	/**
+	 * After a reconnect the server's ready says whether a replay follows
+	 * (`reattaching`). With one, the replay ends the wait. Without one the turn
+	 * is over: its landing in the thread is the whole answer, shown finished;
+	 * with no landing it was lost with the server, and the answer says so.
+	 */
+	async function endReconnectingTurnWithoutReplay(agentId: PersistentAgentId, ws: WebSocket): Promise<void> {
+		// Bound to the connection and the wait it began in: after the read, a newer connection or a later wait is not this one's to end.
+		const wait = reconnectWaitRef.current;
+		const chat = persistentChatRef.current;
+		const stillWaiting = () => !unmountedRef.current && !personHasChanged() && wsRef.current === ws && reconnectWaitRef.current === wait && turnLinkRef.current === "reconnecting" && persistentChatRef.current?.agentId === agentId;
+		if (!chat || !stillWaiting()) return;
+		// A read that fails says nothing about the turn: it is tried again while this wait lasts.
+		let record: PersistentAgentThreadRecord | null = null;
+		for (let attempt = 0; record === null; attempt++) {
+			record = await fetchPersistentAgentThread(agentId, chat.conversationId).catch(() => null);
+			if (!stillWaiting()) return;
+			if (record === null) {
+				await new Promise((resolve) => window.setTimeout(resolve, Math.min(8000, 1000 * 2 ** attempt)));
+				if (!stillWaiting()) return;
+			}
+		}
+		const fetched = threadRecordToLocalThread(record, chat.displayName);
+		fetched.items = savedWithoutRetriedParts(chat, fetched.items);
+		const shownIds = new Set(itemsRef.current.map((item) => item.id));
+		const detachedLanding = fetched.items.some((item) => typeof item.id === "string" && item.id.startsWith("detached-") && !shownIds.has(item.id));
+		if (!detachedLanding && !waitedTurnLanded(fetched.items)) {
+			endReconnectingTurn(CONNECTION_LOST_NOTE);
+			return;
+		}
+		endReconnectingTurn(null);
+		// A turn with shared ids landed under the ids this tab holds: the saved copy, with what only this tab holds.
+		const removed = new Set(pendingRemovalsRef.current.all(chat.agentId, chat.conversationId));
+		const items = detachedLanding ? fetched.items : reconnectedThread({ items: fetched.items, queue: [] }, { items: itemsRef.current, queue: [] }, removed, () => undefined).items;
+		setItems(items);
+		setPersistentThread({ ...fetched, items, state: "live" });
+	}
+
+	/** The turn this tab waited on landed: the saved copy holds an item the server named for its key, marked landed. */
+	function waitedTurnLanded(saved: ChatItem[]): boolean {
+		const key = turnKeyRef.current;
+		return key !== null && saved.some((item) => item.landed === true && keyOfId(item.id) === key);
 	}
 
 	// --- Honest connection health -------------------------------------------
@@ -4500,6 +2177,10 @@ export function App() {
 	}
 
 	function noteConnectionOpen() {
+		signInProbedRef.current = false;
+		// A check still out when the connection came back finds nothing worth saying.
+		signInProbeSeqRef.current += 1;
+		setSessionEnded(false);
 		applyConnectionHealth({ type: "opened", now: Date.now() });
 	}
 
@@ -4525,6 +2206,13 @@ export function App() {
 	 * toward a warning.
 	 */
 	function noteConnectionClosed(deliberate: boolean) {
+		// On a shared server an ended sign-in is the likeliest cause of a first
+		// failure outside a room, so it is asked about at once, not after the
+		// warning's grace window. (A room's retry reads through apiFetch itself.)
+		if (!deliberate && knownRemoteClientContext()?.sharedServer && !persistentChatRef.current && !signInProbedRef.current) {
+			signInProbedRef.current = true;
+			void askIfSignedIn();
+		}
 		applyConnectionHealth({ type: deliberate ? "swapped" : "attempt_failed", now: Date.now() });
 	}
 
@@ -4574,15 +2262,30 @@ export function App() {
 
 	function scheduleHomeReconnect(delayMs?: number) {
 		cancelScheduledHomeReconnect();
+		if (unmountedRef.current || personHasChanged()) return;
 		if (persistentChatRef.current) return; // the room ladder owns this socket
 		// No attempt cap: outside a room there is no transcript to protect and
 		// nothing for a manual affordance to hang off, so the app just keeps
 		// quietly trying and the banner does the talking if it stays broken.
 		const delay = delayMs ?? Math.min(15_000, 1000 * 2 ** homeReconnectAttemptRef.current);
-		homeReconnectTimerRef.current = window.setTimeout(() => {
+		homeReconnectTimerRef.current = window.setTimeout(async () => {
 			homeReconnectTimerRef.current = null;
 			if (persistentChatRef.current) return;
 			homeReconnectAttemptRef.current += 1;
+			// On a shared server a refused socket tells the page nothing: the cheap question first, so a person
+			// who changed ends the page instead of a rebuild being refused again on every try.
+			if (knownRemoteClientContext()?.sharedServer) {
+				const dropped = wsRef.current;
+				const answer = await refreshRemoteClientContext();
+				// The page or the app ended, or a room or a newer socket took over while the question was out.
+				if (answer === "person changed" || unmountedRef.current || persistentChatRef.current || wsRef.current !== dropped) return;
+				if (answer === "no answer") {
+					// A try that got no answer failed as a refused rebuild would: the lost-connection line counts it.
+					applyConnectionHealth({ type: "attempt_failed", now: Date.now() });
+					scheduleHomeReconnect();
+					return;
+				}
+			}
 			// Outside a room a bare version bump IS the reconnect: the socket
 			// carries no turn, no busy state and no transcript, so rebuilding it
 			// is the whole of the work a room's programmatic Resume has to do.
@@ -4599,17 +2302,27 @@ export function App() {
 
 	function scheduleRoomReconnect(delayMs?: number) {
 		cancelScheduledReconnect();
+		if (unmountedRef.current || personHasChanged()) return;
 		if (!persistentChatRef.current) {
 			setRoomReconnect("idle");
 			return;
 		}
 		if (reconnectStartedAtRef.current === null) reconnectStartedAtRef.current = Date.now();
-		if (reconnectAttemptRef.current >= RECONNECT_MAX_ATTEMPTS || Date.now() - reconnectStartedAtRef.current >= RECONNECT_GIVE_UP_MS) {
+		const sharedServer = knownRemoteClientContext()?.sharedServer === true;
+		const outageMs = Date.now() - reconnectStartedAtRef.current;
+		// On a shared server only a stand-down ends the trying; running out of
+		// attempts or time on a lost connection does not.
+		const gaveUp = reconnectStoodDownRef.current || (!sharedServer && (reconnectAttemptRef.current >= RECONNECT_MAX_ATTEMPTS || outageMs >= RECONNECT_GIVE_UP_MS));
+		if (gaveUp) {
 			setRoomReconnect("failed");
 			return;
 		}
 		setRoomReconnect("reconnecting");
-		const delay = delayMs ?? Math.min(RECONNECT_MAX_DELAY_MS, 1000 * 2 ** reconnectAttemptRef.current);
+		const climb = Math.min(RECONNECT_MAX_DELAY_MS, 1000 * 2 ** Math.min(reconnectAttemptRef.current, 10));
+		// The early retries are spread too, plus or minus half: a server back after a short restart is not dialled by every room in step.
+		const delay = delayMs ?? (sharedServer
+			? outageMs >= RECONNECT_GIVE_UP_MS ? RECONNECT_SHARED_DELAY_MS + Math.random() * RECONNECT_SHARED_SPREAD_MS : climb * (0.5 + Math.random())
+			: climb);
 		reconnectTimerRef.current = window.setTimeout(() => {
 			reconnectTimerRef.current = null;
 			reconnectAttemptRef.current += 1;
@@ -4622,16 +2335,24 @@ export function App() {
 	function retryRoomReconnectNow() {
 		reconnectAttemptRef.current = 0;
 		reconnectStartedAtRef.current = null;
+		reconnectStoodDownRef.current = false;
 		scheduleRoomReconnect(0);
 	}
 
 	// The health re-check timer outlives individual sockets by design, so it is
-	// the one thing the socket effect's cleanup cannot own.
-	useEffect(() => () => {
-		if (connectionHealthTimerRef.current !== null) window.clearTimeout(connectionHealthTimerRef.current);
-		if (homeReconnectTimerRef.current !== null) window.clearTimeout(homeReconnectTimerRef.current);
-		if (socketSwapTimerRef.current !== null) window.clearTimeout(socketSwapTimerRef.current);
-		clearSocketTimers();
+	// the one thing the socket effect's cleanup cannot own. The ladders' timers
+	// end here too, and the mark stops what arrives after the unmount.
+	useEffect(() => {
+		// A development remount (StrictMode) runs the cleanup and then mounts again.
+		unmountedRef.current = false;
+		return () => {
+			unmountedRef.current = true;
+			if (connectionHealthTimerRef.current !== null) window.clearTimeout(connectionHealthTimerRef.current);
+			cancelScheduledHomeReconnect();
+			cancelScheduledReconnect();
+			if (socketSwapTimerRef.current !== null) window.clearTimeout(socketSwapTimerRef.current);
+			clearSocketTimers();
+		};
 	}, []);
 
 	async function reconnectPersistentRoom() {
@@ -4640,39 +2361,71 @@ export function App() {
 			setRoomReconnect("idle");
 			return;
 		}
+		// The person may have switched or left the room, or the conversation, while a request ran.
+		const stillThisRoom = () => persistentChatRef.current?.agentId === chat.agentId && persistentChatRef.current?.conversationId === chat.conversationId;
 		try {
-			const record = await fetchPersistentAgentThread(chat.agentId, chat.conversationId);
-			// The user may have switched or left the room while the fetch ran.
-			if (persistentChatRef.current?.conversationId !== chat.conversationId) {
-				setRoomReconnect("idle");
-				return;
+			// On a shared server a retry first asks the cheap question, and reads
+			// the thread only once the server answers it: after a long stop,
+			// every open room reading its whole thread as the server comes back
+			// is the load that keeps it down.
+			if (knownRemoteClientContext()?.sharedServer) {
+				const answer = await refreshRemoteClientContext();
+				// Another person is signed in: this page's data is not theirs, so nothing of it is read or saved.
+				// Nor once the app is gone.
+				if (answer === "person changed" || unmountedRef.current) return;
+				// An attempt for a room the person has left says nothing about the room they are in.
+				if (!stillThisRoom()) return;
+				if (answer === "no answer") {
+					scheduleRoomReconnect();
+					return;
+				}
 			}
+			const record = await fetchPersistentAgentThread(chat.agentId, chat.conversationId);
+			if (unmountedRef.current || personHasChanged() || !stillThisRoom()) return;
 			const fetched = threadRecordToLocalThread(record, chat.displayName);
-			// The debounced persist may not have landed before the drop (a hard
-			// server kill right after an exchange leaves the thread file behind
-			// the screen). Keep whichever transcript is richer and save it back,
-			// so the rebuilt session's context matches what is displayed. When the
-			// file is at least as fresh (another surface may have advanced the
-			// room while this tab was offline), the file wins — like Resume.
-			// One case beats the length heuristic outright: the server-side
-			// landing of a detached turn (community #14) CONSOLIDATES — it strips
-			// the trailing partial assistant debris after the last user message
-			// and appends one `detached-*` item — so the landed file has FEWER
-			// items than the stale local transcript while being strictly newer.
-			// Whenever the file carries a landing item this transcript has never
-			// seen, the file wins unconditionally; length only referees the
-			// ordinary debounced-persist races.
+			fetched.items = savedWithoutRetriedParts(chat, fetched.items);
+			// The saved copy, with what only this tab holds: the debounced save
+			// may not have reached the server before the drop, and another
+			// window may have written while this tab was offline. The items this
+			// tab removed on purpose stay out, whoever's copy still holds them.
+			// A turn without shared ids that landed meanwhile (a `detached-*`
+			// item this tab never saw) consolidated its partial answer into
+			// that item: the saved copy wins whole, with its queue.
 			const localItemIds = new Set(itemsRef.current.map((item) => item.id));
 			const fetchedHasNewLanding = fetched.items.some((item) => typeof item.id === "string" && item.id.startsWith("detached-") && !localItemIds.has(item.id));
-			const localFresher = !fetchedHasNewLanding && itemsRef.current.length > fetched.items.length;
-			const liveThread = { ...fetched, state: "live" as const, items: localFresher ? itemsRef.current : fetched.items };
-			const restoredQueue = localFresher ? pendingHandoffsRef.current : readConsultHandoffQueue(record.pendingHandoffs);
-			if (!localFresher) applyPendingHandoffs(restoredQueue, deriveTrailingConsultIds(liveThread.items, restoredQueue.length));
-			await savePersistentAgentThread(liveThread, "active", "unknown", liveThread.items, restoredQueue);
+			const removed = new Set(pendingRemovalsRef.current.all(chat.agentId, chat.conversationId));
+			const savedQueue = readConsultHandoffQueue(record.pendingHandoffs);
+			const merged = fetchedHasNewLanding
+				? { items: fetched.items.filter((item) => !removed.has(item.id)), queue: savedQueue }
+				: reconnectedThread({ items: fetched.items, queue: savedQueue }, { items: itemsRef.current, queue: pendingHandoffsRef.current }, removed, (entry) => handoffCardByEntryRef.current.get(entry));
+			const landed = fetchedHasNewLanding || waitedTurnLanded(fetched.items);
+			if (landed && turnLinkRef.current === "reconnecting") endReconnectingTurn(null);
+			// The newest turn's answer is back whole: its line saying the connection was lost goes, also after the room gave up.
+			const newestTurn = merged.items.map((item) => item.kind).lastIndexOf("user");
+			// The turn waited on still runs, and its replay rebuilds its answer: until then the screen keeps
+			// this tab's copy of that turn's items, as the saved one can be older and shorter.
+			const waitedKey = turnLinkRef.current === "reconnecting" && !landed ? turnKeyRef.current : null;
+			const shownById = new Map(itemsRef.current.map((item) => [item.id, item] as const));
+			const items = landed
+				? merged.items.filter((item, i) => !(i > newestTurn && isConnectionLostLine(item)))
+				: waitedKey ? merged.items.map((item) => (keyOfId(item.id) === waitedKey ? shownById.get(item.id) ?? item : item)) : merged.items;
+			const liveThread = { ...fetched, state: "live" as const, items };
+			if (personHasChanged()) return;
+			const reply = await savePersistentAgentThread(liveThread, "active", "unknown", liveThread.items, merged.queue);
+			// The person may have changed, the app ended, or another room or conversation opened while the save was out: nothing goes on from it.
+			if (unmountedRef.current || personHasChanged() || !stillThisRoom()) return;
+			// What the room shows is the conversation as the server merged it.
+			liveThread.items = threadRecordToLocalThread(reply, chat.displayName).items;
+			applyPendingHandoffs(merged.queue, deriveTrailingConsultIds(liveThread.items, merged.queue.length));
 			// resetLiveUiState clears the composer — carry a draft typed while
 			// offline across the rebind.
 			const draft = textareaRef.current?.value ?? "";
-			resetLiveUiState();
+			resetLiveUiState(true, true);
+			// The reset keeps Remember's dialog and the note typed in it, and stops its following: the room asks the
+			// server again how its Remember stands (still reading, finished, or cut by a restart), so the dialog shows the truth.
+			checkpointProposalAbortRef.current?.abort();
+			checkpointProposalAbortRef.current = null;
+			setRememberLookupNonce((n) => n + 1);
 			if (draft) setComposerPrefill(draft);
 			setItems(liveThread.items);
 			setPersistentThread(liveThread);
@@ -4682,11 +2435,15 @@ export function App() {
 			// Still "reconnecting": the new socket's ready frame is the true end
 			// of the cycle (the room lock can still bounce this session).
 		} catch {
+			// A late failure belongs to the room that asked: if the person has gone to another room, its own ladder is the one that runs.
+			if (personHasChanged() || !stillThisRoom()) return;
 			scheduleRoomReconnect();
 		}
 	}
 
 	useEffect(() => {
+		// The one place a socket is made: once another person is signed in, none is, whoever asks.
+		if (personHasChanged()) return;
 		// Replacing a socket: the old one's timers die with it, the gating flag
 		// tells the truth from this instant (nothing is open), and the chrome is
 		// covered for the blink so it does not narrate the swap.
@@ -4698,6 +2455,7 @@ export function App() {
 			beginSocketSwap();
 		}
 		suppressReconnectRef.current = false;
+		setCatchingUp(!!persistentChat);
 		// Catch-up drain is per-connection state: a socket that died between
 		// turn_reattach and its replay_done marker must not leave the NEXT
 		// connection's live tokens rendering instantly.
@@ -4708,7 +2466,9 @@ export function App() {
 			cancelScheduledReconnect();
 			reconnectAttemptRef.current = 0;
 			reconnectStartedAtRef.current = null;
+			reconnectStoodDownRef.current = false;
 			if (roomReconnectStateRef.current !== "idle") setRoomReconnect("idle");
+			roomWaitsOnChoiceRef.current = false;
 		} else {
 			// Inside a room the room ladder owns the socket; a pending non-room
 			// retry must not fire a version bump into it.
@@ -4727,7 +2487,7 @@ export function App() {
 			wsParams.set("persistentAgentId", persistentChat.agentId);
 			wsParams.set("modelProvider", persistentChat.model.provider);
 			wsParams.set("model", persistentChat.model.model);
-			// Community #33: this client understands turn_reattach (supersede,
+			// This client understands turn_reattach (supersede,
 			// replay, restored prompt). The server only adopts a cooking turn
 			// onto connections that declare it; older bundles keep the
 			// room_cooking bounce they understand.
@@ -4736,8 +2496,26 @@ export function App() {
 		// Scheme follows the page: https (remote mode's TLS stage) needs wss,
 		// plain http (loopback and the tunnel's http stage) keeps ws.
 		const wsScheme = location.protocol === "https:" ? "wss" : "ws";
-		const ws = new WebSocket(`${wsScheme}://${wsHost}/ws?${wsParams.toString()}`);
+		const ws = new WebSocket(`${wsScheme}://${wsHost}/ws?${wsParams.toString()}`, pagePersonProtocols());
 		wsRef.current = ws;
+		// The server said it is stopping (server_stopping), on this connection only: the next one, after the restart, starts clean.
+		let serverStopping = false;
+		// A question asked on an earlier connection was declined when that one closed.
+		liveApprovalIdsRef.current = new Set();
+		setLiveApprovalIds(new Set());
+		// Open here (or any new room socket) takes the room back: this window saves again.
+		if (turnLinkRef.current === "elsewhere") setTurnLink("live");
+		// A reconnect's replay is drawn in one paint: the frames from
+		// turn_reattach to turn_reattach_replay_done (the server sends them in
+		// one go) are held and then applied in one pass, so the turn's old
+		// items are never gone for a frame before the replayed ones are drawn.
+		// A replay cut off before its marker is never applied: what is on screen
+		// stays, and the next connection replays the turn again from its start.
+		let heldReplay: any[] | null = null;
+		// The socket whose replay is held: its close drops what it held.
+		let replaySocket: WebSocket | null = null;
+		// The last turn frame applied (seq counts up from 1 per turn): a frame seen before is dropped.
+		let lastTurnSeq = 0;
 		// A port that accepts TCP and never finishes the upgrade leaves this
 		// socket in CONNECTING with no event ever coming: no failure, no retry,
 		// no warning, and a UI that looks usable. Closing it on the deadline
@@ -4774,6 +2552,16 @@ export function App() {
 				// been stale for as long as the outage lasted.
 				if (connectionHealthRef.current.unhealthySince !== null) refreshPersistentAgentStatus();
 			}
+			// Coming back from an outage, in a room or not, a line saying the
+			// service could not be reached is no longer true, and what failed
+			// meanwhile is asked for again (Home, an open Settings tab, the
+			// profile and sign-in status that AI setup shows).
+			if (connectionHealthRef.current.unhealthySince !== null) {
+				void refreshRemoteClientContext();
+				setServiceBack((n) => n + 1);
+				setPersistentResumeError(withoutServiceLine);
+				refreshSetupStatusRef.current();
+			}
 		};
 		ws.onclose = () => {
 			if (wsRef.current === ws) clearSocketTimers();
@@ -4787,6 +2575,10 @@ export function App() {
 			noteConnectionClosed(deliberate);
 			if (stale) return;
 			setConnected(false);
+			// A Try again still waiting for its answer dies with the connection.
+			continuedLineRef.current = null;
+			liveApprovalIdsRef.current = new Set();
+			setLiveApprovalIds(new Set());
 			reattachReplayDrainRef.current = false;
 			// Auto-reconnect only unexpected drops of the CURRENT room socket:
 			// deliberate closes arm suppressReconnectRef, and a socket that was
@@ -4799,11 +2591,28 @@ export function App() {
 				scheduleHomeReconnect();
 				return;
 			}
-			// The server aborts the in-flight turn on disconnect — say so on the
-			// bubble and unstick the room instead of leaving a complete-looking
-			// truncated answer behind a stuck busy state. The debounced persist
-			// writes the note to the thread file whenever the server is reachable.
-			if (busyRef.current || turnCancellingRef.current || isAssistantStreamActive(streamStateRef.current)) {
+			// The retry dies with the connection: its note goes, so it never stands beside "the connection was lost".
+			clearTransientStreamNotes();
+			// A replay cut off here is not drawn half: the next connection sends it whole.
+			if (replaySocket === ws) heldReplay = null;
+			reattachReplayDrainRef.current = false;
+			// A stop under way, or the server stopping: the turn really ends with
+			// this connection, so the bubble says so and the room is unstuck. The
+			// debounced persist writes the note whenever the server is reachable.
+			// An answer that ended whole while the server stopped (its end carried no stoppedByServer) lost nothing: its reveal goes on, unmarked.
+			const answerEndedInStop = serverStopping && !busyRef.current && !turnCancellingRef.current && !turnCutByStopRef.current;
+			// A finished answer whose last words are still appearing lost nothing either: its reveal goes on.
+			const onlyRevealing = !busyRef.current && !turnCancellingRef.current;
+			if (!serverStopping && busyRef.current && !turnCancellingRef.current) {
+				// A blip: the server keeps the turn running when the page drops,
+				// and the reconnect replays it. Nothing was cut, so nothing is said
+				// or saved: what arrived goes on appearing at the normal pace, Stop
+				// stays (unavailable while offline) and one quiet line says the
+				// room is reconnecting. The replay picks up from what is on screen
+				// then (turn_reattach). Only a reconnect that gives up says the
+				// connection was lost.
+				setTurnLink("reconnecting");
+			} else if (!answerEndedInStop && !onlyRevealing) {
 				markCurrentAssistantInterrupted(turnInterruptedNoteRef.current ?? CONNECTION_LOST_NOTE);
 				setBusy(false);
 				busyRef.current = false;
@@ -4823,32 +2632,65 @@ export function App() {
 		// is where the health accounting lives.
 		ws.onerror = () => { if (wsRef.current === ws) setConnected(false); };
 
+		function applyHeldReplay() {
+			const held = heldReplay;
+			heldReplay = null;
+			// A replaced socket's replay belongs to the room it was for.
+			if (held && wsRef.current === ws) for (const frame of held) handleFrame(frame);
+		}
 		ws.onmessage = (raw) => {
 			// A frame is the strongest possible proof the connection is real, so
 			// it settles the health run without waiting out the dwell timer.
 			if (wsRef.current === ws) noteConnectionSettled();
 			const msg = JSON.parse(raw.data);
+			if (msg.type === "turn_reattach" && wsRef.current === ws) {
+				heldReplay = [msg];
+				replaySocket = ws;
+				return;
+			}
+			if (heldReplay && replaySocket === ws) {
+				heldReplay.push(msg);
+				if (msg.type === "turn_reattach_replay_done") applyHeldReplay();
+				return;
+			}
+			handleFrame(msg);
+		};
+		function handleFrame(msg: any) {
+			if (msg.type === "turn_reattach") lastTurnSeq = 0;
+			if (typeof msg.seq === "number") {
+				if (msg.seq !== 1 && msg.seq <= lastTurnSeq) return;
+				lastTurnSeq = msg.seq;
+			}
+			// The server is stopping: it declines every open question, so from here no card takes a click.
+			// Read before ready too, since a connection still opening when the stop began gets it first.
+			if (msg.type === "server_stopping") {
+				serverStopping = true;
+				if (wsRef.current === ws) {
+					liveApprovalIdsRef.current = new Set();
+					setLiveApprovalIds(new Set());
+				}
+				return;
+			}
 			if (msg.type === "ready") {
 				// The ready frame is the true end of a reconnect cycle: the room
-				// lock accepted this session. The clear belongs to the room this
-				// socket was opened for — key it on the closure, not on whatever
-				// room is current when the frame lands, and let only the live
-				// socket touch the rest of the UI (the same staleness rule the
-				// refusal path applies): a late ready from a replaced socket must
-				// not clear its successor's overflow mark or reset its reconnect
-				// ladder.
-				const readyRoom = persistentChat?.agentId ?? null;
-				if (readyRoom) setMemoryOverflowRooms((rooms) => rooms.has(readyRoom) ? new Set([...rooms].filter((id) => id !== readyRoom)) : rooms);
+				// lock accepted this session. Only the live socket touches the UI:
+				// a late ready from a replaced socket must not reset its
+				// successor's reconnect ladder.
 				if (wsRef.current !== ws) return;
 				cancelScheduledReconnect();
-				setSignedOutProvider(null);
+				setSignedOut(null);
 				setRoomModelNotOffered(false);
 				reconnectAttemptRef.current = 0;
 				reconnectStartedAtRef.current = null;
+				reconnectStoodDownRef.current = false;
+				// No replay follows this ready: the turn waited on is over.
+				if (turnLinkRef.current === "reconnecting" && persistentChatRef.current && msg.reattaching !== true) void endReconnectingTurnWithoutReplay(persistentChatRef.current.agentId, ws);
+				if (msg.reattaching !== true) setCatchingUp(false);
 				if (roomReconnectStateRef.current !== "idle") {
 					setRoomReconnect("idle");
-					setReconnectedNotice(Date.now());
+					if (!roomWaitsOnChoiceRef.current) setReconnectedNotice(Date.now());
 				}
+				roomWaitsOnChoiceRef.current = false;
 				if (msg.model?.label) setCurrentModelFromName({ model: msg.model.model, modelLabel: String(msg.model.label), provider: msg.model.provider });
 				// The server binds on its own model (the saved lock, or the room's
 				// pick for an empty conversation); the room's model follows it.
@@ -4860,10 +2702,63 @@ export function App() {
 				// Sent after the server's own level has been applied, so this
 				// overrides it rather than being overwritten by it.
 				flushPendingEffort(ws);
+				// A message the model could not answer, handed back while this room was closed.
+				if (msg.returnedPrompt && typeof msg.returnedPrompt === "object") returnFailedPrompt(msg.returnedPrompt as ReturnedPromptFrame);
+				reconcileOutgoing(ws, { waiting: readMessageList(msg.waiting), held: readMessageList(msg.held), taken: readMessageIds(msg.taken) }, readMessageIds(msg.withdrawn));
+				setEditBlockedId(typeof msg.notEditable === "string" ? msg.notEditable : null);
+				return;
+			}
+			if (msg.type === "edit_applied") {
+				const line = msg.line && typeof msg.line.id === "string" && typeof msg.line.text === "string" ? { id: msg.line.id, text: msg.line.text } : null;
+				applySentEdit(String(msg.replaces ?? ""), line);
+				return;
+			}
+			if (msg.type === "edit_refused") {
+				refuseSentEdit(String(msg.replaces ?? ""));
+				// A message held from another window moved the conversation on: it shows now, as it would once the room opens again.
+				// Only the ones this page lacks: a message it sent meanwhile keeps its own way.
+				if (wsRef.current === ws) dispatchOutgoing({ type: "held", messages: readMessageList(msg.held).filter((message) => !outgoingRef.current.some((known) => known.id === message.id)) });
+				return;
+			}
+			if (msg.type === "steer_waiting" || msg.type === "steer_cut" || msg.type === "steer_refused") {
+				if (wsRef.current === ws) steerRouted(msg.type, String(msg.id ?? ""), msg.quiet === true);
+				return;
+			}
+			if (msg.type === "steer_withdrawn") {
+				if (wsRef.current === ws) steerWithdrawn(String(msg.id ?? ""), msg.edit === true);
+				return;
+			}
+			if (msg.type === "steer_withdraw_refused") {
+				// The room takes it in: no Edit is waiting on it any more.
+				if (wsRef.current === ws) editsAskedRef.current.delete(String(msg.id ?? ""));
+				return;
+			}
+			if (msg.type === "steer_taken") {
+				if (wsRef.current === ws) takeSteerIn(String(msg.id ?? ""), String(msg.text ?? ""));
+				return;
+			}
+			if (msg.type === "steer_returned") {
+				if (wsRef.current === ws) steersReturned(readMessageList(msg.messages), msg.held === true);
+				return;
+			}
+			if (msg.type === "prompt_returned") {
+				if (typeof msg.text === "string") returnFailedPrompt(msg as ReturnedPromptFrame);
+				return;
+			}
+			// A gateway's bare "not found": once its model list said why, the newest such line says it.
+			if (msg.type === "gateway_not_found") {
+				const model = typeof msg.model?.provider === "string" ? { provider: String(msg.model.provider), model: String(msg.model.model ?? "") } : undefined;
+				if (isGatewayFind(msg.find) && model) {
+					setItems((s) => {
+						let at = s.length - 1;
+						while (at >= 0 && !(s[at]!.kind === "system" && (s[at] as { failure?: unknown }).failure === "gateway-not-found")) at--;
+						return at < 0 ? s : s.map((item, index) => (index === at ? lineWithGatewayFind(item, msg.find, model) : item));
+					});
+				}
 				return;
 			}
 			if (msg.type === "model_switched") {
-				setTurnSignedOutProvider(null);
+				setTurnSignedOut(null);
 				// The conversation continues on another model: the server rebound the
 				// session. The room's model, the chip, the effort dial and the socket's
 				// model follow, and one quiet line marks the place in the transcript
@@ -4875,7 +2770,9 @@ export function App() {
 				setRoomEffort(readEffortPayload(msg.effort));
 				const noticeText = typeof msg.notice?.text === "string" ? msg.notice.text : "";
 				const noticeId = typeof msg.notice?.id === "string" && msg.notice.id ? msg.notice.id : nid();
-				if (noticeText) setItems((s) => s.some((it) => it.id === noticeId) ? s : [...s, { kind: "system", id: noticeId, text: noticeText, level: "info" }]);
+				// A switch right after another took the place of its line: the page drops it too, so its next save does not write it back.
+				const replaces = typeof msg.notice?.replaces === "string" ? msg.notice.replaces : null;
+				if (noticeText) setItems((s) => withSwitchLine(s, { id: noticeId, text: noticeText, ...(replaces ? { replaces } : {}) }));
 				return;
 			}
 			if (msg.type === "effort") {
@@ -4886,8 +2783,8 @@ export function App() {
 				return;
 			}
 			if (msg.type === "turn_reattach") {
-				// Stepping back into a room whose answer is still being written
-				// (community #33): the server adopted this session onto the
+				// Stepping back into a room whose answer is still being written:
+				// the server adopted this session onto the
 				// in-flight turn and replays the WHOLE turn's event frames right
 				// after this frame; live frames continue seamlessly behind them.
 				// Drop the persisted partial assistant tail first (the replay
@@ -4897,8 +2794,14 @@ export function App() {
 				// busy on and the deltas stream exactly as if we never left; a
 				// turn that settled while this session was binding replays
 				// through its terminal frames the same way and ends quiet.
+				// After a blip the answer went on appearing while the page was
+				// away: the replay draws at once only what is on screen now, and
+				// paces the rest.
+				const blipSeen = turnLinkRef.current === "reconnecting" ? seenOfOpenAnswer(streamStateRef.current) : null;
 				dispatchStream({ type: "reset" });
 				clearTransientStreamNotes();
+				if (turnLinkRef.current === "reconnecting") setTurnLink("live");
+				if (blipSeen) dispatchStream({ type: "replay_seen", seen: blipSeen });
 				// Open the catch-up window: the replayed frames that follow carry
 				// text the user already generated while away — render them
 				// instantly (the replay_done marker closes the window and hands
@@ -4909,10 +2812,15 @@ export function App() {
 				setTurnInterruptedNote(null);
 				turnInterruptedNoteRef.current = null;
 				const reattachUserText = typeof msg.userText === "string" ? msg.userText.trim() : "";
+				// A keyed turn names its question: its id, its bubble's words (also when empty) and its file chips.
+				const keyedQuestion = typeof msg.promptId === "string" && msg.promptId ? { id: msg.promptId as string, shown: readShownPrompt({ text: msg.userText, files: msg.promptFiles })! } : null;
+				if (keyedQuestion) turnKeyRef.current = keyedQuestion.id;
 				// When the turn began: the restored prompt and the replayed
 				// segments are dated by it. Absent on the wire means no stamp.
 				const reattachStartedAt = typeof msg.startedAt === "number" && Number.isFinite(msg.startedAt) ? msg.startedAt : null;
 				reattachStartedAtRef.current = reattachStartedAt;
+				// The server's clock as it sent this frame: the replayed steps that follow are dated by it, before any live step shows the difference.
+				if (typeof msg.now === "number" && Number.isFinite(msg.now)) serverClockAheadRef.current = msg.now - Date.now();
 				// The supersede anchors on TURN IDENTITY, not text: anchorItemId
 				// names the last persisted item at turn start, so only what the
 				// cooking turn itself produced counts as debris. Anchoring on the
@@ -4927,7 +2835,8 @@ export function App() {
 					// turns; everything after it is this turn's debris the replay
 					// rebuilds. Assistant AND tool items go (a persisted tool chip
 					// could never resolve anyway: its toolCallId map died with the
-					// old session); user and system items are never dropped.
+					// old session); user and system items stay, but for the line
+					// saying the connection was lost: the replay brings that answer back.
 					let cut: number;
 					if (hasAnchor && msg.anchorItemId === null) {
 						// The thread was empty when the turn began: everything
@@ -4954,7 +2863,15 @@ export function App() {
 							}
 						}
 					}
-					let next = s.filter((it, i) => !(i > cut && (it.kind === "assistant" || it.kind === "tool")));
+					let next = s.filter((it, i) => !(i > cut && (it.kind === "assistant" || it.kind === "tool" || it.kind === "thinking" || isConnectionLostLine(it))));
+					// A keyed turn's question goes back, under its own id, when the list lacks that id and it shows words or files.
+					if (keyedQuestion) {
+						const { id, shown } = keyedQuestion;
+						if (!next.some((it) => it.id === id) && (shown.text.trim() || shown.files.length)) {
+							next = [...next, { kind: "user" as const, id, text: shown.text, ...(shown.files.length ? { attachments: shown.files } : {}), ...(reattachStartedAt === null ? {} : { ts: reattachStartedAt }) }];
+						}
+						return next;
+					}
 					// Restore the prompt that started the cooking turn when the
 					// persisted tail does not carry it (the leave-save missed it):
 					// presence is judged by position after the anchor, never by
@@ -4977,12 +2894,22 @@ export function App() {
 				if (isAssistantStreamActive(streamStateRef.current)) {
 					dispatchStream({ type: "tick", now: performance.now(), mode: "drain" });
 				}
+				setAnswerDrawnAtOnceId(partDrawnAtOnce(streamStateRef.current));
+				if (streamStateRef.current.replaySeen) dispatchStream({ type: "replay_seen", seen: null });
 				// Live tokens from here on are dated by the clock again.
 				reattachStartedAtRef.current = null;
+				if (wsRef.current === ws) setCatchingUp(false);
 				return;
 			}
 			if (msg.type === "error") {
-				// Detach-vs-death (community #14): the original drop delivers no
+				// A refusal ends a Try again's wait; only the three answers to the continue itself read it below.
+				if (msg.code !== "nothing_to_continue" && msg.code !== "turn_running" && msg.code !== "conversation_moved") continuedLineRef.current = null;
+				// Another window took the room over, and its questions with it: no card here takes a click.
+				if (msg.code === "room_displaced") {
+					liveApprovalIdsRef.current = new Set();
+					setLiveApprovalIds(new Set());
+				}
+				// Detach-vs-death: the original drop delivers no
 				// signal (the network is gone), so the server tells us HERE, on the
 				// reconnect bounce, that the room is still finishing the response in
 				// the background. Make the bubble note honest, then stand the
@@ -4992,8 +2919,9 @@ export function App() {
 				// here, and the manual Reconnect button (failed state) covers the
 				// user who stays in the room until the answer has landed.
 				if (roomReconnectStateRef.current === "reconnecting" && msg.code === "room_cooking") {
+					if (turnLinkRef.current === "reconnecting") endReconnectingTurn(CONNECTION_LOST_COOKING_NOTE);
 					rewriteConnectionLostNoteForCookingRoom();
-					reconnectAttemptRef.current = RECONNECT_MAX_ATTEMPTS;
+					reconnectStoodDownRef.current = true;
 					return;
 				}
 				// The room's memory does not fit this model's window: the server
@@ -5012,21 +2940,109 @@ export function App() {
 					// by itself once the provider is signed in or another model is
 					// picked.
 					setRoomReconnect("failed");
-					if (msg.code === "provider_signed_out") setSignedOutProvider(typeof msg.provider === "string" ? msg.provider : "");
+					roomWaitsOnChoiceRef.current = true;
+					if (msg.code === "provider_signed_out") setSignedOut({ provider: typeof msg.provider === "string" ? msg.provider : "", ...(msg.credentialKey ? { key: msg.credentialKey as CredentialKey } : {}) });
 					else setRoomModelNotOffered(true);
 					flushAssistantStream();
 					setBusy(false);
 					busyRef.current = false;
 					return;
 				}
+				// Try again found nothing to continue: the conversation moved on from that failure, so the message above is sent again whole.
+				if (msg.code === "nothing_to_continue") {
+					if (wsRef.current !== ws) return;
+					const lineId = continuedLineRef.current;
+					continuedLineRef.current = null;
+					setBusy(false);
+					busyRef.current = false;
+					if (lineId) sendAgainFromLine(lineId);
+					return;
+				}
 				// The room holds as many remembered conversations as it can: every
 				// redial reaches the same refusal, and the way out (Maintain, then
 				// Memorize) is on Home. So the ladder stands down, the room is left
-				// the ordinary way, and Home says why. The room is marked so its
-				// Maintain opens although its conversation is still open.
+				// the ordinary way, and Home says why.
+				// Another window moved the room on: the message goes back into the box, and the room offers Reload.
+				// Sent while the last answer was still running (another window, or the moment before this one settled): the message goes back into the box with its files, and the running answer is left alone.
+				if (msg.code === "turn_running") {
+					if (wsRef.current !== ws) return;
+					// A Try again that continues a turn sent no message: nothing goes back in the box.
+					const continued = continuedLineRef.current !== null;
+					continuedLineRef.current = null;
+					const sent = continued ? undefined : [...itemsRef.current].reverse().find((item) => item.kind === "user");
+					const noteId = nid();
+					// Its files come back too, as Try again would send them again: those still in the room's Attachments.
+					const shown = [...itemsRef.current, { kind: "system", id: noteId }];
+					const again = sent ? messageSentAgain(shown, noteId, attachmentAccessRef.current.existingNames) : null;
+					if (!continued) handBack(sent ? [sent] : [], (s) => [...s, { kind: "system", id: noteId, text: TURN_RUNNING_LINE, level: "info" }]);
+					if (sent) {
+						setComposerPrefill(sent.text);
+						setComposerResetNonce((value) => value + 1);
+					}
+					const restage = (files: CarriedFile[]) => {
+						const fileUrl = attachmentAccessRef.current.fileUrl;
+						setStagedAttachments((s) => [...s, ...files.map((file) => ({ ...file, stageId: nid(), status: "ready" as const, parseNote: "", ...(fileUrl && STAGED_IMAGE_EXTENSIONS.has(file.extension) ? { previewUrl: fileUrl(file.name) } : {}) }))]);
+					};
+					if (again?.attachments.length) restage(again.attachments);
+					// A file dropped and sent at once can beat the Attachments list's refresh: the list is read once more before a chip is left out.
+					const room = persistentChatRef.current?.agentId;
+					if (!again && sent?.attachments?.length && room) {
+						void listRoomFiles(room).then((files) => {
+							// A message sent meanwhile went without these files; its chips would land in an empty box.
+							if (persistentChatRef.current?.agentId !== room || itemsRef.current.some((item) => item.kind === "user" && !shown.includes(item))) return;
+							const listed = messageSentAgain(shown, noteId, new Set(files.map((file) => file.name)));
+							if (listed?.attachments.length) restage(listed.attachments);
+						}).catch(() => {});
+					}
+					// While the runtime waits to try the running answer again, Stop stays.
+					if (!retryNoticeIdRef.current) {
+						setBusy(false);
+						busyRef.current = false;
+					}
+					// A turn this page does not see (the moment before it settled, or one in another window): the note goes once the server says it is over.
+					if (!busyRef.current && persistentChatRef.current) void dropTurnRunningNoteOnceSettled(persistentChatRef.current.agentId);
+					return;
+				}
+				// Another window took the room: what was shown stays, with no
+				// interrupted line; running steps go on there; this window stops
+				// saving and never dials back by itself (that would take the room
+				// from the other window). Open here takes it back.
+				if (msg.code === "room_displaced") {
+					if (wsRef.current !== ws) return;
+					// What only this window had queued waits as held messages, for the window that has the room now.
+					holdPageOnlyMessages();
+					suppressReconnectRef.current = true;
+					cancelScheduledReconnect();
+					setTurnLink("elsewhere");
+					setRoomReconnect("failed");
+					flushAssistantStream();
+					// This window no longer follows the turn: a thought it shows stops ticking.
+					setItems((s) => endLiveThinking(s));
+					setBusy(false);
+					busyRef.current = false;
+					setTurnCancelling(false);
+					turnCancellingRef.current = false;
+					setTurnInterruptedNote(null);
+					turnInterruptedNoteRef.current = null;
+					try { ws.close(); } catch {}
+					return;
+				}
+				if (msg.code === "conversation_moved") {
+					if (wsRef.current !== ws) return;
+					flushAssistantStream();
+					const sent = continuedLineRef.current !== null ? undefined : [...itemsRef.current].reverse().find((item) => item.kind === "user");
+					continuedLineRef.current = null;
+					if (sent) {
+						handBack([sent]);
+						setComposerPrefill(sent.text);
+						setComposerResetNonce((value) => value + 1);
+					}
+					setRoomMovedOn(true);
+					setBusy(false);
+					busyRef.current = false;
+					return;
+				}
 				if (msg.code === "room_full") {
-					const refusedRoom = persistentChat?.agentId ?? null;
-					if (refusedRoom) setMemoryOverflowRooms((rooms) => rooms.has(refusedRoom) ? rooms : new Set([...rooms, refusedRoom]));
 					if (wsRef.current !== ws) return;
 					suppressReconnectRef.current = true;
 					cancelScheduledReconnect();
@@ -5034,20 +3050,15 @@ export function App() {
 					flushAssistantStream();
 					setBusy(false);
 					busyRef.current = false;
-					const text = typeof msg.message === "string" && msg.message ? msg.message : "This room is holding as many remembered conversations as it can. Memorize them first: use Maintain on its card, then open it again.";
+					const text = typeof msg.message === "string" && msg.message ? msg.message : `${persistentChatRef.current?.displayName || "This room"} holds as many remembered conversations as it can. Memorize them from Maintain on its Home card to start a new conversation.`;
 					// A save refused on the way out has already said so on Home; both stay.
 					void finishLeaveRoom().then(() => setPersistentResumeError((current) => current ? `${current} ${text}` : text));
 					return;
 				}
 				if (msg.code === "memory_overflow") {
-					// The refusal belongs to the room this socket was opened for —
-					// key the mark on the closure's room, not on whatever room is
-					// current when the frame lands, and let only the live socket
-					// touch the room's UI (the same staleness rule onclose applies):
-					// a frame from a replaced socket must not mark its successor's
-					// room or mute its reconnect ladder.
-					const refusedRoom = persistentChat?.agentId ?? null;
-					if (refusedRoom) setMemoryOverflowRooms((rooms) => rooms.has(refusedRoom) ? rooms : new Set([...rooms, refusedRoom]));
+					// Only the live socket touches the room's UI (the same staleness
+					// rule onclose applies): a frame from a replaced socket must not
+					// mute its successor's reconnect ladder.
 					if (wsRef.current !== ws) return;
 					// No reconnect chrome: a redial, a tab focus, or a Reconnect press
 					// would all reach the same memory and the same window.
@@ -5071,14 +3082,22 @@ export function App() {
 				// settle any tool call the failure cut off (its result is never
 				// coming) so the transcript does not keep a chip running forever.
 				flushAssistantStream();
+				// Refused before the room began the turn: the message goes back into an empty box, which shows it, so its line drops that nothing was lost.
+				const handedBack = msg.code === "room_settings_not_applied" || msg.code === "room_files_unreadable" ? sentMessageForEmptyBox() : null;
 				// A turn refused on the sign-in: the one notice, not the raw line.
 				if (isSignInFailure(String(msg.message ?? ""))) {
-					noteTurnSignInFailure(String(msg.message));
-					setItems((s) => stopRunningToolItems(s));
+					noteTurnSignInFailure(String(msg.message), undefined, msg.credentialKey);
+					setItems((s) => stopWorkInFlight(s));
 				} else {
 					// A failure that repeats on every reconnect attempt (a bind that
 					// cannot succeed) says so once, not once per attempt.
-					setItems((s) => appendErrorLineOnce(stopRunningToolItems(s), { kind: "system", id: nid(), text: msg.message, level: "error" }));
+					const line = { kind: "system" as const, id: nid(), text: handedBack ? String(msg.message).replace(" Nothing was lost.", "") : msg.message, level: "error" as const };
+					if (handedBack) handBack([handedBack], (s) => appendErrorLineOnce(stopWorkInFlight(s), line));
+					else setItems((s) => appendErrorLineOnce(stopWorkInFlight(s), line));
+				}
+				if (handedBack) {
+					setComposerPrefill(handedBack.text);
+					setComposerResetNonce((value) => value + 1);
 				}
 				setBusy(false);
 				busyRef.current = false;
@@ -5110,18 +3129,38 @@ export function App() {
 				if (msg.contextHealth) setContextHealth(msg.contextHealth);
 				return;
 			}
+			// Stop answered a question for the person (in this window or another): its card stops asking, and its preview goes as an answer's does.
+			if (msg.type === "ui_request_closed") {
+				if (liveApprovalIdsRef.current.delete(String(msg.id ?? ""))) {
+					setLiveApprovalIds(new Set(liveApprovalIdsRef.current));
+					setRightPane((cur) => (cur?.kind === "preview" ? null : cur));
+				}
+				// The server closes only a question it never took an answer to, so a click the page already showed as the answer did not count.
+				if (msg.reason === "stopped") setItems((s) => withoutStopLineUnderStoppedCard(s.map((it) => (it.kind === "approval" && it.requestId === msg.id ? { ...it, done: undefined, stopped: true } : it))));
+				// The person's message declined it: the card reads as their no.
+				if (msg.reason === "declined") setItems((s) => s.map((it) => (it.kind === "approval" && it.requestId === msg.id && !it.done ? { ...it, done: declinedAnswerOf(it) } : it)));
+				return;
+			}
 			if (msg.type === "ui_request") {
 				if (msg.kind === "notify") {
+					if (String(msg.id ?? "").startsWith("compaction_")) dropTurnFailureLine();
+					const compaction = compactionFailureLine(msg);
 					setItems((s) => [
 						...s,
-						{ kind: "system", id: nid(), text: msg.message ?? "", level: msg.level === "error" ? "error" : "info" },
+						compaction ?? { kind: "system", id: nid(), text: msg.message ?? "", level: msg.level === "error" ? "error" : "info" },
 					]);
 					return;
 				}
 				if (msg.kind === "status") return;
 				if (msg.kind === "confirm" || msg.kind === "select" || msg.kind === "input") {
+					// A replayed question was already declined when the page left; one asked after the stop's notice is declined by the stop.
+					if (!reattachReplayDrainRef.current && !serverStopping) {
+						liveApprovalIdsRef.current.add(msg.id);
+						setLiveApprovalIds(new Set(liveApprovalIdsRef.current));
+					}
+					// A question asked again (a person came back to the room, or another tab took it over) replaces its saved card.
 					setItems((s) => [
-						...s,
+						...s.filter((it) => !(it.kind === "approval" && it.requestId === msg.id)),
 						{
 							kind: "approval",
 							id: nid(),
@@ -5132,13 +3171,14 @@ export function App() {
 							detail: msg.detail,
 							options: msg.options,
 							placeholder: msg.placeholder,
+							openedAt: Date.now(),
 						},
 					]);
 				}
 				return;
 			}
 			if (msg.type === "consult_started") {
-				dispatchConsult({ type: "started", consultId: String(msg.consultId ?? ""), targetRoomId: String(msg.targetRoomId ?? ""), targetDisplayName: String(msg.targetDisplayName ?? msg.targetRoomId ?? ""), model: msg.model });
+				dispatchConsult({ type: "started", consultId: String(msg.consultId ?? ""), targetRoomId: String(msg.targetRoomId ?? ""), targetDisplayName: shownRoomName(typeof msg.targetDisplayName === "string" ? msg.targetDisplayName : "") || String(msg.targetRoomId ?? ""), model: msg.model });
 				return;
 			}
 			if (msg.type === "consult_delta") {
@@ -5148,7 +3188,7 @@ export function App() {
 			if (msg.type === "consult_end") {
 				// Every consult_end carries two standing invariant lines (exact
 				// strings from the server's buildConsultAnswer in
-				// persistent-agents.ts) — the card's subline already states both,
+				// persistent-agent-consult.ts), the card's subline already states both,
 				// so only room-specific warnings (e.g. the needs_absorb memory-lag
 				// warning) surface as a ⚠ notice.
 				const consultInvariantWarnings = new Set([
@@ -5165,25 +3205,7 @@ export function App() {
 				dispatchConsult({ type: "error", consultId: String(msg.consultId ?? ""), message: String(msg.message ?? "The consult failed."), ...(msg.code ? { code: String(msg.code) } : {}) });
 				return;
 			}
-			if (msg.type === "task_iterate_result") {
-				// ok:true needs no card action — the fresh task's task_started (next
-				// frame) supersedes the done card; ok:false surfaces the reason.
-				setTaskIteratePending(false);
-				if (!msg.ok) {
-					const reason = String(msg.reason ?? "The iteration could not start.");
-					setTaskIterateNotice(reason);
-					// The viewer footer renders the refusal inline; whenever that
-					// footer isn't on screen, the toast keeps the failure from
-					// being silent.
-					const pane = rightPaneRef.current;
-					const inlineVisible = pane?.kind === "artifactViewer" && !!pane.asset;
-					if (!inlineVisible) setExportNotice({ kind: "error", text: reason });
-				}
-				return;
-			}
 			if (msg.type === "task_started") {
-				setTaskIteratePending(false);
-				setTaskIterateNotice(null);
 				dispatchTask({
 					type: "started",
 					taskId: String(msg.taskId ?? ""),
@@ -5233,9 +3255,8 @@ export function App() {
 				});
 				void refreshAssetRows();
 				void refreshRoomFiles();
-				// Done-moment (status grammar, 2026-07-18): if the user is watching
-				// the run view, swap it for the artifact viewer in place — no toast
-				// needed. Otherwise the toast fires once; the green dot persists.
+				// Done-moment: if the user is watching
+				// the run view, swap it for the artifact viewer in place.
 				if (next.taskId === endTaskId && next.phase === "done") {
 					const first = next.artifacts[0] ?? null;
 					const pane = rightPaneRef.current;
@@ -5255,16 +3276,6 @@ export function App() {
 						} else {
 							setRightPane(null);
 						}
-					} else {
-						const doneTitle = assetDisplayTitle(next.title || "Specialist task", next.artifacts);
-						setTaskDoneToast({
-							taskId: endTaskId,
-							title: doneTitle,
-							kind: "done",
-							templateLabel: next.templateLabel ?? "visual",
-							artifact: first ? { relativePath: first.relativePath, extension: first.extension } : null,
-						});
-						notifyDesktop(doneTitle, "Task finished.");
 					}
 				}
 				return;
@@ -5277,7 +3288,7 @@ export function App() {
 				if (typeof msg.handoff === "string" && msg.handoff) {
 					applyPendingHandoffs([...pendingHandoffsRef.current, msg.handoff], pendingConsultItemIdsRef.current);
 				}
-				const next = dispatchTask({
+				dispatchTask({
 					type: "error",
 					taskId: errorTaskId,
 					message: String(msg.message ?? "The task did not finish."),
@@ -5285,21 +3296,6 @@ export function App() {
 				});
 				void refreshAssetRows();
 				void refreshRoomFiles();
-				// A user-requested stop needs no announcement (they did it); a real
-				// failure gets the toast unless the run view is already showing it.
-				const pane = rightPaneRef.current;
-				const watching = pane?.kind === "taskRun" && pane.taskId === errorTaskId;
-				if (next.taskId === errorTaskId && next.phase === "error" && !next.stopRequested && !watching) {
-					const errorTitle = assetDisplayTitle(next.title || "Specialist task", next.artifacts);
-					setTaskDoneToast({
-						taskId: errorTaskId,
-						title: errorTitle,
-						kind: "error",
-						templateLabel: next.templateLabel ?? "visual",
-						artifact: next.artifacts[0] ? { relativePath: next.artifacts[0].relativePath, extension: next.artifacts[0].extension } : null,
-					});
-					notifyDesktop(errorTitle, "The task did not finish.");
-				}
 				return;
 			}
 			if (msg.type === "task_away_notice") {
@@ -5310,14 +3306,14 @@ export function App() {
 					const title = String(notice.title ?? "").trim() || "A specialist task";
 					const outcome = (() => {
 						switch (String(notice.outcome ?? "")) {
-							case "ok": return `While you were away: “${title}” finished — it's waiting in Files.`;
-							case "aborted": return `While you were away: “${title}” was stopped. What it made so far is in Files.`;
-							case "orphaned": return `While you were away: “${title}” was interrupted when the app closed. What it made so far is in Files.`;
+							case "ok": return `While you were away: “${title}” finished: it's waiting in Attachments.`;
+							case "aborted": return `While you were away: “${title}” was stopped. What it made so far is in Attachments.`;
+							case "orphaned": return `While you were away: “${title}” was interrupted when the app closed. What it made so far is in Attachments.`;
 							default: return `While you were away: “${title}” didn't finish.`;
 						}
 					})();
 					// A refused overwrite is the one away outcome the generic line
-					// would misreport: "it's waiting in Files" is true, but not that
+					// would misreport: "it's waiting in Attachments" is true, but not that
 					// it is waiting under a DIFFERENT name because the original
 					// changed. Same sentence as the live path.
 					return [outcome, ...readReviseConflicts(notice.reviseConflicts).map(reviseConflictSentence)];
@@ -5331,7 +3327,7 @@ export function App() {
 			}
 			if (msg.type !== "event") return;
 			handleEvent(msg.event);
-		};
+		}
 
 		// Sleep/wake: backoff timers may not fire while the tab is hidden —
 		// retry the moment the user is back looking at a disconnected room.
@@ -5342,6 +3338,8 @@ export function App() {
 			}
 			const hiddenFor = pageHiddenAtRef.current === null ? 0 : Date.now() - pageHiddenAtRef.current;
 			pageHiddenAtRef.current = null;
+			// A room another window took comes back only through Open here.
+			if (turnLinkRef.current === "elsewhere") return;
 			if (roomReconnectStateRef.current !== "idle") { retryRoomReconnectNow(); return; }
 			// The same sleep/wake problem outside a room: a laptop that slept with
 			// Home open comes back to a dead socket and a timer that never fired.
@@ -5367,10 +3365,16 @@ export function App() {
 			cancelScheduledReconnect();
 			cancelScheduledHomeReconnect();
 			clearSocketTimers();
+			// A replay still held belongs to this binding: it never reaches the next one.
+			heldReplay = null;
 			// Never lose a received tail to a teardown: reveal it, then forget.
-			flushAssistantStream();
-			clearTransientStreamNotes();
-			dispatchStream({ type: "reset" });
+			// A turn waited on through a dropped connection keeps its open
+			// answer for the next socket's replay.
+			if (turnLinkRef.current !== "reconnecting") {
+				flushAssistantStream();
+				clearTransientStreamNotes();
+				dispatchStream({ type: "reset" });
+			}
 			// Socket close kills the consult server-side (no re-attach; a lost
 			// answer is re-derivable) — drop the card/pill with the connection.
 			dispatchConsult({ type: "reset" });
@@ -5386,7 +3390,7 @@ export function App() {
 	// that provider is signed in: a sign-in in this window refreshes the model
 	// status, and one made elsewhere (another tab, the CLI) is noticed when this
 	// window comes back to the front. Another room or conversation starts clean.
-	useEffect(() => { setSignedOutProvider(null); setRoomModelNotOffered(false); setTurnSignedOutProvider(null); }, [persistentSocketKey]);
+	useEffect(() => { setSignedOut(null); setRoomModelNotOffered(false); setTurnSignedOut(null); }, [persistentSocketKey]);
 	useEffect(() => {
 		if (signedOutProvider === null) return;
 		const ready = modelStatus?.providers?.some((provider) => provider.ready && (signedOutProvider === "" || provider.id === signedOutProvider));
@@ -5413,9 +3417,9 @@ export function App() {
 
 
 	function isRoutineRetrievalTool(name: string): boolean {
-		// A read of the archive is the one memory tool the person should see: it
-		// says the room went to its older notes for this answer, as a chip that
-		// names what it looked for. The rest stay behind the activity line.
+		// A memory search is the one memory tool the person should see: it says
+		// the room searched its memory for this answer, as a chip that names what
+		// it looked for. The rest stay behind the activity line.
 		if (name === "memory_recall") return false;
 		return name.startsWith("kb_") || name.startsWith("memory_");
 	}
@@ -5429,14 +3433,150 @@ export function App() {
 		if (retrievalActivityIdRef.current) return;
 		const id = nid();
 		retrievalActivityIdRef.current = id;
+		// The text written before the lookup closes first, so its line sits under it. Not in a keyed message: the
+		// server keeps the text on both sides of a hidden lookup in one part, and so does the page.
+		if (!streamStateRef.current.messageKeyed) dispatchStream({ type: "break", now: performance.now() });
 		setItems((s) => [...s, { kind: "system", id, text: retrievalActivityText() }]);
+	}
+
+	/**
+	 * Puts a tool call's step in the room, or brings the one already there up to
+	 * date. Routine memory and knowledge lookups go behind the "checking relevant
+	 * context…" line, and a hand-off shows only its own cards, from the call's
+	 * first frame on. A step that already runs takes only whole arguments, and
+	 * a settled one keeps its state.
+	 */
+	function placeToolStep(toolId: string, name: string, args: Record<string, unknown>, status: "writing" | "running", serverItemId?: string) {
+		// The first id seen for a call stays its id: the server's, named on the call's frames in a keyed turn.
+		const keepHidden = () => hiddenRoutineToolByIdRef.current.set(toolId, { name, args, itemId: hiddenRoutineToolByIdRef.current.get(toolId)?.itemId ?? serverItemId });
+		if (isRoutineRetrievalTool(name)) {
+			keepHidden();
+			noteRetrievalActivity();
+			return;
+		}
+		if (name === "delegate_task") {
+			// The approval card and the task card ARE this tool's UI; a raw
+			// step above them is noise. Errors still surface via the
+			// hidden-tool path.
+			keepHidden();
+			return;
+		}
+		// Named after the call, so the step its first frame made is the one its whole arguments complete.
+		const itemId = (toolId ? toolByIdRef.current.get(toolId) : undefined) ?? serverItemId ?? (toolId ? `tool-${toolId}` : nid());
+		toolByIdRef.current.set(toolId, itemId);
+		// The text written before the step closes first, so the step sits under it.
+		if (!itemsRef.current.some((it) => it.id === itemId)) dispatchStream({ type: "break", now: performance.now() });
+		setItems((s) => {
+			if (!s.some((it) => it.id === itemId)) return [...s, { kind: "tool", id: itemId, name, args, status }];
+			return s.map((it) => (it.id === itemId && it.kind === "tool" && (it.status === "writing" || (it.status === "running" && status === "running")) ? { ...it, args, status } : it));
+		});
+	}
+
+	/**
+	 * A thinking block as the model writes it. Its start makes an item (a
+	 * block right after another is drawn in the same row); its words go to its
+	 * store, never into the items; its end stamps the row with the server's
+	 * clock, takes the final words when they differ, and drops a row with no
+	 * words that took under a second.
+	 */
+	function noteThinking(update: { type: string; contentIndex?: unknown; at?: unknown; delta?: unknown; content?: unknown; redacted?: unknown }) {
+		const block = typeof update.contentIndex === "number" ? update.contentIndex : -1;
+		const at = typeof update.at === "number" && Number.isFinite(update.at) ? Math.min(Date.now(), update.at - serverClockAheadRef.current) : Date.now();
+		if (update.type === "thinking_start") {
+			const id = `thinking-${nid()}`;
+			thinkingRowByBlockRef.current.set(block, { id, startedAt: at });
+			// The text written before the thinking closes first, so the row sits under it.
+			dispatchStream({ type: "break", now: performance.now() });
+			setItems((s) => [...s, { kind: "thinking", id, ts: at, ...(update.redacted === true ? { redacted: true as const } : {}) }]);
+			return;
+		}
+		const row = thinkingRowByBlockRef.current.get(block);
+		if (!row) return;
+		if (update.type === "thinking_delta") {
+			thinkingTextStore.append(row.id, typeof update.delta === "string" ? update.delta : "");
+			return;
+		}
+		if (typeof update.content === "string") thinkingTextStore.set(row.id, update.content);
+		const dropped = !thinkingTextStore.get(row.id).trim() && at - row.startedAt < 1000;
+		setItems((s) => s.flatMap((it) => (it.id !== row.id || it.kind !== "thinking" ? [it] : dropped ? [] : [{ ...it, ms: Math.max(0, at - it.ts) }])));
+	}
+
+	/**
+	 * A tool the provider runs itself (Claude's or ChatGPT's own web search) is
+	 * an ordinary step of the same name, under its own id: it runs from its
+	 * start, takes its query when the provider says it, and ends done or
+	 * failed. It sits where it ran: the text written before it closes first,
+	 * and the answer opens below it.
+	 */
+	function noteServerTool(update: { type: string; id?: unknown; name?: unknown; query?: unknown; ok?: unknown; at?: unknown; itemId?: unknown }) {
+		if (typeof update.id !== "string" || !update.id) return;
+		const itemId = serverToolByIdRef.current.get(update.id) ?? (typeof update.itemId === "string" && update.itemId ? update.itemId : `srv-${update.id}`);
+		serverToolByIdRef.current.set(update.id, itemId);
+		const at = typeof update.at === "number" && Number.isFinite(update.at) ? Math.min(Date.now(), update.at - serverClockAheadRef.current) : Date.now();
+		if (update.type === "server_tool_end") {
+			const status = update.ok === true ? "done" : "error";
+			setItems((s) => s.map((it) => (it.id === itemId && it.kind === "tool" && it.status === "running" ? { ...it, status, endedAt: Math.max(it.startedAt ?? at, at) } : it)));
+			return;
+		}
+		if (typeof update.name !== "string" || !update.name) return;
+		const name = update.name;
+		const args = typeof update.query === "string" && update.query ? { query: update.query } : null;
+		if (!itemsRef.current.some((it) => it.id === itemId)) dispatchStream({ type: "break", now: performance.now() });
+		setItems((s) => {
+			if (!s.some((it) => it.id === itemId)) return [...s, { kind: "tool", id: itemId, name, args: args ?? {}, status: "running", startedAt: at }];
+			return args ? s.map((it) => (it.id === itemId && it.kind === "tool" && it.status === "running" ? { ...it, args } : it)) : s;
+		});
+	}
+
+	/** What the page knew of a turn's thinking and shortening, gone with the conversation it belonged to. */
+	function forgetLiveTurnProgress() {
+		thinkingRowByBlockRef.current.clear();
+		thinkingTextStore.clear();
+		setShortening(false);
 	}
 
 	function handleEvent(ev: any) {
 		const now = performance.now();
 
 		if (ev.type === "message_start" && ev.message?.role === "assistant") {
-			dispatchStream({ type: "message_start", now });
+			thinkingRowByBlockRef.current.clear();
+			const itemId = frameItemId(ev);
+			if (itemId) turnKeyRef.current = keyOfId(itemId) ?? turnKeyRef.current;
+			dispatchStream({ type: "message_start", now, ...(itemId ? { itemId } : {}) });
+			return;
+		}
+
+		// Shortening may start after the turn's end (the conversation grew past the line), so only its own end clears it.
+		if (ev.type === "compaction_start" || ev.type === "compaction_end") {
+			setShortening(ev.type === "compaction_start");
+			// Only a shortening that wrote its summary blocks the newest bubble; while one runs, `shortening` hides the pencil.
+			if (ev.type === "compaction_end" && ev.result) setEditBlockedId([...itemsRef.current].reverse().find((item) => item.kind === "user")?.id ?? null);
+			return;
+		}
+
+		const update = ev.type === "message_update" ? ev.assistantMessageEvent : null;
+		if (update && /^thinking_(start|delta|end)$/.test(String(update.type ?? ""))) {
+			noteThinking(update);
+			return;
+		}
+
+		// A tool call as the model writes it: the step shows from its first frame and its label grows.
+		if (update && /^toolcall_(start|delta|end)$/.test(String(update.type ?? ""))) {
+			if (typeof update.id === "string" && update.id && typeof update.name === "string" && update.name && update.preview && typeof update.preview === "object") {
+				placeToolStep(update.id, update.name, update.preview as Record<string, unknown>, update.type === "toolcall_end" ? "running" : "writing", frameItemId(update));
+			}
+			return;
+		}
+
+		if (update && /^server_tool_(start|end)$/.test(String(update.type ?? ""))) {
+			noteServerTool(update);
+			return;
+		}
+
+		// A keyed turn's text after a step opens a new part, which the server names here.
+		if (update?.type === "text_start") {
+			const itemId = frameItemId(update);
+			if (itemId) dispatchStream({ type: "part_id", itemId });
 			return;
 		}
 
@@ -5459,10 +3599,15 @@ export function App() {
 			streamErrorLineIdRef.current = null;
 			const noteId = retryNoticeIdRef.current ?? nid();
 			retryNoticeIdRef.current = noteId;
+			const retryModel = (ev as { model?: { provider: string; model: string } }).model;
+			const noteText = retryNoteLine((retryModel?.model ? modelDisplayName(retryModel) : failedTurnModelNameRef.current) || "This model", (ev as { failure?: RetryFailure }).failure);
+			// The turn is still running while the runtime waits to try again: Stop, not Send.
+			setBusy(true);
+			busyRef.current = true;
 			setItems((s) => {
-				const next = errorLineId ? s.filter((it) => it.id !== errorLineId) : s;
-				if (next.some((it) => it.id === noteId)) return next;
-				return [...next, { kind: "system", id: noteId, text: "Connection hiccup. Retrying…" }];
+				const next = withoutRetryNotes(errorLineId ? s.filter((it) => it.id !== errorLineId) : s, noteId);
+				if (next.some((it) => it.id === noteId)) return next.map((it) => (it.id === noteId ? { ...it, text: noteText } : it));
+				return [...next, { kind: "system", id: noteId, text: noteText }];
 			});
 			return;
 		}
@@ -5473,35 +3618,57 @@ export function App() {
 			const noteId = retryNoticeIdRef.current;
 			retryNoticeIdRef.current = null;
 			if (noteId) setItems((s) => s.filter((it) => it.id !== noteId));
-			return;
+			// A retry that ends without an answer (given up, or stopped while it waited) ends the turn like agent_end below.
+			if (ev.success) return;
 		}
 
 		if (ev.type === "message_end" && ev.message?.role === "assistant") {
 			// A turn the provider refused (bad key, disabled model, quota) carries
 			// stopReason "error" and usually no content — without this line the
 			// room would stay silent where the reply should have been.
-			if (ev.message.stopReason === "error") {
+			if (ev.message.stopReason === "error" && (ev as { retrying?: boolean }).retrying === true) {
+				// An attempt the runtime asks again draws no line: its retry note follows at once, and only the attempt that ends the turn says why.
+				dropTurnFailureLine();
+				failedTurnModelNameRef.current = modelDisplayName({ model: String(ev.message.model ?? ""), provider: String(ev.message.provider ?? "") });
+			} else if (ev.message.stopReason === "error") {
 				const detail = String(ev.message.errorMessage ?? "").trim().slice(0, 300);
+				// One line per turn: an attempt the runtime makes on its own (after shortening the conversation) replaces the earlier line.
+				dropTurnFailureLine();
 				const errorLineId = nid();
 				streamErrorLineIdRef.current = errorLineId;
 				// A context overflow is a size problem, not a sign-in problem: the
 				// "check AI setup" advice would send the user to the wrong place.
 				// The runtime compacts the conversation on its own; what it cannot
 				// shrink is the room's memory, so name that remedy.
-				const contextOverflow = /context(?:[ _-]?window| length)|too many tokens|maximum context|prompt is too long|exceeds? (?:the )?(?:model'?s? )?(?:context|token|input)/i.test(detail);
+				// The server names a sign-in or a model no longer offered when only the status said so.
+				const failure = (ev as { failure?: TurnFailure }).failure;
+				const { contextOverflow, notOnAccount, notOffered } = failureKindOf(detail, failure);
 				// A sign-in that cannot be used (the catalog may still call the
 				// provider signed in): the one notice with Sign in, not the raw line.
-				if (!contextOverflow && isSignInFailure(detail)) {
+				// The provider refusing the model for this account: its plan or its
+				// admin. One plain line with the way out; the raw words go to the console.
+				if (notOnAccount) console.warn("[exxperts] the provider refused the model for this account:", detail);
+				// The provider no longer offering the model: the line the room's model row shows, with its way out.
+				if (notOffered) console.warn("[exxperts] the provider no longer offers the model:", detail);
+				const turnModel = { model: String(ev.message.model ?? ""), provider: String(ev.message.provider ?? "") };
+				failedTurnModelNameRef.current = modelDisplayName(turnModel);
+				// The server reads a key's state from the same failure; the workspace 400 is the one case the matcher above leaves out.
+				const credentialKey = (ev as { credentialKey?: CredentialKey }).credentialKey;
+				// Any other failure: one plain line for the cause the server read; the raw words go to the console.
+				if (contextOverflow) console.warn("[exxperts] the conversation and memory are more than the model can read at once:", detail);
+				else if (!notOnAccount && !notOffered && !isSignInFailure(detail) && failure !== "signed-out" && credentialKey !== "no-workspace") console.warn("[exxperts] the model could not answer:", String(ev.message.errorMessage ?? ""));
+				if (!contextOverflow && (isSignInFailure(detail) || failure === "signed-out" || credentialKey === "no-workspace")) {
 					streamErrorLineIdRef.current = null;
-					noteTurnSignInFailure(detail, typeof ev.message.provider === "string" ? ev.message.provider : undefined);
-				} else setItems((s) => [...s, {
-					kind: "system",
-					id: errorLineId,
-					level: "error",
-					text: contextOverflow
-						? `The model could not respond: the conversation plus this room's memory exceed its context window${detail ? ` · ${detail}` : ""}. Run Review from Maintain to shrink memory, or continue on a model with a larger window in Room settings, Model.`
-						: `The model could not respond${detail ? ` · ${detail}` : ""} · check the model and its sign-in in AI setup.`,
-				}]);
+					noteTurnSignInFailure(detail, typeof ev.message.provider === "string" ? ev.message.provider : undefined, credentialKey);
+				} else {
+					const sent = [...itemsRef.current].reverse().find((item) => item.kind === "user");
+					setItems((s) => [...s, { kind: "system", id: errorLineId, level: "error", ...failureLineOf(String(ev.message.errorMessage ?? ""), turnModel, failure, (ev as { quotaWay?: QuotaWay }).quotaWay, sent?.kind === "user" ? sent : undefined) }]);
+				}
+			} else if ((ev as { failure?: TurnFailure }).failure === "empty-answer") {
+				const turnModel = { model: String(ev.message.model ?? ""), provider: String(ev.message.provider ?? "") };
+				const errorLineId = nid();
+				streamErrorLineIdRef.current = errorLineId;
+				setItems((s) => [...s, { kind: "system", id: errorLineId, level: "error", ...failureLine(turnFailureLine(modelDisplayName(turnModel) || "This model", "empty-answer"), "above"), failure: "empty-answer", provider: turnModel.provider }]);
 			}
 			// A turn that ran out of output budget owes the room an explanation.
 			// The starved shape (stopReason "length", nothing user-visible in the
@@ -5530,34 +3697,13 @@ export function App() {
 					});
 				}
 			}
-			dispatchStream({ type: "message_end", finalText: extractAssistantText(ev.message), stopReason: ev.message.stopReason, now });
+			dispatchStream({ type: "message_end", finalText: extractAssistantText(ev.message), stopReason: ev.message.stopReason, now, ...(typeof ev.echoOf === "string" && ev.echoOf ? { echoOf: ev.echoOf } : {}) });
 
+			// The steps the model started while writing take their whole arguments; a provider that sent no start makes them now.
 			const content = ev.message.content as any[] | undefined;
 			if (Array.isArray(content)) {
-				const toolCalls = content.filter((c) => c?.type === "toolCall");
-				if (toolCalls.length) {
-					const visibleAdditions: ChatItem[] = [];
-					for (const c of toolCalls) {
-						const toolId = c.id ?? c.toolCallId;
-						const name = String(c.name ?? "");
-						const args = c.arguments ?? c.args ?? {};
-						if (isRoutineRetrievalTool(name)) {
-							hiddenRoutineToolByIdRef.current.set(toolId, { name, args });
-							noteRetrievalActivity();
-							continue;
-						}
-						if (name === "delegate_task") {
-							// The approval card and the task card ARE this tool's UI; a raw
-							// tool chip above them is noise. Errors still surface via the
-							// hidden-tool path.
-							hiddenRoutineToolByIdRef.current.set(toolId, { name, args });
-							continue;
-						}
-						const itemId = nid();
-						toolByIdRef.current.set(toolId, itemId);
-						visibleAdditions.push({ kind: "tool", id: itemId, name, args, status: "running" });
-					}
-					if (visibleAdditions.length) setItems((s) => [...s, ...visibleAdditions]);
+				for (const c of content) {
+					if (c?.type === "toolCall") placeToolStep(String(c.id ?? c.toolCallId ?? ""), String(c.name ?? ""), c.arguments ?? c.args ?? {}, "running");
 				}
 			}
 			return;
@@ -5572,7 +3718,7 @@ export function App() {
 			if (hidden) {
 				hiddenRoutineToolByIdRef.current.delete(msg.toolCallId);
 				if (!isError) return;
-				setItems((s) => [...s, { kind: "tool", id: nid(), name: hidden.name, args: hidden.args, status: "error", result: text }]);
+				setItems((s) => [...s, { kind: "tool", id: hidden.itemId ?? nid(), name: hidden.name, args: hidden.args, status: "error", result: text }]);
 				return;
 			}
 			const itemId = toolByIdRef.current.get(msg.toolCallId);
@@ -5587,21 +3733,75 @@ export function App() {
 			return;
 		}
 
+		if (ev.type === "tool_execution_start" && typeof ev.startedAt === "number") {
+			// On a shared server the two clocks can differ: a live step began now in this browser's clock, and a replayed one
+			// moves by the difference the reattach frame or the last live step showed, never into the future.
+			if (!reattachReplayDrainRef.current) serverClockAheadRef.current = ev.startedAt - Date.now();
+			const startedAt = Math.min(Date.now(), ev.startedAt - serverClockAheadRef.current);
+			const itemId = toolByIdRef.current.get(ev.toolCallId);
+			if (itemId) setItems((s) => s.map((it) => (it.id === itemId && it.kind === "tool" ? { ...it, startedAt } : it)));
+			return;
+		}
+
+		// A step's end, by the same clock as its start: its row shows how long it took.
+		if (ev.type === "tool_execution_end" && typeof ev.endedAt === "number") {
+			const endedAt = Math.min(Date.now(), ev.endedAt - serverClockAheadRef.current);
+			const itemId = toolByIdRef.current.get(ev.toolCallId);
+			if (itemId) setItems((s) => s.map((it) => (it.id === itemId && it.kind === "tool" && it.startedAt !== undefined ? { ...it, endedAt: Math.max(it.startedAt, endedAt) } : it)));
+			return;
+		}
+
 		if (ev.type === "agent_start") {
+			// A replayed start is the turn the room still runs, which may be the one stopping.
+			if (!reattachReplayDrainRef.current) forgetStoppedTurnRead();
 			setBusy(true);
 			busyRef.current = true;
 		}
-		if (ev.type === "agent_end") {
+		// A failed attempt the runtime asks again: its retry frames follow, so the turn goes on and Stop stays.
+		if ((ev.type === "agent_end" && (ev as { retrying?: boolean }).retrying !== true) || ev.type === "auto_retry_end") {
 			setBusy(false);
 			busyRef.current = false;
-			if (turnCancellingRef.current) {
-				markCurrentAssistantInterrupted(turnInterruptedNoteRef.current ?? "Response interrupted.");
+			continuedLineRef.current = null;
+			if (ev.type === "agent_end") turnCutByStopRef.current = (ev as { stoppedByServer?: boolean }).stoppedByServer === true;
+			retryNoticeIdRef.current = null;
+			// The turn is over: a step it never finished (a provider's search its failure cut) stops with it.
+			setItems((s) => stopWorkInFlight(withoutRetryNotes(s).filter((item) => !isTurnRunningNote(item))));
+			// The server says why a turn ended early, so the line is the same in every window that watched it.
+			const endedBy = readTurnEndedBy((ev as { endedBy?: unknown }).endedBy);
+			if (endedBy === "next" && cutQuietRef.current) {
+				// Cut before anything showed: the message joins the question, with no line.
+				cutQuietRef.current = false;
+				flushAssistantStream();
+				setTurnCancelling(false);
+				turnCancellingRef.current = false;
+				setTurnInterruptedNote(null);
+				turnInterruptedNoteRef.current = null;
+			} else if (turnCancellingRef.current || endedBy) {
+				markCurrentAssistantInterrupted(endedBy ? turnEndedLine(endedBy) : turnInterruptedNoteRef.current ?? "Response interrupted.");
 				setTurnCancelling(false);
 				turnCancellingRef.current = false;
 				setTurnInterruptedNote(null);
 				turnInterruptedNoteRef.current = null;
 			}
-			if (persistentChatRef.current) void refreshPersistentAgentStatus();
+			if (persistentChatRef.current) void refreshStatusUntilStopEnds(persistentChatRef.current);
+		}
+	}
+
+	/**
+	 * The room's status after a turn's end frame. The server sends that frame
+	 * before it lets a stopped turn go, so a read right then can still say the
+	 * turn is stopping, and the next turn would show Stop as already pressed:
+	 * read again until the server no longer says so for this conversation.
+	 */
+	async function refreshStatusUntilStopEnds(chat: { agentId: PersistentAgentId; conversationId: string }): Promise<void> {
+		for (let tries = 0; tries < 40; tries++) {
+			let stopping = false;
+			await refreshPersistentAgentStatus((statuses) => {
+				const thread = statuses.find((status) => status.id === chat.agentId)?.activeThread;
+				stopping = thread?.threadId === chat.conversationId && thread.cancelling === true;
+			});
+			if (!stopping || persistentChatRef.current?.conversationId !== chat.conversationId) return;
+			await new Promise((resolve) => window.setTimeout(resolve, 250));
 		}
 	}
 
@@ -5646,35 +3846,52 @@ export function App() {
 		// applied synchronously to itemsRef as well because room-exit paths
 		// persist the thread right after calling this.
 		cancelStreamTick();
-		const { state, effects } = reduceAssistantStream(streamStateRef.current, { type: "interrupt", now: performance.now() }, revealPacingRef.current);
+		const { state, effects } = reduceAssistantStream(streamStateRef.current, { type: "interrupt", now: performance.now() });
 		commitStreamState(state);
 		const upserts = new Map<string, { text: string; streaming: boolean }>();
-		let interruptedId: string | null = null;
+		let interrupted: { id: string; ended: boolean } | null = null;
 		for (const effect of effects) {
 			if (effect.kind === "upsert") upserts.set(effect.id, { text: effect.text, streaming: effect.streaming });
-			else if (effect.kind === "interrupted") interruptedId = effect.id;
+			else if (effect.kind === "interrupted") interrupted = effect.id ? { id: effect.id, ended: effect.ended === true } : null;
 			else if (effect.kind === "warn") console.warn(effect.message, effect.detail ?? "");
 		}
+		// The person's Stop marks where the answer's words end (`stoppedAt`), on a part of the newest keyed turn
+		// only: a lost connection, a server stop or a displaced room leave the part for the landed answer to replace.
+		const personStopped = turnCancellingRef.current;
+		const withNote = (it: Extract<ChatItem, { kind: "assistant" }>): ChatItem => {
+			// Already noted: the note ends its text. The answer may quote the note's words in its own.
+			const words = it.text.trim() ? it.text.trimEnd() : "";
+			if (words === reason || words.endsWith(`_${reason}_`)) return { ...it, streaming: false };
+			const stoppedAt = personStopped && turnKeyRef.current !== null && isAnswerPartId(it.id) && keyOfId(it.id) === turnKeyRef.current ? { stoppedAt: words.length } : {};
+			return { ...it, text: words ? `${words}\n\n_${reason}_` : reason, streaming: false, ...stoppedAt };
+		};
+		const drops = streamDropsOf(effects);
 		const update = (s: ChatItem[]) => {
-			let next = applyStreamUpserts(upserts, s);
-			if (interruptedId) {
-				next = next.map((it) => {
-					if (it.id !== interruptedId || it.kind !== "assistant") return it;
-					if (it.text.includes(reason)) return { ...it, streaming: false };
-					const text = it.text?.trim() ? `${it.text.trimEnd()}\n\n_${reason}_` : reason;
-					return { ...it, text, streaming: false };
-				});
-			} else if (!next.some((it) => it.kind === "system" && it.text === reason)) {
+			let next = applyStreamUpserts(upserts, s, drops);
+			const last = next.at(-1);
+			// The Stop came as the message ended: its part takes the note while nothing came after it.
+			const endedPart = interrupted?.ended && personStopped && last?.id === interrupted.id && last.kind === "assistant" ? last : null;
+			if (endedPart) {
+				next = next.map((it) => (it === endedPart ? withNote(endedPart) : it));
+			} else if (interrupted && !interrupted.ended) {
+				const openId = interrupted.id;
+				next = next.map((it) => (it.id === openId && it.kind === "assistant" ? withNote(it) : it));
+			} else if (isStopLine(reason) && last?.kind === "assistant") {
+				// Stop put the answer on screen whole and closed it before the turn ended: the line is still that answer's own,
+				// kept in its text as a saved stopped answer has it, so it shows under the text and above the copy button.
+				next = next.map((it) => (it === last && it.kind === "assistant" && answerStopNote(it.text).stopLine === null ? withNote(it) : it));
+			} else if (!next.slice(next.map((it) => it.kind).lastIndexOf("user") + 1).some((it) => it.kind === "system" && it.text === reason)) {
+				// Once per turn: an earlier turn's Stop line, a handed-back one included, says nothing of this one.
 				next = [...next, { kind: "system" as const, id: nid(), text: reason }];
 			}
-			return stopRunningToolItems(next);
+			return stopWorkInFlight(withoutStopLineUnderStoppedCard(next));
 		};
 		itemsRef.current = update(itemsRef.current);
 		setItems(update);
 	}
 
 	// The blip note said the response was killed; the reconnect bounce just
-	// proved it is still being written server-side (community #14). Rewrite the
+	// proved it is still being written server-side. Rewrite the
 	// note in place — UI only, deliberately not persisted: the server-side
 	// landing supersedes this whole partial bubble anyway.
 	function rewriteConnectionLostNoteForCookingRoom() {
@@ -5702,64 +3919,529 @@ export function App() {
 		});
 	}
 
+	/** The passing note about a running answer, once the room's turn is over by the server's word; a turn this page runs ends it on its own end frame. */
+	async function dropTurnRunningNoteOnceSettled(agentId: PersistentAgentId): Promise<void> {
+		for (let tries = 0; tries < 120; tries++) {
+			await new Promise((resolve) => window.setTimeout(resolve, 1000));
+			if (persistentChatRef.current?.agentId !== agentId || !itemsRef.current.some(isTurnRunningNote) || busyRef.current) return;
+			const status = (await fetchPersistentAgentStatuses().catch(() => [])).find((candidate) => candidate.id === agentId);
+			if (status && status.activeThread?.inFlight !== true) {
+				setItems((s) => s.filter((item) => !isTurnRunningNote(item)));
+				return;
+			}
+		}
+	}
+
+	/** Retry notes after the last message: at most one while a retry runs (`keepId`), none once the turn ends. */
+	function withoutRetryNotes(items: ChatItem[], keepId?: string): ChatItem[] {
+		const lastUser = items.map((item) => item.kind).lastIndexOf("user");
+		return items.filter((item, index) => index <= lastUser || item.kind !== "system" || item.id === keepId || !isRetryNote(String(item.text ?? "")));
+	}
+
+	/**
+	 * A message the model could not answer, handed back by the server (it
+	 * stepped the conversation back to before it): its bubble and what the
+	 * failed attempt left (`leftByFailedAttempt`) go, the line under it no longer says where the message is, and
+	 * the text goes back into the box. When the box holds something else the
+	 * person typed meanwhile, the message stays where it was instead, and the
+	 * server returns the conversation to it. The box is not saved, so a message
+	 * in it is handed back on every open until the person clears it from the box.
+	 */
+	function returnFailedPrompt(returned: ReturnedPromptFrame): void {
+		const typed = String(returned.text ?? "").trim();
+		if (!typed) return;
+		const current = itemsRef.current;
+		const textOf = (item: ChatItem | null) => String((item as { text?: unknown } | null)?.text ?? "");
+		const lastUser = current.map((item) => item.kind).lastIndexOf("user");
+		const tail = lastUser >= 0 ? current.slice(lastUser + 1) : [];
+		const bubble = lastUser >= 0 && tail.every(leftByFailedAttempt) && textOf(current[lastUser]).trim() === typed ? current[lastUser] : null;
+		const box = (textareaRef.current?.value ?? "").trim();
+		// Nowhere to put it now: the box holds other text and the bubble is gone. The next open offers it again.
+		if (!bubble && box && box !== typed) return;
+		const kept = !!bubble && !!box && box !== typed;
+		// With no bubble, a line already on screen belongs to something else: this one says its own. Except a stop after a refusal
+		// already took the bubble: the Stop line the turn's end left last is this one's, so it is not said twice.
+		const after = bubble ? tail : [];
+		const ending = current.at(-1);
+		const stopEnding = returned.stopped && !bubble && ending?.kind === "system" && !ending.returnedId && isStopLine(textOf(ending)) ? ending : undefined;
+		const line = after.filter((item) => item.kind === "system" && (returned.stopped ? isStopLine(textOf(item)) : item.level === "error")).pop() ?? stopEnding;
+		// By id: the turn's end may have replaced these items with stopped copies since the page last drew.
+		const stale = new Set((bubble ? tail : current.slice(-1)).filter((item) => item.kind === "system" && isRetryNote(textOf(item))).map((item) => item.id));
+		const gone = kept || !bubble ? [] : [bubble, ...tail.filter((item) => item.kind !== "system")];
+		const name = (returned.model && modelDisplayName(returned.model)) || "The model";
+		// A failure that ended while nobody was in the room left no line: it is said here, from the cause the server kept. The key or sign-in notice says its own.
+		// The same message back on a later open: the line it left already says so, and stays the only one,
+		// whatever came after it (a model switch, another note).
+		const saidBefore = !bubble && !!returned.id && current.some((item) => item.kind === "system" && item.returnedId === returned.id);
+		const marked = returned.id ? { returnedId: returned.id } : {};
+		// Kept above, Try again continues the turn; back in the box, it sends the box.
+		const where: MessageWhere = kept ? "above" : "back";
+		const placed = (item: ChatItem): ChatItem => (item.kind === "system" ? lineWithMessage(item, where) : item);
+		const said = returned.words && !returned.stopped && returned.model ? failureLineOf(returned.words, returned.model, returned.failure as TurnFailure | undefined, returned.quotaWay, { text: typed }, true, returned.gatewayFind) : null;
+		// The key or sign-in notice says the cause and the way on. On the way in none
+		// shows yet, so it is raised here; one the failure's own frame just raised is kept as it is.
+		if (returned.notice && signedOutProviderRef.current === null) {
+			setTurnSignedOut((shown) => shown ?? { provider: returned.model?.provider || persistentChatRef.current?.model.provider || "", ...(returned.key ? { key: returned.key } : {}) });
+		}
+		const added: ChatItem[] = !line && !returned.notice && !saidBefore
+			? [placed(said
+				? { kind: "system", id: nid(), level: "error" as const, ...said, ...marked }
+				: { kind: "system", id: nid(), ...(returned.stopped ? {} : { level: "error" as const, failure: (returned.failure as TurnFailure | undefined) ?? "other", ...(returned.model?.provider ? { provider: returned.model.provider } : {}) }), ...failureLine(returnedFailureLine(name, returned, knownRemoteClientContext()?.sharedServer === true, providerLabelOf(returned.model?.provider ?? "")), where), ...(returned.quotaWay ? { quotaWay: returned.quotaWay } : {}), ...(returned.gatewayFind ? { gatewayFind: returned.gatewayFind } : {}), ...marked })]
+			: [];
+		handBack(gone, (s) => [...s.filter((item) => !stale.has(item.id)).map((item) => (line && item.id === line.id ? placed(lineWithGatewayFind({ ...item, ...marked } as ChatItem, returned.gatewayFind, returned.model)) : item)), ...added]);
+		if (kept) {
+			sendReturnedPromptHandled(true);
+			return;
+		}
+		if (!box) {
+			setComposerPrefill(typed);
+			setComposerResetNonce((value) => value + 1);
+		}
+		returnedPromptPendingRef.current = true;
+	}
+
+	/**
+	 * Takes handed-back items out of the conversation and records them as
+	 * removed on purpose in the same step, so neither a late save nor a
+	 * reconnect's copy brings them back. `andThen` changes the rest of the
+	 * list in the same update.
+	 */
+	function handBack(items: readonly ChatItem[], andThen: (s: ChatItem[]) => ChatItem[] = (s) => s): void {
+		const chat = persistentChatRef.current;
+		const ids = new Set(items.map((item) => item.id));
+		if (chat && ids.size) pendingRemovalsRef.current.add(chat.agentId, chat.conversationId, [...ids]);
+		const update = (s: ChatItem[]) => andThen(ids.size ? s.filter((item) => !ids.has(item.id)) : s);
+		itemsRef.current = update(itemsRef.current);
+		setItems(update);
+	}
+
+	/**
+	 * The newest message, when it may be edited: typed text only, the room
+	 * idle and not shortening, nothing shortened since, no edit on its way, and no queued or held
+	 * message waiting (the edit would go before it).
+	 */
+	function editableMessageId(): string | null {
+		if (busy || shortening || persistentRoomInFlight || !connected || turnLink !== "live" || lastEdit?.phase === "sent" || outgoing.length > 0) return null;
+		const newest = [...items].reverse().find((item) => item.kind === "user");
+		if (!newest || newest.kind !== "user" || newest.attachments?.length || !newest.text.trim() || newest.id === editBlockedId) return null;
+		return newest.id;
+	}
+
+	function startEdit(id: string): void {
+		const bubble = itemsRef.current.find((item) => item.id === id);
+		if (!bubble || bubble.kind !== "user") return;
+		setLastEdit({ phase: "editing", id, text: bubble.text });
+	}
+
+	/** Cancel: everything as it was. A sent edit is the server's to take or refuse. */
+	function cancelEdit(): void {
+		if (lastEditRef.current?.phase === "editing") setLastEdit(null);
+	}
+
+	/** Send the edited text in place of the newest message. Never with files: an edit is typed text only. */
+	function sendEdit(text: string): boolean {
+		const was = lastEditRef.current;
+		if (was?.phase !== "editing" || !text.trim()) return false;
+		return sendMessage(text, { attachments: [] }, { replaces: was.id, text: was.text });
+	}
+
+	/** The server took the edit: the replaced message and its answer leave the conversation, and the line says what was not undone. */
+	function applySentEdit(replaces: string, notUndone: { id: string; text: string } | null): void {
+		const sent = lastEditRef.current;
+		if (sent?.phase !== "sent" || sent.replaces !== replaces) return;
+		setLastEdit(null);
+		const gone = itemsRef.current.filter((item) => sent.oldIds.includes(item.id));
+		// The server's line, under the id its landing saves it with.
+		handBack(gone, (s) => {
+			if (!notUndone || s.some((item) => item.id === notUndone.id)) return s;
+			const at = s.findIndex((item) => item.id === sent.newId);
+			const line: ChatItem = { kind: "system", id: notUndone.id, text: notUndone.text, level: "info" };
+			return at < 0 ? [...s, line] : [...s.slice(0, at), line, ...s.slice(at)];
+		});
+	}
+
+	/** The server refused the edit (the room moved on meanwhile): the old message and answer stay, the edit goes back in the box. */
+	function refuseSentEdit(replaces: string): void {
+		const sent = lastEditRef.current;
+		if (sent?.phase !== "sent" || sent.replaces !== replaces) return;
+		setLastEdit(null);
+		setEditBlockedId(sent.replaces);
+		const bubble = itemsRef.current.find((item) => item.id === sent.newId);
+		handBack(bubble ? [bubble] : [], (s) => [...s, { kind: "system", id: nid(), text: EDIT_REFUSED_LINE, level: "info" }]);
+		// Beside whatever is already typed in the box.
+		putInBox(sent.text);
+		setBusy(false);
+		busyRef.current = false;
+	}
+
+	function sendReturnedPromptHandled(kept: boolean): void {
+		const ws = wsRef.current;
+		if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "returned_prompt_handled", kept }));
+	}
+
 	async function abortCurrentTurn(options: { leaveAfter?: boolean } = {}): Promise<void> {
 		const ws = wsRef.current;
 		if (!ws || ws.readyState !== WebSocket.OPEN) return;
 		setTurnCancelling(true);
 		turnCancellingRef.current = true;
-		const note = options.leaveAfter ? "Response interrupted because you left the room." : "Response interrupted by Stop.";
+		const note = options.leaveAfter ? "Response interrupted because you left the room." : STOPPED_LINE;
 		setTurnInterruptedNote(note);
 		turnInterruptedNoteRef.current = note;
 		ws.send(JSON.stringify({ type: "abort" }));
 		await waitForCurrentTurnToSettle(options.leaveAfter ? 1200 : 2500);
 	}
 
-	const send = (text: string): boolean => {
-		if (busyRef.current || turnCancellingRef.current) return false;
+	/** The message just sent, when it can go back into the box: typed text with no files, and the box empty. */
+	function sentMessageForEmptyBox(): Extract<ChatItem, { kind: "user" }> | null {
+		const sent = [...itemsRef.current].reverse().find((item): item is Extract<ChatItem, { kind: "user" }> => item.kind === "user");
+		if (!sent || sent.attachments?.length || !sent.text.trim()) return null;
+		return (textareaRef.current?.value ?? "").trim() ? null : sent;
+	}
+
+	const send = (text: string): boolean => sendFromBox(text, false);
+	const sendNowFromBox = (text: string): boolean => sendFromBox(text, true);
+
+	/** Whether the room answers now, as the send path must know it before the next render. */
+	function roomAnswering(): boolean {
+		return busyRef.current || turnCancellingRef.current || roomInFlightRef.current;
+	}
+
+	/** A leading "@Room question" naming another room, as the box routes it. */
+	function leadingConsult(text: string): { roomId: string; question: string } | null {
+		const chat = persistentChatRef.current;
+		if (!chat) return null;
+		const mention = resolveLeadingMention(text, mentionCandidatesRef.current, chat.agentId);
+		return mention?.kind === "consult" ? { roomId: mention.room.id, question: mention.question } : null;
+	}
+
+	/**
+	 * The box's message. With no answer running it goes as always. While the
+	 * room answers, Enter queues it and Cmd/Ctrl+Enter (`now`) sends it now,
+	 * stopping the answer at the words on screen; "@Room question" waits for the
+	 * answer's end and goes to that room as a consult.
+	 */
+	function sendFromBox(text: string, now: boolean): boolean {
+		const consult = leadingConsult(text);
+		if (!roomAnswering()) return consult ? requestConsult(consult.roomId, consult.question) : sendMessage(text, null);
+		if (queueRefusal(text)) return false;
+		return queueMessage(text, now, consult);
+	}
+
+	/** A consult the box asks for: while the room answers, it waits as a queued message. */
+	function requestConsult(targetRoomId: string, question: string): boolean {
+		if (!roomAnswering()) return handleConsultRequest(targetRoomId, question);
+		return queueMessage(`@${targetRoomId} ${question}`, false, { roomId: targetRoomId, question });
+	}
+
+	function queueMessage(text: string, now: boolean, consult: { roomId: string; question: string } | null): boolean {
+		const payload = text.trim();
+		const ws = wsRef.current;
+		// Not while the socket catches up: the ready's list of waiting messages would read one sent before it as held.
+		if (!payload || !ws || ws.readyState !== WebSocket.OPEN || catchingUpRef.current || closedByFullSaveRef.current || turnLinkRef.current !== "live") return false;
+		if (!fitsHeldLimits(outgoingRef.current, payload)) return false;
+		const id = nid();
+		const started = currentDraftStartedAt();
+		const declined = itemsRef.current.filter((item): item is Extract<ChatItem, { kind: "approval" }> => item.kind === "approval" && approvalAsking(item) && liveApprovalIdsRef.current.has(item.requestId) && messageDeclinesQuestion(item.openedAt, started));
+		if (consult) {
+			dispatchOutgoing({ type: "add", id, text: payload, state: "consult", consult });
+			// The consult goes to the other room, never to this one: the step it declines is told no here.
+			for (const item of declined) resolveApproval(item.requestId, false, confirmApprovalLabels(item).decline);
+			if (now) sendQueuedNow(id);
+			return true;
+		}
+		// While a cut for another message settles, this one waits for the new answer; while a Stop settles, it goes as the next one.
+		if (cutSettling(outgoingRef.current)) {
+			dispatchOutgoing({ type: "add", id, text: payload, state: "later" });
+			return true;
+		}
+		if (turnCancellingRef.current) {
+			dispatchOutgoing({ type: "add", id, text: payload, state: "next" });
+			return true;
+		}
+		dispatchOutgoing({ type: "add", id, text: payload, state: "routing" });
+		const shown = now ? freezeAnswer() : answerShownChars();
+		ws.send(JSON.stringify({ type: "steer", id, text: payload, shown, ...(declined.length ? { declines: true } : {}), ...(now ? { now: true } : {}) }));
+		return true;
+	}
+
+	/**
+	 * Why the box cannot queue its message while the room answers, or null: a
+	 * queued message carries words only, so files wait in the box for the
+	 * answer's end; and a message past the held limits
+	 * (held-message-limits.ts) is one the server could not keep.
+	 */
+	function queueRefusal(text: string): string | null {
+		if (stagedAttachmentsRef.current.length > 0 && !leadingConsult(text)) return QUEUE_REFUSED_FILES;
+		return fitsHeldLimits(outgoingRef.current, text.trim()) ? null : QUEUE_REFUSED_TOO_LONG;
+	}
+
+	/** How many characters of the message being written the page shows, as the server counts its text. */
+	function answerShownChars(): number {
+		const state = streamStateRef.current;
+		return isAssistantStreamActive(state) && state.itemId ? state.shownBefore.length + state.displayed.length : 0;
+	}
+
+	/** Stops the reveal where it is: what has arrived shows now, and nothing more until the server says where the message goes. */
+	function freezeAnswer(): number {
+		cancelStreamTick();
+		if (isAssistantStreamActive(streamStateRef.current)) dispatchStream({ type: "tick", now: performance.now(), mode: "drain" });
+		answerFreezeRef.current ??= { backlog: [], cut: false };
+		return answerShownChars();
+	}
+
+	/** The message waits after all: the answer goes on from where it stood. */
+	function thawAnswer(): void {
+		const freeze = answerFreezeRef.current;
+		if (!freeze || freeze.cut) return;
+		answerFreezeRef.current = null;
+		for (const action of freeze.backlog) dispatchStream(action);
+		scheduleStreamTick();
+	}
+
+	/** The answer stops for the person's messages: their Stop is not what ended it, and the line under it says so. */
+	function stopForNext(quiet: boolean): void {
+		answerFreezeRef.current = { backlog: [], cut: true };
+		cutQuietRef.current = quiet;
+		stopByPersonRef.current = false;
+		setTurnCancelling(true);
+		turnCancellingRef.current = true;
+		setTurnInterruptedNote(STOPPED_FOR_NEXT_LINE);
+		turnInterruptedNoteRef.current = STOPPED_FOR_NEXT_LINE;
+	}
+
+	/**
+	 * Send now under a queued bubble (`id`), or Cmd/Ctrl+Enter in an empty box
+	 * (the first queued message): the answer stops at the words on screen and
+	 * that message goes now, alone; a consult goes once the answer has
+	 * stopped. The others queued wait for the new answer. With no answer
+	 * running (a consult chosen first runs), it goes at once, on its own.
+	 */
+	function sendQueuedNow(id?: string): boolean {
+		const queued = queuedForAnswer(outgoingRef.current);
+		const target = id ? queued.find((message) => message.id === id) : queued[0];
+		if (!target) return false;
+		const ws = wsRef.current;
+		if (!roomAnswering()) {
+			const sent = target.consult ? handleConsultRequest(target.consult.roomId, target.consult.question) : sendMessage(target.text, { attachments: [] });
+			if (sent) dispatchOutgoing({ type: "gone", ids: [target.id] });
+			return true;
+		}
+		// While the socket catches up the answer on screen is not the replayed one yet: a cut there would cut it at nothing.
+		if (turnCancellingRef.current || catchingUpRef.current || !ws || ws.readyState !== WebSocket.OPEN) return true;
+		const shown = freezeAnswer();
+		stopForNext(shown === 0);
+		dispatchOutgoing({ type: "now", id: target.id });
+		ws.send(JSON.stringify({ type: "abort", shown, forNext: true }));
+		return true;
+	}
+
+	/** Where the server put a message sent while the room answered (steer-route.ts SteerRouted). */
+	function steerRouted(type: "steer_waiting" | "steer_cut" | "steer_refused", id: string, quiet: boolean): void {
+		const known = outgoingRef.current.some((message) => message.id === id);
+		if (type === "steer_waiting") {
+			thawAnswer();
+			if (known) dispatchOutgoing({ type: "waiting", id });
+			return;
+		}
+		if (type === "steer_cut") {
+			stopForNext(quiet);
+			// It goes alone; the server hands back the ones still waiting, and they wait for the new answer.
+			if (known) dispatchOutgoing({ type: "now", id });
+			return;
+		}
+		// No answer ran to take it: it goes as the next message, or back into the box after the person's Stop.
+		thawAnswer();
+		if (!known) return;
+		if (stopByPersonRef.current) handOutgoingBack([id]);
+		else dispatchOutgoing({ type: "next", ids: [id] });
+	}
+
+	/** The room took a queued message in: its bubble becomes the conversation's, where the room took it. */
+	function takeSteerIn(id: string, text: string): void {
+		if (!id) return;
+		dispatchOutgoing({ type: "gone", ids: [id] });
+		const itemId = bubbleIdOf(id);
+		const words = text.trim() || outgoingRef.current.find((message) => message.id === id)?.text || "";
+		if (!words) return;
+		const update = (s: ChatItem[]) => [...s.filter((item) => item.id !== itemId), { kind: "user" as const, id: itemId, text: words, ts: Date.now(), steered: true as const }];
+		itemsRef.current = update(itemsRef.current);
+		setItems(update);
+	}
+
+	/** The server handed back what the answer did not take. */
+	function steersReturned(messages: readonly ListedMessage[], held: boolean): void {
+		if (held) {
+			dispatchOutgoing({ type: "held", messages });
+			return;
+		}
+		const ids = messages.map((message) => message.id).filter((id) => outgoingRef.current.some((known) => known.id === id));
+		if (stopByPersonRef.current) handOutgoingBack(ids);
+		else dispatchOutgoing({ type: "next", ids });
+	}
+
+	/** Stop or Esc, or the server handing back after it: the queued messages go into the box, oldest first, above what is typed there. */
+	function handOutgoingBack(ids?: readonly string[]): void {
+		const all = handBackAll(outgoingRef.current);
+		const back = ids ? { ids: all.ids.filter((id) => ids.includes(id)), text: outgoingRef.current.filter((message) => ids.includes(message.id) && all.ids.includes(message.id)).map((message) => message.text).join("\n\n") } : all;
+		if (back.ids.length === 0) return;
+		dispatchOutgoing({ type: "gone", ids: back.ids });
+		putInBox(back.text);
+	}
+
+	function putInBox(text: string): void {
+		setComposerPrefill(boxWithHandBack(text, textareaRef.current?.value ?? ""));
+		setComposerResetNonce((value) => value + 1);
+	}
+
+	/**
+	 * Another window took the room: what only this one had queued waits as
+	 * held messages, which the server keeps (dispatchOutgoing). The ones the
+	 * running answer holds stay its own: it takes them in the other window.
+	 */
+	function holdPageOnlyMessages(): void {
+		const fromPage = queuedForAnswer(outgoingRef.current).filter((message) => message.state !== "waiting").map(({ id, text }) => ({ id, text }));
+		if (fromPage.length) dispatchOutgoing({ type: "held", messages: fromPage });
+	}
+
+	/**
+	 * A new connection says what the server has: the running answer's waiting
+	 * messages, the held ones and the ones the last turn took. What only this
+	 * page had and the server lacks goes to it again; a held one it no longer
+	 * has went in another window.
+	 */
+	function reconcileOutgoing(ws: WebSocket, ready: { waiting: readonly ListedMessage[]; held: readonly ListedMessage[]; taken: readonly string[] }, withdrawn: readonly string[]): void {
+		// Edits the server took out of the answer while their replies were lost with the old connection: their texts go back in the box, in the order sent, at once.
+		const edited = handBackAll(outgoingRef.current.filter((message) => withdrawn.includes(message.id) && editsAskedRef.current.has(message.id)));
+		editsAskedRef.current.clear();
+		if (edited.ids.length) putInBox(edited.text);
+		const fromPage = heldFromPage(outgoingRef.current, ready);
+		if (fromPage.length && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "hold", messages: fromPage }));
+		dispatchOutgoing({ type: "reconcile", ...ready });
+	}
+
+	/**
+	 * Edit or Remove on a message queued for the answer. What only this page
+	 * holds goes at once; one in the running answer's queue goes once the
+	 * server took it out (steer_withdrawn), and stays if the room is taking it
+	 * in already.
+	 */
+	function takeBackQueued(message: OutgoingMessage, edit: boolean): void {
+		if (message.state === "later" || message.state === "consult") {
+			dispatchOutgoing({ type: "gone", ids: [message.id] });
+			if (edit) putInBox(message.text);
+			return;
+		}
+		const ws = wsRef.current;
+		if (message.state !== "waiting" || !ws || ws.readyState !== WebSocket.OPEN) return;
+		ws.send(JSON.stringify({ type: "steer_withdraw", id: message.id, edit }));
+		if (edit) editsAskedRef.current.set(message.id, message.text);
+	}
+
+	/** The server took a message out of the running answer's queue: it goes, also when a Send now since moved it on. */
+	function steerWithdrawn(id: string, edit: boolean): void {
+		editsAskedRef.current.delete(id);
+		const message = outgoingRef.current.find((candidate) => candidate.id === id && candidate.state !== "held");
+		if (!message) return;
+		dispatchOutgoing({ type: "gone", ids: [id] });
+		if (edit) putInBox(message.text);
+	}
+
+	/** A queued bubble's buttons. A held message goes on its own; Edit puts it back in the box. */
+	const queuedActions = useMemo(() => ({
+		onSendNow: (id: string) => queuedActionRef.current("send", id),
+		onEdit: (id: string) => queuedActionRef.current("edit", id),
+		onRemove: (id: string) => queuedActionRef.current("remove", id),
+	}), []);
+	const queuedActionRef = useRef<(action: "send" | "edit" | "remove", id: string) => void>(() => {});
+	queuedActionRef.current = (action, id) => {
+		const message = outgoingRef.current.find((candidate) => candidate.id === id);
+		const ws = wsRef.current;
+		if (!message) return;
+		if (message.state !== "held") {
+			if (action === "send") sendQueuedNow(id);
+			else takeBackQueued(message, action === "edit");
+			textareaRef.current?.focus();
+			return;
+		}
+		// The server lets a held one go only over an open connection (dispatchOutgoing), and the page sends it once caught up.
+		if (!ws || ws.readyState !== WebSocket.OPEN || (action === "send" && catchingUpRef.current)) return;
+		dispatchOutgoing({ type: "gone", ids: [id] });
+		if (action === "send") {
+			// On its own, never the box's message: what is typed there, its files and its hand-offs stay.
+			const consult = leadingConsult(message.text);
+			const sent = !roomAnswering()
+				? consult ? handleConsultRequest(consult.roomId, consult.question) : sendMessage(message.text, { attachments: [] })
+				: queueMessage(message.text, true, consult);
+			// Not taken (the room cannot send now): it stays held.
+			if (!sent) dispatchOutgoing({ type: "held", messages: [{ id, text: message.text }] });
+		} else if (action === "edit") putInBox(message.text);
+		textareaRef.current?.focus();
+	};
+	// Whether the room takes a message now: no answer running or stopping, the conversation open, no model change waiting, the link live.
+	function roomTakesMessageNow(): boolean {
+		return !(busyRef.current || turnCancellingRef.current || closedByFullSaveRef.current || modelChangePendingFor(persistentChatRef.current)) && wsRef.current?.readyState === WebSocket.OPEN;
+	}
+
+	// `again`: a message a failure line sends again, with the files it carried, leaving the box, its files and any queued transfer as they are.
+	// Null for the box's message, which takes all three, after which the box empties.
+	function sendMessage(text: string, again: { attachments: ReadonlyArray<{ name: string; bytes: number; extension: string }> } | null, edit?: { replaces: string; text: string }): boolean {
+		if (!roomTakesMessageNow()) return false;
+		const fromBox = again === null;
 		const payload = text.trim();
 		// Ready staged attachments ride THIS message (files UI slice): their
 		// notes join the wire text, their chips join the bubble. A message may
 		// be attachments-only — the note alone is then the prompt.
-		const readyAttachments = stagedAttachmentsRef.current.filter((entry) => entry.status === "ready" && entry.name);
-		if (!payload && readyAttachments.length === 0) return false;
-		if (stagedAttachmentsRef.current.some((entry) => entry.status === "uploading")) return false;
+		const readyAttachments = fromBox ? stagedAttachmentsRef.current.filter((entry) => entry.status === "ready" && entry.name) : [];
+		// A file sent again, or back in the box after a refusal, is still in the room's Attachments: its note is said again from what the room lists.
+		const listedPages = (name: string) => roomShelfFiles.find((shelf) => shelf.name === name)?.pages ?? undefined;
+		const carried = fromBox
+			? readyAttachments.map((entry) => ({ name: entry.name, bytes: entry.bytes, extension: entry.extension, pages: entry.pages ?? listedPages(entry.name), parseNote: entry.parseNote }))
+			: again.attachments.map((file) => ({ ...file, pages: listedPages(file.name), parseNote: undefined }));
+		if (!payload && carried.length === 0) return false;
+		if (fromBox && stagedAttachmentsRef.current.some((entry) => entry.status === "uploading")) return false;
 		const ws = wsRef.current;
-		if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+		if (!ws) return false;
 		// Consult MR-5 (§2): any queued handoff blocks ride ahead of the user's text
 		// on the wire (entering the session JSONL, where a checkpoint can compress
 		// them), then the queue clears. The chat bubble shows only the user's text.
-		const pending = pendingHandoffsRef.current;
+		const pending = fromBox ? pendingHandoffsRef.current : [];
 		// Attachment notes (files UI slice): the pairing "this file arrives with
 		// this message" enters the transcript as a note on the WIRE only — the
 		// bubble shows the chip instead. Zero file content rides along; the room
 		// reads on demand via its shelf tools.
-		const attachmentNotes = readyAttachments.map((entry) => {
+		const attachmentNotes = carried.map((entry) => {
 			const measure = typeof entry.pages === "number" ? `${entry.pages} page${entry.pages === 1 ? "" : "s"}` : entry.parseNote || entry.extension.replace(/^\./, "") || "file";
-			return `[FILE ATTACHED: ${entry.name} · ${measure} · now in this room's Files; read it with read_file when relevant]`;
+			return `[FILE ATTACHED: ${entry.name} · ${measure} · now in this room's Attachments; read it with read_file when relevant]`;
 		});
 		const wireBody = attachmentNotes.length > 0 ? [attachmentNotes.join("\n"), payload].filter(Boolean).join("\n\n") : payload;
 		const wireText = composeOutgoingPromptWithHandoffs(pending, wireBody);
 		if (pending.length) {
 			applyPendingHandoffs([], new Set());
 			// The block is consumed exactly once: the SERVER clears the persisted
-			// queue atomically when it receives this prompt (index.ts prompt handler),
+			// queue atomically when it receives this prompt (room-socket.ts prompt handler),
 			// so a crash or reordered save can't re-queue it. Cancel any in-flight
 			// debounced persist here too, so a stale save can't re-write the old queue
 			// before the setItems below reschedules an empty-queue persist.
 			if (persistTimerRef.current) { window.clearTimeout(persistTimerRef.current); persistTimerRef.current = null; }
 		}
+		// The bubble's id keys the turn: the server names the turn's items from it, and lands the bubble as shown.
+		const promptId = nid();
+		const shownFiles = carried.map((entry) => ({ name: entry.name, bytes: entry.bytes, extension: entry.extension }));
 		setItems((s) => [...s, {
 			kind: "user",
-			id: nid(),
+			id: promptId,
 			text: payload,
 			ts: Date.now(),
-			...(readyAttachments.length > 0 ? { attachments: readyAttachments.map((entry) => ({ name: entry.name, bytes: entry.bytes, extension: entry.extension })) } : {}),
+			...(shownFiles.length > 0 ? { attachments: shownFiles } : {}),
 		}]);
 		if (readyAttachments.length > 0) {
 			// The bubble shows the shelf copy from here on; the local previews are done.
 			releaseStaged(stagedAttachmentsRef.current);
 			setStagedAttachments([]);
 		}
+		// A new message: a Try again's wait and the last turn's failure line belong to the turns before it.
+		continuedLineRef.current = null;
+		streamErrorLineIdRef.current = null;
 		// No effort on the wire here. The level this client holds came from the
 		// server already CLAMPED to the locked model, so echoing it back would
 		// overwrite the room's raw stored preference with a clamped one and
@@ -5767,21 +4449,103 @@ export function App() {
 		// is sticky on its own and applies the room's level at bind and before
 		// every turn; the composer's only job is to say when the user CHOOSES,
 		// which the effort frame does.
-		ws.send(JSON.stringify({ type: "prompt", text: wireText }));
-		setTurnSignedOutProvider(null);
+		ws.send(JSON.stringify({ type: "prompt", text: wireText, id: promptId, shown: { text: payload, files: shownFiles }, ...(edit ? { edit } : {}) }));
+		turnKeyRef.current = promptId;
+		if (edit) {
+			// Dimmed until the server takes the edit: the bubble and everything after it, up to this new one.
+			const at = itemsRef.current.findIndex((item) => item.id === edit.replaces);
+			const oldIds = at < 0 ? [] : itemsRef.current.slice(at).map((item) => item.id).filter((id) => id !== promptId);
+			setLastEdit({ phase: "sent", replaces: edit.replaces, oldIds, newId: promptId, text: payload });
+		}
+		if (fromBox) {
+			setComposerPrefill("");
+			setComposerResetNonce((value) => value + 1);
+		}
+		startTurnOnPage();
+		return true;
+	}
+
+	/** The page's side of a turn the server was just asked for. */
+	/**
+	 * A new answer has started in this conversation, so the server has let the
+	 * last one go: a read of the room taken while that one stopped still says
+	 * it is stopping, and would keep Stop and Esc dead until the next read.
+	 */
+	function forgetStoppedTurnRead(): void {
+		const chat = persistentChatRef.current;
+		if (!chat) return;
+		const fresh = (status: PersistentAgentStatus): PersistentAgentStatus => (status.id === chat.agentId && status.activeThread?.threadId === chat.conversationId && status.activeThread.cancelling ? { ...status, activeThread: { ...status.activeThread, cancelling: false, working: true } } : status);
+		setPersistentAgentStatuses((statuses) => statuses.map(fresh));
+		setPersistentAgentStatus((status) => (status ? fresh(status) : status));
+	}
+
+	function startTurnOnPage(): void {
+		forgetStoppedTurnRead();
+		setTurnSignedOut(null);
+		// The previous answer may still be appearing: its rest goes on screen
+		// now, so the new message sits under the whole answer.
+		flushAssistantStream();
 		dispatchStream({ type: "new_turn", now: performance.now() });
 		outputLimitNoticeShownRef.current = false;
 		retrievalActivityIdRef.current = null;
-		setComposerPrefill("");
-		setComposerResetNonce((value) => value + 1);
+		turnCutByStopRef.current = false;
+		stopByPersonRef.current = false;
+		cutQuietRef.current = false;
 		setTurnInterruptedNote(null);
 		turnInterruptedNoteRef.current = null;
 		setTurnCancelling(false);
 		turnCancellingRef.current = false;
 		setBusy(true);
 		busyRef.current = true;
+	}
+
+	/** Try again under a failure whose message stayed above: the model answers that message again, which is not sent a second time, and the box is left alone. */
+	function continueAfterFailure(line: { id: string }): boolean {
+		const ws = wsRef.current;
+		if (!roomTakesMessageNow() || !ws) return false;
+		continuedLineRef.current = line.id;
+		// A fresh id keys the continued turn's items; it makes no question.
+		const turnKey = nid();
+		ws.send(JSON.stringify({ type: "continue", id: turnKey }));
+		turnKeyRef.current = turnKey;
+		startTurnOnPage();
 		return true;
-	};
+	}
+
+	/**
+	 * The message above a line, sent again whole with its files: for a line saved before Try again continued, or a conversation that moved on from the failure.
+	 * One that cannot go whole (a file gone from the room's Attachments, a transfer that rode with it) goes back into an empty box, and its line no longer says it is above;
+	 * with a draft in the box, or no words to give back, its line says it cannot be sent again as it was. Either way the line changes.
+	 */
+	function sendAgainFromLine(lineId: string): void {
+		const again = messageSentAgain(itemsRef.current, lineId, attachmentAccessRef.current.existingNames);
+		if (again && sendMessage(again.text, again)) return;
+		const at = itemsRef.current.findIndex((item) => item.id === lineId);
+		const above = itemsRef.current.slice(0, Math.max(at, 0)).reverse().find((item): item is Extract<ChatItem, { kind: "user" }> => item.kind === "user");
+		const back = !!above?.text.trim() && !(textareaRef.current?.value ?? "").trim();
+		setItems((s) => s.map((item) => (item.id !== lineId || item.kind !== "system" ? item : back ? lineWithMessage(item, "back") : lineWithMessage({ ...item, parts: { cause: item.parts?.cause ?? item.text, wayOn: NOT_SENT_AGAIN } }, "above"))));
+		if (back && above) {
+			setComposerPrefill(above.text);
+			setComposerResetNonce((value) => value + 1);
+		}
+		textareaRef.current?.focus();
+	}
+
+	// Try again on the newest failure line sends what is in the box, as Send does;
+	// under a message that stayed above, the model answers it again, and the box is left alone.
+	// Under a stop by an away limit, the message above goes again whole: the steps the turn finished stay in the conversation. Once it
+	// went back into the box, the box is sent; while the room cannot take a message, the line stays as it is.
+	function tryAgainAfterFailure(line: { id: string; messageAbove?: true; messageBack?: true; failure?: FailureCause }): void {
+		if (isAwayLimitStop(line.failure) && !line.messageBack) {
+			if (roomTakesMessageNow()) sendAgainFromLine(line.id);
+			else textareaRef.current?.focus();
+			return;
+		}
+		if (line.messageAbove) {
+			if (continueAfterFailure(line)) return;
+		} else if (send(textareaRef.current?.value ?? "")) return;
+		textareaRef.current?.focus();
+	}
 
 	// The composer @-mention popover (Consult MR-3) resolves a leading mention of
 	// a known room and hands off here instead of the normal send. MR-4 wires it to
@@ -5805,7 +4569,7 @@ export function App() {
 			targetRoomId,
 			question,
 			requestedAt: new Date().toISOString(),
-			targetDisplayName: targetStatus?.displayName ?? targetRoomId,
+			targetDisplayName: shownRoomName(targetStatus?.displayName) || targetRoomId,
 			asOfCheckpointAt: targetStatus?.memoryStatus?.lastCheckpointAt ?? null,
 		});
 		// Accepted iff the reducer adopted this consult (a rejected second consult
@@ -5820,7 +4584,7 @@ export function App() {
 	// carries the prior exchanges. The as-of is re-read from the room's current
 	// status (a fresh point-in-time read, §8.5), not pinned to the first ask.
 	function handleConsultFollowUp(question: string): boolean {
-		// Socket guard (hardening 2026-07-11, fresh-eyes MAJOR): without this, a
+		// Socket guard: without this, a
 		// follow-up during a reconnect blip advanced the reducer to `streaming`
 		// with no frame sent — a permanently hung card whose completed (and still
 		// transferable) answer became unreachable. Mirror handleConsultRequest:
@@ -5906,25 +4670,19 @@ export function App() {
 		setItems((s) => [...s, item]);
 		const nextIds = new Set(pendingConsultItemIdsRef.current);
 		nextIds.add(itemId);
+		handoffCardByEntryRef.current.set(block, itemId);
 		applyPendingHandoffs([...pendingHandoffsRef.current, block], nextIds);
 		dispatchConsult({ type: "dismiss" });
 	}
 
-	// Visuals V6's card-transfer path retired with the done-card (status grammar,
-	// 2026-07-18), and the viewer-footer transfer door retired with the files UI
-	// slice: the room has eyes on its shelf now (manifest + read tools), so no
-	// manual re-injection remains — completion announcement goes automatic with
-	// the revise slice (slimmed handoff on the pending queue).
-
 	// Assets panel (rung 3): open a ledger row in the right-pane viewer — the
 	// reconstituted done-card. The live running row opens the run view instead;
 	// other rows without artifacts are not clickable.
-	function openAssetRow(row: AssetRowView) {
+	function openAssetRow(row: AssetRowView, backTo?: AttachmentsView) {
 		// Clicking the already-selected row closes the pane (same as the header
 		// X); a running task keeps running server-side either way.
 		if (rightPane && (rightPane.kind === "artifactViewer" || rightPane.kind === "taskRun") && rightPane.taskId === row.taskId) {
-			setArtifactMaximized(false);
-			setRightPane(null);
+			closePaneFile();
 			return;
 		}
 		if (row.running) {
@@ -5936,16 +4694,28 @@ export function App() {
 		setArtifactMaximized(false);
 		// User-added rows (files UI slice) have no ledger record to stamp.
 		if (!row.userFileName) markAssetRowViewed(row.taskId);
-		// A refusal notice belongs to the task it answered — never carry it
-		// into another row's footer.
-		setTaskIterateNotice(null);
 		setRightPane({
 			kind: "artifactViewer",
 			taskId: row.taskId,
 			templateLabel: row.userFileName ? "file" : assetTemplateShortName(row.templateId),
 			artifact: { relativePath: row.artifacts[0].relativePath, extension: row.artifacts[0].extension },
 			asset: row,
+			...(backTo ? { backTo } : {}),
 		});
+	}
+
+	// The file on show leaves the pane: back to the Attachments it opened from, if any.
+	function closePaneFile() {
+		const pane = rightPaneRef.current;
+		setArtifactMaximized(false);
+		setRightPane(pane?.kind === "artifactViewer" && pane.backTo ? { kind: "attachments", view: pane.backTo } : null);
+	}
+
+	function toggleAttachments() {
+		closeSidebarOnPhone();
+		setArtifactMaximized(false);
+		attachmentsScrollRef.current = 0;
+		setRightPane(rightPane?.kind === "attachments" ? null : { kind: "attachments", view: "panel" });
 	}
 
 	// Per-task delete (contract §4): orphan rows only; the server re-verifies
@@ -5961,10 +4731,7 @@ export function App() {
 				return;
 			}
 			setExportNotice({ kind: "success", text: "Deleted." });
-			if (rightPane?.kind === "artifactViewer" && rightPane.taskId === row.taskId) {
-				setArtifactMaximized(false);
-				setRightPane(null);
-			}
+			if (rightPane?.kind === "artifactViewer" && rightPane.taskId === row.taskId) closePaneFile();
 			void refreshAssetRows();
 			void refreshRoomFiles();
 		} catch {
@@ -5972,7 +4739,7 @@ export function App() {
 		}
 	}
 
-	// Remove from list (user control, 2026-07-20): a list operation only — the
+	// Remove from list: a list operation only — the
 	// ledger row gets a removedAt stamp and the panel hides it; files are kept.
 	// No dialog: nothing is destroyed, and the toast's Undo clears the stamp.
 	async function removeAssetRow(row: AssetRowView) {
@@ -5986,10 +4753,7 @@ export function App() {
 				return;
 			}
 			setRemoveNotice({ taskId: row.taskId });
-			if ((rightPane?.kind === "artifactViewer" || rightPane?.kind === "taskRun") && rightPane.taskId === row.taskId) {
-				setArtifactMaximized(false);
-				setRightPane(null);
-			}
+			if ((rightPane?.kind === "artifactViewer" || rightPane?.kind === "taskRun") && rightPane.taskId === row.taskId) closePaneFile();
 			void refreshAssetRows();
 		} catch {
 			setExportNotice({ kind: "error", text: "That didn't work — the list is unchanged." });
@@ -6008,7 +4772,7 @@ export function App() {
 		void refreshAssetRows();
 	}
 
-	// Unified delete (files-management slice): the Files row ✕ on file rows.
+	// Unified delete: Delete on an Attachments card.
 	// Stage opens the undo window (the file leaves shelf, panel and manifest at
 	// once); the toast's expiry commits (bytes + reading cache go); Undo brings
 	// it back. Room-made files and files the room read this session get the
@@ -6035,10 +4799,7 @@ export function App() {
 		releaseStaged(stagedAttachmentsRef.current.filter((entry) => entry.name === fileName));
 		setStagedAttachments((s) => s.filter((entry) => entry.name !== fileName));
 		const pane = rightPaneRef.current;
-		if (pane?.kind === "artifactViewer" && pane.artifact?.relativePath === `files/${fileName}`) {
-			setArtifactMaximized(false);
-			setRightPane(null);
-		}
+		if (pane?.kind === "artifactViewer" && pane.artifact?.relativePath === `files/${fileName}`) closePaneFile();
 		void refreshRoomFiles();
 		void refreshAssetRows();
 	}
@@ -6089,10 +4850,7 @@ export function App() {
 				setStagedAttachments((s) => s.map((entry) => (entry.name === fileName ? { ...entry, name: result.name, extension: result.name.includes(".") ? result.name.slice(result.name.lastIndexOf(".")).toLowerCase() : "" } : entry)));
 			}
 			const pane = rightPaneRef.current;
-			if (pane?.kind === "artifactViewer" && pane.artifact?.relativePath === `files/${fileName}`) {
-				setArtifactMaximized(false);
-				setRightPane(null);
-			}
+			if (pane?.kind === "artifactViewer" && pane.artifact?.relativePath === `files/${fileName}`) closePaneFile();
 		} catch (e) {
 			setExportNotice({ kind: "error", text: (e as Error).message || "The file could not be renamed." });
 		}
@@ -6133,19 +4891,9 @@ export function App() {
 		}
 	}
 
-	// Panel iterate: the same user-authored one-click frame as the done card —
-	// the server derives template + read scope from its own records (D7; the
-	// ledger fallback covers rows older than the reseed window).
-	function submitAssetIterate(taskId: string, brief: string): boolean {
-		const payload = brief.trim();
-		const ws = wsRef.current;
-		if (!payload || !ws || ws.readyState !== WebSocket.OPEN) return false;
-		setTaskIteratePending(true);
-		setTaskIterateNotice(null);
-		ws.send(JSON.stringify({ type: "task_iterate", taskId, brief: payload }));
-		return true;
-	}
-
+	// Remember runs on the server as a job: this starts it and follows it to
+	// its end. A closed tab or a reload no longer stops it; Cancel does, from
+	// any tab, and a second start on the same conversation attaches to it.
 	async function requestCheckpointProposal(targetChat: NonNullable<PersistentChatConfig>, density: CheckpointDensity, rememberText: string, signal?: AbortSignal): Promise<CheckpointProposalResponse> {
 		// A paced tail may still be draining after busy cleared — the proposal
 		// must see the complete answer.
@@ -6158,6 +4906,8 @@ export function App() {
 				if (item.kind === "user" || item.kind === "assistant" || item.kind === "system") return { kind: item.kind, id: item.id, text: item.text };
 				return { kind: "tool", id: item.id, name: item.name, status: item.status };
 			}) : undefined;
+		const kept = rememberContinueOnRef.current;
+		const continueOn = kept && kept.agentId === targetChat.agentId && kept.conversationId === targetChat.conversationId ? { provider: kept.lock.provider, model: kept.lock.model } : null;
 		const res = await apiFetch(`/api/persistent-agents/${encodeURIComponent(targetChat.agentId)}/checkpoint/propose`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
@@ -6166,23 +4916,88 @@ export function App() {
 				conversationId: targetChat.conversationId,
 				density,
 				rememberText,
+				background: true,
 				...(transcriptItems ? { items: transcriptItems } : {}),
+				...(continueOn ? { continueOn } : {}),
 			}),
 		});
-		if (!res.ok) {
-			let message = `Failed to generate proposal (${res.status})`;
+		if (!res.ok) throw await rememberRequestError(res);
+		return await followCheckpointJob(targetChat, signal);
+	}
+
+	/**
+	 * Polls the Remember job on this conversation once a second ("part 2 of
+	 * 4", the wait line) until it ends, then reads its proposal or its notice.
+	 * Two answers of none past the first seconds mean the server restarted and ended the
+	 * job; the parts it had read are kept, and the dialog says how many.
+	 */
+	async function followCheckpointJob(targetChat: NonNullable<PersistentChatConfig>, signal?: AbortSignal): Promise<CheckpointProposalResponse> {
+		const base = `/api/persistent-agents/${encodeURIComponent(targetChat.agentId)}/checkpoint`;
+		const query = `conversationId=${encodeURIComponent(targetChat.conversationId)}`;
+		const startedAt = Date.now();
+		let missing = 0;
+		const stopIfCancelled = () => {
+			if (!signal?.aborted) return;
+			throw signal.reason instanceof Error ? signal.reason : Object.assign(new Error("Remember was cancelled."), { name: "AbortError" });
+		};
+		for (;;) {
+			stopIfCancelled();
 			try {
-				const body = await res.json();
-				if (body?.error) message = String(body.error);
-			} catch {}
-			throw new Error(message);
+				const res = await apiFetch(`${base}/progress?${query}`, signal ? { signal } : {});
+				const progress = res.ok ? await res.json() as { state?: string; read?: number; of?: number; wait?: ModelWait; continueOn?: { provider: string; model: string } } : null;
+				if (progress?.state === "none") {
+					if (Date.now() - startedAt >= 3_000 && ++missing >= 2) throw new Error(rememberRestartSentence());
+				} else if (progress) {
+					missing = 0;
+					if (progress.state === "restarted") throw new Error(rememberRestartSentence());
+					// A job followed after a reload carries its switch from the start, so a failed read run again keeps it.
+					if (progress.continueOn) rememberContinueOnRef.current = { agentId: targetChat.agentId, conversationId: targetChat.conversationId, lock: { provider: progress.continueOn.provider, model: progress.continueOn.model } };
+					if (progress.state !== "reading") break;
+					if (typeof progress.read === "number" && typeof progress.of === "number") {
+						setCheckpointProgress({ read: progress.read, of: progress.of, ...(progress.wait ? { wait: progress.wait } : {}) });
+					}
+				}
+			} catch (error) {
+				stopIfCancelled();
+				if (error instanceof Error && !(error instanceof TypeError)) throw error;
+			}
+			await new Promise((resolve) => window.setTimeout(resolve, 1_000));
 		}
+		stopIfCancelled();
+		const res = await apiFetch(`${base}/result?${query}`, signal ? { signal } : {});
+		if (!res.ok) throw await rememberRequestError(res);
 		const proposal = await res.json() as CheckpointProposalResponse;
 		const currentChat = persistentChatRef.current;
-		if (!currentChat || currentChat.agentId !== targetChat.agentId || currentChat.conversationId !== targetChat.conversationId) throw new Error("The room changed. Please reopen Remember.");
-		if (proposal.agentId !== targetChat.agentId) throw new Error("This memory proposal does not match the current room.");
-		if (proposal.conversationId !== targetChat.conversationId || proposal.process?.parentConversationId !== targetChat.conversationId) throw new Error("This memory proposal does not match the current conversation.");
+		if (!currentChat || currentChat.agentId !== targetChat.agentId || currentChat.conversationId !== targetChat.conversationId || proposal.agentId !== targetChat.agentId || proposal.conversationId !== targetChat.conversationId || proposal.process?.parentConversationId !== targetChat.conversationId) throw new Error(REMEMBER_OTHER_CONVERSATION_OPEN);
+		// A job read back after a reload carries its switch: Generate again keeps asking for it.
+		if (proposal.continueOn) rememberContinueOnRef.current = { agentId: targetChat.agentId, conversationId: targetChat.conversationId, lock: { provider: proposal.continueOn.provider, model: proposal.continueOn.model } };
 		return proposal;
+	}
+
+	async function rememberRequestError(res: Response): Promise<ApiRequestError> {
+		let message = "Remember stopped unexpectedly. Nothing was saved. Generate again.";
+		let code: string | undefined;
+		let details: unknown;
+		try {
+			const body = await res.json();
+			if (body?.error) message = String(body.error);
+			if (typeof body?.code === "string") code = body.code;
+			if (body?.details !== undefined) details = body.details;
+		} catch {}
+		return new ApiRequestError(message, res.status, code, details);
+	}
+
+	/** A cancel returns to the dialog as it was; a model that cannot be reached gets the one notice; any other failure says why. */
+	function showCheckpointProposalFailure(e: unknown, cancel: AbortController) {
+		if (e instanceof ApiRequestError && e.code === "conversation_moved") {
+			setCheckpointPreviewOpen(false);
+			setRoomMovedOn(true);
+			return;
+		}
+		const notice = cancel.signal.aborted ? null : modelNoticeFromError(e);
+		if (notice) setCheckpointProposalNotice(notice);
+		else if (!cancel.signal.aborted) setCheckpointProposalError(formatRememberError((e as Error).message));
+		else if (cancel.signal.reason instanceof Error && cancel.signal.reason.name !== "AbortError") setCheckpointProposalError(cancel.signal.reason.message);
 	}
 
 	async function generateCheckpointProposal() {
@@ -6192,8 +5007,14 @@ export function App() {
 			setCheckpointProposalError("Stop or wait for the current response before remembering.");
 			return;
 		}
+		if (checkpointProposal && checkpointEdits?.key === checkpointEditsKey(checkpointProposal) && !sameCheckpointFields(checkpointEdits.fields, checkpointFieldsOf(checkpointProposal))) {
+			const ok = await confirmDialog({ title: "Generate again replaces your edits.", confirmLabel: "Generate again" });
+			if (!ok) return;
+		}
+		setCheckpointEdits(null);
 		setCheckpointProposalLoading(true);
 		setCheckpointProposalError(null);
+		setCheckpointProposalNotice(null);
 		setCheckpointApprovalError(null);
 		setCheckpointApprovalResult(null);
 		setCheckpointProposal(null);
@@ -6203,55 +5024,107 @@ export function App() {
 			const proposal = await requestCheckpointProposal(targetChat, checkpointDensity, checkpointRememberText, cancel.signal);
 			setCheckpointProposal(proposal);
 		} catch (e) {
-			// A cancel returns to the dialog as it was; any other failure says why.
-			if (!cancel.signal.aborted) setCheckpointProposalError(formatRememberError((e as Error).message));
-			else if (cancel.signal.reason instanceof Error && cancel.signal.reason.name !== "AbortError") setCheckpointProposalError(cancel.signal.reason.message);
+			showCheckpointProposalFailure(e, cancel);
 		} finally {
 			if (checkpointProposalAbortRef.current === cancel) checkpointProposalAbortRef.current = null;
 			setCheckpointProposalLoading(false);
 		}
 	}
 
-	function cancelCheckpointProposal(reason?: Error) {
-		checkpointProposalAbortRef.current?.abort(reason);
+	/** Cancel, from this tab or any other: the job on the server stops; the parts it read stay kept. */
+	function cancelCheckpointProposal() {
+		checkpointProposalAbortRef.current?.abort();
+		// The server drops the switch with the job: Remember run again is Remember alone.
+		rememberContinueOnRef.current = null;
+		const chat = persistentChatRef.current;
+		if (chat) void apiFetch(`/api/persistent-agents/${encodeURIComponent(chat.agentId)}/checkpoint/cancel`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: chat.conversationId }) }).catch(() => {});
 	}
 
-	// "Part 2 of 4" while a proposal generates. A 404 means the server has no
-	// Remember running for this conversation: normal for a moment at the start
-	// and the end of a request, but twice in a row past the first seconds it
-	// means the server restarted and took the Remember with it, and the dialog
-	// says so instead of spinning forever.
-	useEffect(() => {
-		const targetChat = persistentChat;
-		if (!checkpointProposalLoading || !targetChat) {
-			setCheckpointProgress(null);
+	/** Discard: the kept proposal and parts go too, so a reopened dialog starts fresh. */
+	function discardCheckpointProposalOnServer() {
+		const chat = persistentChatRef.current;
+		if (chat) void apiFetch(`/api/persistent-agents/${encodeURIComponent(chat.agentId)}/checkpoint/cancel`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: chat.conversationId, discard: true }) }).catch(() => {});
+	}
+
+	/**
+	 * A Remember this conversation already has on the server: one still
+	 * reading (started in another tab, or before a reload) is followed in the
+	 * dialog, and a finished one's entry is shown; entering the room opens the
+	 * dialog for either, so an entry read while the tab was closed waits there.
+	 */
+	async function resumeCheckpointJob(openOnEntry: boolean) {
+		const targetChat = persistentChatRef.current;
+		if (!targetChat || checkpointProposalAbortRef.current || checkpointProposal) return;
+		let state: string | undefined;
+		let continueOnFailed = false;
+		try {
+			const res = await apiFetch(`/api/persistent-agents/${encodeURIComponent(targetChat.agentId)}/checkpoint/progress?conversationId=${encodeURIComponent(targetChat.conversationId)}`);
+			if (!res.ok) return;
+			const progress = (await res.json()) as { state?: string; continueOn?: { provider: string; model: string } };
+			state = progress.state;
+			// A job read after a reload carries its switch, whatever its state: Remember run again keeps asking for it.
+			if (progress.continueOn) rememberContinueOnRef.current = { agentId: targetChat.agentId, conversationId: targetChat.conversationId, lock: { provider: progress.continueOn.provider, model: progress.continueOn.model } };
+			continueOnFailed = state === "failed" && Boolean(progress.continueOn);
+		} catch {
 			return;
 		}
-		let stopped = false;
-		let missing = 0;
-		const startedAt = Date.now();
-		const url = `/api/persistent-agents/${encodeURIComponent(targetChat.agentId)}/checkpoint/progress?conversationId=${encodeURIComponent(targetChat.conversationId)}`;
-		const timer = window.setInterval(async () => {
-			try {
-				const res = await apiFetch(url);
-				if (stopped) return;
-				if (res.ok) {
-					missing = 0;
-					setCheckpointProgress(await res.json() as { read: number; of: number });
-					return;
-				}
-				if (res.status !== 404 || Date.now() - startedAt < 3_000) return;
-				missing += 1;
-				if (missing >= 2) cancelCheckpointProposal(new Error("Remember stopped before it finished, because the app restarted while it was reading. Nothing was saved. Generate the proposal again."));
-			} catch {}
-		}, 1_000);
-		return () => {
-			stopped = true;
-			window.clearInterval(timer);
-		};
-	}, [checkpointProposalLoading, persistentChat?.agentId, persistentChat?.conversationId]);
+		// The app restarted while Remember read this conversation: the dialog says so, with Generate again and Discard.
+		if (state === "restarted") {
+			setCheckpointPreviewOpen(true);
+			setCheckpointProposalError(rememberRestartSentence());
+			return;
+		}
+		// A Remember and switch that failed meanwhile opens too, with its reason and Generate again, so the switch is not lost unseen.
+		if (state !== "reading" && state !== "done" && !continueOnFailed) return;
+		if (!openOnEntry && !checkpointPreviewOpen) return;
+		if (checkpointProposalAbortRef.current) return;
+		setCheckpointPreviewOpen(true);
+		setCheckpointProposalLoading(true);
+		setCheckpointProposalError(null);
+		setCheckpointProposalNotice(null);
+		const cancel = new AbortController();
+		checkpointProposalAbortRef.current = cancel;
+		try {
+			setCheckpointProposal(await followCheckpointJob(targetChat, cancel.signal));
+		} catch (e) {
+			// A finished entry the conversation has moved past says so (the reply's own sentence, with Generate again and Discard).
+			if (e instanceof ApiRequestError && e.status === 404) setCheckpointProposalError(formatRememberError(e.message));
+			else showCheckpointProposalFailure(e, cancel);
+		} finally {
+			if (checkpointProposalAbortRef.current === cancel) checkpointProposalAbortRef.current = null;
+			setCheckpointProposalLoading(false);
+		}
+	}
+
+	useEffect(() => {
+		if (!checkpointProposalLoading) setCheckpointProgress(null);
+	}, [checkpointProposalLoading]);
+
+	// Leaving the conversation (Back, Home, another room) stops this page's
+	// following of its Remember; the job reads on, and entering again follows it anew.
+	const followedConversation = persistentChat ? `${persistentChat.agentId}\n${persistentChat.conversationId}` : "";
+	useEffect(() => () => {
+		checkpointProposalAbortRef.current?.abort();
+		checkpointProposalAbortRef.current = null;
+	}, [followedConversation]);
+
+	// Entering a room whose conversation Remember is reading opens the dialog
+	// in its reading state, with the read count, the wait line and Cancel; one
+	// whose Remember finished opens it on the entry.
+	useEffect(() => {
+		void resumeCheckpointJob(true);
+	}, [persistentChat?.agentId, persistentChat?.conversationId, rememberLookupNonce]);
+
+	// Opening the dialog shows a proposal a finished job kept.
+	useEffect(() => {
+		if (checkpointPreviewOpen) closeSidebarOnPhone();
+		if (checkpointPreviewOpen) void resumeCheckpointJob(false);
+	}, [checkpointPreviewOpen]);
 
 	async function bindToApprovedCheckpointRuntime(approval: CheckpointApprovalResponse, targetChat: NonNullable<PersistentChatConfig>): Promise<void> {
+		// The save landed; a tab that moved to another conversation meanwhile does not switch, and parks with the saved line.
+		const currentChat = persistentChatRef.current;
+		if (!currentChat || currentChat.agentId !== targetChat.agentId || currentChat.conversationId !== targetChat.conversationId) throw new Error(REMEMBER_OTHER_CONVERSATION_OPEN);
 		const freshThreadId = approval.postCheckpoint.activeThreadId || approval.runtimeBoundary.newThreadId;
 		const record = await fetchPersistentAgentThread(targetChat.agentId, freshThreadId);
 		const thread = threadRecordToLocalThread(record, targetChat.displayName);
@@ -6267,7 +5140,9 @@ export function App() {
 		clearTransientStreamNotes();
 		dispatchStream({ type: "reset" });
 		toolByIdRef.current.clear();
+		serverToolByIdRef.current.clear();
 		hiddenRoutineToolByIdRef.current.clear();
+		forgetLiveTurnProgress();
 		retrievalActivityIdRef.current = null;
 		setPersistentThread(null);
 		setPersistentChat(null);
@@ -6314,7 +5189,9 @@ export function App() {
 		setComposerPrefill("");
 		setComposerResetNonce((value) => value + 1);
 		toolByIdRef.current.clear();
+		serverToolByIdRef.current.clear();
 		hiddenRoutineToolByIdRef.current.clear();
+		forgetLiveTurnProgress();
 		retrievalActivityIdRef.current = null;
 		setPersistentThread(null);
 		setPersistentChat(null);
@@ -6346,29 +5223,54 @@ export function App() {
 		setSessionVersion((v) => v + 1);
 	}
 
-	async function approveCheckpointProposal(approvedRecentContext: string) {
+	async function approveCheckpointProposal(approvedFields: CheckpointApprovalEditFields) {
 		const targetChat = persistentChat;
 		const proposal = checkpointProposal;
 		if (!targetChat || !proposal || checkpointApprovalLoading) return;
 		if (busyRef.current || turnCancellingRef.current) {
-			setCheckpointApprovalError("Stop or wait for the current response before approving a memory proposal.");
+			setCheckpointApprovalError("Stop the answer or wait for it to finish, then save.");
 			return;
 		}
 		if (proposal.agentId !== targetChat.agentId) {
-			setCheckpointApprovalError("This memory proposal does not match the current room. Please regenerate it.");
+			setCheckpointApprovalError(REMEMBER_OTHER_CONVERSATION_OPEN);
 			return;
 		}
 		if (proposal.conversationId !== targetChat.conversationId || proposal.process?.parentConversationId !== targetChat.conversationId) {
-			setCheckpointApprovalError("This memory proposal does not match the current conversation. Please regenerate it.");
+			setCheckpointApprovalError(REMEMBER_OTHER_CONVERSATION_OPEN);
 			return;
 		}
 		setCheckpointApprovalLoading(true);
 		setCheckpointApprovalError(null);
 		try {
-			const approval = await requestCheckpointApproval(targetChat, proposal, approvedRecentContext);
-			await bindToApprovedCheckpointRuntime(approval, targetChat);
-			setCheckpointApprovalResult(approval);
+			const savedHereBefore = checkpointSavesSentRef.current.has(checkpointSaveKey(targetChat));
+			let approval: CheckpointApprovalResponse;
+			let answerWasLost = false;
+			try {
+				approval = await requestCheckpointApproval(targetChat, proposal, approvedFields);
+			} catch (e) {
+				if (!saveAnswerLost(e)) throw e;
+				// The answer was lost: the line says so, and the room says once it answers whether this conversation saved.
+				setCheckpointApprovalError(SAVE_ANSWER_LOST_SENTENCE);
+				const landed = await lostRememberSaveLanded(targetChat, proposal, approvedFields);
+				if (!landed) {
+					setCheckpointApprovalError(SAVE_NOT_LANDED_SENTENCE);
+					return;
+				}
+				approval = landed;
+				answerWasLost = true;
+				setCheckpointApprovalError(null);
+			}
 			void refreshPersistentAgentStatus();
+			// A save that had already landed parks the window, unless it filled the room or this window's answer was the one lost: then its page shows.
+			if (approval.alreadySaved && !answerWasLost && !roomFilledBy(approval)) { parkAfterSavedRemember(targetChat, savedHereBefore ? REMEMBER_SAVED_REOPEN_SENTENCE : REMEMBER_SAVED_ELSEWHERE_SENTENCE); return; }
+			// A tab that moved to another conversation meanwhile never shows this save's page: the card says it.
+			// Asked before the bind, which is what moves this tab to the fresh conversation.
+			if (tabMovedFrom(targetChat)) return;
+			// A save that fills the room never binds: the empty conversation would be refused. Its page offers Memorize.
+			if (!roomFilledBy(approval)) {
+				try { await bindToApprovedCheckpointRuntime(approval, targetChat); } catch { parkAfterSavedRemember(targetChat); return; }
+			}
+			setCheckpointApprovalResult(approval);
 		} catch (e) {
 			setCheckpointApprovalError(formatRememberError((e as Error).message));
 		} finally {
@@ -6376,7 +5278,30 @@ export function App() {
 		}
 	}
 
-	async function requestCheckpointApproval(targetChat: NonNullable<PersistentChatConfig>, proposal: CheckpointProposalResponse, approvedRecentContext: string): Promise<CheckpointApprovalResponse> {
+	/**
+	 * After a Remember Save whose answer was lost: once the server answers, the
+	 * room says whether this conversation saved, and a saved one gives its answer
+	 * again (the Save sent again writes nothing). It is sent with the fields the
+	 * first Save sent, so the server checks what the person typed. Null: it did
+	 * not save.
+	 */
+	async function lostRememberSaveLanded(targetChat: NonNullable<PersistentChatConfig>, proposal: CheckpointProposalResponse, approvedFields: CheckpointApprovalEditFields): Promise<CheckpointApprovalResponse | null> {
+		const progress = await askUntilAnswered(() => fetchJson<{ saved?: true }>(`/api/persistent-agents/${encodeURIComponent(targetChat.agentId)}/checkpoint/progress?conversationId=${encodeURIComponent(targetChat.conversationId)}`));
+		if (!progress.saved) return null;
+		return await askUntilAnswered(() => requestCheckpointApproval(targetChat, proposal, approvedFields));
+	}
+
+	function checkpointSaveKey(chat: NonNullable<PersistentChatConfig>): string {
+		return `${chat.agentId}\n${chat.conversationId}`;
+	}
+
+	/**
+	 * Save sends the three parts: the server builds the page from the
+	 * proposal's heading, each part under the one rule, so nothing typed in a
+	 * part can read as another part.
+	 */
+	async function requestCheckpointApproval(targetChat: NonNullable<PersistentChatConfig>, proposal: CheckpointProposalResponse, approvedFields: CheckpointApprovalEditFields): Promise<CheckpointApprovalResponse> {
+		checkpointSavesSentRef.current.add(checkpointSaveKey(targetChat));
 		const res = await apiFetch(`/api/persistent-agents/${encodeURIComponent(targetChat.agentId)}/checkpoint/approve`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
@@ -6385,21 +5310,22 @@ export function App() {
 				model: targetChat.model,
 				density: proposal.density,
 				proposal,
-				approvedRecentContext,
+				approvedFields,
 			}),
 		});
 		if (!res.ok) {
 			let message = `Failed to save this memory (${res.status})`;
+			let code: string | undefined;
 			try {
 				const body = await res.json();
 				if (body?.error) message = String(body.error);
+				if (typeof body?.code === "string") code = body.code;
 			} catch {}
-			throw new Error(message);
+			// A proxy's 502 with no word of its own is a lost answer, as the network's is.
+			throw new ApiRequestError(message, res.status, code);
 		}
 		const approval = await res.json() as CheckpointApprovalResponse;
-		const currentChat = persistentChatRef.current;
-		if (!currentChat || currentChat.agentId !== targetChat.agentId || currentChat.conversationId !== targetChat.conversationId) throw new Error("The room changed after approval. Refresh the room status before continuing.");
-		if (approval.agentId !== targetChat.agentId || approval.conversationId !== targetChat.conversationId) throw new Error("The save response does not match the current room.");
+		if (approval.agentId !== targetChat.agentId || approval.conversationId !== targetChat.conversationId) throw new Error(REMEMBER_OTHER_CONVERSATION_OPEN);
 		return approval;
 	}
 
@@ -6413,6 +5339,7 @@ export function App() {
 		setCheckpointRememberText("");
 		setCheckpointProposal(null);
 		setCheckpointProposalError(null);
+		setCheckpointProposalNotice(null);
 		setCheckpointApprovalError(null);
 		setCheckpointApprovalResult(null);
 		setCheckpointPreviewOpen(true);
@@ -6424,17 +5351,15 @@ export function App() {
 			proposal = await requestCheckpointProposal(targetChat, "standard", "", cancel.signal);
 			setCheckpointProposal(proposal);
 		} catch (e) {
-			if (!cancel.signal.aborted) setCheckpointProposalError(formatRememberError((e as Error).message));
-			else if (cancel.signal.reason instanceof Error && cancel.signal.reason.name !== "AbortError") setCheckpointProposalError(cancel.signal.reason.message);
+			showCheckpointProposalFailure(e, cancel);
 			setCheckpointProposalLoading(false);
 			return;
 		} finally {
 			if (checkpointProposalAbortRef.current === cancel) checkpointProposalAbortRef.current = null;
 		}
 		setCheckpointProposalLoading(false);
-		const blockers = quickRememberBlockers(proposal);
-		if (blockers.length > 0) {
-			setCheckpointQuickBlockedReasons(blockers);
+		if (quickRememberNeedsPreview(proposal)) {
+			setCheckpointQuickBlockedReasons([]);
 			return;
 		}
 		// The room decides whether a blocker-free proposal may skip the preview.
@@ -6442,47 +5367,85 @@ export function App() {
 		// the proposal, never silently applying it.
 		const skipsPreview = await fetchQuickCheckpointPreference(targetChat.agentId);
 		setRememberSkipsPreview(skipsPreview);
+		// Off: the review simply opens, as Remember's own review.
 		if (!skipsPreview) {
-			setCheckpointQuickBlockedReasons(["To save without this preview, turn on Remember without the preview in Room settings, Memory."]);
+			setCheckpointQuickRequested(false);
 			return;
 		}
 		setCheckpointApprovalLoading(true);
 		try {
-			const approvedRecentContext = buildApprovedRecentContextMarkdown(proposal, {
-				sessionArc: proposal.fields.sessionArc,
-				body: proposal.fields.body,
-				parked: proposal.fields.parked?.trim() || "None",
-			});
-			const approval = await requestCheckpointApproval(targetChat, proposal, approvedRecentContext);
-			await bindToApprovedCheckpointRuntime(approval, targetChat);
+			const approvedFields = { sessionArc: proposal.fields.sessionArc, body: proposal.fields.body, parked: proposal.fields.parked?.trim() || "None" };
+			const savedHereBefore = checkpointSavesSentRef.current.has(checkpointSaveKey(targetChat));
+			let approval: CheckpointApprovalResponse;
+			try {
+				approval = await requestCheckpointApproval(targetChat, proposal, approvedFields);
+			} catch (e) {
+				if (!saveAnswerLost(e)) throw e;
+				// The answer was lost: once the server answers, the room says whether this conversation saved.
+				const landed = await lostRememberSaveLanded(targetChat, proposal, approvedFields);
+				if (!landed) throw new Error(SAVE_NOT_LANDED_SENTENCE);
+				approval = { ...landed, alreadySaved: undefined };
+			}
 			void refreshPersistentAgentStatus();
+			if (approval.alreadySaved && !roomFilledBy(approval)) { parkAfterSavedRemember(targetChat, savedHereBefore ? REMEMBER_SAVED_REOPEN_SENTENCE : REMEMBER_SAVED_ELSEWHERE_SENTENCE); return; }
+			if (roomFilledBy(approval)) {
+				if (tabMovedFrom(targetChat)) return;
+				setCheckpointApprovalResult(approval);
+				setCheckpointPreviewOpen(true);
+				return;
+			}
+			try { await bindToApprovedCheckpointRuntime(approval, targetChat); } catch { parkAfterSavedRemember(targetChat); return; }
 			resetCheckpointInput();
-			// Disclose what the gate does not block on: shortened tool output
-			// rides the saved line together with approval warnings.
 			// "automatically" is deliberate: the saved line must disclose that no
 			// human reviewed this entry before it was written.
-			let savedNote = "Saved to memory automatically.";
-			const trimmedNote = rememberToolOutputSentence(proposal.rememberRead);
-			const disclosedNotes = [...(trimmedNote ? [trimmedNote] : []), ...approval.warnings];
-			if (disclosedNotes.length > 0) savedNote += ` ${disclosedNotes.join(" ")}`;
+			const refusedWhole = rememberRefusedWholeSentence(proposal);
+			let savedNote = refusedWhole ? refusedWhole.replace(/^Saved\./, "Saved to memory automatically.") : "Saved to memory automatically.";
 			// The manual path shows the sessions-cap heads-up in the preview; the
 			// auto path has no preview, so it rides the saved line instead.
 			const headsUp = recentSessionsHeadsUp(approval.recentContextEntryCount);
 			if (headsUp) savedNote += ` ${headsUp}`;
 			setItems((s) => [...s, { kind: "system", id: nid(), text: savedNote }]);
 		} catch (e) {
-			setCheckpointApprovalError(`The memory entry could not save automatically. Review and approve it manually. ${formatRememberError((e as Error).message)}`);
+			// The cause only when it is one of Remember's plain sentences: no raw text.
+			const cause = formatRememberError((e as Error).message);
+			setCheckpointApprovalError(`Saving did not work this time. Here is the entry to save.${isPlainRememberSentence(cause) ? ` ${cause}` : ""}`);
 		} finally {
 			setCheckpointApprovalLoading(false);
 		}
 	}
 
-	function resetCheckpointInput() {
-		setCheckpointPreviewOpen(false);
-		setCheckpointRememberText("");
-		setCheckpointDensity("standard");
+	// The save landed and only opening the fresh conversation failed, or the save
+	// had already landed: the room is parked on Home with the plain outcome, and
+	// the entry is never offered again. Only a save this window never sent was
+	// saved in another window, and Home says so.
+	// A tab that moved to another conversation meanwhile stays where it went.
+	function parkAfterSavedRemember(targetChat: NonNullable<PersistentChatConfig>, sentence = REMEMBER_SAVED_REOPEN_SENTENCE): void {
+		if (tabMovedFrom(targetChat)) return;
+		resetCheckpointInput();
+		setPersistentChat(null);
+		setPersistentThread(null);
+		setItems([]);
+		setPersistentResumeError(sentence);
+		setView("home");
+		void refreshPersistentAgentStatus();
+	}
+
+	function tabMovedFrom(targetChat: NonNullable<PersistentChatConfig>): boolean {
+		const currentChat = persistentChatRef.current;
+		return !!currentChat && (currentChat.agentId !== targetChat.agentId || currentChat.conversationId !== targetChat.conversationId);
+	}
+
+	/** `keepTyped`: a reconnect keeps the dialog as it was and what the person typed and chose in it. */
+	function resetCheckpointInput(keepTyped = false) {
+		if (!keepTyped) {
+			setCheckpointPreviewOpen(false);
+			setCheckpointRememberText("");
+			setCheckpointDensity("standard");
+		}
+		setCheckpointEdits(null);
 		setCheckpointProposal(null);
 		setCheckpointProposalError(null);
+		setCheckpointProposalNotice(null);
 		setCheckpointProposalLoading(false);
 		setCheckpointApprovalError(null);
 		setCheckpointApprovalLoading(false);
@@ -6493,12 +5456,14 @@ export function App() {
 
 	function resetAbsorbWorkflow() {
 		maintainRunRef.current += 1;
+		cancelFirstRead();
 		clearAbsorbKeepDraft();
 		setAbsorbWorkflow(CLOSED_ABSORB_WORKFLOW);
 	}
 
 	function resetReviewWorkflow() {
 		maintainRunRef.current += 1;
+		cancelFirstRead();
 		clearReviewKeepDraft();
 		setReviewWorkflow(CLOSED_REVIEW_WORKFLOW);
 	}
@@ -6520,51 +5485,49 @@ export function App() {
 		if (origin === "memory") setView("memory");
 	}
 
-	function resetLiveUiState() {
+	/** `rebind`: the same room's conversation binds again after a dropped connection. */
+	function resetLiveUiState(keepRememberTyped = false, rebind = false) {
 		// This close is deliberate (a navigation/rebind path owns what happens
 		// next) — it must not trigger the auto-reconnect.
 		suppressReconnectRef.current = true;
 		try { wsRef.current?.close(); } catch {}
 		setUsage(ZERO_USAGE);
 		setContextHealth(null);
-		// The effort pill belongs to the room being left: the next room's ready
+		// The effort shown belongs to the room being left: the next room's ready
 		// frame brings its own sticky level and its own model's capability.
 		setRoomEffort(null);
 		setPreview(null);
-		setBusy(false);
 		setCurrentModelState(NO_CURRENT_MODEL);
 		setComposerPrefill("");
 		setComposerResetNonce((value) => value + 1);
-		flushAssistantStream();
-		clearTransientStreamNotes();
-		dispatchStream({ type: "reset" });
+		// A turn waited on through the drop keeps its open answer across the
+		// rebind: what arrived goes on appearing, and the replay continues from
+		// what is on screen (turn_reattach).
+		if (!(rebind && turnLinkRef.current === "reconnecting")) {
+			setTurnLink("live");
+			setBusy(false);
+			flushAssistantStream();
+			clearTransientStreamNotes();
+			dispatchStream({ type: "reset" });
+		}
 		toolByIdRef.current.clear();
+		serverToolByIdRef.current.clear();
 		hiddenRoutineToolByIdRef.current.clear();
+		forgetLiveTurnProgress();
 		retrievalActivityIdRef.current = null;
-		resetCheckpointInput();
+		resetCheckpointInput(keepRememberTyped);
 		resetMaintainWorkflows();
+		setRoomMovedOn(false);
 	}
 
 	// Why this room cannot be maintained right now, in words that name the way
 	// out; null when Maintain can start. Mirrors the launcher card's canMaintain.
 	function maintainBlockedReason(agentId: PersistentAgentId): string | null {
 		if (persistentChat) return "A room session is open. Close it, then start Maintain.";
+		// An open conversation, here or elsewhere, never locks Maintain: it keeps
+		// the boot it started with, and its next bind boots on the memory as it is
+		// then. A save that meets a turn waits for it on the server.
 		const status = persistentAgentStatuses.find((candidate) => candidate.id === agentId) ?? null;
-		if (status?.activeLock) {
-			return status.activeLock.surface === "scheduler"
-				? "This room is working on a scheduled background task. Wait for it to finish, then start Maintain."
-				: "This room is active in another place. Close it there, then start Maintain.";
-		}
-		const localStandby = persistentThread?.state === "standby" && persistentThread.agentId === agentId ? persistentThread : null;
-		const hasThread = Boolean(localStandby)
-			|| (!!status && (status.runtime.state === "standby" || status.runtime.state === "active") && !!status.runtime.activeThreadId);
-		// Only a conversation someone has spoken in holds anything Maintain
-		// could leave behind. The fresh one Remember or Forget prepares is empty,
-		// and its next bind boots on the memory as it is then.
-		const threadHasTurns = localStandby
-			? hasUserVisibleTurn(localStandby.items)
-			: (status?.activeThread?.hasUserVisibleTurns ?? true);
-		if (hasThread && threadHasTurns && !memoryOverflowRooms.has(agentId)) return MAINTAIN_BLOCKED_BY_OPEN_CONVERSATION;
 		if (status && status.exists && status.status !== "ready" && status.status !== "needs_absorb") return "This room needs attention before it can be maintained.";
 		if (status && nothingToMaintain(status.memoryStatus)) return NOTHING_TO_MAINTAIN_SENTENCE;
 		return null;
@@ -6577,6 +5540,17 @@ export function App() {
 		resetAbsorbWorkflow();
 		resetReviewWorkflow();
 		setMaintainChooserOpen(true);
+		// A Memorize a restart left waiting for Save or Discard opens at once, not behind the chooser.
+		const opened = maintainRunRef.current;
+		void fetchAbsorbStatus(target.agentId).then((availability) => {
+			if (availability.waitingRunId && opened === maintainRunRef.current) void startAbsorbWorkflow({ target });
+		}, () => {});
+		// So does a Review still tidying, after a reload. A card left ready waits behind the chooser, where Review opens it.
+		void fetchReviewStatus(target.agentId).then(async (status) => {
+			if (!status.waitingRunId || opened !== maintainRunRef.current) return;
+			const waiting = await fetchReviewRun(target.agentId, status.waitingRunId);
+			if (reviewRunIsWorking(waiting.state) && opened === maintainRunRef.current) void startPruneMemoryWorkflow(target);
+		}).catch(() => {});
 		return true;
 	}
 
@@ -6599,13 +5573,10 @@ export function App() {
 		}
 	}
 
-	async function startPruneMemoryWorkflow() {
-		// The overflow exemption must mirror maintainBlockedReason: when the
-		// server refused this room's memory at the window, the latched standby
-		// thread is exactly what Maintain exists to fix — without the exemption
-		// the chooser opens and this click dies silently.
-		if (persistentChat || (maintainTarget && persistentThread?.state === "standby" && persistentThread.agentId === maintainTarget.agentId && !memoryOverflowRooms.has(maintainTarget.agentId))) return;
-		const target = maintainTarget;
+	/** `forTarget`: the room to open when the chooser's state has not caught up yet. */
+	async function startPruneMemoryWorkflow(forTarget?: MaintainTarget) {
+		if (persistentChat) return;
+		const target = forTarget ?? maintainTarget;
 		setReviewLoadingIndex(Math.floor(Math.random() * REVIEW_LOADING_MESSAGES.length));
 		setMaintainChooserOpen(false);
 		resetAbsorbWorkflow();
@@ -6618,25 +5589,41 @@ export function App() {
 		try {
 			const status = await fetchReviewStatus(target.agentId);
 			if (run !== maintainRunRef.current) return;
+			if (status.waitingRunId) return beginReviewRunWatch({ ...CLOSED_REVIEW_WORKFLOW, step: "assessment", target, openedWaiting: true, assessment: missingReviewFirstRead(target.agentId, status) }, status.waitingRunId);
 			if (!status.available) {
 				setReviewWorkflow({ ...CLOSED_REVIEW_WORKFLOW, step: "unavailable", target, unavailableReason: status.reason ?? null });
 				return;
 			}
 			setReviewWorkflow({ ...CLOSED_REVIEW_WORKFLOW, step: "assessing", target });
-			const assessment = await requestReviewAssessment(target.agentId);
+			// The first read never blocks Review: with no first read, the tidy reads every topic.
+			let notice: ModelNotice | null = null;
+			const assessment = await askFirstRead(target.agentId, "review", (first) => requestFirstRead<ReviewAssessmentResponse>(reviewBase(target.agentId), first)).catch((error: unknown) => {
+				notice = modelNoticeFromError(error);
+				if (!notice && !isUnexplainedRequestFailure(error)) throw error;
+				return missingReviewFirstRead(target.agentId, status);
+			});
 			const fastPathEnabled = await roomFastPathEnabled(target.agentId);
 			if (run !== maintainRunRef.current) return;
-			setReviewWorkflow({ ...CLOSED_REVIEW_WORKFLOW, step: "assessment", target, availability: assessment.availability, assessment, fastPathEnabled });
+			// A discussion kept from before a reload (or from another tab) comes back as it was.
+			const kept = assessment.keptDiscussion;
+			setReviewWorkflow(kept?.messages.length
+				? { ...CLOSED_REVIEW_WORKFLOW, step: "discussing", target, availability: assessment.availability, assessment, notice, fastPathEnabled, discussionMessages: kept.messages, discussionTokenBudget: kept.tokenBudget, discussionSending: false }
+				: { ...CLOSED_REVIEW_WORKFLOW, step: "assessment", target, availability: assessment.availability, assessment, notice, fastPathEnabled });
 		} catch (e) {
 			if (run !== maintainRunRef.current) return;
-			setReviewWorkflow({ ...CLOSED_REVIEW_WORKFLOW, step: "error", target, error: formatReviewWorkflowError((e as Error).message) });
+			const notice = modelNoticeFromError(e);
+			setReviewWorkflow({ ...CLOSED_REVIEW_WORKFLOW, step: "error", target, notice, error: notice ? null : formatReviewWorkflowError((e as Error).message) });
 		}
 	}
 
 	function abortReviewWorkflow() {
 		const hasDiscussionTranscript = (reviewWorkflow.discussionMessages?.length ?? 0) > 0 && (reviewWorkflow.step === "discussing" || reviewWorkflow.step === "signing_off");
 		if (hasDiscussionTranscript) {
-			setMaintainConfirm({ title: "Leave this discussion?", body: "The discussion is temporary and will be discarded. No memory has been changed.", confirmLabel: "Discard discussion", cancelLabel: "Keep discussing", onConfirm: exitMaintainWorkflows });
+			setMaintainConfirm({ title: "Leave Review?", body: discussionKeptSentence("Review", Boolean(reviewWorkflow.assessment?.firstReadMissing)), confirmLabel: "Leave", cancelLabel: "Keep discussing", onConfirm: exitMaintainWorkflows });
+			return;
+		}
+		if (reviewWorkflow.step === "run_card" && reviewWorkflow.run && reviewRunNothingToSave(reviewWorkflow.run)) {
+			void closeEmptyReviewRun();
 			return;
 		}
 		// A tidy is live work on the server: leaving it has to stop it too.
@@ -6651,9 +5638,9 @@ export function App() {
 	// temporary transcript is discarded, after the existing confirm.
 	function backToReviewAssessment() {
 		if (reviewWorkflow.step !== "discussing" || reviewWorkflow.discussionSending) return;
-		const leave = () => setReviewWorkflow((current) => current.step === "discussing" ? { ...current, step: "assessment", discussionMessages: [], discussionTokenBudget: null, discussionSending: false, discussionWarnings: null, guidance: null, error: null } : current);
+		const leave = () => setReviewWorkflow((current) => current.step === "discussing" ? { ...current, step: "assessment", discussionMessages: [], discussionTokenBudget: null, discussionSending: false, discussionWarnings: null, guidance: null, notice: null, error: null } : current);
 		if ((reviewWorkflow.discussionMessages?.length ?? 0) > 0) {
-			setMaintainConfirm({ title: "Leave this discussion?", body: "The discussion is temporary and will be discarded. The first read is kept. No memory has been changed.", confirmLabel: "Back to the first read", cancelLabel: "Keep discussing", onConfirm: leave });
+			setMaintainConfirm({ title: "Back to the first read?", body: discussionKeptSentence("Review", Boolean(reviewWorkflow.assessment?.firstReadMissing)), confirmLabel: "Back to the first read", cancelLabel: "Keep discussing", onConfirm: leave });
 			return;
 		}
 		leave();
@@ -6671,13 +5658,15 @@ export function App() {
 		setReviewLoadingIndex(Math.floor(Math.random() * REVIEW_LOADING_MESSAGES.length));
 		setReviewWorkflow({ ...reviewWorkflow, step: "assessing", error: null });
 		try {
-			const assessment = await requestReviewAssessment(target.agentId, { retryFeedback: reviewAssessmentRetryFeedback(prior) });
+			// A missing read is never kept, so asking without `fresh` reads anew, or joins the read a dropped request left running.
+			const assessment = await askFirstRead(target.agentId, "review", (first) => requestFirstRead<ReviewAssessmentResponse>(reviewBase(target.agentId), { retryFeedback: reviewAssessmentRetryFeedback(prior), ...(prior.firstReadMissing ? {} : { fresh: true }), ...first }));
 			if (run !== maintainRunRef.current) return;
-			setReviewWorkflow({ ...reviewWorkflow, step: "assessment", availability: assessment.availability, assessment, depth: null, guidance: null, discussionMessages: [], discussionTokenBudget: null, discussionWarnings: null, signoffWarnings: undefined, error: null });
+			setReviewWorkflow({ ...reviewWorkflow, step: "assessment", availability: assessment.availability, assessment, notice: null, depth: null, guidance: null, discussionMessages: [], discussionTokenBudget: null, discussionWarnings: null, error: null });
 		} catch (e) {
 			if (run !== maintainRunRef.current) return;
 			// The previous first read is still valid: keep it on screen with the reason.
-			setReviewWorkflow({ ...reviewWorkflow, step: "assessment", error: formatReviewWorkflowError((e as Error).message) });
+			const notice = modelNoticeFromError(e);
+			setReviewWorkflow({ ...reviewWorkflow, step: "assessment", notice, error: notice ? null : formatReviewWorkflowError((e as Error).message) });
 		}
 	}
 
@@ -6690,7 +5679,7 @@ export function App() {
 		if (!assessment || reviewWorkflow.step !== "assessment") return;
 		setReviewWorkflow({
 			...reviewWorkflow,
-			step: "discussing",
+			step: "discussing", notice: null,
 			discussionMessages: [],
 			discussionTokenBudget: null,
 			discussionSending: false,
@@ -6711,7 +5700,7 @@ export function App() {
 		if (!userMessage.content) return;
 		const optimisticMessages = [...(reviewWorkflow.discussionMessages ?? []), userMessage];
 		const run = maintainRunRef.current;
-		setReviewWorkflow({ ...reviewWorkflow, discussionMessages: optimisticMessages, discussionSending: true, error: null });
+		setReviewWorkflow({ ...reviewWorkflow, discussionMessages: optimisticMessages, discussionSending: true, notice: null, error: null });
 		try {
 			// The transcript carries the person's latest line as its last message;
 			// the server reads the conversation the screen shows, not a second copy.
@@ -6720,18 +5709,21 @@ export function App() {
 				messages: optimisticMessages,
 			});
 			if (run !== maintainRunRef.current) return;
+			logMaintenanceWarnings(response.warnings);
 			setReviewWorkflow({
 				...reviewWorkflow,
 				step: "discussing",
 				discussionMessages: [...optimisticMessages, response.message],
 				discussionTokenBudget: response.tokenBudget,
 				discussionSending: false,
-				discussionWarnings: meaningfulMaintenanceWarnings(response.warnings).join("\n") || null,
+				discussionWarnings: null,
+				notice: null,
 				error: null,
 			});
 		} catch (e) {
 			if (run !== maintainRunRef.current) return;
-			setReviewWorkflow({ ...reviewWorkflow, step: "discussing", discussionMessages: optimisticMessages, discussionSending: false, error: formatReviewWorkflowError((e as Error).message) });
+			const notice = modelNoticeFromError(e);
+			setReviewWorkflow({ ...reviewWorkflow, step: "discussing", discussionMessages: optimisticMessages, discussionSending: false, notice, error: notice ? null : formatReviewWorkflowError((e as Error).message) });
 		}
 	}
 
@@ -6746,7 +5738,8 @@ export function App() {
 			return;
 		}
 		const run = maintainRunRef.current;
-		setReviewWorkflow({ ...reviewWorkflow, step: "signing_off", error: null });
+		cancelFirstRead();
+		setReviewWorkflow({ ...reviewWorkflow, step: "signing_off", notice: null, error: null });
 		try {
 			const signoff = await requestReviewDiscussionSignoff(target.agentId, { assessmentMarkdown: assessment.assessmentMarkdown, messages });
 			if (run !== maintainRunRef.current) return;
@@ -6755,7 +5748,7 @@ export function App() {
 				step: "signing_off",
 				guidance: signoff.guidance,
 				discussionMessages: messages,
-				signoffWarnings: signoff.warnings,
+				notice: null,
 				error: null,
 			};
 			setReviewWorkflow(base);
@@ -6765,7 +5758,8 @@ export function App() {
 			beginReviewRunWatch(base, started.runId);
 		} catch (e) {
 			if (run !== maintainRunRef.current) return;
-			setReviewWorkflow({ ...reviewWorkflow, step: "discussing", discussionSending: false, error: formatReviewWorkflowError((e as Error).message) });
+			const notice = modelNoticeFromError(e);
+			setReviewWorkflow({ ...reviewWorkflow, step: "discussing", discussionSending: false, notice, error: notice ? null : formatReviewWorkflowError((e as Error).message) });
 		}
 	}
 
@@ -6774,7 +5768,8 @@ export function App() {
 	 * flagged, at the depth the picker is showing. A discussion already had is
 	 * honoured unless the person explicitly asked to go on without it.
 	 */
-	async function startReviewTidy(options?: { withoutDiscussion?: boolean; afterStoppingRun?: boolean }) {
+	/** `topicsLeftOf`: a saved run whose topics left are reviewed again, alone, at its depth and with its guidance. */
+	async function startReviewTidy(options?: { withoutDiscussion?: boolean; afterStoppingRun?: boolean; topicsLeftOf?: ReviewRun | null }) {
 		const assessment = reviewWorkflow.assessment;
 		const target = reviewWorkflow.target;
 		if (!assessment || reviewWorkflow.step === "running" || reviewWorkflow.step === "signing_off") return;
@@ -6784,12 +5779,15 @@ export function App() {
 			return;
 		}
 		const run = maintainRunRef.current;
-		const guidance = options?.withoutDiscussion ? null : reviewWorkflow.guidance ?? null;
-		const depth = reviewWorkflow.depth ?? reviewWorkflow.availability?.recommendedDepth ?? "wording";
-		const base: ReviewWorkflowState = { ...reviewWorkflow, step: "assessment", guidance, signoffWarnings: guidance ? reviewWorkflow.signoffWarnings : undefined, activeRunConflictId: null, error: null };
+		cancelFirstRead();
+		// The saved run carries its own guidance; the page's is gone after a reload or when the run was opened waiting.
+		const guidance = options?.withoutDiscussion ? null : options?.topicsLeftOf ? options.topicsLeftOf.guidance ?? null : reviewWorkflow.guidance ?? null;
+		const depth = options?.topicsLeftOf?.depth ?? reviewWorkflow.depth ?? reviewWorkflow.availability?.recommendedDepth ?? "wording";
+		const topics = options?.topicsLeftOf ? options.topicsLeftOf.leftAsIs.flatMap((row) => row.topics) : assessment.fields.topics;
+		const base: ReviewWorkflowState = { ...reviewWorkflow, step: "assessment", guidance, activeRunConflictId: null, error: null };
 		setReviewWorkflow({ ...base, step: "running", runId: null, run: null, runBusy: false, runPollError: null, error: null });
 		try {
-			const started = await startReviewRun(target.agentId, { depth, topics: assessment.fields.topics, ...(guidance ? { guidance } : {}) });
+			const started = await startReviewRun(target.agentId, { depth, topics, ...(guidance ? { guidance } : {}) });
 			if (run !== maintainRunRef.current) return;
 			beginReviewRunWatch(base, started.runId);
 		} catch (e) {
@@ -6802,9 +5800,10 @@ export function App() {
 				setReviewWorkflow({ ...base, step: "assessment", activeRunConflictId: e.runId, error: null });
 				return;
 			}
-			const startError = formatReviewWorkflowError((e as Error).message);
-			if (fromDiscussion) setReviewWorkflow({ ...reviewWorkflow, step: "discussing", discussionSending: false, error: startError });
-			else setReviewWorkflow({ ...base, step: "assessment", error: startError });
+			const notice = modelNoticeFromError(e);
+			const startError = notice ? null : formatReviewWorkflowError((e as Error).message);
+			if (fromDiscussion) setReviewWorkflow({ ...reviewWorkflow, step: "discussing", discussionSending: false, notice, error: startError });
+			else setReviewWorkflow({ ...base, step: "assessment", notice, error: startError });
 		}
 	}
 
@@ -6816,7 +5815,7 @@ export function App() {
 	function beginReviewRunWatch(base: ReviewWorkflowState, runId: string): void {
 		reviewRunSettledRef.current = null;
 		clearReviewKeepDraft();
-		setReviewWorkflow({ ...base, step: "running", runId, run: null, runBusy: false, runPollError: null, approvalResult: null, error: null });
+		setReviewWorkflow({ ...base, step: "running", runId, run: null, runBusy: false, runPollError: null, approvalResult: null, fastPathApplied: undefined, fastPathBlockedReasons: undefined, undo: undefined, error: null });
 	}
 
 	// A tidy that reaches a resting state is handled exactly once: the poll that
@@ -6849,7 +5848,8 @@ export function App() {
 	async function maybeFastPathReviewRun(target: MaintainTarget, reviewRun: ReviewRun, runToken: number): Promise<boolean> {
 		const fastPathOn = await roomFastPathEnabled(target.agentId);
 		if (runToken !== maintainRunRef.current) return true;
-		if (!fastPathOn) return false;
+		// A tidy that tidied nothing is shown, never saved: a save would record a review that did not happen.
+		if (!fastPathOn || reviewRunNothingToSave(reviewRun)) return false;
 		const blockers = reviewRunFastPathBlockers(reviewRun);
 		if (blockers.length > 0) {
 			setReviewWorkflow((current) => ({ ...current, step: "run_card", run: reviewRun, runBusy: false, fastPathBlockedReasons: blockers, error: null }));
@@ -6962,9 +5962,30 @@ export function App() {
 		void withReviewRunRequest((target, runId) => keepReviewRunEntries(target.agentId, runId, { keepTopics }));
 	}
 
-	/** The card's Edit on a note: the person's words replace the room's before saving. */
-	function editReviewRunEntryText(entryId: string, text: string): Promise<void> {
-		return withReviewRunRequest((target, runId) => editReviewRunEntry(target.agentId, runId, entryId, text));
+	/**
+	 * The card's Edit. The server's refusal goes back to the note, its editor
+	 * open; a lost answer says so there, the review is read again once the server
+	 * answers, and the note says what is true.
+	 */
+	async function editReviewRunEntryText(entryId: string, text: string, onLost: (line: string) => void): Promise<void> {
+		const target = reviewWorkflow.target;
+		const runId = reviewWorkflow.run?.runId ?? reviewWorkflow.runId;
+		if (!target || !runId) return;
+		const runToken = maintainRunRef.current;
+		const current = () => runToken === maintainRunRef.current;
+		setReviewWorkflow((state) => ({ ...state, runBusy: true, error: null }));
+		try {
+			const updated = await editReviewRunEntry(target.agentId, runId, entryId, text);
+			if (current()) setReviewWorkflow((state) => ({ ...state, run: updated }));
+		} catch (e) {
+			if (!saveAnswerLost(e)) throw e;
+			onLost(SAVE_ANSWER_LOST_SENTENCE);
+			const run = await askUntilAnswered(() => fetchReviewRun(target.agentId, runId), { stopped: () => !current() });
+			if (current()) setReviewWorkflow((state) => ({ ...state, run }));
+			if (!sameNoteWords(run.changes.find((change) => change.id === entryId)?.after, text)) throw new Error(SAVE_NOT_LANDED_SENTENCE);
+		} finally {
+			if (current()) setReviewWorkflow((state) => ({ ...state, runBusy: false }));
+		}
 	}
 
 	/** Cancel always asks first: a tidy costs minutes of reading to redo. */
@@ -6983,6 +6004,26 @@ export function App() {
 	 * Stopping never costs the first read: the minutes already spent on it are
 	 * the reason a person stops a tidy at all.
 	 */
+	/** Try again or Continue on the card: the same run tidies the groups not done; a run the server no longer holds starts Review again. */
+	async function resumeReviewRunAfterStop(): Promise<void> {
+		const target = reviewWorkflow.target;
+		const runId = reviewWorkflow.run?.runId ?? reviewWorkflow.runId;
+		if (!target || !runId || reviewWorkflow.runBusy) return;
+		const runToken = maintainRunRef.current;
+		setReviewWorkflow((current) => ({ ...current, runBusy: true, error: null }));
+		try {
+			await resumeReviewRun(target.agentId, runId);
+		} catch (e) {
+			if (runToken !== maintainRunRef.current) return;
+			const code = apiErrorCode(e);
+			if (code === "review_run_unknown") return void startPruneMemoryWorkflow();
+			if (code !== "review_run_not_ready" && code !== "review_run_nothing_waiting") return setReviewWorkflow((current) => ({ ...current, runBusy: false, error: formatReviewWorkflowError((e as Error).message) }));
+		}
+		if (runToken !== maintainRunRef.current) return;
+		reviewRunSettledRef.current = null;
+		setReviewWorkflow((current) => ({ ...current, step: "running", runId, runBusy: false, runPollError: null, fastPathBlockedReasons: undefined, error: null }));
+	}
+
 	async function reviewRunBackToAssessment(): Promise<void> {
 		clearReviewKeepDraft();
 		const target = reviewWorkflow.target;
@@ -6991,7 +6032,25 @@ export function App() {
 		if (target && runId) {
 			try { await cancelReviewRun(target.agentId, runId); } catch {}
 		}
+		// No first read was asked for that run: the notes are read now, never shown as "No first read this time".
+		if (target && reviewWorkflow.openedWaiting) return void startPruneMemoryWorkflow(target);
 		setReviewWorkflow((current) => ({ ...current, step: "assessment", run: null, runId: null, runBusy: false, runPollError: null, fastPathBlockedReasons: undefined, error: null }));
+	}
+
+	/** A tidy with nothing to save is dropped without a confirm: there is nothing to lose. */
+	async function dropEmptyReviewRun(): Promise<void> {
+		clearReviewKeepDraft();
+		const target = reviewWorkflow.target;
+		const runId = reviewWorkflow.run?.runId ?? reviewWorkflow.runId;
+		reviewRunSettledRef.current = runId ?? null;
+		if (target && runId) {
+			try { await cancelReviewRun(target.agentId, runId); } catch {}
+		}
+	}
+
+	async function closeEmptyReviewRun(): Promise<void> {
+		await dropEmptyReviewRun();
+		exitMaintainWorkflows();
 	}
 
 	function approveReviewRunUpdate(): void {
@@ -7001,9 +6060,11 @@ export function App() {
 		const overLimit = reviewRun.demotion.overageTokens > 0 || reviewRun.budget.overBudgetAfter;
 		setMaintainConfirm({
 			title: `Save these changes to ${target.displayName}'s memory?`,
-			body: overLimit
-				? "The notes are tidied as shown; conversations waiting to be memorized are not touched. This leaves memory above its budget. A copy of today's memory is kept, so this can be undone."
-				: "The notes are tidied as shown; conversations waiting to be memorized are not touched. A copy of today's memory is kept, so this can be undone.",
+			body: reviewRun.changes.length === 0 && reviewRun.demotion.counts.leaving > 0
+				? reviewBudgetOnlyConfirmBody(reviewRun.demotion.counts.leaving)
+				: overLimit
+				? "The notes are tidied as shown; conversations waiting to be memorized are not touched. This leaves memory above its budget."
+				: "The notes are tidied as shown; conversations waiting to be memorized are not touched.",
 			confirmLabel: overLimit ? "Save over the budget" : "Save",
 			cancelLabel: "Keep reading",
 			onConfirm: () => { void performReviewRunApproval(target, reviewRun); },
@@ -7020,7 +6081,28 @@ export function App() {
 			setReviewWorkflow((current) => ({ ...current, step: "saved", run: reviewRun, approvalResult, runBusy: false, error: null }));
 		} catch (e) {
 			if (runToken !== maintainRunRef.current) return;
-			setReviewWorkflow((current) => ({ ...current, step: "run_card", run: reviewRun, runBusy: false, error: formatReviewApprovalError((e as Error).message) }));
+			if (saveAnswerLost(e)) return settleLostReviewSave(target, reviewRun, runToken);
+			setReviewWorkflow((current) => ({ ...current, step: "run_card", run: reviewRun, runBusy: false, error: formatReviewApprovalError((e as Error).message, apiErrorCode(e)) }));
+		}
+	}
+
+	/** A Save whose answer was lost: the card says so, and shows what is true once the server answers. */
+	async function settleLostReviewSave(target: MaintainTarget, reviewRun: ReviewRun, runToken: number): Promise<void> {
+		const stopped = () => runToken !== maintainRunRef.current;
+		setReviewWorkflow((current) => ({ ...current, step: "run_card", run: reviewRun, runBusy: true, error: SAVE_ANSWER_LOST_SENTENCE }));
+		try {
+			const outcome = await settleLostRunSave({ read: () => fetchReviewRun(target.agentId, reviewRun.runId), save: () => approveReviewRun(target.agentId, reviewRun.runId), gone: (error) => apiErrorCode(error) === "review_run_unknown", stopped });
+			if (stopped()) return;
+			if ("unsaved" in outcome) {
+				setReviewWorkflow((current) => ({ ...current, step: "run_card", run: outcome.unsaved, runBusy: false, error: SAVE_NOT_LANDED_SENTENCE }));
+				return;
+			}
+			await refreshPersistentAgentStatus();
+			if (stopped()) return;
+			setReviewWorkflow((current) => ({ ...current, step: "saved", run: reviewRun, approvalResult: outcome.saved, runBusy: false, error: null }));
+		} catch (e) {
+			if (stopped()) return;
+			setReviewWorkflow((current) => ({ ...current, step: "run_card", run: reviewRun, runBusy: false, error: formatReviewApprovalError((e as Error).message, apiErrorCode(e)) }));
 		}
 	}
 
@@ -7038,25 +6120,62 @@ export function App() {
 		});
 	}
 
+	function undoAbsorbSave() {
+		const target = absorbWorkflow.target;
+		const result = absorbWorkflow.approvalResult;
+		if (!target || !result || absorbWorkflow.step !== "saved" || absorbWorkflow.undo?.busy || absorbWorkflow.undo?.done) return;
+		const saveId = result.saveId ?? result.absorbId;
+		setMaintainConfirm({
+			title: `Undo this update of ${target.displayName}'s memory?`,
+			body: "The memory goes back to how it was before these changes were saved. Nothing else changes.",
+			confirmLabel: "Undo",
+			cancelLabel: "Keep the changes",
+			onConfirm: () => { void performAbsorbUndo(target, saveId); },
+		});
+	}
+
 	async function performReviewUndo(target: MaintainTarget, saveId: string) {
+		await performMaintainUndo(target, saveId, (undo) => setReviewWorkflow((current) => ({ ...current, undo })));
+	}
+
+	async function performAbsorbUndo(target: MaintainTarget, saveId: string) {
+		await performMaintainUndo(target, saveId, (undo) => setAbsorbWorkflow((current) => ({ ...current, undo })));
+	}
+
+	/** Takes back the save a Memorize or Review saved screen shows; `setUndo` writes that screen's undo state. */
+	async function performMaintainUndo(target: MaintainTarget, saveId: string, setUndo: (undo: ReviewUndoState) => void) {
 		const run = maintainRunRef.current;
-		setReviewWorkflow((current) => ({ ...current, undo: { busy: true, done: false, error: null } }));
+		setUndo({ busy: true, done: false, error: null });
 		try {
 			// The answer is kept: an undo that lowered the limit says so on the saved screen.
 			const response = await undoMemorySave(target.agentId, saveId);
 			await refreshPersistentAgentStatus();
 			if (run !== maintainRunRef.current) return;
-			setReviewWorkflow((current) => ({ ...current, undo: { busy: false, done: true, error: null, limitLoweredTo: response.limitLoweredTo } }));
+			setUndo({ busy: false, done: true, error: null, limitLoweredTo: response.limitLoweredTo });
 		} catch (e) {
 			if (run !== maintainRunRef.current) return;
-			setReviewWorkflow((current) => ({ ...current, undo: { busy: false, done: false, error: (e as Error).message } }));
+			if (saveAnswerLost(e)) {
+				// The answer was lost: the line says so, and the room's history says whether it undid.
+				setUndo({ busy: true, done: false, error: SAVE_ANSWER_LOST_SENTENCE });
+				try {
+					const undone = await lostUndoLanded(target.agentId, saveId, () => run !== maintainRunRef.current);
+					if (undone) await refreshPersistentAgentStatus();
+					if (run !== maintainRunRef.current) return;
+					setUndo(undone ? { busy: false, done: true, error: null } : { busy: false, done: false, error: UNDO_NOT_LANDED_SENTENCE });
+				} catch (error) {
+					if (run !== maintainRunRef.current) return;
+					setUndo({ busy: false, done: false, error: (error as Error).message });
+				}
+				return;
+			}
+			setUndo({ busy: false, done: false, error: (e as Error).message });
 		}
 	}
 
 	function abortAbsorbWorkflow() {
 		const hasDiscussionTranscript = (absorbWorkflow.discussionMessages?.length ?? 0) > 0 && (absorbWorkflow.step === "discussing" || absorbWorkflow.step === "signing_off" || absorbWorkflow.step === "proposing");
 		if (hasDiscussionTranscript) {
-			setMaintainConfirm({ title: "Abort this memory discussion?", body: "The discussion transcript is temporary and will be discarded. No memory has been changed.", confirmLabel: "Discard discussion", cancelLabel: "Keep discussing", onConfirm: exitMaintainWorkflows });
+			setMaintainConfirm({ title: "Leave Memorize?", body: discussionKeptSentence("Memorize", Boolean(absorbWorkflow.assessment?.firstReadMissing)), confirmLabel: "Leave", cancelLabel: "Keep discussing", onConfirm: exitMaintainWorkflows });
 			return;
 		}
 		// A run is live work on the server: leaving it has to stop it too.
@@ -7071,9 +6190,9 @@ export function App() {
 	// temporary transcript is discarded, after the existing confirm.
 	function backToAbsorbAssessment() {
 		if (absorbWorkflow.step !== "discussing" || absorbWorkflow.discussionSending) return;
-		const leave = () => setAbsorbWorkflow((current) => current.step === "discussing" ? { ...current, step: "assessment", discussionMessages: [], discussionTokenBudget: null, discussionSending: false, discussionWarnings: null, assessmentHandoff: null, error: null } : current);
+		const leave = () => setAbsorbWorkflow((current) => current.step === "discussing" ? { ...current, step: "assessment", discussionMessages: [], discussionTokenBudget: null, discussionSending: false, discussionWarnings: null, assessmentHandoff: null, notice: null, error: null } : current);
 		if ((absorbWorkflow.discussionMessages?.length ?? 0) > 0) {
-			setMaintainConfirm({ title: "Leave this discussion?", body: "The discussion transcript is temporary and will be discarded. Your assessment is kept. No memory has been changed.", confirmLabel: "Back to assessment", cancelLabel: "Keep discussing", onConfirm: leave });
+			setMaintainConfirm({ title: "Back to the first read?", body: discussionKeptSentence("Memorize", Boolean(absorbWorkflow.assessment?.firstReadMissing)), confirmLabel: "Back to the first read", cancelLabel: "Keep discussing", onConfirm: leave });
 			return;
 		}
 		leave();
@@ -7090,13 +6209,12 @@ export function App() {
 	// Start, or Discuss first from the chooser. A room that saves a clean update
 	// without the card starts on Start with no first read: the run begins at
 	// once. Discuss first, and every other room, reads first as always.
-	async function startAbsorbWorkflow(options?: { discuss?: boolean }) {
-		// The overflow exemption must mirror maintainBlockedReason: when the
-		// server refused this room's memory at the window, the latched standby
-		// thread is exactly what Maintain exists to fix — without the exemption
-		// the chooser opens and this click dies silently.
-		if (persistentChat || (maintainTarget && persistentThread?.state === "standby" && persistentThread.agentId === maintainTarget.agentId && !memoryOverflowRooms.has(maintainTarget.agentId))) return;
-		const target = maintainTarget;
+	// `target` comes from a click that also left the room, before the page state caught up.
+	// `readFirst`: a room that saves without the card still reads first, as after Stop or Back on a run that was waiting.
+	async function startAbsorbWorkflow(options?: { discuss?: boolean; readFirst?: boolean; target?: MaintainTarget }) {
+		if (persistentChat && !options?.target) return;
+		const target = options?.target ?? maintainTarget;
+		if (options?.target) setMaintainTarget(options.target);
 		setMaintainChooserOpen(false);
 		resetReviewWorkflow();
 		if (!target) {
@@ -7109,13 +6227,18 @@ export function App() {
 		try {
 			const availability = await fetchAbsorbStatus(target.agentId);
 			if (run !== maintainRunRef.current) return;
+			if (availability.waitingRunId) {
+				beginAbsorbRunWatch({ step: "running", target, availability, assessment: missingFirstRead(target.agentId, availability, "skipped"), approvalResult: null, openedWaiting: true, error: null }, availability.waitingRunId);
+				return;
+			}
 			if (!availability.available) {
 				setAbsorbUnavailable(availability, target);
 				return;
 			}
 			const fastPathEnabled = await roomFastPathEnabled(target.agentId);
 			if (run !== maintainRunRef.current) return;
-			if (fastPathEnabled && !options?.discuss) {
+			// With no conversation waiting there is nothing for a first read: the run sorts the notes alone.
+			if ((fastPathEnabled && !options?.discuss && !options?.readFirst) || availability.recentContextEntryCount === 0) {
 				const from: AbsorbWorkflowState = { step: "assessment", target, availability, conversations: availability.sessions, assessment: missingFirstRead(target.agentId, availability, "skipped"), approvalResult: null, fastPathEnabled, error: null };
 				setAbsorbWorkflow(from);
 				await generateAbsorbProposal({ from });
@@ -7125,18 +6248,25 @@ export function App() {
 			// The first read never blocks Memorize: when the request itself fails
 			// without the server saying why, the screen goes on without one. A
 			// sentence the server wrote is its answer and is shown as before.
-			const assessment = await requestAbsorbAssessment(target.agentId).catch((error: unknown) => {
-				if (!isUnexplainedRequestFailure(error)) throw error;
+			let notice: ModelNotice | null = null;
+			const assessment = await askFirstRead(target.agentId, "memorize", (first) => requestFirstRead<AbsorbAssessmentResponse>(absorbBaseUrl(target.agentId), first)).catch((error: unknown) => {
+				notice = modelNoticeFromError(error);
+				if (!notice && !isUnexplainedRequestFailure(error)) throw error;
 				return missingFirstRead(target.agentId, availability);
 			});
 			if (run !== maintainRunRef.current) return;
-			const read: AbsorbWorkflowState = { step: "assessment", target, availability: withAbsorbStatusFields(assessment.availability, availability), conversations: availability.sessions, assessment, approvalResult: null, fastPathEnabled, error: null };
+			const read: AbsorbWorkflowState = { step: "assessment", target, availability: withAbsorbStatusFields(assessment.availability, availability), conversations: availability.sessions, assessment, notice, approvalResult: null, fastPathEnabled, error: null };
 			// Discuss first opens the discussion on the read it just made; a read
 			// with no source has nothing to discuss and stays on the first read.
-			setAbsorbWorkflow(options?.discuss && assessment.source ? { ...read, step: "discussing", discussionMessages: [], discussionTokenBudget: null, discussionSending: false, assessmentHandoff: null } : read);
+			// A discussion kept from before a reload (or from another tab) comes back as it was.
+			const kept = assessment.keptDiscussion;
+			if (kept && assessment.source) setAbsorbWorkflow({ ...read, step: "discussing", discussionMessages: kept.messages, discussionTokenBudget: kept.tokenBudget, discussionSending: false, assessmentHandoff: null });
+			else setAbsorbWorkflow(options?.discuss && assessment.source ? { ...read, step: "discussing", discussionMessages: [], discussionTokenBudget: null, discussionSending: false, assessmentHandoff: null } : read);
 		} catch (e) {
 			if (run !== maintainRunRef.current) return;
-			setAbsorbError(formatAbsorbWorkflowError((e as Error).message), null, target);
+			// A Memory model signed out or too small: the one notice with its ways out.
+			const notice = modelNoticeFromError(e);
+			setAbsorbWorkflow({ step: "error", target, availability: null, assessment: null, approvalResult: null, notice, error: notice ? null : formatAbsorbWorkflowError((e as Error).message) });
 		}
 	}
 
@@ -7152,12 +6282,16 @@ export function App() {
 		setAbsorbLoadingIndex(Math.floor(Math.random() * ABSORB_LOADING_MESSAGES.length));
 		setAbsorbWorkflow({ ...absorbWorkflow, step: "assessing", approvalResult: null, error: null });
 		try {
-			const assessment = await requestAbsorbAssessment(target.agentId, { retryFeedback: assessmentRetryFeedback(prior) }).catch((error: unknown) => {
-				if (!isUnexplainedRequestFailure(error)) throw error;
-				return missingFirstRead(target.agentId, prior.availability);
+			let notice: ModelNotice | null = null;
+			// A missing read is never kept, so asking without `fresh` reads anew, or joins the read a dropped request left running.
+			const assessment = await askFirstRead(target.agentId, "memorize", (first) => requestFirstRead<AbsorbAssessmentResponse>(absorbBaseUrl(target.agentId), { retryFeedback: assessmentRetryFeedback(prior), ...(prior.firstReadMissing ? {} : { fresh: true }), ...first })).catch((error: unknown) => {
+				notice = modelNoticeFromError(error);
+				if (!notice && !isUnexplainedRequestFailure(error)) throw error;
+				// The screen's availability carries the waiting conversations; the read's own may not.
+				return missingFirstRead(target.agentId, absorbWorkflow.availability ?? prior.availability);
 			});
 			if (run !== maintainRunRef.current) return;
-			setAbsorbWorkflow({ ...absorbWorkflow, step: "assessment", availability: withAbsorbStatusFields(assessment.availability, absorbWorkflow.availability), assessment, approvalResult: null, assessmentHandoff: null, discussionMessages: [], discussionTokenBudget: null, discussionWarnings: null, signoffWarnings: undefined, error: null });
+			setAbsorbWorkflow({ ...absorbWorkflow, step: "assessment", availability: withAbsorbStatusFields(assessment.availability, absorbWorkflow.availability), assessment, notice, approvalResult: null, assessmentHandoff: null, discussionMessages: [], discussionTokenBudget: null, discussionWarnings: null, signoffWarnings: undefined, error: null });
 		} catch (e) {
 			if (run !== maintainRunRef.current) return;
 			// The previous assessment is still valid: keep it on screen with the reason.
@@ -7203,7 +6337,7 @@ export function App() {
 		if (!assessment?.source || absorbWorkflow.step !== "assessment") return;
 		setAbsorbWorkflow({
 			...absorbWorkflow,
-			step: "discussing",
+			step: "discussing", notice: null,
 					approvalResult: null,
 			discussionMessages: [],
 			discussionTokenBudget: null,
@@ -7226,7 +6360,7 @@ export function App() {
 		const priorMessages = absorbWorkflow.discussionMessages ?? [];
 		const optimisticMessages = [...priorMessages, userMessage];
 		const run = maintainRunRef.current;
-		setAbsorbWorkflow({ ...absorbWorkflow, discussionMessages: optimisticMessages, discussionSending: true, error: null });
+		setAbsorbWorkflow({ ...absorbWorkflow, discussionMessages: optimisticMessages, discussionSending: true, notice: null, error: null });
 		try {
 			const response = await requestAbsorbDiscussionTurn(target.agentId, {
 				source: assessment.source,
@@ -7235,6 +6369,7 @@ export function App() {
 				userMessage: userMessage.content,
 			});
 			if (run !== maintainRunRef.current) return;
+			logMaintenanceWarnings(response.warnings);
 			setAbsorbWorkflow({
 				...absorbWorkflow,
 				step: "discussing",
@@ -7242,12 +6377,14 @@ export function App() {
 				discussionMessages: [...optimisticMessages, response.message],
 				discussionTokenBudget: response.tokenBudget,
 				discussionSending: false,
-				discussionWarnings: meaningfulMaintenanceWarnings(response.warnings).join("\n") || null,
+				discussionWarnings: null,
+				notice: null,
 				error: null,
 			});
 		} catch (e) {
 			if (run !== maintainRunRef.current) return;
-			setAbsorbWorkflow({ ...absorbWorkflow, step: "discussing", discussionMessages: optimisticMessages, discussionSending: false, error: formatAbsorbWorkflowError((e as Error).message) });
+			const notice = modelNoticeFromError(e);
+			setAbsorbWorkflow({ ...absorbWorkflow, step: "discussing", discussionMessages: optimisticMessages, discussionSending: false, notice, error: notice ? null : formatAbsorbWorkflowError((e as Error).message) });
 		}
 	}
 
@@ -7261,7 +6398,8 @@ export function App() {
 			return;
 		}
 		const run = maintainRunRef.current;
-		setAbsorbWorkflow({ ...absorbWorkflow, step: "signing_off", error: null });
+		cancelFirstRead();
+		setAbsorbWorkflow({ ...absorbWorkflow, step: "signing_off", notice: null, error: null });
 		try {
 			const signoff = await requestAbsorbDiscussionSignoff(target.agentId, {
 				source: assessment.source,
@@ -7297,7 +6435,8 @@ export function App() {
 			beginAbsorbRunWatch(base, response.runId);
 		} catch (e) {
 			if (run !== maintainRunRef.current) return;
-			setAbsorbWorkflow({ ...absorbWorkflow, step: "discussing", discussionSending: false, error: formatAbsorbWorkflowError((e as Error).message) });
+			const notice = modelNoticeFromError(e);
+			setAbsorbWorkflow({ ...absorbWorkflow, step: "discussing", discussionSending: false, notice, error: notice ? null : formatAbsorbWorkflowError((e as Error).message) });
 		}
 	}
 
@@ -7317,6 +6456,7 @@ export function App() {
 			return;
 		}
 		const run = maintainRunRef.current;
+		cancelFirstRead();
 		setAbsorbWorkflow({ ...current, step: "proposing", approvalResult: null, activeRunConflictId: null, error: null });
 		try {
 			// Redrafts keep honoring a discussion the user already had — unless the
@@ -7338,10 +6478,12 @@ export function App() {
 				return;
 			}
 			// A run that could not start never destroys work: the discussion or the
-			// first read survives with an inline error.
-			const draftError = formatMaintenanceDraftError((e as Error).message);
-			if (fromDiscussion) setAbsorbWorkflow({ ...current, step: "discussing", discussionSending: false, approvalResult: null, assessmentHandoff: null, error: draftError });
-			else setAbsorbWorkflow({ ...current, step: "assessment", approvalResult: null, error: draftError });
+			// first read survives with an inline error, or with the model notice
+			// when the Memory model is the reason.
+			const notice = modelNoticeFromError(e);
+			const draftError = notice ? null : formatMaintenanceDraftError((e as Error).message);
+			if (fromDiscussion) setAbsorbWorkflow({ ...current, step: "discussing", discussionSending: false, approvalResult: null, assessmentHandoff: null, notice, error: draftError });
+			else setAbsorbWorkflow({ ...current, step: "assessment", approvalResult: null, notice, error: draftError });
 		}
 	}
 
@@ -7362,7 +6504,9 @@ export function App() {
 		if (absorbRunSettledRef.current === absorbRun.runId) return;
 		absorbRunSettledRef.current = absorbRun.runId;
 		if (absorbRun.state === "failed") {
-			setAbsorbWorkflow((current) => ({ ...current, step: "run_failed", run: absorbRun, runBusy: false, runPollError: null, error: absorbRun.error ?? "The memory update could not be finished." }));
+			// What stopped it goes to the console; the screen says what happened.
+			if (absorbRun.error) console.info(`[maintenance] ${absorbRun.error}`);
+			setAbsorbWorkflow((current) => ({ ...current, step: "run_failed", run: absorbRun, runBusy: false, runPollError: null, error: null }));
 			return;
 		}
 		if (absorbRun.state === "cancelled") {
@@ -7513,16 +6657,76 @@ export function App() {
 		void withAbsorbRunRequest((target, runId) => keepAbsorbRunEntries(target.agentId, runId, { keepTopics }));
 	}
 
-	/** The card's Edit on a note: the person's words replace the model's before saving. */
-	function editAbsorbRunEntryText(entryId: string, text: string): Promise<void> {
-		return withAbsorbRunRequest((target, runId) => editAbsorbRunEntry(target.agentId, runId, entryId, text));
+	/**
+	 * The card's Edit. The server's refusal goes back to the note, its editor
+	 * open; a lost answer says so there, the update is read again once the
+	 * server answers, and the note says what is true.
+	 */
+	async function editAbsorbRunEntryText(entryId: string, text: string, onLost: (line: string) => void): Promise<void> {
+		const target = absorbWorkflow.target;
+		const runId = absorbWorkflow.run?.runId ?? absorbWorkflow.runId;
+		if (!target || !runId) return;
+		const runToken = maintainRunRef.current;
+		const current = () => runToken === maintainRunRef.current;
+		setAbsorbWorkflow((state) => ({ ...state, runBusy: true, error: null }));
+		try {
+			const updated = await editAbsorbRunEntry(target.agentId, runId, entryId, text);
+			if (current()) setAbsorbWorkflow((state) => ({ ...state, run: updated }));
+		} catch (e) {
+			if (!saveAnswerLost(e)) throw e;
+			onLost(SAVE_ANSWER_LOST_SENTENCE);
+			const run = await askUntilAnswered(() => fetchAbsorbRun(target.agentId, runId), { stopped: () => !current() });
+			if (current()) setAbsorbWorkflow((state) => ({ ...state, run }));
+			const change = run.sessions.flatMap((session) => session.changes ?? []).find((candidate) => candidate.id === entryId);
+			if (!sameNoteWords(change?.after, text)) throw new Error(SAVE_NOT_LANDED_SENTENCE);
+		} finally {
+			if (current()) setAbsorbWorkflow((state) => ({ ...state, runBusy: false }));
+		}
 	}
 	function chooseAbsorbRunBesideNote(entryId: string, choice: "replace" | "keep-both"): Promise<void> {
 		return withAbsorbRunRequest((target, runId) => chooseAbsorbRunBeside(target.agentId, runId, entryId, choice));
 	}
+	async function moveAbsorbRunSorted(entryId: string, topic: string, onLost: (line: string) => void): Promise<void> {
+		const target = absorbWorkflow.target;
+		const runId = absorbWorkflow.run?.runId ?? absorbWorkflow.runId;
+		if (!target || !runId) return;
+		const runToken = maintainRunRef.current;
+		const current = () => runToken === maintainRunRef.current;
+		setAbsorbWorkflow((state) => ({ ...state, runBusy: true, error: null }));
+		try {
+			const updated = await moveAbsorbRunSortedNote(target.agentId, runId, entryId, topic);
+			if (current()) setAbsorbWorkflow((state) => ({ ...state, run: updated }));
+		} catch (e) {
+			if (!saveAnswerLost(e)) throw e;
+			onLost(SAVE_ANSWER_LOST_SENTENCE);
+			const run = await askUntilAnswered(() => fetchAbsorbRun(target.agentId, runId), { stopped: () => !current() });
+			if (current()) setAbsorbWorkflow((state) => ({ ...state, run }));
+			if (run.sorted?.find((row) => row.id === entryId)?.topic !== topic.replace(/\s+/g, " ").trim()) throw new Error(SAVE_NOT_LANDED_SENTENCE);
+		} finally {
+			if (current()) setAbsorbWorkflow((state) => ({ ...state, runBusy: false }));
+		}
+	}
 
-	/** Cancel always asks first: a run costs minutes of model work to redo. */
+	/**
+	 * Cancel asks first: a run costs minutes of model work to redo. While it still reads, Cancel stops it; once it has
+	 * finished reading, what is left is a draft, so Cancel asks to discard it. A paused run with nothing to save has none
+	 * to lose, so it goes without a question, as Review's Close does.
+	 */
 	function confirmCancelAbsorbRun(): void {
+		const run = absorbWorkflow.run;
+		if (absorbWorkflow.step === "run_card" && run?.stop && absorbRunNothingToSave(run)) return void absorbRunBackToAssessment();
+		if (absorbWorkflow.step === "run_card" && run?.state === "ready") {
+			// A Discard already on its way is not asked twice.
+			if (absorbWorkflow.runBusy) return;
+			setMaintainConfirm({
+				title: "Discard this draft?",
+				body: "Nothing has been saved, and the conversations stay remembered for the next Memorize.",
+				confirmLabel: "Discard",
+				cancelLabel: "Keep draft",
+				onConfirm: () => { void discardAbsorbDraft(); },
+			});
+			return;
+		}
 		setMaintainConfirm({
 			title: "Stop this memory update?",
 			body: "Nothing has been saved, and the conversations stay remembered. Starting again reads them from the beginning.",
@@ -7530,6 +6734,34 @@ export function App() {
 			cancelLabel: "Keep going",
 			onConfirm: () => { void absorbRunBackToAssessment(); },
 		});
+	}
+
+	/**
+	 * Discard: cancelling a finished run drops its draft on the server; then the room's memory page opens again. A draft
+	 * the server no longer holds (a newer Memorize replaced it), or one a cancel whose answer was lost did drop, is
+	 * discarded already. Any other refusal keeps the card as it was, its unsent Keep choices included, with its reason.
+	 */
+	async function discardAbsorbDraft(): Promise<void> {
+		const target = absorbWorkflow.target;
+		const runId = absorbWorkflow.run?.runId ?? absorbWorkflow.runId;
+		if (!target || !runId) return;
+		const runToken = maintainRunRef.current;
+		const current = () => runToken === maintainRunRef.current;
+		setAbsorbWorkflow((state) => ({ ...state, runBusy: true, error: null }));
+		try {
+			await cancelAbsorbRun(target.agentId, runId);
+		} catch (e) {
+			const gone = apiErrorCode(e) === "absorb_run_unknown" || (await fetchAbsorbRun(target.agentId, runId).then((run) => run.state === "cancelled", () => false));
+			if (!current()) return;
+			if (!gone) {
+				setAbsorbWorkflow((state) => ({ ...state, runBusy: false, error: (e as Error).message }));
+				return;
+			}
+		}
+		if (!current()) return;
+		absorbRunSettledRef.current = runId;
+		clearAbsorbKeepDraft();
+		restartMaintain();
 	}
 
 	/**
@@ -7546,6 +6778,8 @@ export function App() {
 		if (target && runId) {
 			try { await cancelAbsorbRun(target.agentId, runId); } catch {}
 		}
+		// No first read was asked for that run (it was waiting, or the room saves on its own): its conversations are read now, never shown as "No first read this time".
+		if (target && (absorbWorkflow.openedWaiting || absorbWorkflow.assessment?.firstReadMissing === "skipped") && (absorbWorkflow.availability?.recentContextEntryCount ?? 0) > 0) return void startAbsorbWorkflow({ target, readFirst: true });
 		setAbsorbWorkflow((current) => ({ ...current, step: "assessment", run: null, runId: null, runBusy: false, runPollError: null, fastPathBlockedReasons: undefined, error: null }));
 	}
 
@@ -7591,8 +6825,8 @@ export function App() {
 		setMaintainConfirm({
 			title: `Save these notes to ${target.displayName}'s memory?`,
 			body: overBudget
-				? "The remembered conversations become lasting notes, and memory stays above its budget because of what you kept. A copy of today's memory is kept, so this can be undone."
-				: "The remembered conversations become lasting notes. A copy of today's memory is kept, so this can be undone.",
+				? "The remembered conversations become lasting notes, and memory stays above its budget because of what you kept."
+				: "The remembered conversations become lasting notes.",
 			confirmLabel: overBudget ? "Save over the budget" : "Save",
 			cancelLabel: "Keep reading",
 			onConfirm: () => { void performAbsorbRunApproval(target, absorbRun); },
@@ -7609,6 +6843,27 @@ export function App() {
 			setAbsorbWorkflow((current) => ({ ...current, step: "saved", run: absorbRun, approvalResult, runBusy: false, error: null }));
 		} catch (e) {
 			if (runToken !== maintainRunRef.current) return;
+			if (saveAnswerLost(e)) return settleLostAbsorbSave(target, absorbRun, runToken);
+			setAbsorbWorkflow((current) => ({ ...current, step: "run_card", run: absorbRun, runBusy: false, error: formatAbsorbRunSaveError((e as Error).message) }));
+		}
+	}
+
+	/** A Save whose answer was lost: the card says so, and shows what is true once the server answers. */
+	async function settleLostAbsorbSave(target: MaintainTarget, absorbRun: AbsorbRun, runToken: number): Promise<void> {
+		const stopped = () => runToken !== maintainRunRef.current;
+		setAbsorbWorkflow((current) => ({ ...current, step: "run_card", run: absorbRun, runBusy: true, error: SAVE_ANSWER_LOST_SENTENCE }));
+		try {
+			const outcome = await settleLostRunSave({ read: () => fetchAbsorbRun(target.agentId, absorbRun.runId), save: () => approveAbsorbRun(target.agentId, absorbRun.runId), gone: (error) => apiErrorCode(error) === "absorb_run_unknown", stopped });
+			if (stopped()) return;
+			if ("unsaved" in outcome) {
+				setAbsorbWorkflow((current) => ({ ...current, step: "run_card", run: outcome.unsaved, runBusy: false, error: SAVE_NOT_LANDED_SENTENCE }));
+				return;
+			}
+			await refreshPersistentAgentStatus();
+			if (stopped()) return;
+			setAbsorbWorkflow((current) => ({ ...current, step: "saved", run: absorbRun, approvalResult: outcome.saved, runBusy: false, error: null }));
+		} catch (e) {
+			if (stopped()) return;
 			setAbsorbWorkflow((current) => ({ ...current, step: "run_card", run: absorbRun, runBusy: false, error: formatAbsorbRunSaveError((e as Error).message) }));
 		}
 	}
@@ -7642,7 +6897,7 @@ export function App() {
 
 
 	async function openPersistentAgent(target: PersistentAgentTarget) {
-		const label = target.displayName?.trim() || "Exxpert";
+		const label = shownRoomName(target.displayName) || "Exxpert";
 		// The server decides a new conversation's model (the room's conversation
 		// row); the resolved row only fills the room's header until the saved
 		// thread answers with its lock.
@@ -7652,7 +6907,12 @@ export function App() {
 		if (!shownModel) {
 			// The room's model cannot run (the server's sentence names it and the
 			// way out), or nothing is signed in at all.
-			setPersistentResumeError(conversationRow?.refusal ?? "No AI provider is signed in. Sign in in Settings, AI setup, then open the room again.");
+			const role = sharedServerRole(clientContext);
+			setPersistentResumeError(conversationRow?.refusal ?? (role === "member"
+				? "No AI model is set up on this server yet. Ask your admin to add one in Settings, AI setup, then open the room again."
+				: role === "admin"
+					? "No AI model is set up yet. Add an API key or a gateway in Settings, AI setup, then open the room again."
+					: "No AI provider is signed in. Sign in in Settings, AI setup, then open the room again."));
 			return;
 		}
 		const model: WebChatModelOption = { provider: shownModel.provider, model: shownModel.model, label: shownModel.label };
@@ -7722,18 +6982,18 @@ export function App() {
 		setSessionVersion((v) => v + 1);
 	}
 
-	// A switch made in Room settings, Model. With a live socket the
+	// A switch made in the model panel. With a live socket the
 	// model_switched frame usually lands first and carries all of this; the
 	// answer to the request settles it either way: the room takes the new model,
 	// the conversation gets the server's own "Continued on" line unless the
 	// frame already brought it (the same id), and a socket that is down (its
 	// provider signed out) dials again on the new model.
-	function adoptSwitchedConversationModel(conversationId: string, model: RoomModelLockView, notice: ConversationSwitchNotice): void {
+	function adoptSwitchedConversationModel(conversationId: string, model: Pick<RoomModelLockView, "provider" | "model" | "label">, notice: ConversationSwitchNotice): void {
 		const next: WebChatModelOption = { provider: model.provider, model: model.model, label: model.label };
 		const differs = (current: WebChatModelOption) => current.provider !== next.provider || current.model !== next.model;
 		setPersistentThread((thread) => thread && thread.conversationId === conversationId && differs(thread.model) ? { ...thread, model: next } : thread);
 		setPersistentChat((chat) => chat && chat.conversationId === conversationId && differs(chat.model) ? { ...chat, model: next } : chat);
-		if (notice?.id) setItems((s) => s.some((item) => item.id === notice.id) ? s : [...s, { kind: "system", id: notice.id, text: notice.text, level: "info" }]);
+		if (notice?.id) setItems((s) => withSwitchLine(s, notice));
 		const ws = wsRef.current;
 		if (!ws || ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED) setSessionVersion((v) => v + 1);
 	}
@@ -7752,6 +7012,23 @@ export function App() {
 		setBackgroundDoneToast((current) => (current?.agentId === agentId ? null : current));
 	}
 
+	// Reload in a window the room moved on from: it joins the room's conversation, the typed message kept in the box.
+	async function reloadMovedRoom(): Promise<void> {
+		const chat = persistentChatRef.current;
+		if (!chat) return;
+		const draft = textareaRef.current?.value ?? "";
+		if (draft.trim()) roomDraftsRef.current.set(chat.agentId, draft);
+		try {
+			const status = (await fetchPersistentAgentStatuses()).find((candidate) => candidate.id === chat.agentId);
+			if (!status) throw new Error("This room is no longer available. Refresh Home and try again.");
+			await openRoomFromAddress(status);
+		} catch (e) {
+			setPersistentResumeError((e as Error).message);
+			setView("home");
+			await refreshPersistentAgentStatus();
+		}
+	}
+
 	async function openPersistentAgentResume(status: PersistentAgentStatus) {
 		setPersistentResumeError(null);
 		clearBackgroundActivityBadge(status.id);
@@ -7759,13 +7036,13 @@ export function App() {
 		const localThreadId = persistentThread?.agentId === status.id && (persistentThread.state === "standby" || persistentThread.state === "live") ? persistentThread.conversationId : null;
 		const threadId = runtimeThreadId || localThreadId;
 		if (!threadId) {
-			setPersistentResumeError("No standby thread was found for this room. Refresh Home and try again.");
+			setPersistentResumeError("No conversation to continue was found for this room. Refresh Home and try again.");
 			await refreshPersistentAgentStatus();
 			return;
 		}
 		try {
 			const record = await fetchPersistentAgentThread(status.id, threadId);
-			const thread = threadRecordToLocalThread(record, status.displayName || "Exxpert");
+			const thread = threadRecordToLocalThread(record, shownRoomName(status.displayName) || "Exxpert");
 			const liveThread = { ...thread, state: "live" as const };
 			// Standby → resume re-queues the persisted pending-transfer queue (§2.3)
 			// before the first save, so a stale ref from a prior room can't leak in.
@@ -7784,7 +7061,7 @@ export function App() {
 			setCurrentModel(liveThread.model);
 			setView("chat");
 			setSessionVersion((v) => v + 1);
-			// Community #33: entering a still-cooking room takes two awaited
+			// Entering a still-cooking room takes two awaited
 			// round trips between the clear at the top and the room binding
 			// here; a status poll in that gap re-enrolls the room as "cooking
 			// with nobody inside", which would toast an answer the user is about
@@ -7798,8 +7075,8 @@ export function App() {
 	}
 
 	// The background-answer toast's Open (slice 3): from Home a plain resume;
-	// from inside another room the full leave grammar first — goHome owns the
-	// leave-and-let-it-finish confirm, and a declined confirm stays put.
+	// from inside another room the full leave grammar first: goHome saves the
+	// prompt and lets a running answer finish in the background.
 	async function openRoomFromBackgroundToast(agentId: PersistentAgentId): Promise<void> {
 		setBackgroundDoneToast(null);
 		if (persistentChatRef.current) {
@@ -7823,23 +7100,36 @@ export function App() {
 	// picks inside one frame (drag right, drag back) compare against what was
 	// actually just chosen instead of a stale render's value.
 	function selectRoomEffort(level: string): void {
+		// While a pick is held the dial stands on that model's ladder, and the
+		// room still runs the model being left: the level waits with the pick.
+		const held = heldPickFor(persistentChatRef.current);
+		if (held) {
+			const next = { ...held, level };
+			heldModelPickRef.current = next;
+			setHeldModelPick(next);
+			return;
+		}
+		// The dial is empty while a socket comes back; a level from a pick that
+		// took over meanwhile still has to reach the room.
 		const current = roomEffortRef.current;
-		if (!current || level === current.level) return;
-		const next = { ...current, level };
-		roomEffortRef.current = next;
-		setRoomEffort(next);
+		if (current) {
+			const next = { ...current, level };
+			roomEffortRef.current = next;
+			setRoomEffort(next);
+		}
 		const ws = wsRef.current;
 		if (ws && ws.readyState === WebSocket.OPEN) {
 			pendingEffortRef.current = null;
-			ws.send(JSON.stringify({ type: "effort", level }));
+			// The person picked it: stored even when it equals the level shown, and it becomes the room's default for new conversations.
+			ws.send(JSON.stringify({ type: "effort", level, explicit: true }));
 			return;
 		}
-		// The socket is between lives (a rebind, a reconnect). The pill has
+		// The socket is between lives (a rebind, a reconnect). The slider has
 		// already moved, so dropping the frame here would leave the screen
 		// claiming a level the room never heard about. Hold it against this
 		// room and send it the moment the room binds again.
 		const room = persistentChatRef.current;
-		if (room) pendingEffortRef.current = { agentId: room.agentId, level };
+		if (room) pendingEffortRef.current = { agentId: room.agentId, conversationId: room.conversationId, level };
 	}
 
 	/** Delivers a level picked while the socket was down, once it is back. */
@@ -7847,8 +7137,8 @@ export function App() {
 		const pending = pendingEffortRef.current;
 		if (!pending) return;
 		const room = persistentChatRef.current;
-		// A choice belongs to the room it was made in and travels nowhere else.
-		if (!room || room.agentId !== pending.agentId) { pendingEffortRef.current = null; return; }
+		// A choice belongs to the conversation it was made in and travels nowhere else.
+		if (!room || room.agentId !== pending.agentId || room.conversationId !== pending.conversationId) { pendingEffortRef.current = null; return; }
 		if (ws.readyState !== WebSocket.OPEN) return;
 		pendingEffortRef.current = null;
 		const current = roomEffortRef.current;
@@ -7857,7 +7147,133 @@ export function App() {
 			roomEffortRef.current = next;
 			setRoomEffort(next);
 		}
-		ws.send(JSON.stringify({ type: "effort", level: pending.level }));
+		ws.send(JSON.stringify({ type: "effort", level: pending.level, explicit: true }));
+	}
+
+	/**
+	 * A model picked in the model panel. The control shows it at once; while
+	 * the room answers the switch waits for the answer to end, otherwise it
+	 * goes now through the switch route, which keeps its own fit check.
+	 */
+	function pickConversationModel(lock: RoomModelLock): void {
+		const chat = persistentChatRef.current;
+		if (!chat) return;
+		const onCurrent = chat.model.provider === lock.provider && chat.model.model === lock.model;
+		// With a switch still on the wire, even a return to the current model
+		// waits for it: the earlier request may yet move the conversation.
+		const onWire = switchesInFlightFor(chat.agentId, chat.conversationId) > 0;
+		if (onCurrent && !onWire) {
+			heldModelPickRef.current = null;
+			setHeldModelPick(null);
+			// A conversation with nothing said yet follows the room's default until
+			// a model is picked for it: picking the one it shows keeps it there.
+			if (!roomInFlightRef.current && !itemsRef.current.some((item) => item.kind === "user")) void applyConversationPick(chat.agentId, chat.conversationId, lock);
+			return;
+		}
+		const waiting = roomInFlightRef.current || onWire;
+		const next = { agentId: chat.agentId, conversationId: chat.conversationId, lock, phase: waiting ? "waiting" as const : "sending" as const };
+		heldModelPickRef.current = next;
+		setHeldModelPick(next);
+		if (!waiting) void applyConversationPick(chat.agentId, chat.conversationId, lock);
+	}
+
+	// A held pick goes once the room confirms it (the conversation's model is
+	// then the pick) or refuses it; a newer pick made meanwhile stays. A level
+	// held with it goes over only when the pick took over: the session is on
+	// the new model by now, so the room judges the level against that model.
+	function settleHeldModelPick(conversationId: string, lock: RoomModelLock, tookOver: boolean): void {
+		const held = heldModelPickRef.current;
+		if (!held || held.conversationId !== conversationId || held.lock.provider !== lock.provider || held.lock.model !== lock.model) return;
+		heldModelPickRef.current = null;
+		setHeldModelPick(null);
+		if (tookOver && held.level) selectRoomEffort(held.level);
+	}
+
+	async function applyConversationPick(agentId: string, conversationId: string, lock: RoomModelLock): Promise<void> {
+		const key = `${agentId}\n${conversationId}`;
+		const inFlight = switchesInFlightRef.current;
+		inFlight.set(key, (inFlight.get(key) ?? 0) + 1);
+		switchingToRef.current.set(key, lock);
+		// Drawn at once, so Send shows it waits as soon as the request leaves.
+		setSwitchesTick((n) => n + 1);
+		try { await sendConversationPick(agentId, conversationId, lock); } finally {
+			const left = (inFlight.get(key) ?? 1) - 1;
+			if (left > 0) inFlight.set(key, left); else { inFlight.delete(key); switchingToRef.current.delete(key); }
+			setSwitchesTick((n) => n + 1);
+		}
+	}
+
+	// The end frame can land before the server clears its turn guard, so only
+	// the answering refusal is asked again, until the turn is idle. Any other
+	// coded refusal wrote nothing: the conversation's model shows again with
+	// the reason. A failure without a code may have moved the conversation (a
+	// failed rebind, a lost answer): the stored model is read first, and only
+	// then is Send released. The outcome belongs to the conversation the pick
+	// was made in: once the page has left it, nothing is written into the one now open.
+	async function sendConversationPick(agentId: string, conversationId: string, lock: RoomModelLock): Promise<void> {
+		const stillOpen = () => persistentChatRef.current?.agentId === agentId && persistentChatRef.current?.conversationId === conversationId;
+		const giveUpAt = Date.now() + SWITCH_ANSWERING_RETRY_MS;
+		for (;;) {
+			try {
+				const switched = await switchConversationModel(agentId, conversationId, lock);
+				if (stillOpen()) adoptSwitchedConversationModel(conversationId, switched.model, switched.notice ?? null);
+				settleHeldModelPick(conversationId, lock, true);
+				void refreshPersistentAgentStatus();
+				return;
+			} catch (e) {
+				const refusal = conversationSwitchRefusal(e);
+				if (refusal === "switch_answering" && stillOpen() && Date.now() < giveUpAt) { await new Promise((resolve) => setTimeout(resolve, 400)); continue; }
+				const key = `${agentId}\n${conversationId}`;
+				if (refusal === null) switchOutcomeUnknownRef.current.add(key);
+				if (stillOpen()) setItems((s) => [...s, { kind: "system", id: nid(), text: (e as Error).message, level: "error" }]);
+				// Until a read says where the conversation stands, the switch stays
+				// on the wire, Send waits and nothing is saved: the stored model and
+				// its lines are taken first, so the next save keeps what the switch wrote.
+				let tookOver = false;
+				while (refusal === null && stillOpen()) {
+					try {
+						const record = await fetchPersistentAgentThread(agentId as PersistentAgentId, conversationId);
+						if (stillOpen()) {
+							adoptSwitchedConversationModel(conversationId, { ...record.model, label: record.model.label ?? record.model.model }, null);
+							setItems((s) => withStoredSwitchLines(s, record.items));
+							tookOver = record.model.provider === lock.provider && record.model.model === lock.model;
+						}
+						break;
+					} catch {
+						await new Promise((resolve) => setTimeout(resolve, SWITCH_READ_RETRY_MS));
+					}
+				}
+				switchOutcomeUnknownRef.current.delete(key);
+				settleHeldModelPick(conversationId, lock, tookOver);
+				return;
+			}
+		}
+	}
+
+	// The chat's "Choose another model" rescues the open conversation, so it
+	// opens the conversation's model panel; the Memory model's stays in Room settings.
+	function openModelPanel(): void {
+		setModelPanelOpen(true);
+	}
+
+	function askModelSwitch(lock: RoomModelLock, name: string): void {
+		const chat = persistentChatRef.current;
+		if (!chat) return;
+		setModelSwitchAsk({ agentId: chat.agentId, conversationId: chat.conversationId, lock, name });
+	}
+
+	// "Remember and switch", or Remember alone for a room this save fills:
+	// checked again on the click, since the answer may have started or ended
+	// since the window opened. Remember then runs exactly as its own button
+	// runs it, the switch riding its proposal.
+	function confirmModelSwitch(withSwitch: boolean): void {
+		const ask = modelSwitchAsk;
+		const chat = persistentChatRef.current;
+		if (!ask || !chat || chat.agentId !== ask.agentId || chat.conversationId !== ask.conversationId) { setModelSwitchAsk(null); return; }
+		if (roomInFlightRef.current || busyRef.current || turnCancellingRef.current) return;
+		setModelSwitchAsk(null);
+		rememberContinueOnRef.current = withSwitch ? { agentId: ask.agentId, conversationId: ask.conversationId, lock: ask.lock } : null;
+		void runQuickCheckpoint();
 	}
 
 	async function mementoPersistentThread() {
@@ -7865,14 +7281,7 @@ export function App() {
 		if (!targetChat) return;
 		// Memento always works, even mid-stream: the server stops the current
 		// response, closes the thread and opens a fresh one.
-		const inFlightWarning = persistentRoomInFlight ? "The response currently being written will be stopped. " : "";
-		const ok = await confirmDialog({
-			title: "Forget this conversation and start fresh?",
-			body: `${inFlightWarning}This will discard the current room transcript. Nothing will be saved to memory.`,
-			confirmLabel: "Forget",
-			danger: true,
-		});
-		if (!ok) return;
+		if (!(await confirmForgetConversation(persistentRoomInFlight))) return;
 		// The server closes this room's socket as part of Forget, before its
 		// answer arrives: that close is deliberate, not a drop to reconnect
 		// from (or to save an interrupted answer into the forgotten conversation).
@@ -7899,11 +7308,17 @@ export function App() {
 	function continueAfterCheckpoint() {
 		const approval = checkpointApprovalResult;
 		const targetChat = persistentChat;
+		// The card's button goes with the card, so focus would fall to the page: it goes back to the message box, after the render that
+		// closes the card (never on a touch screen, where it would pop the keyboard over the room).
+		const keepChatting = () => {
+			resetCheckpointInput();
+			if (!isTouchScreen()) window.requestAnimationFrame(() => textareaRef.current?.focus());
+		};
 		if (approval && targetChat && targetChat.conversationId !== approval.postCheckpoint.activeThreadId) {
-			void bindToApprovedCheckpointRuntime(approval, targetChat).then(() => resetCheckpointInput()).catch((error) => setCheckpointApprovalError(formatRememberError((error as Error).message)));
+			void bindToApprovedCheckpointRuntime(approval, targetChat).then(keepChatting).catch((error) => setCheckpointApprovalError(formatRememberError((error as Error).message)));
 			return;
 		}
-		resetCheckpointInput();
+		keepChatting();
 	}
 
 	async function restAfterCheckpoint() {
@@ -7914,7 +7329,7 @@ export function App() {
 				await discardEmptyPreparedBoundaryThread(approval.agentId, postCheckpointThreadId);
 			} catch (e) {
 				setCheckpointApprovalError(formatRememberError((e as Error).message));
-				return;
+				return false;
 			}
 		} else if (!approval && persistentChat) {
 			void setPersistentRuntimeIdle(persistentChat.agentId);
@@ -7930,6 +7345,13 @@ export function App() {
 		setItems([]);
 		setView("home");
 		void refreshPersistentAgentStatus();
+		return true;
+	}
+
+	// The Remember that filled the room: Home, and Memorize starts on it.
+	async function memorizeAfterCheckpoint() {
+		const target = persistentChat ? { agentId: persistentChat.agentId, displayName: persistentChat.displayName } : null;
+		if (await restAfterCheckpoint() && target) void startAbsorbWorkflow({ target });
 	}
 
 	const resolveApproval = useCallback((requestId: string, value: any, label: string) => {
@@ -7938,6 +7360,9 @@ export function App() {
 		// place. The preview payload carries no per-approval identity, so pane kind
 		// is the only available discriminant.
 		setRightPane((cur) => (cur?.kind === "preview" ? null : cur));
+		if (!liveApprovalIdsRef.current.has(requestId)) return;
+		liveApprovalIdsRef.current.delete(requestId);
+		setLiveApprovalIds(new Set(liveApprovalIdsRef.current));
 		const ws = wsRef.current;
 		if (ws && ws.readyState === WebSocket.OPEN) {
 			ws.send(JSON.stringify({ type: "ui_response", id: requestId, value }));
@@ -7956,8 +7381,8 @@ export function App() {
 	// V5: open a task artifact beside the chat (the pane's second occupant).
 	// Every fresh open starts un-maximized; opening over a preview (or vice
 	// versa) swaps the occupant — one slot, last click wins. Whatever the entry
-	// path (done card, thread item, Assets row), the viewer gets the SAME
-	// reconstituted done-card chrome (Borja, live test 2026-07-18): the asset
+	// path (thread item, Assets row), the viewer gets the SAME
+	// reconstituted done-card chrome: the asset
 	// row rides along when the ledger has it, with a card-state fallback for
 	// the beat between task_end and the panel refetch landing.
 	const openArtifactViewer = useCallback((taskId: string, templateLabel: string, artifact: { relativePath: string; extension: string }) => {
@@ -8010,7 +7435,6 @@ export function App() {
 				};
 			}
 		}
-		setTaskIterateNotice(null);
 		setRightPane({ kind: "artifactViewer", taskId, templateLabel, artifact, ...(asset ? { asset } : {}) });
 	}, []);
 
@@ -8060,7 +7484,7 @@ export function App() {
 			}
 			const savedName = result.savedTo.split(/[\\/]/).pop() ?? exportName;
 			const isHtml = exportName.toLowerCase().endsWith(".html");
-			// Filename, not the full path (Borja, live test 2026-07-18) — with Keep
+			// Filename, not the full path — with Keep
 			// both it was suffixed, and that is what the user has to learn here.
 			setExportNotice({ kind: "success", text: `Saved “${savedName}”.` + (isHtml ? " Note: once saved, HTML files open outside the app's protections." : "") });
 		} catch (e) {
@@ -8068,11 +7492,6 @@ export function App() {
 		}
 	}, []);
 
-	useEffect(() => {
-		if (!taskDoneToast) return;
-		const timer = window.setTimeout(() => setTaskDoneToast(null), 6000);
-		return () => window.clearTimeout(timer);
-	}, [taskDoneToast]);
 	useEffect(() => {
 		if (!backgroundDoneToast) return;
 		const timer = window.setTimeout(() => setBackgroundDoneToast(null), 8000);
@@ -8121,7 +7540,7 @@ export function App() {
 	}, [persistentChat?.agentId]);
 
 	// Assets panel projection: ledger rows + the live task + the thread's
-	// transferred ids → the rail's row view-models (pure, smoke-tested).
+	// transferred ids → the cards' row view-models (pure, smoke-tested).
 	const threadTaskIds = useMemo(() => new Set(items.filter((it): it is Extract<ChatItem, { kind: "task" }> => it.kind === "task").map((it) => it.taskId)), [items]);
 	const shelfFileRows = useMemo<ShelfFileRowInput[]>(() => roomShelfFiles.map((file) => ({
 		name: file.name,
@@ -8170,8 +7589,11 @@ export function App() {
 		const timer = window.setTimeout(() => setReconnectedNotice(null), 3000);
 		return () => window.clearTimeout(timer);
 	}, [reconnectedNotice]);
+	// Skills this room paused because they changed: said once, on entering.
+	const pausedSkillsToast = usePausedSkillsNotice(persistentChat?.agentId ?? null, () => openRoomSettings("skills"));
 	const roomToasts = useMemo<ToastView[]>(() => {
 		const list: ToastView[] = [];
+		if (pausedSkillsToast) list.push(pausedSkillsToast);
 		if (reconnectedNotice !== null) list.push({ id: `reconnected:${reconnectedNotice}`, tone: "success", text: "Connected again." });
 		if (backgroundDoneToastView) list.push(backgroundDoneToastView);
 		if (exportNotice) list.push({ id: "export", tone: exportNotice.kind, text: exportNotice.text });
@@ -8193,31 +7615,9 @@ export function App() {
 				action: { label: "Undo", onClick: () => void undoFileDelete() },
 			});
 		}
-		if (taskDoneToast) {
-			// The whole card used to be the click target ("click to open"); under
-			// one grammar the verb becomes the action button, so every toast is
-			// read the same way: what happened, then what you can do about it.
-			const toast = taskDoneToast;
-			list.push({
-				id: `task:${toast.taskId}`,
-				tone: toast.kind === "done" ? "success" : "error",
-				text: toast.kind === "done" ? `“${toast.title}” is ready.` : `“${toast.title}” didn't finish.`,
-				...(toast.artifact
-					? {
-						action: {
-							label: toast.kind === "done" ? "Open" : "See what it made",
-							onClick: () => {
-								setTaskDoneToast(null);
-								if (toast.artifact) openArtifactViewer(toast.taskId, toast.templateLabel, toast.artifact);
-							},
-						},
-					}
-					: {}),
-			});
-		}
 		return list;
-	}, [reconnectedNotice, backgroundDoneToastView, exportNotice, removeNotice, fileDeleteNotice, taskDoneToast]);
-	// The chip in a message opens the file exactly as its Files row does (taste
+	}, [pausedSkillsToast, reconnectedNotice, backgroundDoneToastView, exportNotice, removeNotice, fileDeleteNotice]);
+	// The chip in a message opens the file exactly as its Attachments card does (taste
 	// pass), so the two entry points can never drift: find the row that stands
 	// for that shelf file and take the row's own path. A ref keeps the handler
 	// identity stable for the memoised transcript while still calling the
@@ -8241,13 +7641,25 @@ export function App() {
 			? { existingNames: new Set(roomShelfFiles.map((file) => file.name)) }
 			: {}),
 	}), [openShelfFileByName, persistentChat?.agentId, roomFilesKnownFor, roomShelfFiles]);
+	// For the room's socket, whose handlers outlive the render that opened it.
+	const attachmentAccessRef = useRef(attachmentAccess);
+	attachmentAccessRef.current = attachmentAccess;
 	const selectedAssetTaskId = rightPane?.kind === "artifactViewer" || rightPane?.kind === "taskRun" ? rightPane.taskId : null;
+	const attachmentRows = assetRows.filter((row) => row.artifacts.length > 0 || row.running);
+	const attachmentsView = rightPane?.kind === "attachments" ? rightPane.view : rightPane?.kind === "artifactViewer" ? rightPane.backTo ?? null : null;
+	// A phone has no gallery: its panel is already the whole screen's width.
+	const galleryShown = attachmentsView === "gallery" && !phoneWidth;
+	// Another room has other Attachments.
+	useEffect(() => {
+		setRightPane((pane) => (pane?.kind === "attachments" || (pane?.kind === "artifactViewer" && pane.backTo) ? null : pane));
+	}, [persistentChat?.agentId]);
 
 	const empty = items.length === 0;
 	const currentThreadHasUserInput = hasUserInput(items);
 	const currentPersistentStatus = persistentChat
 		? persistentAgentStatuses.find((status) => status.id === persistentChat.agentId) ?? (persistentAgentStatus?.id === persistentChat.agentId ? persistentAgentStatus : null)
 		: null;
+	roomMemoryEmptyRef.current = !!currentPersistentStatus && nothingToMaintain(currentPersistentStatus.memoryStatus);
 	const currentActiveThreadStatus = persistentChat && currentPersistentStatus?.activeThread?.threadId === persistentChat.conversationId
 		? currentPersistentStatus.activeThread
 		: null;
@@ -8255,44 +7667,127 @@ export function App() {
 	// socket swap it says nothing has changed, because nothing meaningfully has;
 	// everything that GATES an action keeps reading `connected` itself.
 	const connectedForChrome = connected || socketSwapping;
-	const serverInFlightRelevant = Boolean(persistentChat && currentActiveThreadStatus?.inFlight && (busy || turnCancelling || !connected));
+	const serverInFlightRelevant = Boolean(persistentChat && currentActiveThreadStatus?.inFlight && (busy || turnCancelling || !connected || catchingUp));
 	const persistentRoomRunning = Boolean(persistentChat && (busy || (serverInFlightRelevant && currentActiveThreadStatus?.working)));
 	const persistentRoomCancelling = Boolean(persistentChat && (turnCancelling || (serverInFlightRelevant && currentActiveThreadStatus?.cancelling)));
 	const persistentRoomInFlight = Boolean(persistentChat && (persistentRoomRunning || persistentRoomCancelling || serverInFlightRelevant));
-	// What the turn's chrome shows: the server's turn plus the reveal of its
-	// tail. Only Stop, the header spinner, the composer placeholder and
-	// Remember read these; leaving, detaching and every server call keep
-	// reading the server-side flags above.
-	const roomWorkingForChrome = persistentRoomRunning || (Boolean(persistentChat) && revealing);
-	const roomInFlightForChrome = persistentRoomInFlight || (Boolean(persistentChat) && revealing);
-	// Stop while the answer is only still appearing: the turn is over and the
-	// answer is saved, so there is nothing to abort. Show the rest at once.
-	function stopTurn() {
-		if (!persistentRoomInFlight && revealingRef.current) {
-			flushAssistantStream();
+	// Stepping back into a running answer: until its replay is in, Send and Stop wait, as the replay sets the turn's own state.
+	const catchingUpOnAnswer = catchingUp && serverInFlightRelevant;
+	// The turn's chrome (Stop, the composer placeholder, Send, Remember)
+	// follows the server's turn: the moment the model is done they work,
+	// while the answer's last words may still be appearing. Sending shows
+	// that rest at once first (startTurnOnPage).
+	// A turn that went on in another window is stopped there: here the way
+	// back is Open here. Through a dropped connection Stop stays, unavailable.
+	const stopShown = (persistentRoomInFlight && turnLink !== "elsewhere") || turnLink === "reconnecting";
+	// A consult Send now chose, from the moment it is asked until it has answered: the messages behind it wait.
+	const consultAheadRef = useRef<"asked" | "answering" | null>(null);
+	// Messages queued for the answer go once it has ended: the ones it stopped for as the next message, then a consult once the room is idle.
+	useEffect(() => {
+		if (busy || turnCancelling || !connected || turnLink !== "live" || closedByFullSaveRef.current || roomMovedOn || modelChangePendingFor(persistentChatRef.current)) return;
+		// A consult Send now chose goes before the messages left waiting behind it, and they wait until it has answered.
+		const first = firstConsult(outgoing);
+		if (first?.consult) {
+			if (!roomInFlightRef.current && consultState.phase === "none" && handleConsultRequest(first.consult.roomId, first.consult.question)) {
+				consultAheadRef.current = "asked";
+				dispatchOutgoing({ type: "gone", ids: [first.id] });
+			}
 			return;
 		}
+		if (consultAheadRef.current === "asked" && consultState.phase === "streaming") consultAheadRef.current = "answering";
+		if (consultAheadRef.current === "answering" && consultState.phase !== "streaming") consultAheadRef.current = null;
+		if (consultAheadRef.current) return;
+		const batch = nextBatch(outgoing);
+		if (batch) {
+			if (sendMessage(batch.text, { attachments: [] })) dispatchOutgoing({ type: "gone", ids: batch.ids });
+			return;
+		}
+		// Queued behind a message the answer stopped for, and no new answer ran: they go next.
+		const later = laterIds(outgoing);
+		if (later.length) {
+			if (!roomInFlightRef.current) dispatchOutgoing({ type: "promote", ids: later });
+			return;
+		}
+		const consult = nextConsult(outgoing);
+		// One consult at a time: the next waits until the open one is dismissed or added.
+		if (!consult?.consult || roomInFlightRef.current || consultState.phase !== "none") return;
+		if (handleConsultRequest(consult.consult.roomId, consult.consult.question)) dispatchOutgoing({ type: "gone", ids: [consult.id] });
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [outgoing, busy, turnCancelling, connected, turnLink, roomMovedOn, persistentRoomInFlight, switchesTick, consultState.phase]);
+	// The new answer runs: what was queued behind the message it answers goes to it as queued messages do.
+	useEffect(() => {
+		const ws = wsRef.current;
+		if (!busy || turnCancelling || turnLink !== "live" || !ws || ws.readyState !== WebSocket.OPEN) return;
+		const later = outgoing.filter((message) => message.state === "later");
+		// Not before the message or the consult the answer stopped for has gone: the turn still running is the stopped one.
+		if (later.length === 0 || nextBatch(outgoing) || firstConsult(outgoing)) return;
+		dispatchOutgoing({ type: "steer", ids: later.map((message) => message.id) });
+		for (const message of later) ws.send(JSON.stringify({ type: "steer", id: message.id, text: message.text, shown: answerShownChars() }));
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [outgoing, busy, turnCancelling, turnLink]);
+	// Queued messages belong to the conversation they were sent in; a new one's ready lists its own.
+	useEffect(() => {
+		consultAheadRef.current = null;
+		dispatchOutgoing({ type: "clear" });
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [persistentChat?.agentId, persistentChat?.conversationId]);
+	// The save that filled the room closed this conversation on the server: no message box, only the ways on.
+	const closedByFullSave = Boolean(persistentChat && checkpointApprovalResult && roomFilledBy(checkpointApprovalResult) && checkpointApprovalResult.conversationId === persistentChat.conversationId);
+	closedByFullSaveRef.current = closedByFullSave;
+	roomInFlightRef.current = persistentRoomInFlight;
+	// A pick the room has not settled holds the next message, so it never runs on the model being left.
+	const modelChangePending = modelChangePendingFor(persistentChat);
+	// A held pick belongs to the conversation it was made in, and goes out once the answer ends.
+	useEffect(() => {
+		if (!heldModelPick) return;
+		if (!persistentChat || persistentChat.agentId !== heldModelPick.agentId || persistentChat.conversationId !== heldModelPick.conversationId) { heldModelPickRef.current = null; setHeldModelPick(null); return; }
+		if (persistentRoomInFlight || switchesInFlightFor(heldModelPick.agentId, heldModelPick.conversationId) > 0 || heldModelPick.phase !== "waiting") return;
+		// A return to the model the conversation already runs on needs no request.
+		if (persistentChat.model.provider === heldModelPick.lock.provider && persistentChat.model.model === heldModelPick.lock.model) { settleHeldModelPick(heldModelPick.conversationId, heldModelPick.lock, true); return; }
+		const sending = { ...heldModelPick, phase: "sending" as const };
+		heldModelPickRef.current = sending;
+		setHeldModelPick(sending);
+		void applyConversationPick(heldModelPick.agentId, heldModelPick.conversationId, heldModelPick.lock);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [heldModelPick, persistentRoomInFlight, switchesTick, persistentChat?.agentId, persistentChat?.conversationId, persistentChat?.model.provider, persistentChat?.model.model]);
+	// A Remember that closes, saved or not, takes its switch with it.
+	useEffect(() => { if (!checkpointPreviewOpen) rememberContinueOnRef.current = null; }, [checkpointPreviewOpen]);
+	// The switch window and the panel belong to the conversation they opened in.
+	useEffect(() => {
+		setModelSwitchAsk(null);
+		setModelPanelOpen(false);
+	}, [persistentChat?.agentId, persistentChat?.conversationId]);
+	function stopTurn() {
+		// One Stop ends the answer and every queued message comes back into the box: nothing goes on by itself.
+		stopByPersonRef.current = true;
+		handOutgoingBack();
 		void abortCurrentTurn();
+		if (!turnCancellingRef.current) return;
+		// Stop is felt on the click: what has arrived shows at once. An open
+		// card stays until the server says Stop answered it, so a click that
+		// crosses Stop on the way is told so.
+		cancelStreamTick();
+		if (isAssistantStreamActive(streamStateRef.current)) dispatchStream({ type: "tick", now: performance.now(), mode: "drain" });
 	}
 	// Resolves true when the leave actually happened (or nothing needed
-	// leaving) — a declined leave-and-let-it-finish confirm resolves false, so
-	// a caller chaining a navigation (the background-answer toast's Open) can
-	// stand down without reading state that only settles on the next render.
+	// leaving), and false only when a leave could not happen, so a caller
+	// chaining a navigation (the background-answer toast's Open) can stand down
+	// without reading state that only settles on the next render.
 	async function goHome(): Promise<boolean> {
+		// A conversation the save that filled the room closed leaves the way Return Home does: nothing is saved into it.
+		if (closedByFullSaveRef.current) return restAfterCheckpoint();
+		// Another window has the room: leaving saves nothing over its conversation.
+		if (turnLinkRef.current === "elsewhere") {
+			await finishLeaveRoom({ detachInFlight: true });
+			return true;
+		}
 		// A fully-received answer may still be revealing its tail (busy
 		// already false); leaving must not persist a truncated tail.
 		flushAssistantStream();
 		if (persistentChat && persistentRoomInFlight && !turnCancelling) {
-			// Community #14 slice 2: leaving no longer kills the response — the
-			// server keeps writing it and lands it in the conversation; the room
-			// card announces when it is ready.
-			const ok = await confirmDialog({
-				title: "Leave and let it finish in the background?",
-				body: "The assistant is still responding. The answer will be waiting in this room.",
-				confirmLabel: "Leave",
-				cancelLabel: "Stay",
-			});
-			if (!ok) return false;
+			// Leaving does not stop the response: the server keeps writing it
+			// and lands it in the conversation, and the room card shows it
+			// answering, then ready. So there is nothing to confirm.
 			// Make sure the prompt that started this turn is on disk before the
 			// socket closes: the server lands the answer by appending to the
 			// saved thread file (the landing supersedes any partial tail saved
@@ -8317,15 +7812,15 @@ export function App() {
 			setTurnInterruptedNote(null);
 			turnInterruptedNoteRef.current = null;
 		}
-		// Option 4 (2026-07-19): leaving no longer stops a running specialist —
+		// Leaving no longer stops a running specialist —
 		// the worker survives in the room-scoped registry and the rail's pulsing
 		// row greets the user on return. No guard dialog; nothing to warn about.
 		await finishLeaveRoom();
 		return true;
 	}
 
-	// The tail of goHome, split out so the leave-guard dialog's "Leave anyway"
-	// can resume the exact same path. `detachInFlight` (community #14) leaves a
+	// The tail of goHome, split out so the other leave paths take the exact
+	// same steps. `detachInFlight` leaves a
 	// still-running turn cooking on the server: the standby save is the
 	// server's job then (the landing write parks the thread), and the room's
 	// active-lock badge is deliberately kept — the lock really is still held
@@ -8355,15 +7850,21 @@ export function App() {
 					await closePersistentAgentRoom(liveThread, "home");
 				} catch (e) {
 					// The chat closes on the next line, so a line in it would never be
-					// read: the failed save is said on Home, where the person lands.
-					setPersistentResumeError(`${persistentChat.displayName || "This room"}: ${(e as Error).message}`);
+					// read: the failed save is said on Home, where the person lands. A
+					// save that got no answer is the service sentence alone: without
+					// it, only the room's name would be left to show.
+					const message = (e as Error).message;
+					setPersistentResumeError(isServiceUnreachableLine(message) ? message : `${persistentChat.displayName || "This room"}: ${message}`);
 				}
 			}
+			// The room is left: no turn of it is waited on here any more.
+			setTurnLink("live");
 			setPersistentChat(null);
 			setCheckpointPreviewOpen(false);
 			resetMaintainWorkflows();
 			setBusy(false);
 		}
+		if (releasingAgentId) leftRoomRef.current = { id: releasingAgentId, at: Date.now() };
 		if (releasingAgentId && !options.detachInFlight) {
 			setPersistentAgentStatuses((statuses) => statuses.map((s) => (s.id === releasingAgentId ? { ...s, activeLock: null } : s)));
 		}
@@ -8374,7 +7875,13 @@ export function App() {
 	// rename from the in-room settings wheel lands on the header and the
 	// composer placeholder right away. (persistentChat itself is left alone:
 	// it is the open conversation's own record.)
-	const activeDisplay = currentPersistentStatus?.displayName || persistentChat?.displayName || "";
+	const activeDisplay = shownRoomName(currentPersistentStatus?.displayName || persistentChat?.displayName);
+	// The window title names the room a person is in, for window finders and
+	// time trackers; Home and Settings keep the app's name. The desktop window follows it.
+	const windowTitle = view === "chat" && !settingsOverlay && activeDisplay ? `${activeDisplay} - exxperts` : "exxperts";
+	useEffect(() => {
+		document.title = windowTitle;
+	}, [windowTitle]);
 	// The modal tracks the LIVE status for this room the same way the launcher's
 	// does — it renders off persistentAgentStatuses, and opening refetches so it
 	// starts from what the server says right now.
@@ -8383,12 +7890,87 @@ export function App() {
 		setRoomSettingsOpen(true);
 		void refreshPersistentAgentStatus();
 	}
+	// The one line for a failed attempt, from its words: said live and again on the way in, so both read the same.
+	// The message is still above until the server hands it back. `message`: what the person sent, with its
+	// files, so an overflow that the message alone explains says so rather than pointing at memory.
+	// `messageFailed` false: a failure after the answer landed (shortening the conversation then), with no message to place.
+	function failureLineOf(words: string, turnModel: { model: string; provider: string }, failure: TurnFailure | undefined, quotaWay: QuotaWay | undefined, message?: SentMessage, messageFailed = true, gatewayFind?: GatewayFind) {
+		const { contextOverflow, notOnAccount, notOffered } = failureKindOf(words.trim().slice(0, 300), failure);
+		const name = modelDisplayName(turnModel) || "This model";
+		const shared = knownRemoteClientContext()?.sharedServer === true;
+		const overflow = contextOverflow
+			? overflowLineOf({ modelName: name, words, messageOverWindow: messageOverWindow(message, turnModel), memoryEmpty: roomMemoryEmptyRef.current, windowSetInSetup: windowSetInAiSetup(turnModel), shared })
+			: undefined;
+		const details = providerSentence(words);
+		const parts = overflow
+			? overflow.parts
+			: notOnAccount
+				? lineBeforeChooseModel(modelNotOnAccountSentence(name, turnModel.provider))
+				: notOffered
+					? lineBeforeChooseModel(roomModelUnavailableLine(modelOnProvider(modelDisplayName(turnModel) || turnModel.model, providerLabelOf(turnModel.provider) ?? turnModel.provider), "not-offered", "conversation"))
+					: turnFailureLine(name, failure, turnModel.provider, quotaWay, shared, providerLabelOf(turnModel.provider), gatewayFind);
+		const cause: FailureCause = overflow ? overflow.failure : notOnAccount ? "not-on-account" : notOffered ? "not-offered" : failure ?? "other";
+		const from = details ? detailsFromName(turnModel.provider, quotaWay) : undefined;
+		// Kept with the line, so a plan's reset is worded for the moment it is read again.
+		return { ...failureLine(parts, messageFailed ? "above" : "lost"), failure: cause, provider: turnModel.provider, ...(details ? { details } : {}), ...(from ? { detailsFrom: from } : {}), ...(quotaWay ? { quotaWay } : {}), ...(gatewayFind ? { gatewayFind } : {}) };
+	}
+	// A gateway's bare "not found" line, worded again once the gateway's model list said why; where its message is stays.
+	function lineWithGatewayFind(item: ChatItem, find: GatewayFind | undefined, model: { provider: string; model: string } | undefined): ChatItem {
+		if (!find || !model || item.kind !== "system" || item.failure !== "gateway-not-found" || item.provider !== model.provider) return item;
+		const parts = turnFailureLine(modelDisplayName(model) || "This model", "gateway-not-found", model.provider, undefined, knownRemoteClientContext()?.sharedServer === true, providerLabelOf(model.provider), find);
+		return lineWithMessage({ ...item, parts, gatewayFind: find }, item.messageAbove ? "above" : item.messageBack ? "back" : "lost") as ChatItem;
+	}
+	/**
+	 * The room could not shorten the conversation: a usual failure row, cause first. A size problem says so; any other cause
+	 * (a rate limit, a lost connection) is that cause's line. After an overflow a message failed and is still above until the
+	 * server hands it back; after a threshold the answer had landed, and no message is placed.
+	 */
+	function compactionFailureLine(msg: { failure?: unknown; reason?: unknown; summaryCut?: unknown; model?: { provider?: unknown; model?: unknown }; words?: unknown; quotaWay?: QuotaWay }): ChatItem | null {
+		if (typeof msg.failure !== "string") return null;
+		const turnModel = { provider: String(msg.model?.provider ?? ""), model: String(msg.model?.model ?? "") };
+		const messageFailed = msg.reason === "overflow";
+		const words = typeof msg.words === "string" ? msg.words : "";
+		if (msg.failure !== "could-not-shorten") return { kind: "system", id: nid(), level: "error", ...failureLineOf(words, turnModel, msg.failure as TurnFailure, msg.quotaWay, undefined, messageFailed) };
+		const details = words ? providerSentence(words) : undefined;
+		const from = details ? detailsFromName(turnModel.provider, undefined) : undefined;
+		return { kind: "system", id: nid(), level: "error", ...failureLine(couldNotShortenLine(modelDisplayName(turnModel) || "this model", msg.summaryCut === true, messageFailed), messageFailed ? "above" : "lost"), failure: "could-not-shorten", provider: turnModel.provider, ...(details ? { details } : {}), ...(from ? { detailsFrom: from } : {}) };
+	}
+	// A provider as AI setup names it, a gateway by its own label.
+	function providerLabelOf(provider: string): string | undefined {
+		return modelStatusRef.current?.providers?.find((entry) => entry.id === provider)?.label;
+	}
+	// The context window the page knows for a model: the app's own number for a built-in provider, the one set in AI setup for a gateway's.
+	function modelWindowOf(turnModel: { model: string; provider: string }): number | undefined {
+		const status = modelStatusRef.current;
+		const same = (option: { provider: string; model: string }) => option.provider === turnModel.provider && option.model === turnModel.model;
+		const window = status?.providers?.find((provider) => provider.id === turnModel.provider)?.conversation.find(same)?.contextWindow ?? status?.models.find(same)?.contextWindow;
+		return typeof window === "number" && window > 0 ? window : undefined;
+	}
+	// A gateway's models, a company's or one on this computer, carry the window typed in AI setup, which can be larger than what the model reads.
+	function windowSetInAiSetup(turnModel: { model: string; provider: string }): number | undefined {
+		const profile = aiProfileStatusRef.current?.profiles.find((entry) => entry.provider.id === turnModel.provider);
+		return profile?.kind === "gateway" ? modelWindowOf(turnModel) : undefined;
+	}
+	// The message alone, by the one estimate the app speaks in, is more than the model's window: no memory Review can shrink makes it fit.
+	// A text file's bytes are its text, so it counts as typed text does; a document's or a picture's bytes say little of what the model reads.
+	function messageOverWindow(message: SentMessage | undefined, turnModel: { model: string; provider: string }): boolean {
+		const textFileTokens = (message?.attachments ?? []).filter((file) => TEXT_FILE_EXTENSIONS.has(file.extension.toLowerCase())).reduce((sum, file) => sum + estimateTokensFromChars(file.bytes), 0);
+		const tokens = estimateTokens(message?.text ?? "") + textFileTokens;
+		if (tokens === 0) return false;
+		const window = modelWindowOf(turnModel);
+		return window !== undefined && tokens * modelTokenFactor(turnModel) > window;
+	}
+	// Whose words Details shows, as the room names that service: "Anthropic" for the Claude key, the name a spent limit's way on uses, else AI setup's.
+	function detailsFromName(provider: string, quotaWay: QuotaWay | undefined): string | undefined {
+		const named = providerAccountName(provider) ?? (quotaWay && "provider" in quotaWay ? quotaWay.provider : undefined) ?? modelStatusRef.current?.providers?.find((entry) => entry.id === provider)?.label ?? providerDisplayName(provider);
+		return named && named !== provider ? named : undefined;
+	}
 	// A turn refused on the sign-in: the raw text goes to the log, the room
 	// shows the one notice, and the message the person sent goes back into an
 	// empty composer, to send again once signed in.
-	function noteTurnSignInFailure(detail: string, provider?: string): void {
+	function noteTurnSignInFailure(detail: string, provider?: string, key?: CredentialKey): void {
 		console.warn("[exxperts] the turn failed on the provider's sign-in:", detail);
-		setTurnSignedOutProvider(provider || persistentChatRef.current?.model.provider || "");
+		setTurnSignedOut({ provider: provider || persistentChatRef.current?.model.provider || "", ...(key ? { key } : {}) });
 		const lastUser = [...itemsRef.current].reverse().find((item) => item.kind === "user");
 		if (lastUser?.kind === "user" && lastUser.text && !(textareaRef.current?.value ?? "").trim()) {
 			setComposerPrefill(lastUser.text);
@@ -8396,6 +7978,33 @@ export function App() {
 		}
 	}
 	const stoppedProvider = signedOutProvider ?? turnSignedOutProvider;
+	// The stop's own frame names a key connection's state: the socket's
+	// refusal (no credential at all) and a turn's failure (a key refused while
+	// still saved). Without it (an older server), the auth list tells: the
+	// sign-in providers are always on it, and one missing from it (a key
+	// provider or a gateway whose key was removed) holds a key.
+	const stoppedKey = signedOut !== null ? signedOut.key : turnSignedOut?.key;
+	const stoppedSignsIn = !stoppedKey && (!stoppedProvider || !authStatus || authStatus.providers.find((provider) => provider.id === stoppedProvider)?.oauth === true);
+	const stoppedGone = stoppedKey ? credentialGoneOf(stoppedKey) : stoppedSignsIn ? "signed-out" : signedOutProvider !== null ? "key-missing" : "key-refused";
+	const stoppedWords = credentialGoneWords(stoppedGone);
+	// A provider whose key was removed can leave the model list; its name then
+	// comes from the names table, and only an unknown id reads as "This
+	// conversation's provider".
+	const stoppedProviderLabel = stoppedProvider ? modelStatus?.providers?.find((provider) => provider.id === stoppedProvider)?.label ?? (providerDisplayName(stoppedProvider) !== stoppedProvider ? providerDisplayName(stoppedProvider) : null) : null;
+	// On a shared server the key's button is the admin's alone, and nobody signs in there: without it, the line names
+	// the way on that is left.
+	const stoppedRole = sharedServerRole(clientContext);
+	const stoppedKeyButton = offersCredentialButton(stoppedRole, stoppedGone === "signed-out");
+	// A refused key, and a provider a shared server has no button for, are
+	// the service's word ("Anthropic did not accept the saved key"), never
+	// the row's ("Claude API key").
+	const stoppedSubject = ((stoppedGone === "key-refused" || !stoppedKeyButton) && stoppedProvider ? providerAccountName(stoppedProvider) : undefined) ?? stoppedProviderLabel ?? "This conversation's provider";
+	const stoppedCause = stoppedGone === "key-no-workspace"
+		? `${modelDisplayName({ model: persistentChat?.model.model, modelLabel: persistentChat?.model.label, provider: persistentChat?.model.provider }) || "This conversation's model"} ${credentialGoneWhy(stoppedGone)}`
+		: stoppedRole && !stoppedKeyButton ? `${stoppedSubject} ${sharedCredentialState(stoppedGone)}` : providerCredentialClause(stoppedSubject, stoppedGone);
+	const stoppedWayOn = stoppedKeyButton
+		? stoppedGone === "key-no-workspace" ? "" : ` ${stoppedWords.again} to continue this conversation.`
+		: ` Choose another model to continue this conversation${stoppedRole === "member" ? ", or tell your admin" : ""}.`;
 	// Settings, AI setup, at the signed-out provider's row, to sign in again.
 	function openSignIn(providerId: string): void {
 		setAiSetupFocus(providerId ? { providerId } : null);
@@ -8426,6 +8035,174 @@ export function App() {
 	// modal here declares aria-modal — so the chord no-ops instead of
 	// stacking overlays. Same fresh-render ref seam as refreshSetupStatusRef:
 	// the mount-scoped listener must call the CURRENT render's openers.
+	// Back and Forward move between Home, a room, Maintain, Memory and the
+	// dashboard as on a normal website: each change of screen is a history
+	// entry, and the address names the screen, so a reload on a room opens it.
+	const maintainAgentId = absorbWorkflow.target?.agentId ?? reviewWorkflow.target?.agentId ?? (maintainChooserOpen ? maintainTarget?.agentId : undefined);
+	const shownRoute: AppRoute = maintainAgentId ? { screen: "maintain", agentId: maintainAgentId }
+		: view === "chat" && persistentChat ? { screen: "room", agentId: persistentChat.agentId }
+		: view === "memory" || view === "dashboard" ? { screen: view }
+		: { screen: "home" };
+	const shownHash = appRouteHash(shownRoute);
+	// The address the page was loaded on, opened once the rooms are known.
+	const routeOnLoadRef = useRef<AppRoute | null>(parseAppRouteHash(window.location.hash));
+	// Until a room's address has opened that room, Home is not shown for a moment on the way: the room's id while it opens.
+	const [openingRoomFromAddress, setOpeningRoomFromAddress] = useState<string | null>(() => routeOnLoadRef.current?.screen === "room" ? routeOnLoadRef.current.agentId : null);
+	useEffect(() => {
+		if (!openingRoomFromAddress) return;
+		const giveUp = window.setTimeout(() => setOpeningRoomFromAddress(null), 5_000);
+		return () => window.clearTimeout(giveUp);
+	}, [openingRoomFromAddress]);
+	// Each entry the app makes carries its place in the history (appIndex). Set by Back or Forward: the address shown
+	// then and the place it came from. The address already moved: a screen that went elsewhere, or found nothing
+	// there (a room that is gone), is written over it; a screen that stayed (a Leave confirm) goes back to where
+	// it was, every entry kept.
+	const historyIndexRef = useRef<number>(typeof window.history.state?.appIndex === "number" ? window.history.state.appIndex : 0);
+	const fromHistoryRef = useRef<{ shown: string; index: number } | null>(null);
+	const nothingThereRef = useRef(false);
+	const ignorePopRef = useRef(false);
+	// Where a Back the screen refused went: a Leave right after lands there, as Back would have, adding no entry.
+	const refusedBackRef = useRef<{ hash: string; index: number } | null>(null);
+	const shownHashRef = useRef(shownHash);
+	shownHashRef.current = shownHash;
+	const entryState = (index: number) => ({ ...(window.history.state ?? {}), appIndex: index });
+	const [routeSettled, setRouteSettled] = useState(0);
+	useEffect(() => {
+		if (routeOnLoadRef.current) {
+			if (shownHash === "#/") return;
+			routeOnLoadRef.current = null;
+		}
+		if (window.location.hash === shownHash || (window.location.hash === "" && shownHash === "#/")) {
+			fromHistoryRef.current = null;
+			nothingThereRef.current = false;
+			return;
+		}
+		const popped = fromHistoryRef.current;
+		if (popped !== null) {
+			const stayed = popped.shown === shownHash && !nothingThereRef.current;
+			const back = popped.index - historyIndexRef.current;
+			fromHistoryRef.current = null;
+			nothingThereRef.current = false;
+			if (stayed && back !== 0) {
+				refusedBackRef.current = { hash: window.location.hash || "#/", index: historyIndexRef.current };
+				goWithoutRoute(back, popped.index);
+			} else {
+				window.history.replaceState(entryState(historyIndexRef.current), "", shownHash);
+			}
+			return;
+		}
+		const refused = refusedBackRef.current;
+		refusedBackRef.current = null;
+		if (refused?.hash === shownHash) {
+			goWithoutRoute(refused.index - historyIndexRef.current, refused.index);
+			return;
+		}
+		historyIndexRef.current += 1;
+		window.history.pushState(entryState(historyIndexRef.current), "", shownHash);
+	}, [shownHash, routeSettled]);
+	/** Moves `by` entries to the one at `index`, whose screen is already shown: its popstate is not a route. */
+	function goWithoutRoute(by: number, index: number): void {
+		ignorePopRef.current = true;
+		// Never left on: a return that never arrives must not swallow the person's next Back.
+		window.setTimeout(() => { ignorePopRef.current = false; }, 1_000);
+		historyIndexRef.current = index;
+		window.history.go(by);
+	}
+	// Review memory on an overflow line: the room is left the way Home leaves it, then Maintain opens on Review for it.
+	// Maintain waits for no room to be open, so Review starts once the leave has rendered.
+	const reviewAfterLeaveRef = useRef<MaintainTarget | null>(null);
+	async function reviewMemoryFromRoom(): Promise<void> {
+		const chat = persistentChatRef.current;
+		if (!chat) return;
+		reviewAfterLeaveRef.current = { agentId: chat.agentId, displayName: activeDisplay || chat.agentId };
+		if (!(await goHome())) reviewAfterLeaveRef.current = null;
+	}
+	useEffect(() => {
+		const target = reviewAfterLeaveRef.current;
+		if (!target || persistentChat) return;
+		reviewAfterLeaveRef.current = null;
+		const blocked = maintainBlockedReason(target.agentId);
+		if (blocked) {
+			setPersistentResumeError(blocked);
+			return;
+		}
+		setMaintainTarget(target);
+		setMaintainOrigin("home");
+		void startPruneMemoryWorkflow(target);
+	}, [persistentChat]);
+	useEffect(() => {
+		const route = routeOnLoadRef.current;
+		if (!route || route.screen === "home") return;
+		if (route.screen === "memory" || route.screen === "dashboard") {
+			routeOnLoadRef.current = null;
+			setView(route.screen);
+			return;
+		}
+		const status = persistentAgentStatuses.find((candidate) => candidate.id === route.agentId);
+		if (!status) {
+			if (persistentAgentStatuses.length > 0) {
+				routeOnLoadRef.current = null;
+				setOpeningRoomFromAddress(null);
+			}
+			return;
+		}
+		routeOnLoadRef.current = null;
+		if (route.screen === "room") void openRoomFromAddress(status).finally(() => setOpeningRoomFromAddress(null));
+		else openMaintainChooser({ agentId: status.id, displayName: shownRoomName(status.displayName) || status.id });
+	}, [persistentAgentStatuses]);
+	// A room opens from its address as its card opens it: a conversation waiting there is resumed. An empty
+	// one a save or Forget prepared is retired for a fresh one, unless another window has the room open on it.
+	const openRoomFromAddress = (status: PersistentAgentStatus): Promise<void> => {
+		const prepared = !!(status.activeThread?.preparedByBoundary ?? status.activeThread?.preparedByCheckpoint);
+		const shownElsewhere = status.activeLock?.surface === "web";
+		const waiting = (!prepared || shownElsewhere) && (status.runtime.state === "standby" || status.runtime.state === "active") && !!status.runtime.activeThreadId;
+		return waiting ? openPersistentAgentResume(status) : openPersistentAgent(status);
+	};
+	const applyRouteRef = useRef<(route: AppRoute) => Promise<void>>(async () => {});
+	applyRouteRef.current = async (route: AppRoute) => {
+		// Leaving Maintain asks what its own close asks.
+		if (maintainAgentId) {
+			if (route.screen === "maintain" && route.agentId === maintainAgentId) return;
+			if (absorbWorkflow.target) abortAbsorbWorkflow();
+			else if (reviewWorkflow.target) abortReviewWorkflow();
+			else closeMaintainChooser();
+			return;
+		}
+		if (route.screen === "room" && view === "chat" && persistentChat?.agentId === route.agentId) return;
+		if (view === "chat" && !(await goHome())) return;
+		if (route.screen === "room" || route.screen === "maintain") {
+			const status = persistentAgentStatuses.find((candidate) => candidate.id === route.agentId);
+			if (!status) {
+				nothingThereRef.current = true;
+				return;
+			}
+			if (route.screen === "room") await openRoomFromAddress(status);
+			else openMaintainChooser({ agentId: status.id, displayName: shownRoomName(status.displayName) || status.id });
+			return;
+		}
+		setView(route.screen);
+	};
+	useEffect(() => {
+		if (typeof window.history.state?.appIndex !== "number") window.history.replaceState(entryState(historyIndexRef.current), "");
+		const onPop = (event: PopStateEvent) => {
+			// The return from a refused move: already where the screen is.
+			if (ignorePopRef.current) {
+				ignorePopRef.current = false;
+				return;
+			}
+			refusedBackRef.current = null;
+			// A second Back before the first settled keeps the place the first one came from.
+			fromHistoryRef.current ??= { shown: shownHashRef.current, index: historyIndexRef.current };
+			// An entry the browser made itself (an address typed or followed) has no place yet: it is the next one.
+			const known = typeof event.state?.appIndex === "number";
+			historyIndexRef.current = known ? event.state.appIndex : historyIndexRef.current + 1;
+			if (!known) window.history.replaceState(entryState(historyIndexRef.current), "");
+			void applyRouteRef.current(parseAppRouteHash(window.location.hash)).finally(() => setRouteSettled((count) => count + 1));
+		};
+		window.addEventListener("popstate", onPop);
+		return () => window.removeEventListener("popstate", onPop);
+	}, []);
+
 	const settingsChordRef = useRef<(event: KeyboardEvent) => void>(() => {});
 	settingsChordRef.current = (event: KeyboardEvent) => {
 		// The platform's own convention: ⌘ on a Mac, Ctrl elsewhere — matching
@@ -8472,17 +8249,7 @@ export function App() {
 					label: "AI setup",
 					content: (
 						<div className="landing ai-setup-page">
-							<AiProfileSwitcherSection status={aiProfileStatus} authStatus={authStatus} onRefresh={refreshAiProfileStatus} onRefreshAuth={refreshAuthStatus} onSignedIn={() => setTurnSignedOutProvider(null)} focus={aiSetupFocus} />
-						</div>
-					),
-				},
-				{
-					id: "web-search",
-					label: "Web search",
-					content: (
-						<div className="landing ai-setup-page settings-web-search">
-							<PaneHeader title="Web search" line="How rooms look things up on the web." />
-							<WebSearchSettingsSection />
+							<AiProfileSwitcherSection status={aiProfileStatus} authStatus={authStatus} onRefresh={refreshAiProfileStatus} onRefreshAuth={refreshAuthStatus} onSignedIn={() => setTurnSignedOut(null)} focus={aiSetupFocus} serviceBack={serviceBack} />
 						</div>
 					),
 				},
@@ -8496,19 +8263,30 @@ export function App() {
 						</div>
 					),
 				},
+				{ id: "skills", label: "Skills", title: "Reusable know-how your rooms can pick up", content: <SkillsPage serviceBack={serviceBack} /> },
 				{
 					id: "connectors",
 					label: "Connectors",
 					title: "External tools your rooms can reach",
 					content: (
 						<div className="landing ai-setup-page connectors-page">
-							<PaneHeader title="Connectors" line="External tools your rooms can reach. Add one here, then enable it in each room that should use it." />
-							<ConnectorsPage />
+							<PaneHeader title="Connectors" line={clientContext.sharedServer ? "External tools your rooms can reach." : "External tools your rooms can reach. Add one here, then enable it in each room that should use it."} />
+							<ConnectorsPage serviceBack={serviceBack} />
 						</div>
 					),
 				},
-				{ id: "skills", label: "Skills", title: "Reusable know-how your rooms can pick up", content: <SkillsPage /> },
-				...(remoteClient ? [] : [{
+				{
+					id: "web-search",
+					label: "Web search",
+					content: (
+						<div className="landing ai-setup-page settings-web-search">
+							<PaneHeader title="Web search" line="How rooms look things up on the web." />
+							<WebSearchSettingsSection />
+						</div>
+					),
+				},
+				{ id: "appearance", label: "Appearance", content: <AppearancePane appearance={appearance} onSetAppearance={setAppearance} /> },
+				...(computerOnlyControls ? [{
 					id: "remote" as const,
 					label: "Remote access",
 					content: (
@@ -8517,11 +8295,11 @@ export function App() {
 							<RemoteAccessPage />
 						</div>
 					),
-				}]),
+				}] : []),
 				// Local-only like Remote access: switching restarts this computer's
 				// server and rotates the sign-in token, which a remote device can
 				// neither survive nor complete.
-				...(remoteClient ? [] : [{
+				...(computerOnlyControls ? [{
 					id: "profile" as const,
 					label: "Profiles",
 					title: "Which exxperts data profile this computer runs",
@@ -8531,15 +8309,21 @@ export function App() {
 							<StateProfileSection />
 						</div>
 					),
-				}]),
+				}] : []),
 			]}
 		/>
 	) : null;
+	// While the banner says the connection is lost, Home's strip does not say
+	// the same outage again in its own words: a line that is only the service
+	// sentence is not shown, and one that gives it as the reason shows the rest.
+	// The reconnect does the same to the line itself.
+	const homeStripLine = showConnectionLost ? withoutServiceLine(persistentResumeError) : persistentResumeError;
 	const withConnectionBanner = (content: ReactNode): ReactNode => (
 		<>
-			{connectionWarning && <ConnectionLostBanner />}
+			{sessionEnded && clientContext.sharedServer ? <SignedOutBanner /> : showConnectionLost && <ConnectionLostBanner />}
 			{content}
 			{settingsOverlayNode}
+			{personChanged && <PersonChangedCover kind={personChanged} onReload={reloadForNewPerson} />}
 		</>
 	);
 	// Consult MR-3 candidate rooms for the composer @-mention popover. The list is
@@ -8547,18 +8331,40 @@ export function App() {
 	// is excluded inside the popover logic.
 	const mentionCandidates: MentionCandidateRoom[] = persistentAgentStatuses.map((status) => ({
 		id: status.id,
-		displayName: status.displayName || status.id,
+		displayName: shownRoomName(status.displayName) || status.id,
 		status: status.status,
 		lastCheckpointAt: status.memoryStatus?.lastCheckpointAt ?? null,
 	}));
+	mentionCandidatesRef.current = mentionCandidates;
+
+	// Kept the same between renders unless the edit changes, so the transcript is not drawn again for each streamed word.
+	const editableId = editableMessageId();
+	const editActionsRef = useRef({ startEdit, cancelEdit, sendEdit });
+	editActionsRef.current = { startEdit, cancelEdit, sendEdit };
+	const inRoom = persistentChat !== null;
+	const editingId = lastEdit?.phase === "editing" ? lastEdit.id : null;
+	const editingText = lastEdit?.phase === "editing" ? lastEdit.text : "";
+	const editSentId = lastEdit?.phase === "sent" ? lastEdit.replaces : null;
+	const lastMessageEdit = useMemo<LastMessageEdit | undefined>(() => inRoom ? {
+		editableId,
+		editing: editingId ? { id: editingId, text: editingText } : null,
+		sentId: editSentId,
+		onEdit: (id) => editActionsRef.current.startEdit(id),
+		onCancel: () => editActionsRef.current.cancelEdit(),
+		onSend: (text) => { editActionsRef.current.sendEdit(text); },
+	} : undefined, [inRoom, editableId, editingId, editingText, editSentId]);
 
 	if (view === "home") {
+		if (openingRoomFromAddress) {
+			const openingName = shownRoomName(persistentAgentStatuses.find((status) => status.id === openingRoomFromAddress)?.displayName);
+			return withConnectionBanner(<div className="app-opening-room" role="status">{openingName ? `Opening ${openingName}…` : "Opening the room…"}</div>);
+		}
 		if (absorbWorkflowOpen) {
 			const absorbModelSettingsRoom = absorbModelSettingsOpen && absorbWorkflow.target ? persistentAgentStatuses.find((status) => status.id === absorbWorkflow.target!.agentId) ?? null : null;
 			return withConnectionBanner(
 				<>
 					{maintainConfirm && <MaintainConfirmDialog confirm={maintainConfirm} onClose={() => setMaintainConfirm(null)} />}
-					<AbsorbWorkflowShell state={absorbWorkflow} loadingMessage={ABSORB_LOADING_MESSAGES[absorbLoadingIndex]} waitingMessage={ABSORB_WAITING_MESSAGES[absorbWaitingIndex]} keepIds={absorbKeepDraft ?? absorbWorkflow.run?.demotion.keepIds ?? []} onStopAbandonedRun={() => void stopAbandonedAbsorbRun()} onAbort={abortAbsorbWorkflow} onDiscuss={startAbsorbDiscussion} onSendDiscussionMessage={sendAbsorbDiscussionMessage} onGenerateFromDiscussion={generateAbsorbProposalFromDiscussion} onGenerate={() => void generateAbsorbProposal()} onBackToAssessment={backToAbsorbAssessment} onReassess={reassessAbsorb} onDraftWithoutDiscussion={() => void generateAbsorbProposal({ withoutDiscussion: true })} onRestart={restartMaintain} onCancelRun={confirmCancelAbsorbRun} onToggleRunKeep={toggleAbsorbRunKeep} onToggleRunKeepTopic={toggleAbsorbRunKeepTopic} onRaiseRunBudget={raiseAbsorbRunBudget} onRaiseLimitBeforeRun={(tokens) => void raiseAbsorbLimitBeforeRun(tokens)} onReviewFirst={reviewFirstFromAbsorb} onEditRunEntry={editAbsorbRunEntryText} onChooseRunBeside={chooseAbsorbRunBesideNote} onApproveRun={approveAbsorbRunUpdate} onRunBackToAssessment={() => void absorbRunBackToAssessment()} onResumeRun={() => void resumeAbsorbRunAfterStop()} onChooseModel={() => setAbsorbModelSettingsOpen(true)} returnLabel={maintainReturnLabel} />
+					<AbsorbWorkflowShell state={absorbWorkflow} turnWait={absorbWorkflow.step === "approving" && roomTurnInFlight(absorbWorkflow.target?.agentId)} loadingMessage={ABSORB_LOADING_MESSAGES[absorbLoadingIndex]} waitingMessage={ABSORB_WAITING_MESSAGES[absorbWaitingIndex]} keepIds={absorbKeepDraft ?? absorbWorkflow.run?.demotion.keepIds ?? []} onStopAbandonedRun={() => void stopAbandonedAbsorbRun()} onAbort={abortAbsorbWorkflow} onDiscuss={startAbsorbDiscussion} onSendDiscussionMessage={sendAbsorbDiscussionMessage} onGenerateFromDiscussion={generateAbsorbProposalFromDiscussion} onGenerate={() => void generateAbsorbProposal()} onBackToAssessment={backToAbsorbAssessment} onReassess={reassessAbsorb} onDraftWithoutDiscussion={() => void generateAbsorbProposal({ withoutDiscussion: true })} onRestart={restartMaintain} onCancelRun={confirmCancelAbsorbRun} onToggleRunKeep={toggleAbsorbRunKeep} onToggleRunKeepTopic={toggleAbsorbRunKeepTopic} onRaiseRunBudget={raiseAbsorbRunBudget} onRaiseLimitBeforeRun={(tokens) => void raiseAbsorbLimitBeforeRun(tokens)} onReviewFirst={reviewFirstFromAbsorb} onEditRunEntry={editAbsorbRunEntryText} onChooseRunBeside={chooseAbsorbRunBesideNote} onMoveRunSorted={moveAbsorbRunSorted} onApproveRun={approveAbsorbRunUpdate} onRunBackToAssessment={() => void absorbRunBackToAssessment()} onResumeRun={() => void resumeAbsorbRunAfterStop()} onUndo={undoAbsorbSave} onChooseModel={() => setAbsorbModelSettingsOpen(true)} onSignIn={(provider) => openSignIn(provider)} returnLabel={maintainReturnLabel} />
 					{absorbModelSettingsRoom && (
 						<RoomSettingsModal status={absorbModelSettingsRoom} initialPane="model" onClose={() => setAbsorbModelSettingsOpen(false)} onArchive={archivePersistentAgentRoom} onPurge={purgePersistentAgentRoom} onRefresh={refreshPersistentAgentStatus} onOpenSkillsLibrary={() => openSettings("skills")} onOpenConnectors={() => openSettings("connectors")} />
 					)}
@@ -8566,23 +8372,34 @@ export function App() {
 			);
 		}
 		if (reviewWorkflowOpen) {
+			const reviewModelSettingsRoom = absorbModelSettingsOpen && reviewWorkflow.target ? persistentAgentStatuses.find((status) => status.id === reviewWorkflow.target!.agentId) ?? null : null;
 			return withConnectionBanner(
 				<>
 					{maintainConfirm && <MaintainConfirmDialog confirm={maintainConfirm} onClose={() => setMaintainConfirm(null)} />}
-					<ReviewWorkflowShell state={reviewWorkflow} loadingMessage={REVIEW_LOADING_MESSAGES[reviewLoadingIndex]} waitingMessage={REVIEW_WAITING_MESSAGES[reviewWaitingIndex]} keepIds={reviewKeepDraft ?? reviewWorkflow.run?.demotion.keepIds ?? []} onStopAbandonedRun={() => void stopAbandonedReviewRun()} onAbort={abortReviewWorkflow} onDiscuss={startReviewDiscussion} onSendDiscussionMessage={sendReviewDiscussionMessage} onContinueFromDiscussion={() => void startReviewTidyFromDiscussion()} onContinueWithoutDiscussion={() => void startReviewTidy({ withoutDiscussion: true })} onContinue={() => void startReviewTidy()} onBackToAssessment={backToReviewAssessment} onReassess={() => void reassessReview()} onRestart={restartMaintain} onSetDepth={setReviewDepth} onCancelRun={confirmCancelReviewRun} onToggleRunKeep={toggleReviewRunKeep} onToggleRunKeepTopic={toggleReviewRunKeepTopic} onRaiseRunBudget={raiseReviewRunBudget} onEditRunEntry={editReviewRunEntryText} onSaveRun={approveReviewRunUpdate} onRunBackToAssessment={() => void reviewRunBackToAssessment()} onUndo={undoReviewSave} returnLabel={maintainReturnLabel} />
+					<ReviewWorkflowShell state={reviewWorkflow} turnWait={reviewWorkflow.step === "approving" && roomTurnInFlight(reviewWorkflow.target?.agentId)} loadingMessage={REVIEW_LOADING_MESSAGES[reviewLoadingIndex]} waitingMessage={REVIEW_WAITING_MESSAGES[reviewWaitingIndex]} keepIds={reviewKeepDraft ?? reviewWorkflow.run?.demotion.keepIds ?? []} onStopAbandonedRun={() => void stopAbandonedReviewRun()} onAbort={abortReviewWorkflow} onDiscuss={startReviewDiscussion} onSendDiscussionMessage={sendReviewDiscussionMessage} onContinueFromDiscussion={() => void startReviewTidyFromDiscussion()} onContinueWithoutDiscussion={() => void startReviewTidy({ withoutDiscussion: true })} onContinue={() => void startReviewTidy()} onBackToAssessment={backToReviewAssessment} onReassess={() => void reassessReview()} onRestart={restartMaintain} onSetDepth={setReviewDepth} onCancelRun={confirmCancelReviewRun} onToggleRunKeep={toggleReviewRunKeep} onToggleRunKeepTopic={toggleReviewRunKeepTopic} onRaiseRunBudget={raiseReviewRunBudget} onEditRunEntry={editReviewRunEntryText} onSaveRun={approveReviewRunUpdate} onTryTopicsLeft={() => void startReviewTidy({ topicsLeftOf: reviewWorkflow.run })} onCloseEmptyRun={() => void closeEmptyReviewRun()} onRunBackToAssessment={() => void reviewRunBackToAssessment()} onResumeRun={() => void resumeReviewRunAfterStop()} onUndo={undoReviewSave} onChooseModel={() => setAbsorbModelSettingsOpen(true)} onSignIn={(provider) => openSignIn(provider)} returnLabel={maintainReturnLabel} />
+					{reviewModelSettingsRoom && (
+						<RoomSettingsModal status={reviewModelSettingsRoom} initialPane="model" onClose={() => setAbsorbModelSettingsOpen(false)} onArchive={archivePersistentAgentRoom} onPurge={purgePersistentAgentRoom} onRefresh={refreshPersistentAgentStatus} onOpenSkillsLibrary={() => openSettings("skills")} onOpenConnectors={() => openSettings("connectors")} />
+					)}
 				</>
 			);
 		}
 		if (maintainChooserOpen && maintainTarget) {
-			return withConnectionBanner(<MaintainChooserShell target={maintainTarget} roomStatus={persistentAgentStatuses.find((status) => status.id === maintainTarget.agentId) ?? null} onAbsorb={() => void startAbsorbWorkflow()} onDiscussFirst={() => void startAbsorbWorkflow({ discuss: true })} onPrune={startPruneMemoryWorkflow} onReturn={closeMaintainChooser} returnLabel={maintainReturnLabel} />);
+			return withConnectionBanner(
+				<div className="landing-shell with-product-sidebar">
+					<ProductSidebar onHome={() => { closeMaintainChooser(); setView("home"); }} onSettings={openSettings} onDashboard={() => { closeMaintainChooser(); setView("dashboard"); }} onMemory={() => { closeMaintainChooser(); setView("memory"); }} theme={theme} appearance={appearance} onSetAppearance={setAppearance} active="memory" />
+					<MaintainChooserShell target={maintainTarget} roomStatus={persistentAgentStatuses.find((status) => status.id === maintainTarget.agentId) ?? null} onAbsorb={() => void startAbsorbWorkflow()} onDiscussFirst={() => void startAbsorbWorkflow({ discuss: true })} onPrune={() => void startPruneMemoryWorkflow()} onReturn={closeMaintainChooser} returnLabel={maintainReturnLabel} />
+				</div>
+			);
 		}
 		return withConnectionBanner(
 			<>
 				{gcAssessment && !gcReviewOpen && <TaskStoreGcBanner assessment={gcAssessment} onReview={() => setGcReviewOpen(true)} onDismiss={() => setGcAssessment(null)} />}
 				{gcReviewOpen && gcAssessment && <TaskStoreGcDialog assessment={gcAssessment} busy={gcBusy} onConfirm={() => void confirmTaskStoreGc()} onClose={() => setGcReviewOpen(false)} />}
-				{backgroundDoneToastView && <div className="launcher-toasts"><ToastStack toasts={[backgroundDoneToastView]} /></div>}
-				{whatsNew && <WhatsNewDialog version={whatsNew.version} entries={whatsNew.entries} onClose={dismissWhatsNew} />}
-				<Landing roomOrder={homeRoomOrder.view} onChooseRoomOrder={homeRoomOrder.choose} onArrangingChange={(dirty) => { roomArrangeDirtyRef.current = dirty; }} onOpenSettings={openSettings} onOpenDashboard={() => setView("dashboard")} onOpenMemory={() => setView("memory")} onOpenPersistentAgent={openPersistentAgent} onResumePersistentAgent={openPersistentAgentResume} onMaintainPersistentAgent={(target) => { if (!openMaintainChooser(target)) setPersistentResumeError(maintainBlockedReason(target.agentId) ?? "Maintain is not available for this room right now."); }} onCreatePersistentAgent={createPersistentAgentRoom} onArchiveRoom={archivePersistentAgentRoom} onPurgeRoom={purgePersistentAgentRoom} onMementoForget={(agentId) => { roomDraftsRef.current.delete(agentId); }} modelStatus={modelStatus} persistentAgentStatuses={persistentAgentStatuses} persistentThread={persistentThread} persistentLive={!!persistentChat} persistentResumeError={persistentResumeError} onRefreshPersistentAgent={refreshPersistentAgentStatus} theme={theme} appearance={appearance} onSetAppearance={setAppearance} aiProfileStatus={aiProfileStatus} backgroundReadyRooms={backgroundReadyRooms} purgingRooms={purgingRooms} unresumableRooms={memoryOverflowRooms} />
+				{/* No "finished a response" note here: on Home the room's own card
+				    already turns to response ready. Inside another room, where the
+				    card cannot be seen, the room's toast stack carries it. */}
+				{whatsNew && <WhatsNewDialog sections={whatsNew.sections} onClose={dismissWhatsNew} />}
+				<Landing roomOrder={homeRoomOrder.view} onChooseRoomOrder={homeRoomOrder.choose} onArrangingChange={(dirty) => { roomArrangeDirtyRef.current = dirty; }} onOpenSettings={openSettings} onOpenDashboard={() => setView("dashboard")} onOpenMemory={() => setView("memory")} onOpenPersistentAgent={openPersistentAgent} onResumePersistentAgent={openPersistentAgentResume} onMaintainPersistentAgent={(target) => { if (!openMaintainChooser(target)) setPersistentResumeError(maintainBlockedReason(target.agentId) ?? "Maintain is not available for this room right now."); }} onCreatePersistentAgent={createPersistentAgentRoom} onArchiveRoom={archivePersistentAgentRoom} onPurgeRoom={purgePersistentAgentRoom} onMementoForget={(agentId) => { roomDraftsRef.current.delete(agentId); }} modelStatus={modelStatus} persistentAgentStatuses={persistentAgentStatuses} persistentThread={persistentThread} persistentLive={!!persistentChat} persistentResumeError={homeStripLine} onRefreshPersistentAgent={refreshPersistentAgentStatus} theme={theme} appearance={appearance} onSetAppearance={setAppearance} aiProfileStatus={aiProfileStatus} backgroundReadyRooms={backgroundReadyRooms} purgingRooms={purgingRooms} serviceBack={serviceBack} />
 			</>
 		);
 	}
@@ -8624,7 +8441,7 @@ export function App() {
 		);
 	}
 
-	const rightPaneVisible = Boolean(rightPane);
+	const rightPaneVisible = Boolean(rightPane) && !(rightPane?.kind === "attachments" && galleryShown);
 	const artifactPaneMaximized = artifactMaximized && rightPane?.kind === "artifactViewer";
 	// Maximized: no inline style — the .artifact-pane-maximized class drives a
 	// single-track grid. The width travels as a custom property (consumed by the
@@ -8634,8 +8451,25 @@ export function App() {
 		? ({ "--right-pane-width": `${rightPaneWidth}px` } as CSSProperties)
 		: undefined;
 
+	const attachmentsBrowser = (view: AttachmentsView) => (
+		<AttachmentsBrowser
+			view={view}
+			rows={attachmentRows}
+			{...(persistentChat ? { roomId: persistentChat.agentId } : {})}
+			selectedTaskId={selectedAssetTaskId}
+			onOpen={(row) => openAssetRow(row, view)}
+			onClose={() => setRightPane(null)}
+			onShowView={(next) => setRightPane({ kind: "attachments", view: next })}
+			onDeleteFile={requestFileDelete}
+			onRenameFile={(row, fileName, newName) => void renameFileRow(row, fileName, newName)}
+			onRemove={(row) => void removeAssetRow(row)}
+			onAddFiles={(files) => { for (const file of files) void addFileToShelfQuietly(file); }}
+			scrollTop={attachmentsScrollRef}
+		/>
+	);
 	const rightPaneSlot = (
 		<>
+			{galleryShown && attachmentsBrowser("gallery")}
 			{rightPaneVisible && !artifactPaneMaximized && (
 				<div
 					className="pane-resizer"
@@ -8655,6 +8489,7 @@ export function App() {
 					}}
 				/>
 			)}
+			{rightPane?.kind === "attachments" && !galleryShown && attachmentsBrowser("panel")}
 			{preview && <Preview content={preview.content} title={preview.title} type={preview.type} onClose={() => setPreview(null)} />}
 			{rightPane?.kind === "taskRun" && taskState.phase !== "none" && taskState.taskId === rightPane.taskId && (
 				<TaskRunView
@@ -8672,9 +8507,10 @@ export function App() {
 					artifact={rightPane.artifact}
 					maximized={artifactMaximized}
 					onToggleMaximize={() => setArtifactMaximized((m) => !m)}
-					onClose={() => { setArtifactMaximized(false); setRightPane(null); }}
+					onClose={() => { if (rightPane.backTo === "gallery") closePaneFile(); else { setArtifactMaximized(false); setRightPane(null); } }}
 					roomId={persistentChat?.agentId}
 					reloadNonce={viewerReloadNonce}
+					{...(rightPane.backTo ? { onBack: closePaneFile } : {})}
 					{...(rightPane.asset ? {
 						assetTitle: rightPane.asset.title,
 						originLine: rightPane.asset.originLine,
@@ -8684,13 +8520,8 @@ export function App() {
 							<AssetViewerFooter
 								taskId={rightPane.taskId}
 								artifact={rightPane.artifact}
-								userFileName={rightPane.asset.userFileName}
 								roomId={persistentChat?.agentId}
-								canIterate={!rightPane.asset.userFileName && rightPane.asset.artifacts.length > 0}
 								summary={rightPane.asset.summary}
-								onIterate={(brief) => submitAssetIterate(rightPane.taskId, brief)}
-								iteratePending={taskIteratePending}
-								iterateNotice={taskIterateNotice}
 								{...(rightPane.artifact.relativePath.startsWith("files/") ? { onSaveTo: () => setSaveAsPrompt({ shelfName: rightPane.artifact.relativePath.slice("files/".length) }) } : {})}
 								{...(rightPane.asset.orphan ? { onDelete: () => rightPane.asset && setAssetDeleteConfirm(rightPane.asset) } : {})}
 							/>
@@ -8700,6 +8531,37 @@ export function App() {
 			)}
 		</>
 	);
+
+	const shownQueued = queuedBubbles(outgoing);
+	const heldHere = heldPickFor(persistentChat);
+	const switchingLock = persistentChat ? (heldHere?.lock ?? switchingToRef.current.get(`${persistentChat.agentId}\n${persistentChat.conversationId}`)) : undefined;
+	const switchingToName = modelChangePending && switchingLock ? modelDisplayName(switchingLock) : null;
+	// A step of this answer waits for the person's OK.
+	const stepAsksNow = persistentRoomRunning && items.some((item) => item.kind === "approval" && approvalAsking(item) && liveApprovalIds.has(item.requestId));
+	const connectionStopped: ConnectionStopped | undefined = closedByFullSave
+		? { line: recentSessionsHeadsUp(checkpointApprovalResult?.recentContextEntryCount, persistentChat?.displayName) ?? "", onReturnHome: () => void restAfterCheckpoint(), onMemorize: () => void memorizeAfterCheckpoint() }
+		: turnLink === "elsewhere"
+		? { line: ROOM_ELSEWHERE_SENTENCE, onOpenHere: () => void reloadMovedRoom() }
+		: roomMovedOn
+		? { line: ROOM_MOVED_ON_SENTENCE, onReload: () => void reloadMovedRoom() }
+		: stoppedProvider !== null
+		? { line: `${stoppedCause}.${stoppedWayOn}`, ...(stoppedKeyButton ? { onSignIn: () => openSignIn(stoppedProvider), signInLabel: stoppedWords.button } : {}), onChooseModel: openModelPanel, failed: true }
+		: roomModelNotOffered
+			? { line: `${currentPersistentStatus?.models?.conversation.chosen?.name ?? "This room's model"} is no longer offered. Choose another model to continue.`, onChooseModel: openModelPanel }
+			: undefined;
+	const failureLineActions: FailureLineActions = {
+		shared: clientContext.sharedServer,
+		reviewsMemory: !!currentPersistentStatus && !nothingToMaintain(currentPersistentStatus.memoryStatus),
+		onTryAgain: tryAgainAfterFailure,
+		onReviewMemory: () => void reviewMemoryFromRoom(),
+		onChooseModel: openModelPanel,
+		onReplaceKey: (provider) => openSignIn(provider),
+		onOpenAiSetup: (provider) => openSignIn(provider),
+	};
+
+	// The room's command mode: under the box beside the model, in the box on the phone.
+	// Commands are not run on a shared server, so there is no mode to show.
+	const commandModeChip = persistentChat && !clientContext.sharedServer ? <BashModeChip agentId={persistentChat.agentId} bashEnabled={roomBashEnabled} settingsOpen={roomSettingsOpen} /> : null;
 
 	return (
 		<InRoomChatShellView
@@ -8711,26 +8573,25 @@ export function App() {
 					appearance={appearance}
 					onSetAppearance={setAppearance}
 					onSettings={openSettings}
-					assetsSlot={persistentChat ? <AssetsPanel rows={assetRows} selectedTaskId={selectedAssetTaskId} onSelect={openAssetRow} onStopRunning={() => dispatchTask({ type: "abort_requested" })} onRemove={(row) => void removeAssetRow(row)} onDeleteFile={(row, fileName) => requestFileDelete(row, fileName)} onRenameFile={(row, fileName, newName) => void renameFileRow(row, fileName, newName)} /> : undefined}
+					assetsSlot={persistentChat ? <AttachmentsEntry count={attachmentRows.length} open={attachmentsView !== null} onClick={toggleAttachments} /> : undefined}
 				/>
 			}
 			withPreview={false}
 			workbenchRef={workbenchRef}
-			workbenchClassName={`${rightPaneVisible ? (artifactPaneMaximized ? "with-right-pane artifact-pane-maximized" : "with-right-pane") : ""}${resizingRightPane ? " pane-resizing" : ""}`}
+			workbenchClassName={`${rightPaneVisible ? (artifactPaneMaximized ? "with-right-pane artifact-pane-maximized" : "with-right-pane") : ""}${resizingRightPane ? " pane-resizing" : ""}${rightPane?.kind === "attachments" || rightPane?.kind === "artifactViewer" ? " with-file-pane" : ""}${galleryShown ? " attachments-gallery-open" : ""}`}
 			workbenchStyle={workbenchStyle}
 			activeDisplay={activeDisplay || ""}
 			ownerSecondary=""
-			busy={busy || revealing}
+			// The header's spinner shows as long as Stop does.
+			busy={busy || stopShown}
 			usage={usage}
 			contextHealth={persistentChat ? contextHealth : null}
-			loadRememberEstimate={persistentChat ? () => fetchRememberReadEstimate(persistentChat.agentId, persistentChat.conversationId) : undefined}
 			currentModelLabel={currentModel.name}
 			currentModelProvider={currentModel.provider}
 			topbarActions={
 				persistentChat
 					? (
 						<>
-							<BashModeChip agentId={persistentChat.agentId} bashEnabled={roomBashEnabled} settingsOpen={roomSettingsOpen} />
 							{/* Gated on being IN a room, not on the polled status list:
 							    a stale or empty list is exactly the stuck-room case
 							    Forget exists to rescue, and the button vanishing then
@@ -8741,12 +8602,12 @@ export function App() {
 					)
 					: undefined
 			}
-			composerRightActions={
+			composerAttachSlot={
 				persistentChat ? (
 					<>
 						<button
 							className="icon-btn icon-btn-square composer-attach-btn"
-							title="Add a file to this room's Files and attach it to your next message"
+							title="Add a file to this room's Attachments and to your next message"
 							aria-label="Attach a file"
 							onClick={() => attachFileInputRef.current?.click()}
 						><PaperclipIcon /></button>
@@ -8760,18 +8621,17 @@ export function App() {
 								e.target.value = "";
 							}}
 						/>
-						{/* No pill unless there is something to choose between: a
-						    model that cannot reason reports one rung, and so does a
-						    model whose levels all collapse onto one effort. It stays
-						    live across the blink of a socket swap, because a pick
-						    made in that window is queued and delivered when the room
-						    binds; only a genuine outage dims it. */}
-						{roomEffort && roomEffort.ladder.length >= 2 && (
-							<EffortControl level={roomEffort.level} ladder={roomEffort.ladder} disabled={!connectedForChrome} onSelect={selectRoomEffort} />
-						)}
+					</>
+				) : null
+			}
+			composerRememberSlot={
+				persistentChat ? (
+					<>
+						{/* The phone has no row under the box: the command mode sits in the box, before Remember. */}
+						{phoneWidth && commandModeChip}
 						<CheckpointSplitButton
 							hasUserInput={currentThreadHasUserInput}
-							inFlight={roomInFlightForChrome}
+							inFlight={persistentRoomInFlight}
 							skipsPreview={rememberSkipsPreview}
 							onQuickCheckpoint={() => void runQuickCheckpoint()}
 							onOpenFullCheckpoint={() => { setCheckpointQuickRequested(false); setCheckpointQuickBlockedReasons(null); setCheckpointPreviewOpen(true); }}
@@ -8779,17 +8639,45 @@ export function App() {
 					</>
 				) : null
 			}
+			composerModelSlot={persistentChat ? (placement) => (
+				// Under the box the command mode follows the model; the phone's header line holds the model alone.
+				<div className="composer-under-controls">
+					{/* The model pick is an HTTP route, so the control stays usable while
+					    the socket is down; only the effort slider waits for it. An effort
+					    pick in the blink of a socket swap is queued and delivered when the room binds. */}
+					<ModelPickControl
+						placement={placement}
+						agentId={persistentChat.agentId}
+						conversationId={persistentChat.conversationId}
+						open={modelPanelOpen}
+						onOpenChange={setModelPanelOpen}
+						current={persistentChat.model}
+						currentName={runningModelName && runningModelName.provider === persistentChat.model.provider && runningModelName.model === persistentChat.model.model ? runningModelName.name : undefined}
+						held={heldHere && { ...heldHere.lock, level: heldHere.level }}
+						effort={roomEffort}
+						// A held pick keeps its level with it. A switch on the wire with no
+						// held pick (the page left and came back) has nowhere to keep one: a
+						// level sent now would be judged against the model being left.
+						effortDisabled={!connectedForChrome || (modelChangePending && !heldHere)}
+						onPick={pickConversationModel}
+						onEffort={selectRoomEffort}
+						onTooLong={askModelSwitch}
+					/>
+					{placement === "row" && commandModeChip}
+				</div>
+			) : undefined}
 			connected={connectedForChrome}
 			reconnectState={roomReconnectState}
 			onReconnect={retryRoomReconnectNow}
-			connectionStopped={stoppedProvider !== null
-				? { line: `${modelStatus?.providers?.find((provider) => provider.id === stoppedProvider)?.label ?? "This conversation's provider"} is signed out. Sign in again to continue this conversation.`, onSignIn: () => openSignIn(stoppedProvider), onChooseModel: () => openRoomSettings("model") }
-				: roomModelNotOffered
-					? { line: `${currentPersistentStatus?.models?.conversation.chosen?.name ?? "This room's model"} is no longer offered. Choose another model to continue.`, onChooseModel: () => openRoomSettings("model") }
-					: undefined}
-			items={items}
+			connectionStopped={connectionStopped}
+			items={shownItems}
 			pendingConsultIds={pendingConsultItemIds}
 			attachmentAccess={attachmentAccess}
+			failureLineActions={failureLineActions}
+			answerDrawnAtOnceId={answerDrawnAtOnceId}
+			stepsElsewhere={turnLink === "elsewhere"}
+			edit={lastMessageEdit}
+			statusLine={shortening ? SHORTENING_LINE : null}
 			composerOverlaySlot={<ToastStack toasts={roomToasts} />}
 			onOpenTaskArtifact={(taskId, relativePath) => {
 				const extension = relativePath.includes(".") ? relativePath.slice(relativePath.lastIndexOf(".")).toLowerCase() : "";
@@ -8799,12 +8687,34 @@ export function App() {
 			empty={empty}
 			onSend={send}
 			onStop={stopTurn}
-			stopVisible={roomInFlightForChrome}
-			stopDisabled={persistentRoomCancelling || (persistentRoomInFlight && !connected)}
+			onSendNow={sendNowFromBox}
+			onSendQueuedNow={() => sendQueuedNow()}
+			queueRefusal={busy || turnCancelling || persistentRoomInFlight ? queueRefusal : undefined}
+			onEscapeStop={() => {
+				if (!stopShown || persistentRoomCancelling || !connected || catchingUpOnAnswer || turnLink !== "live") return false;
+				stopTurn();
+				return true;
+			}}
+			queued={shownQueued}
+			queuedActions={queuedActions}
+			stopVisible={stopShown}
+			stopDisabled={persistentRoomCancelling || (persistentRoomInFlight && !connected) || catchingUpOnAnswer || turnLink === "reconnecting"}
 			stopLabel="Stop"
 			textareaRef={textareaRef}
-			composerPlaceholder={persistentRoomCancelling ? "Stopping current response…" : roomWorkingForChrome ? "Working… Stop before sending another message" : `Ask ${activeDisplay}…`}
-			sendUnavailable={!connected || roomInFlightForChrome}
+			composerPlaceholder={composerHint({
+				room: activeDisplay,
+				asToday: !!connectionStopped,
+				connected: connectedForChrome,
+				reconnect: roomReconnectState,
+				reconnectingTurn: turnLink === "reconnecting",
+				elsewhere: turnLink === "elsewhere",
+				switchingTo: switchingToName,
+				stopping: persistentRoomCancelling,
+				stepAsks: stepAsksNow,
+				answering: persistentRoomRunning,
+				keys: isTouchScreen() ? "touch" : isMacPlatform() ? "mac" : "windows",
+			})}
+			sendUnavailable={!connected || closedByFullSave || roomMovedOn || turnLink !== "live" || modelChangePending || catchingUpOnAnswer}
 			initialDraftValue={composerPrefill || undefined}
 			draftResetKey={composerResetNonce}
 			composerAllowEmptySend={stagedAttachments.some((entry) => entry.status === "ready")}
@@ -8863,9 +8773,10 @@ export function App() {
 			mention={persistentChat ? {
 				candidates: mentionCandidates,
 				currentRoomId: persistentChat.agentId,
-				busy: persistentRoomInFlight,
-				busyTitle: "You can consult another room once this room's current response finishes.",
-				onConsultRequest: handleConsultRequest,
+				// While the room answers, "@Room question" waits as a queued message and goes when the answer ends.
+				busy: false,
+				busyTitle: "",
+				onConsultRequest: requestConsult,
 				// §8.3: while a consult card is docked, a composer @-mention is rejected
 				// visibly (the card is the place to follow up) — name the docked room.
 				activeConsultDisplayName: consultState.phase !== "none" ? (consultState.targetDisplayName ?? consultState.targetRoomId) : null,
@@ -8874,16 +8785,27 @@ export function App() {
 			onApprovalPreview={openApprovalPreview}
 			aboveComposerSlot={persistentChat ? (
 				<>
-					{workspaceNudgeRoomId === persistentChat.agentId && (
+					{workspaceHint?.roomId === persistentChat.agentId && !clientContext.sharedServer && !stoppedNoticeShows(connectionStopped, connectedForChrome, roomReconnectState) && (
 						<div className="room-workspace-nudge" role="note">
-							<span className="room-workspace-nudge-text">Connect a folder so this room can read and write files.</span>
-							<div className="room-workspace-nudge-actions">
-								{/* Hide only for the moment, never write the dismissed flag:
-								    the close-modal re-check re-shows the nudge if the user
-								    cancelled without setting a workspace. Only Dismiss burns it. */}
-								<button className="rs-btn" type="button" title="Choose the folder this room may read and write" onClick={() => { setWorkspaceNudgeRoomId(null); openRoomSettings(); }}>Set workspace</button>
-								<button className="rs-quiet" type="button" title="Hide this hint for good" onClick={dismissWorkspaceNudge}>Dismiss</button>
-							</div>
+							{workspaceHint.kind === "folder-gone" ? (
+								<>
+									<span className="room-workspace-nudge-text">{workspaceHint.folderName} was not found on this computer. Choose it again, or another folder.</span>
+									<div className="room-workspace-nudge-actions">
+										<button className="rs-btn" type="button" title="Choose the folder this room may read and write" onClick={() => openRoomSettings("workspace")}>Choose folder</button>
+									</div>
+								</>
+							) : (
+								<>
+									<span className="room-workspace-nudge-text">Set a folder so this room can read and write files.</span>
+									<div className="room-workspace-nudge-actions">
+										{/* Hide only for the moment, never write the dismissed flag:
+										    the close-modal re-check re-shows the nudge if the user
+										    cancelled without setting a workspace. Only Dismiss burns it. */}
+										<button className="rs-btn" type="button" title="Choose the folder this room may read and write" onClick={() => { setWorkspaceHint(null); openRoomSettings("workspace"); }}>Set workspace</button>
+										<button className="rs-quiet" type="button" title="Hide this hint for good" onClick={dismissWorkspaceNudge}>Dismiss</button>
+									</div>
+								</>
+							)}
 						</div>
 					)}
 					<ConsultDock
@@ -8898,17 +8820,29 @@ export function App() {
 				</>
 			) : undefined}
 			previewSlot={rightPaneSlot}
-			checkpointPreviewSlot={checkpointPreviewOpen && persistentChat && <CheckpointPreviewShell chat={persistentChat} itemCount={items.length} rememberText={checkpointRememberText} density={checkpointDensity} proposal={checkpointProposal} loading={checkpointProposalLoading} progress={checkpointProgress} onCancelGenerate={() => cancelCheckpointProposal()} error={checkpointProposalError} approvalLoading={checkpointApprovalLoading} approvalError={checkpointApprovalError} approvalResult={checkpointApprovalResult} quickRequested={checkpointQuickRequested} quickBlockedReasons={checkpointQuickBlockedReasons} consultRunning={consultState.phase === "streaming"} taskRunning={taskState.phase === "running"} pendingConsultHandoffCount={pendingHandoffs.filter((block) => !isSpecialistHandoffBlock(block)).length} pendingTaskHandoffCount={pendingHandoffs.filter(isSpecialistHandoffBlock).length} onRememberTextChange={(text) => { setCheckpointRememberText(text); setCheckpointProposal(null); setCheckpointProposalError(null); setCheckpointApprovalError(null); setCheckpointApprovalResult(null); }} onDensityChange={(next) => { setCheckpointDensity(next); setCheckpointProposal(null); setCheckpointProposalError(null); setCheckpointApprovalError(null); setCheckpointApprovalResult(null); }} onGenerate={generateCheckpointProposal} onApprove={approveCheckpointProposal} onDiscard={() => { setCheckpointProposal(null); setCheckpointProposalError(null); setCheckpointApprovalError(null); setCheckpointApprovalResult(null); setCheckpointQuickRequested(false); setCheckpointQuickBlockedReasons(null); setCheckpointPreviewOpen(false); }} onContinueAfterCheckpoint={continueAfterCheckpoint} onRestAfterCheckpoint={restAfterCheckpoint} onClose={() => setCheckpointPreviewOpen(false)} />}
+			checkpointPreviewSlot={checkpointPreviewOpen && persistentChat && <CheckpointPreviewShell chat={persistentChat} itemCount={items.length} rememberText={checkpointRememberText} density={checkpointDensity} proposal={checkpointProposal} loading={checkpointProposalLoading} progress={checkpointProgress} onCancelGenerate={() => cancelCheckpointProposal()} error={checkpointProposalError} notice={checkpointProposalNotice} onChooseModel={() => openRoomSettings("model")} onSignIn={(provider) => openSignIn(provider ?? persistentChat.model.provider)} approvalLoading={checkpointApprovalLoading} approvalError={checkpointApprovalError} approvalResult={checkpointApprovalResult} quickRequested={checkpointQuickRequested} skipsPreview={rememberSkipsPreview} quickBlockedReasons={checkpointQuickBlockedReasons} consultRunning={consultState.phase === "streaming"} taskRunning={taskState.phase === "running"} pendingConsultHandoffCount={pendingHandoffs.filter((block) => !isSpecialistHandoffBlock(block)).length} pendingTaskHandoffCount={pendingHandoffs.filter(isSpecialistHandoffBlock).length} approvedFields={checkpointFields} onFieldsChange={(fields) => { if (checkpointProposal) setCheckpointEdits({ key: checkpointEditsKey(checkpointProposal), fields }); }} onRememberTextChange={(text) => { setCheckpointRememberText(text); setCheckpointProposal(null); setCheckpointProposalError(null); setCheckpointProposalNotice(null); setCheckpointApprovalError(null); setCheckpointApprovalResult(null); }} onDensityChange={(next) => { setCheckpointDensity(next); setCheckpointProposal(null); setCheckpointProposalError(null); setCheckpointProposalNotice(null); setCheckpointApprovalError(null); setCheckpointApprovalResult(null); }} onGenerate={generateCheckpointProposal} onApprove={approveCheckpointProposal} onDiscard={() => { discardCheckpointProposalOnServer(); setCheckpointEdits(null); setCheckpointProposal(null); setCheckpointProposalError(null); setCheckpointProposalNotice(null); setCheckpointApprovalError(null); setCheckpointApprovalResult(null); setCheckpointQuickRequested(false); setCheckpointQuickBlockedReasons(null); setCheckpointPreviewOpen(false); }} onContinueAfterCheckpoint={continueAfterCheckpoint} onRestAfterCheckpoint={restAfterCheckpoint} onMemorizeAfterCheckpoint={memorizeAfterCheckpoint} onClose={() => { if (roomFilledBy(checkpointApprovalResult)) void restAfterCheckpoint(); else setCheckpointPreviewOpen(false); }} />}
 			globalOverlaySlot={
 				<>
 					{roomSettingsOpen && currentPersistentStatus && (
-						<RoomSettingsModal status={currentPersistentStatus} initialPane={roomSettingsPane} onClose={() => setRoomSettingsOpen(false)} onArchive={archivePersistentAgentRoom} onPurge={purgePersistentAgentRoom} onRefresh={refreshPersistentAgentStatus} onMementoApplied={leaveRoomAfterMemento} onConversationSwitched={adoptSwitchedConversationModel} onOpenSkillsLibrary={() => openSettings("skills")} onOpenConnectors={() => openSettings("connectors")} />
+						<RoomSettingsModal status={currentPersistentStatus} answering={persistentRoomInFlight} initialPane={roomSettingsPane} onClose={() => setRoomSettingsOpen(false)} onArchive={archivePersistentAgentRoom} onPurge={purgePersistentAgentRoom} onRefresh={refreshPersistentAgentStatus} onMementoApplied={leaveRoomAfterMemento} onOpenSkillsLibrary={() => openSettings("skills")} onOpenConnectors={() => openSettings("connectors")} />
+					)}
+					{modelSwitchAsk && persistentChat && modelSwitchAsk.agentId === persistentChat.agentId && modelSwitchAsk.conversationId === persistentChat.conversationId && (
+						<ModelSwitchWindow
+							modelName={modelSwitchAsk.name}
+							roomName={persistentChat.displayName}
+							answering={persistentRoomInFlight}
+							waitingConversations={currentPersistentStatus?.memoryStatus?.recentContextCount ?? null}
+							onCancel={() => setModelSwitchAsk(null)}
+							onSwitch={() => confirmModelSwitch(true)}
+							onRemember={() => confirmModelSwitch(false)}
+						/>
 					)}
 					{assetDeleteConfirm && <AssetDeleteDialog title={assetDeleteConfirm.title} onDelete={() => { const row = assetDeleteConfirm; setAssetDeleteConfirm(null); if (row) void deleteAssetRow(row); }} onCancel={() => setAssetDeleteConfirm(null)} />}
 					{fileDeleteConfirm && <FileDeleteDialog fileName={fileDeleteConfirm.fileName} reason={fileDeleteConfirm.reason} onDelete={() => { const confirm = fileDeleteConfirm; setFileDeleteConfirm(null); if (confirm) void performFileDelete(confirm.fileName); }} onCancel={() => setFileDeleteConfirm(null)} />}
 					{saveAsPrompt && <SaveAsDialog shelfName={saveAsPrompt.shelfName} onSave={(chosenName) => { const prompt = saveAsPrompt; setSaveAsPrompt(null); if (prompt) void saveViewerFileToFolder(prompt.shelfName, undefined, chosenName); }} onCancel={() => setSaveAsPrompt(null)} />}
 					{exportCollision && <ExportCollisionDialog collision={exportCollision} onClose={() => setExportCollision(null)} />}
 					{settingsOverlayNode}
+					{personChanged && <PersonChangedCover kind={personChanged} onReload={reloadForNewPerson} />}
 				</>
 			}
 		/>

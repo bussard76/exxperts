@@ -7,11 +7,14 @@
 // This module turns any of those into one canonical display name so the same
 // model reads the same everywhere, without touching persisted formats.
 //
-// Dedupe spec (for the Wallet filter and any grouping surface): group entries
-// by `canonicalModelKey(...)` — the same model recorded under different raw
+// Dedupe spec (for any grouping surface): group entries by
+// `canonicalModelKey(...)`: the same model recorded under different raw
 // ids or label eras collapses into one group ("claude-opus-4-8" and
 // "claude-opus-4.8" share a key). A group renders as `canonicalModelName(...)`
 // once; selecting it must match ALL underlying raw model strings in the group.
+// The Wallet names a gateway's model by `realModelName(...)` instead: a name
+// a gateway's owner saved is not the model, and two gateways can save one
+// name for two models.
 //
 // Naming rules, in order:
 // 1. Known-family ids (GPT, Claude, Gemini, Kimi, DeepSeek, …) are prettified
@@ -46,12 +49,20 @@ export interface CanonicalModelName {
  */
 export const GATEWAY_PROVIDER_ID_PREFIX = "gateway-";
 
-// Mirrors the server's WEB_CHAT_PROVIDER_LABELS so client-side fallbacks agree
-// with labels minted by the server for new rows.
+/** A gateway's provider: one saved under its own name, or the single gateway the app had before those. */
+function isGatewayProvider(providerId: string | null | undefined): boolean {
+	const id = (providerId ?? "").trim();
+	return id.startsWith(GATEWAY_PROVIDER_ID_PREFIX) || id === "openai-compatible";
+}
+
+// The names AI setup shows, also for the Wallet and the built-in profiles.
+// The server still writes the older "Anthropic / Claude" into new rows'
+// labels (WEB_CHAT_PROVIDER_LABELS), so that one is read as the sign-in.
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 	"openai-codex": "ChatGPT Plus/Pro",
 	openai: "OpenAI",
-	anthropic: "Anthropic / Claude",
+	anthropic: "Claude",
+	"anthropic-api-key": "Claude API key",
 	"github-copilot": "GitHub Copilot",
 	"openai-compatible": "OpenAI-compatible gateway",
 	google: "Google / Gemini",
@@ -107,6 +118,8 @@ export function splitProviderLabel(label: string): { provider: string; name: str
 	const name = label.slice(idx + 1).trim();
 	return provider && name ? { provider, name } : null;
 }
+
+const PROVIDER_ID_BY_LABEL: Record<string, string> = { "Anthropic / Claude": "anthropic" };
 
 /** Provider display name for a provider id; falls back to the id itself. */
 export function providerDisplayName(providerId: string): string {
@@ -169,8 +182,20 @@ function mergeVersionRuns(tokens: string[]): string[] {
 	return out;
 }
 
+// A trailing release date pins one snapshot of a model ("-20251001",
+// "-2024-08-06"); it is not part of the model's name.
+const TRAILING_DATE = /[-_.@](20\d{2})-?(0[1-9]|1[0-2])-?(0[1-9]|[12]\d|3[01])$/;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** The release date a model id ends with, in plain form ("29 Sep 2025"); null when it has none. */
+export function modelIdDate(rawId: string): string | null {
+	const match = TRAILING_DATE.exec(rawId.trim());
+	return match ? `${Number(match[3])} ${MONTHS[Number(match[2]) - 1]} ${match[1]}` : null;
+}
+
 /** Tidy a raw model id into a readable name without inventing anything. */
 function prettifyModelId(rawId: string): string {
+	rawId = rawId.replace(TRAILING_DATE, "") || rawId;
 	let tokens = mergeVersionRuns(tokenizeModelId(rawId));
 	if (tokens.length === 0) return rawId;
 
@@ -205,8 +230,13 @@ export function canonicalModelName(input: ModelNameInput): CanonicalModelName {
 	const rawId = (input.model ?? "").trim();
 	const label = (input.modelLabel ?? "").trim();
 	const split = label ? splitProviderLabel(label) : null;
-	const provider = split?.provider ?? (input.provider ? providerDisplayName(input.provider.trim()) : undefined);
+	const splitProvider = split ? (PROVIDER_ID_BY_LABEL[split.provider] ? providerDisplayName(PROVIDER_ID_BY_LABEL[split.provider]) : split.provider) : undefined;
+	const provider = splitProvider ?? (input.provider ? providerDisplayName(input.provider.trim()) : undefined);
 
+	// A name a gateway's owner saved for a model is its name, as saved, even
+	// for a known family's id. A gateway label that only repeats the id is no
+	// saved name: it is tidied below like any other.
+	if (split && isGatewayProvider(input.provider) && split.name !== rawId) return { name: split.name, provider: splitProvider! };
 	if (rawId && KNOWN_FAMILY_ID.test(rawId)) {
 		return { name: prettifyModelId(rawId), ...(provider ? { provider } : {}) };
 	}
@@ -214,7 +244,7 @@ export function canonicalModelName(input: ModelNameInput): CanonicalModelName {
 		const namePart = stripDecoration(split.name);
 		// Gateway labels often just repeat the raw id after the dash — tidy it.
 		const name = namePart && namePart !== rawId ? (KNOWN_FAMILY_ID.test(namePart) ? prettifyModelId(namePart) : namePart) : prettifyModelId(rawId || namePart);
-		return { name, provider: split.provider };
+		return { name, provider: splitProvider! };
 	}
 	// A dashless label is already a curated name — better than tidying an
 	// unknown id generically.
@@ -228,6 +258,49 @@ export function modelDisplayName(input: ModelNameInput): string {
 	return canonicalModelName(input).name;
 }
 
+// Amazon Bedrock's id shapes: a region before the vendor
+// ("eu.anthropic.claude-…") and a version after the name ("-v1:0", "-1:0",
+// and a bare "-v1" on Claude ids). None is part of the model's name; a bare
+// "-v2" elsewhere can be ("nvidia.nemotron-nano-12b-v2"). Its Llama ids glue
+// the family to its version ("meta.llama3-3-70b-instruct" is Llama 3.3).
+const BEDROCK_REGION = /^(?:eu|us|us-gov|apac|au|jp|in|global)\.(?=[a-z0-9]+\.)/i;
+const BEDROCK_VERSION = /-v?\d+:\d+$/i;
+const BEDROCK_CLAUDE_VERSION = /^(anthropic\.claude-.+)-v\d+$/i;
+const BEDROCK_LLAMA = /^meta\.llama(\d+)(?:-(\d+))?(?=-)/i;
+
+/**
+ * The model behind an id, wherever it runs: its name and release date read
+ * from the id alone, through Bedrock's region and version shapes, so
+ * "eu.anthropic.claude-sonnet-4-5-20250929-v1:0" reads as
+ * `{ name: "Claude Sonnet 4.5", date: "29 Sep 2025" }`. For counting real
+ * models (the Wallet). A list to choose from
+ * keeps canonicalModelName, where a gateway's region variants of one model
+ * still read apart.
+ */
+export function realModelName(rawId: string): { name: string; date: string | null } {
+	const id = rawId
+		.trim()
+		.replace(BEDROCK_REGION, "")
+		.replace(BEDROCK_VERSION, "")
+		.replace(BEDROCK_CLAUDE_VERSION, "$1")
+		.replace(BEDROCK_LLAMA, (_, major: string, minor?: string) => `meta.llama-${minor ? `${major}.${minor}` : major}`);
+	return { name: modelDisplayName({ model: id }), date: modelIdDate(id) };
+}
+
+/**
+ * The names of one list's models, in order. Two that would read the same tell
+ * themselves apart by the release date in their ids: "Claude Sonnet 4.5 (29 Sep 2025)".
+ */
+export function distinctModelNames(inputs: ModelNameInput[]): string[] {
+	const names = inputs.map((input) => modelDisplayName(input) || (input.model ?? ""));
+	const counts = new Map<string, number>();
+	for (const name of names) counts.set(name.toLowerCase(), (counts.get(name.toLowerCase()) ?? 0) + 1);
+	return names.map((name, index) => {
+		const date = (counts.get(name.toLowerCase()) ?? 0) > 1 ? modelIdDate(inputs[index].model ?? "") : null;
+		return date ? `${name} (${date})` : name;
+	});
+}
+
 /**
  * "Name (Provider)". The face of the app shows the name alone; the tooltip is
  * where the provider belongs, so two look-alike models from different
@@ -237,6 +310,16 @@ export function modelDisplayName(input: ModelNameInput): string {
 export function formatModelWithProvider(name: string, provider: string | null | undefined): string {
 	if (!name) return provider ?? "";
 	return provider ? `${name} (${provider})` : name;
+}
+
+/**
+ * "<model> on <provider>", for a sentence that needs the provider, or the
+ * model alone when its name already says it: "Claude Opus 4.8", never
+ * "Claude Opus 4.8 on Claude".
+ */
+export function modelOnProvider(name: string, provider: string | null | undefined): string {
+	if (!provider || name.toLowerCase().startsWith(`${provider.toLowerCase()} `)) return name;
+	return `${name} on ${provider}`;
 }
 
 /** The canonical name with its provider, ready for a title attribute. */

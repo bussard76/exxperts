@@ -1,0 +1,9 @@
+#!/bin/sh
+# agentic-factory hook (pre-commit)
+set -eu
+d=$(dirname "$0")
+# The project's own pre-commit (kept by init as pre-commit.own next to this file) runs first and must pass.
+if [ -x "$d/pre-commit.own" ]; then "$d/pre-commit.own" "$@"; fi
+node tools/factory-guardrails.mjs test-count
+node tools/factory-guardrails.mjs staged-safety
+node tools/factory-guardrails.mjs static-checks

@@ -1,22 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { PersistentAgentStatus } from "../types";
 import { fetchPersistentRoomSkillSettings, updatePersistentRoomSkillSetting, type PersistentRoomEnabledSkillStatus } from "../persistent-room-management-api";
+import { pausedSkills } from "../paused-skills";
 import { fetchSkill, fetchSkills, type SkillDetail, type SkillListItem } from "../skills-api";
 import { FileGroupList, groupFilesByFolder } from "./file-groups";
 import { MarkdownRenderer } from "./Markdown";
 import { RsInfo } from "./rs-info";
 import { PaneHeader } from "./pane-header";
+import { useRemoteClientContext } from "../remote-client-context";
 
-/**
- * Room settings wheel — Skills panel (skills MR-5, spec §4/§5; enabled-first
- * redesign, Borja 2026-07-11). Shows ONLY the room's enabled skills, so the
- * wheel stays constant-size however large the library grows; adding more goes
- * through a searchable picker over the not-yet-enabled library. Enabling pins
- * the skill's current sha256 server-side; a skill whose body changed since
- * enablement shows a "re-review required" state and is NOT injected until
- * re-enabled after review. The resident-cost line keeps the
- * ~100-tokens-per-skill index price visible.
- */
 /** A skill's problem in plain words, under its description; null when it works. */
 function skillProblemLine(state: PersistentRoomEnabledSkillStatus): string | null {
 	if (state.status === "hash-mismatch") return "Changed since you enabled it. The room stopped using it until you review the new version.";
@@ -25,10 +17,19 @@ function skillProblemLine(state: PersistentRoomEnabledSkillStatus): string | nul
 	return null;
 }
 
-/** The files line's state: allowed, off, or allowed before and changed since. */
-function runFilesLine(executeState: PersistentRoomEnabledSkillStatus["executeState"], count: number): string {
+/** The files line's state: allowed, off, or allowed before and changed since. Files run
+ * only through Bash, so an allowed skill in a room with Bash off says so. */
+function runFilesLine(executeState: PersistentRoomEnabledSkillStatus["executeState"], count: number, terminalOn: boolean | null, sharedServer: boolean): string {
 	const one = count === 1;
-	if (executeState === "approved") return one ? "Allowed: the room may run its file as it is now." : `Allowed: the room may run its ${count} files as they are now.`;
+	if (executeState === "approved" && sharedServer) return one ? "Allowed. On a shared server, its file never runs." : `Allowed. On a shared server, its ${count} files never run.`;
+	if (executeState === "approved" && terminalOn === false) {
+		return one
+			? "Allowed. Its file runs only while this room's Bash is on; turn it on under Folder."
+			: `Allowed. Its ${count} files run only while this room's Bash is on; turn it on under Folder.`;
+	}
+	// While the room's Bash is not known, say only what is true either way.
+	if (executeState === "approved" && terminalOn === null) return one ? "Allowed. Its file runs only while this room's Bash is on." : `Allowed. Its ${count} files run only while this room's Bash is on.`;
+	if (executeState === "approved") return one ? "Allowed. The room may run its file as it is now." : `Allowed. The room may run its ${count} files as they are now.`;
 	if (executeState === "drifted") {
 		return one
 			? "Its file changed since you allowed it, so it does not run. Turn this on to allow it as it is now."
@@ -37,9 +38,26 @@ function runFilesLine(executeState: PersistentRoomEnabledSkillStatus["executeSta
 	return one ? "Off: the room follows its instructions but does not run its file." : `Off: the room follows its instructions but does not run its ${count} files.`;
 }
 
-export function RoomSkillsSection({ status, onOpenSkillsLibrary }: { status: PersistentAgentStatus; onOpenSkillsLibrary?: () => void }) {
+/**
+ * Room settings wheel — Skills panel. Shows ONLY the room's enabled skills, so
+ * the wheel stays constant-size however large the library grows; adding more
+ * goes through a searchable picker over the not-yet-enabled library. Enabling
+ * pins the skill's current sha256 server-side; a skill whose body changed since
+ * enablement shows a "re-review required" state and is NOT injected until
+ * re-enabled after review. The resident-cost line keeps the
+ * ~100-tokens-per-skill index price visible.
+ */
+export function RoomSkillsSection({ status, terminalOn = null, onOpenSkillsLibrary, onPausedCount }: { status: PersistentAgentStatus; terminalOn?: boolean | null; onOpenSkillsLibrary?: () => void; onPausedCount?: (count: number) => void }) {
+	const sharedServer = useRemoteClientContext().sharedServer;
 	const [library, setLibrary] = useState<SkillListItem[] | null>(null);
 	const [enabled, setEnabled] = useState<PersistentRoomEnabledSkillStatus[] | null>(null);
+	// The settings nav counts the paused skills; it hears each change here,
+	// so a review clears the count at once.
+	const onPausedCountRef = useRef(onPausedCount);
+	onPausedCountRef.current = onPausedCount;
+	useEffect(() => {
+		if (enabled) onPausedCountRef.current?.(pausedSkills(enabled).length);
+	}, [enabled]);
 	const [busyName, setBusyName] = useState<string | null>(null);
 	// Execution approval (executable skills): its own busy name so the enable/remove
 	// buttons keep their own labels while an approval is in flight.
@@ -139,7 +157,7 @@ export function RoomSkillsSection({ status, onOpenSkillsLibrary }: { status: Per
 			<PaneHeader
 				title="Skills"
 				line={<>
-					{okCount > 0 ? `${okCount} enabled, ~${okCount * 100} tokens per turn.` : "Abilities this room can use in its turns."}
+					{okCount > 0 ? `${okCount} enabled.` : "Abilities this room can use in its turns."}
 					<RsInfo text="Each enabled skill adds a ~100-token index entry to every turn of this room. Enabling or disabling takes effect right away, from the room's next reply on; a changed or removed skill stops being injected immediately. A skill's full instructions load only when the room reads it and are never memorized." />
 				</>}
 				actions={loaded && library.length > enabledNames.size && !pickerOpen
@@ -216,7 +234,7 @@ export function RoomSkillsSection({ status, onOpenSkillsLibrary }: { status: Per
 												<div className="settings-row-main">
 													<span className="room-skill-files-label">Run its files</span>
 													<span className={`settings-row-sub${state.executeState === "drifted" ? " room-skill-problem" : ""}`}>
-														{runFilesLine(state.executeState, bundledFiles.length)}{" "}
+														{runFilesLine(state.executeState, bundledFiles.length, terminalOn, sharedServer)}{" "}
 														<button
 															type="button"
 															className="rs-text-btn"

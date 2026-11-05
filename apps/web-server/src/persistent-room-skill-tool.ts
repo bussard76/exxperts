@@ -17,7 +17,7 @@ import { sha256 } from "./skills-store.js";
  *   and provenance-wrapped. There is no filesystem handle and no path argument —
  *   name lookup only.
  * - Index freshness is TURN-scoped: the enabled-skills index rides the per-turn
- *   prompt assembly (index.ts), recomputed from the room's current effective
+ *   prompt assembly (room-socket.ts), recomputed from the room's current effective
  *   enabled set for every request — enabling a skill mid-session lists it on
  *   the very next message. The tool enforces the same LIVE effective set on
  *   every call, so index and enforcement can never disagree for longer than
@@ -65,10 +65,10 @@ const readSkillSchema = Type.Object({
 	name: Type.String({ description: "Name of an enabled skill from the room's enabled-skills index. Names only — paths are not accepted." }),
 });
 
-type TextToolResult = { content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> | undefined };
+type TextToolResult = { content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> | undefined; isError?: boolean };
 
 function refusal(text: string, details?: Record<string, unknown>): TextToolResult {
-	return { content: [{ type: "text", text }], details };
+	return { content: [{ type: "text", text }], details, isError: true };
 }
 
 export interface ReadSkillTelemetry {
@@ -91,7 +91,7 @@ export interface SkillExecutionExposure {
  * user-store skill, room policy allows bash, manual (never background) context,
  * clean unicode scan, and the room's execution approval pinned to the exact
  * files on disk right now. Any gate failing returns null and the body is served
- * exactly as before, path-free. The wiring in index.ts owns the gate chain;
+ * exactly as before, path-free. The wiring in room-socket.ts owns the gate chain;
  * this module only knows "exposed or not".
  */
 export type SkillExecutionExposureResolver = (name: string) => SkillExecutionExposure | null;
@@ -157,7 +157,7 @@ export function createReadSkillTool(options: CreateReadSkillToolOptions): ToolDe
 			// The appended paragraph is app-authored text, never skill content.
 			const exposure = resolveExecutionExposure?.(name) ?? null;
 			const exposureSection = exposure
-				? `\n\nThe user approved running this skill's bundled files in this room, for exactly this version. They live at:\n${exposure.skillDir}\nFiles: ${exposure.files.map((file) => JSON.stringify(file)).join(", ") || "(none)"}\nRun them with the bash tool when the instructions call for it. Write any outputs into the room's workspace, never into the skill's folder: the approval is pinned to the skill's exact files, so a new file there voids it. Outputs you write to the workspace stay in the workspace folder on the user's computer and do NOT appear in this room's Files panel unless explicitly shelved; when you tell the user where an output landed, name the workspace folder path, never the Files panel. If this approval no longer appears in a later read of this skill, it was withdrawn or the files changed — do not run them from memory.`
+				? `\n\nThe user approved running this skill's bundled files in this room, for exactly this version. They live at:\n${exposure.skillDir}\nFiles: ${exposure.files.map((file) => JSON.stringify(file)).join(", ") || "(none)"}\nRead them with the read tool, and run them with the bash tool when the instructions call for it. Write any outputs into the room's workspace, never into the skill's folder: the approval is pinned to the skill's exact files, so a new file there voids it. Outputs you write to the workspace stay in the workspace folder on the user's computer and do NOT appear in this room's Attachments panel unless explicitly shelved; when you tell the user where an output landed, name the workspace folder path, never the Attachments panel. If this approval no longer appears in a later read of this skill, it was withdrawn or the files changed: do not run them from memory.`
 				: "";
 			return {
 				content: [{

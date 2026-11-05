@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { authedFetch, type AuthedFetchInit, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer } from "./smoke-server-process.js";
+import { authedFetch, freePort, type AuthedFetchInit, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer, waitForServer } from "./smoke-server-process.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -13,11 +13,15 @@ process.env.HOME = tempHome;
 process.env.USERPROFILE = tempHome;
 
 const canonicalDir = path.join(tempHome, ".exxperts", "agent", "skills");
+// The server's own temp folder, so the folders an upload makes there can be counted.
+const serverTmp = path.join(tempHome, "tmp");
+fs.mkdirSync(serverTmp, { recursive: true });
+const uploadFolders = () => fs.readdirSync(serverTmp).filter((name) => name.startsWith("exxperts-skill-upload-"));
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const webServerDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(webServerDir, "..", "..");
-const port = 24000 + Math.floor(Math.random() * 10000);
+const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -33,23 +37,6 @@ async function zipBase64(files: Record<string, string>): Promise<string> {
 	for (const [name, content] of Object.entries(files)) zip.file(name, content);
 	const buffer = await zip.generateAsync({ type: "nodebuffer" });
 	return buffer.toString("base64");
-}
-
-async function waitForServer(server: ChildProcessWithoutNullStreams): Promise<void> {
-	const deadline = Date.now() + 15000;
-	let lastError = "server did not respond";
-	while (Date.now() < deadline) {
-		if (server.exitCode != null) throw new Error(`server exited before startup with code ${server.exitCode}`);
-		try {
-			const response = await fetch(`${baseUrl}/healthz`);
-			if (response.ok) return;
-			lastError = `healthz returned ${response.status}`;
-		} catch (error) {
-			lastError = (error as Error).message;
-		}
-		await new Promise((resolve) => setTimeout(resolve, 150));
-	}
-	throw new Error(`server did not become ready: ${lastError}`);
 }
 
 async function requestJson(pathname: string, init: AuthedFetchInit = {}): Promise<{ status: number; body: any }> {
@@ -76,11 +63,11 @@ try {
 		shell: process.platform === "win32",
 		...SMOKE_SERVER_SPAWN_TREE_OPTIONS,
 		cwd: webServerDir,
-		env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome, PORT: String(port), ...SMOKE_SERVER_AUTH_ENV, EXXETA_HOME: repoRoot },
+		env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome, TMPDIR: serverTmp, TMP: serverTmp, TEMP: serverTmp, PORT: String(port), ...SMOKE_SERVER_AUTH_ENV, EXXETA_HOME: repoRoot },
 	});
 	server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
 	server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
-	await waitForServer(server);
+	await waitForServer(server, baseUrl, 15000);
 
 	// --- Valid zip with a nested SKILL.md + a bundled script -------------------
 	// The candidate carries the frontmatter name/description, a clean scan, and the
@@ -155,6 +142,16 @@ try {
 	}));
 	assert(filteredOut.status === 400, `an archive whose SKILL.md files are all filtered out should be rejected, got ${filteredOut.status}`);
 	assert(/no SKILL\.md/i.test(String(filteredOut.body?.error)), "filtered-out archive should report no SKILL.md found");
+
+	// --- Reject: an archive whose bundled files include an unsafe name leaves no folder behind ---
+	const foldersBefore = uploadFolders().length;
+	const unsafeName = await upload("unsafe.zip", await zipBase64({
+		"unsafe/SKILL.md": skillMd("unsafe", "unsafe name", "A body."),
+		"unsafe/a-fine-file.txt": "fine",
+		"unsafe/not:fine.txt": "a colon",
+	}));
+	assert(unsafeName.status === 400 && /unsafe file name/.test(String(unsafeName.body?.error)), `an unsafe file name is refused as before, got ${unsafeName.status}: ${JSON.stringify(unsafeName.body)}`);
+	assert(uploadFolders().length === foldersBefore, `a refused upload leaves no upload folder in the temp folder, got ${uploadFolders().length - foldersBefore} more`);
 
 	// --- Fix: a description BEGINNING with a quote round-trips through write + read ----
 	// buildUserSkillMarkdown wrote a bare `description: "x"`, which the parser then read

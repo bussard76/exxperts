@@ -12,9 +12,11 @@
 // Steps (each prints pass/fail; exit 0 only if all pass):
 //   1. `exxperts --version` prints "exxperts <version>" (version read from
 //      the archive's app/package.json).
-//   2. `exxperts doctor` exits 0 and reports the archive install type: doctor's
-//      exit-code contract (optional layers and network probes warn, never fail)
-//      must hold on a bare machine, and the archive detection must fire.
+//   2. app/scripts/doctor.mjs, run by the vendored node as the desktop app's
+//      Health Check runs it, exits 0 and reports the archive install type:
+//      doctor's exit-code contract (optional layers and network probes warn,
+//      never fail) must hold on a bare machine, and the archive detection
+//      must fire.
 //   3. `exxperts web --no-open --port <free port>` boots the real web server
 //      (tsx compiling the TS sources with the vendored node) and serves HTTP
 //      on /healthz and /; then the whole process tree is torn down.
@@ -162,17 +164,21 @@ function killTree(pid, signal) {
 }
 
 let server;
-// A POSIX child killed by an unhandled signal (the normal SIGTERM outcome
-// here) has exitCode null and signalCode set, so checking exitCode alone
-// would misread a clean teardown as a live process, escalate to a pointless
-// SIGKILL, and fail the final assertion.
+// The server ends a SIGTERM through its own stop, with an exit code; a
+// wrapper or a process the signal reaches before the server listens can still
+// die by the signal, with exitCode null and signalCode set. Checking exitCode
+// alone would misread such a teardown as a live process, escalate to a
+// pointless SIGKILL, and fail the final assertion.
 function serverDead() {
 	return server.exitCode != null || server.signalCode != null;
 }
 async function stopServer() {
 	if (!server || serverDead() || server.pid == null) return;
 	const exited = new Promise((resolve) => server.once("exit", resolve));
-	const waitUpTo = (ms) => Promise.race([exited, new Promise((resolve) => setTimeout(resolve, ms))]);
+	const waitUpTo = (ms) => {
+		let timer;
+		return Promise.race([exited, new Promise((resolve) => { timer = setTimeout(resolve, ms); })]).finally(() => clearTimeout(timer));
+	};
 	killTree(server.pid, "SIGTERM");
 	await waitUpTo(10_000);
 	if (!serverDead()) {
@@ -263,8 +269,8 @@ function runShim(args, opts = {}) {
 // ---------------------------------------------------------------------------
 
 {
-	const { cmd, cmdArgs, spawnOpts } = runShim(["doctor"]);
-	const res = spawnSync(cmd, cmdArgs, { ...spawnOpts, encoding: "utf8", timeout: 120_000 });
+	const vendorNode = path.join(top, "vendor", "node", ...(isWin ? ["node.exe"] : ["bin", "node"]));
+	const res = spawnSync(vendorNode, [path.join(top, "app", "scripts", "doctor.mjs")], { env: sanitizedEnv, cwd: top, encoding: "utf8", timeout: 120_000 });
 	const output = `${res.stdout ?? ""}${res.stderr ?? ""}`;
 	const reportsArchive = output.includes("install type: archive");
 	step(

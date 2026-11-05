@@ -12,6 +12,26 @@ for (const [provider, models] of Object.entries(MODELS)) {
 	modelRegistry.set(provider, providerModels);
 }
 
+/**
+ * An Anthropic API key is its own provider beside the Claude sign-in, because
+ * the credential store holds one credential per provider: a key saved under
+ * "anthropic" would replace the sign-in. Its models are the Anthropic list
+ * itself, prices included, so a new Claude model reaches both from one source.
+ */
+export const ANTHROPIC_API_KEY_PROVIDER = "anthropic-api-key";
+
+/** The providers that call Anthropic's own API directly: the sign-in and the key. */
+export function isDirectAnthropicProvider(provider: string): boolean {
+	return provider === "anthropic" || provider === ANTHROPIC_API_KEY_PROVIDER;
+}
+
+const anthropicModels = modelRegistry.get("anthropic");
+if (anthropicModels) {
+	const keyModels = new Map<string, Model<Api>>();
+	for (const [id, model] of anthropicModels) keyModels.set(id, { ...model, provider: ANTHROPIC_API_KEY_PROVIDER });
+	modelRegistry.set(ANTHROPIC_API_KEY_PROVIDER, keyModels);
+}
+
 type ModelApi<
 	TProvider extends KnownProvider,
 	TModelId extends keyof (typeof MODELS)[TProvider],
@@ -36,11 +56,22 @@ export function getModels<TProvider extends KnownProvider>(
 	return models ? (Array.from(models.values()) as Model<ModelApi<TProvider, keyof (typeof MODELS)[TProvider]>>[]) : [];
 }
 
-export function calculateCost<TApi extends Api>(model: Model<TApi>, usage: Usage): Usage["cost"] {
+/**
+ * Anthropic bills a one-hour cache write at twice the input price; the
+ * catalogue's `cacheWrite` is the five-minute rate (1.25x). Only Claude-format
+ * responses report one-hour writes, so the rule needs no provider check.
+ */
+const ONE_HOUR_CACHE_WRITE_INPUT_MULTIPLIER = 2;
+
+/** Takes only the price, so a stored usage row can be repriced with the same rule. */
+export function calculateCost(model: { cost: Model<Api>["cost"] }, usage: Usage): Usage["cost"] {
+	const oneHourWrites = Math.min(usage.cacheWrite1h ?? 0, usage.cacheWrite);
 	usage.cost.input = (model.cost.input / 1000000) * usage.input;
 	usage.cost.output = (model.cost.output / 1000000) * usage.output;
 	usage.cost.cacheRead = (model.cost.cacheRead / 1000000) * usage.cacheRead;
-	usage.cost.cacheWrite = (model.cost.cacheWrite / 1000000) * usage.cacheWrite;
+	usage.cost.cacheWrite =
+		(model.cost.cacheWrite / 1000000) * (usage.cacheWrite - oneHourWrites) +
+		((model.cost.input * ONE_HOUR_CACHE_WRITE_INPUT_MULTIPLIER) / 1000000) * oneHourWrites;
 	usage.cost.total = usage.cost.input + usage.cost.output + usage.cost.cacheRead + usage.cost.cacheWrite;
 	return usage.cost;
 }
@@ -174,7 +205,12 @@ function defaultEffortName(model: Model<Api>, level: ModelThinkingLevel): string
  */
 export function thinkingEffortName<TApi extends Api>(model: Model<TApi>, level: ModelThinkingLevel): string {
 	const mapped = model.thinkingLevelMap?.[level];
-	return typeof mapped === "string" ? mapped : defaultEffortName(model as Model<Api>, level);
+	// Anthropic's off maps to a thinking type (between_tools), not an effort,
+	// so the rung keeps the name every other Claude off rung has.
+	if (typeof mapped !== "string" || (level === "off" && model.api === "anthropic-messages")) {
+		return defaultEffortName(model as Model<Api>, level);
+	}
+	return mapped;
 }
 
 /**

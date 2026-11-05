@@ -1,4 +1,4 @@
-import { redirectToSignInOn401 } from "./api";
+import { apiFetch } from "./api";
 export interface McpConnectorAuthStatus {
 	mode: "oauth" | "bearer" | "none";
 	// Entry explicitly configures OAuth (custom client) — a login is expected
@@ -19,7 +19,8 @@ export interface McpConnectorStatus {
 	name: string;
 	transport: "http" | "stdio";
 	target: string;
-	source: { path: string; kind: string; importKind?: string } | null;
+	/** importFile: the other tool's own file an imported connector is read from; Remove cannot remove it here. */
+	source: { path: string; kind: string; importKind?: string; importFile?: string } | null;
 	auth: McpConnectorAuthStatus;
 	tools: McpConnectorToolsStatus | null;
 }
@@ -39,8 +40,7 @@ export interface McpConnectorsStatusResponse {
 }
 
 async function fetchJson<T>(input: string, init: RequestInit | undefined, fallbackError: string): Promise<T> {
-	const response = await fetch(input, init);
-	redirectToSignInOn401(response);
+	const response = await apiFetch(input, init);
 	let payload: unknown = null;
 	try {
 		payload = await response.json();
@@ -65,6 +65,8 @@ export interface AddMcpServerRequest {
 	args?: string[];
 	bearerToken?: string;
 	oauth?: { clientId: string; clientSecret?: string; scope?: string };
+	/** Extra headers sent with every request, such as a key in a header of its own. */
+	headers?: Record<string, string>;
 }
 
 export function addMcpServer(request: AddMcpServerRequest): Promise<{ name: string; path: string }> {
@@ -101,6 +103,8 @@ export interface McpServerTestResult {
 	toolNames?: string[];
 	needsAuth?: boolean;
 	error?: string;
+	/** The status the address answered with, when the test learned it. */
+	httpStatus?: number;
 }
 
 export function testMcpServer(name: string): Promise<McpServerTestResult> {

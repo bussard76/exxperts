@@ -1,0 +1,541 @@
+/* ── A room's Attachments: the sidebar's entry, the panel, the gallery ─────── */
+.sidebar-primary-nav .attachments-entry {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	text-align: left;
+}
+/* Open reads as a selected row of Home's lists (.product-nav .list-btn.active),
+   hovered too: :root .sidebar outranks the light theme's sidebar rows. */
+:root .sidebar .sidebar-primary-nav .attachments-entry[aria-expanded="true"],
+:root .sidebar .sidebar-primary-nav .attachments-entry[aria-expanded="true"]:hover,
+:root .sidebar .sidebar-primary-nav .attachments-entry[aria-expanded="true"]:focus-visible {
+	background: var(--exx-active-muted-bg);
+	border-color: var(--exx-divider);
+	box-shadow: var(--exx-shadow-hover);
+	color: var(--fg);
+}
+.attachments-entry-count {
+	color: var(--muted);
+	font-size: 12px;
+}
+/* On the open row's darker fill the muted number falls under 4.5:1 in light: a step toward the text. */
+.attachments-entry[aria-expanded="true"] .attachments-entry-count { color: color-mix(in srgb, var(--muted) 70%, var(--fg)); }
+.attachments-browser {
+	min-width: 0;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	background: var(--bg);
+	color: var(--fg);
+}
+/* The gallery lies over the chat column, under the room's bar. The column
+   stays laid out beneath it, so its draft and scroll survive, unseen but for
+   the bar and the composer's toast stack (a delete's Undo), which paint over
+   the gallery as positioned parts of the column. The column is no stacking
+   context, which would hold the bar under the mac app's drag strip. */
+.attachments-gallery {
+	grid-column: 1;
+	grid-row: 1;
+	margin-top: 46px;
+}
+.workbench.attachments-gallery-open > .main {
+	grid-column: 1;
+	grid-row: 1;
+	pointer-events: none;
+}
+.workbench.attachments-gallery-open > .main > .topbar { pointer-events: auto; }
+.workbench.attachments-gallery-open > .main > :not(.topbar) { visibility: hidden; }
+.workbench.attachments-gallery-open .composer-toasts {
+	visibility: visible;
+	bottom: calc(100% - 120px);
+}
+/* The room's bar takes the gallery's edges, not the reading rail's. */
+.workbench.attachments-gallery-open .topbar {
+	--topbar-column-edge: max(24px, calc((100% - 1160px) / 2 + 24px));
+	--topbar-banner-edge: var(--topbar-column-edge);
+}
+.workbench.artifact-pane-maximized > .attachments-gallery { display: none; }
+.attachments-panel { border-left: 1px solid var(--border); }
+.att-backdrop { display: none; }
+.att-head {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex: none;
+	padding: 10px 24px 14px;
+}
+.attachments-panel .att-head {
+	min-height: 46px;
+	box-sizing: border-box;
+	padding: 7px var(--exx-sp-4);
+	border-bottom: 1px solid var(--border);
+}
+.attachments-gallery .att-head,
+.attachments-gallery .att-grid {
+	width: 100%;
+	box-sizing: border-box;
+	max-width: 1160px;
+	margin-inline: auto;
+}
+.att-title {
+	margin: 0;
+	font-size: 17px;
+	font-weight: 600;
+	color: var(--fg);
+}
+.att-count {
+	color: var(--muted);
+	font-size: 13px;
+}
+.att-spacer { flex: 1; }
+.att-icon {
+	flex: none;
+	width: 30px;
+	height: 30px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	border: 1px solid transparent;
+	border-radius: var(--exx-radius-control);
+	background: none;
+	color: var(--fg-soft);
+	cursor: pointer;
+}
+.att-icon:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); color: var(--fg); }
+.att-add {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 12px;
+	border: 1px solid var(--border);
+	border-radius: var(--exx-radius-control);
+	background: transparent;
+	color: var(--fg-soft);
+	font: inherit;
+	font-size: 13px;
+	cursor: pointer;
+	white-space: nowrap;
+}
+.att-add:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); color: var(--fg); }
+.att-grid {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+	grid-auto-rows: max-content;
+	align-content: start;
+	gap: 18px;
+	padding: 4px 24px 32px;
+	scrollbar-width: thin;
+	scrollbar-color: var(--border) transparent;
+}
+.attachments-panel .att-grid {
+	grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+	gap: 14px;
+	padding: var(--exx-sp-4);
+}
+.att-card {
+	position: relative;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	border: 1px solid var(--border-soft);
+	border-radius: var(--exx-radius-card);
+	background: var(--exx-surface);
+	transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+}
+.att-card:hover {
+	transform: translateY(-1px);
+	box-shadow: var(--exx-shadow-hover);
+	border-color: var(--border);
+}
+.att-card.sel { border-color: var(--fg-soft); }
+.att-card:has(.att-menu) {
+	z-index: 6;
+	/* Scrolled into view for its menu, it keeps a gap under the panel's head. */
+	scroll-margin: 16px;
+}
+.att-open {
+	display: block;
+	width: 100%;
+	padding: 0;
+	border: none;
+	background: none;
+	cursor: pointer;
+	border-radius: var(--exx-radius-card) var(--exx-radius-card) 0 0;
+}
+/* The whole card opens the file; ⋯, its menu and a rename sit above this. */
+.att-open::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	z-index: 1;
+	border-radius: var(--exx-radius-card);
+}
+.att-open:focus-visible { outline: none; }
+.att-open:focus-visible::after { outline: 2px solid var(--exx-focus); outline-offset: -2px; }
+.att-preview {
+	position: relative;
+	display: flex;
+	justify-content: center;
+	align-items: flex-start;
+	overflow: hidden;
+	aspect-ratio: 4 / 3;
+	background: var(--exx-surface-raised);
+	border-radius: 11px 11px 0 0;
+}
+.att-image { width: 100%; height: 100%; object-fit: cover; display: block; }
+.att-paper {
+	display: block;
+	box-sizing: border-box;
+	width: 70%;
+	height: 100%;
+	margin-top: 14px;
+	overflow: hidden;
+	background: var(--exx-paper);
+	box-shadow: var(--exx-shadow-hover);
+}
+.att-paper canvas { display: block; width: 100%; height: auto; }
+/* A text preview fades out at the sheet's foot rather than ending on half-cut letters. */
+.att-paper.att-paper-text { position: relative; }
+.att-paper.att-paper-text::after {
+	content: "";
+	position: absolute;
+	inset: auto 0 0;
+	height: 36px;
+	background: linear-gradient(transparent, var(--exx-paper));
+}
+.att-paper-text {
+	padding: 10px 11px;
+	color: var(--exx-ink);
+	font-family: var(--exx-font-mono);
+	font-size: 8.5px;
+	line-height: 1.5;
+	text-align: left;
+	white-space: pre-wrap;
+}
+.att-drawn {
+	display: grid;
+	align-content: start;
+	gap: 6px;
+	box-sizing: border-box;
+	width: 72%;
+	height: 100%;
+	margin-top: 28px;
+	padding: 14px 13px;
+	background: var(--exx-surface-hover);
+	border-radius: 3px 3px 0 0;
+}
+.att-drawn i { display: block; height: 4px; border-radius: 2px; background: var(--muted); opacity: 0.75; }
+.att-drawn i:nth-child(1) { width: 58%; height: 6px; }
+.att-drawn i:nth-child(4) { width: 84%; }
+.att-drawn i:nth-child(7) { width: 46%; }
+.att-drawn-sheet { grid-template-columns: repeat(4, 1fr); gap: 3px; }
+.att-drawn.att-drawn-sheet i:nth-child(n) { width: auto; height: 11px; border-radius: 1px; opacity: 0.4; }
+.att-drawn.att-drawn-sheet i:nth-child(-n+4) { opacity: 1; }
+.att-foot {
+	position: relative;
+	flex: 1;
+	display: flex;
+	gap: 4px;
+	padding: 9px 11px 11px;
+}
+/* Cards in a row share a height: the meta sits on the bottom, so a wrapped name
+   beside a short one keeps the meta lines level with no line held in reserve. */
+.att-words { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.att-words .assets-rename-input { position: relative; z-index: 2; margin-bottom: auto; }
+.att-name {
+	margin-bottom: auto;
+	padding-bottom: 2px;
+	color: var(--fg);
+	font-size: 13px;
+	font-weight: 600;
+	line-height: 1.3;
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	overflow: hidden;
+	overflow-wrap: anywhere;
+}
+.att-card.orphan .att-name { color: var(--muted); }
+.att-meta {
+	color: var(--muted);
+	font-size: 11.5px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.att-more {
+	position: absolute;
+	z-index: 2;
+	top: 7px;
+	right: 7px;
+	width: 28px;
+	height: 28px;
+	padding: 0;
+	border: 1px solid var(--border-soft);
+	border-radius: var(--exx-radius-control);
+	background: var(--exx-surface);
+	color: var(--fg-soft);
+	font-size: 15px;
+	line-height: 1;
+	cursor: pointer;
+}
+@media (hover: hover) {
+	.att-more { opacity: 0; transition: opacity 120ms ease; }
+	.att-card:hover .att-more,
+	.att-more:focus-visible,
+	.att-more[aria-expanded="true"] { opacity: 1; }
+}
+.att-more:hover,
+.att-more[aria-expanded="true"] { background: var(--exx-surface-raised); color: var(--fg); }
+.att-menu {
+	position: absolute;
+	right: 44px;
+	bottom: calc(100% + 8px);
+	z-index: 5;
+	min-width: 124px;
+	display: flex;
+	flex-direction: column;
+	padding: 4px;
+	border: 1px solid var(--border);
+	border-radius: var(--exx-radius-control);
+	background: var(--exx-surface-raised);
+	box-shadow: var(--exx-shadow-popover);
+}
+.att-menu a,
+.att-menu button {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 5px 9px;
+	border: none;
+	border-radius: var(--exx-radius-sm);
+	background: none;
+	color: var(--fg);
+	font: inherit;
+	font-size: 13px;
+	text-decoration: none;
+	text-align: left;
+	cursor: pointer;
+	white-space: nowrap;
+}
+.att-menu a:hover,
+.att-menu button:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
+.att-menu .att-menu-delete { color: var(--error-text); }
+/* The hover tint darkens dark's menu: the red moves toward the text colour to keep 4.5:1. */
+.att-menu .att-menu-delete:hover { color: color-mix(in srgb, var(--error-text) 70%, var(--fg)); }
+.att-empty {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	padding: 32px 28px 72px;
+	text-align: center;
+}
+.att-empty-tile {
+	display: grid;
+	place-items: center;
+	width: 56px;
+	height: 56px;
+	margin-bottom: 6px;
+	border-radius: var(--exx-radius-card);
+	background: var(--exx-surface-raised);
+	color: var(--fg-soft);
+}
+.att-empty-title { margin: 0; color: var(--fg); font-size: 15px; font-weight: 600; }
+.att-empty-line { margin: 0 0 10px; max-width: 340px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.artifact-viewer-back + .artifact-viewer-provenance { flex: 1; }
+/* Status dots in the subline: green steady = done-unread (decays on first
+   open), danger steady = didn't finish. Never animated — oscillation is the
+   running row's alone. */
+.assets-dot {
+	display: inline-block;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	margin-right: 5px;
+	vertical-align: 1px;
+}
+.assets-dot-ready { background: var(--success); }
+.assets-dot-failed { background: var(--exx-danger); }
+/* Save… filename step (files-management slice). */
+.save-as-input {
+	width: 100%;
+	min-width: 0;
+	font: inherit;
+	font-size: 13px;
+	color: var(--fg);
+	background: var(--exx-surface-raised);
+	border: 1px solid var(--border);
+	border-radius: var(--exx-radius-control);
+	padding: 7px 9px;
+	margin: 10px 0 4px;
+}
+.save-as-input:focus { outline: none; border-color: var(--fg); }
+.assets-rename-input {
+	width: 100%;
+	min-width: 0;
+	font: inherit;
+	font-size: 12px;
+	color: var(--fg);
+	background: var(--exx-surface-raised);
+	border: 1px solid var(--border);
+	border-radius: 5px;
+	padding: 1px 4px;
+}
+
+/* Reconstituted done-card viewer: header file list + action footer */
+.artifact-viewer-files {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	padding: 8px 14px 0;
+}
+.artifact-viewer-file {
+	background: transparent;
+	border: 1px solid var(--border);
+	border-radius: var(--exx-radius-pill);
+	color: var(--muted);
+	font-size: 11px;
+	padding: 2px 10px;
+	cursor: pointer;
+	max-width: 200px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.artifact-viewer-file:hover { color: var(--fg); }
+.artifact-viewer-file.active { color: var(--fg); background: var(--exx-surface-raised); }
+.artifact-viewer-foot {
+	border-top: 1px solid var(--border);
+	padding: 10px 14px;
+	flex: none;
+}
+.asset-viewer-footer { display: flex; flex-direction: column; gap: 8px; }
+.asset-viewer-footer-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.asset-viewer-iterate { display: flex; gap: 8px; }
+.asset-viewer-iterate-input {
+	flex: 1;
+	min-width: 0;
+	background: var(--exx-surface-raised);
+	border: 1px solid var(--border);
+	border-radius: var(--exx-radius-control);
+	color: var(--fg);
+	font-size: 12.5px;
+	padding: 6px 10px;
+}
+.asset-viewer-iterate-input:focus { outline: none; border-color: var(--fg-soft); }
+.asset-viewer-iterate-notice { font-size: 12px; color: var(--exx-danger, #c0392b); }
+
+/* ── Task-store GC (contract §4) + panel delete ───────────────────────────── */
+.task-store-gc-banner {
+	position: fixed;
+	bottom: 24px;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 60;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	max-width: min(680px, calc(100vw - 32px));
+	padding: 10px 12px 10px 16px;
+	border-radius: 8px;
+	font-size: 13px;
+	background: var(--exx-surface-raised);
+	color: var(--fg);
+	border: 1px solid var(--border);
+	box-shadow: var(--exx-shadow-popover);
+}
+.task-store-gc-card { max-width: 560px; }
+.task-store-gc-list {
+	max-height: 260px;
+	overflow-y: auto;
+	border: 1px solid var(--border);
+	border-radius: var(--exx-radius-control);
+	margin: 10px 0;
+}
+.task-store-gc-row {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 6px 10px;
+	font-size: 12.5px;
+	border-bottom: 1px solid var(--exx-divider);
+}
+.task-store-gc-row:last-child { border-bottom: none; }
+.task-store-gc-title {
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	color: var(--fg);
+}
+.task-store-gc-meta { flex: none; color: var(--muted); font-size: 11px; }
+.asset-viewer-delete { color: var(--danger, #d33); margin-left: auto; }
+
+/* ── Connection lost (exception only) ─────────────────────────────────────
+   Anchored to the window, not to a screen: the condition belongs to the whole
+   app and every screen shows the same one. Bottom centre is where this app
+   already floats a banner (task-store GC), and unlike the top it covers no
+   page heading. When both are up the older, quieter one steps aside. */
+.connection-lost-banner {
+	position: fixed;
+	bottom: 24px;
+	left: 50%;
+	transform: translateX(-50%);
+	/* Above settings (70), memory fullscreen (80) and the mermaid viewer (85):
+	   a dead connection concerns the whole app, whatever is on screen. Portaled
+	   menus (90) stay above; they dismiss on any click anyway. */
+	z-index: 86;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	max-width: min(560px, calc(100vw - 32px));
+	padding: 10px 16px;
+	border-radius: 8px;
+	font-size: 13px;
+	line-height: 1.35;
+	background: var(--exx-surface-raised);
+	color: var(--fg);
+	border: 1px solid var(--error);
+	box-shadow: var(--exx-shadow-popover);
+}
+.connection-lost-banner a {
+	color: inherit;
+	text-decoration: underline;
+}
+.person-changed-cover {
+	position: fixed;
+	inset: 0;
+	z-index: 1000;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 16px;
+	background: var(--bg);
+	color: var(--fg);
+}
+.connection-lost-dot {
+	flex: none;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--error);
+}
+/* Two things want the bottom centre: this banner and the task-store banner.
+   They are rendered in that order, so the second steps up one slot when the
+   first is on screen. The pitch clears the taller one even when its text
+   wraps to two lines. */
+.connection-lost-banner ~ .task-store-gc-banner { bottom: 120px; }
+

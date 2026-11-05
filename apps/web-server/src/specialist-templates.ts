@@ -14,6 +14,7 @@ import {
 	MAX_SCOPED_HTML_ARTIFACT_BYTES,
 	MAX_SCOPED_MD_ARTIFACT_BYTES,
 } from "../../../pi-package/extensions/artifacts/index.js";
+import { SPECIALIST_TEMPLATE_LABELS } from "./specialist-template-labels.js";
 
 /** The only tools a specialist template may grant (visuals contract §2/§3). */
 export const SPECIALIST_GRANTABLE_TOOL_NAMES = new Set<string>([
@@ -90,8 +91,8 @@ export interface SpecialistTemplate {
 const TEMPLATES: SpecialistTemplate[] = [
 	{
 		id: "diagram-svg",
-		label: "Diagram",
-		// v2 (prompt hardening slice 2, 2026-07-17): constraint wording moved out
+		label: SPECIALIST_TEMPLATE_LABELS["diagram-svg"],
+		// v2: constraint wording moved out
 		// of promptIntro into the profile-derived block; write-time SVG validation
 		// now enforces what the old intro only asked for.
 		version: 2,
@@ -107,9 +108,8 @@ const TEMPLATES: SpecialistTemplate[] = [
 	},
 	{
 		id: "chart-html",
-		label: "Chart",
-		// v2 (prompt hardening slice 2, 2026-07-17): constraint wording single-
-		// sourced into the profile-derived block.
+		label: SPECIALIST_TEMPLATE_LABELS["chart-html"],
+		// v2: constraint wording single-sourced into the profile-derived block.
 		version: 2,
 		outputExtensions: [".html"],
 		toolNames: ["artifact_write", "artifact_read", "artifact_list"],
@@ -124,15 +124,15 @@ const TEMPLATES: SpecialistTemplate[] = [
 	},
 	{
 		id: "deck",
-		label: "Slide deck",
-		// v2 (D3 amendment, Borja 2026-07-12): free model-authored HTML replaced
+		label: SPECIALIST_TEMPLATE_LABELS["deck"],
+		// v2: free model-authored HTML replaced
 		// the deterministic DeckSpecV1 generator — its {title,keyMessage,bullets}
 		// schema could not express real slide layouts (card grids, chips, accent
 		// panels), so specialist decks came out visibly below main-room quality.
 		// Same write validation, sandbox, and scriptless CSP as document-html;
 		// the PPTX derivative is deferred until a structured path returns (§9).
 		// artifact_write_html_deck stays registered for main-room use.
-		// v3 (prompt hardening slice 2, 2026-07-17): constraint wording (static,
+		// v3: constraint wording (static,
 		// no external refs, data:-URI line) single-sourced into the profile block;
 		// the old intro's data:-URI invitation contradicted the write validator.
 		version: 3,
@@ -151,9 +151,8 @@ const TEMPLATES: SpecialistTemplate[] = [
 	},
 	{
 		id: "document-html",
-		label: "Document",
-		// v2 (prompt hardening slice 2, 2026-07-17): constraint wording single-
-		// sourced into the profile block; the old intro's data:-URI invitation
+		label: SPECIALIST_TEMPLATE_LABELS["document-html"],
+		// v2: constraint wording single-sourced into the profile block; the old intro's data:-URI invitation
 		// contradicted the write validator.
 		version: 2,
 		outputExtensions: [".html"],

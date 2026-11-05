@@ -1,9 +1,10 @@
 // The archive pointer line and the tool it points at, in the same turn.
 //
-// A demoted topic keeps a pointer in the room's context — "_Archived: 2 older
-// notes from Mar to May 2026; use memory_recall to read them._" — and the room
-// carries the tool that line names. Each half was covered on its own; the pair
-// was not, so either could have left the room without a smoke noticing.
+// A demoted topic keeps a pointer in the room's context —
+// "_Archived: 2 older notes from Mar to May 2026; use memory_recall to read them._"
+// — and the room carries the tool that line names. Each half was covered on its
+// own; the pair was not, so either could have left the room without a smoke
+// noticing.
 //
 // This one makes the pair the thing under test. The gateway is scripted to
 // DEPEND on both: it streams a memory_recall call only if the system prompt it
@@ -26,7 +27,8 @@ import os from "node:os";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
-import { authedFetch, SMOKE_AUTH_HEADERS, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer, type AuthedFetchInit } from "./smoke-server-process.js";
+import { ROOM_STATE_HEADING } from "../src/room-state-message.js";
+import { authedFetch, SMOKE_AUTH_HEADERS, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer, freePort, type AuthedFetchInit, waitForServer } from "./smoke-server-process.js";
 
 function assert(condition: unknown, message: string): asserts condition {
 	if (!condition) throw new Error(message);
@@ -35,7 +37,7 @@ function assert(condition: unknown, message: string): asserts condition {
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const webServerDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(webServerDir, "..", "..");
-const port = 27000 + Math.floor(Math.random() * 10000);
+const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "exxperts-pointer-recall-"));
@@ -93,7 +95,8 @@ const gateway = http.createServer((req, res) => {
 		const toolNames: string[] = (parsed?.tools ?? []).map((tool: any) => String(tool?.function?.name ?? tool?.name ?? ""));
 		const pointerSeen = !IGNORE_POINTER && systemPrompt.includes(POINTER_TRIGGER);
 		const toolOffered = toolNames.includes("memory_recall");
-		const question = messages.filter((message) => message?.role === "user").map((message) => messageText(message.content)).pop() ?? "";
+		// The person's newest message: a room-state copy after it is the app's, not the question.
+		const question = messages.filter((message) => message?.role === "user").map((message) => messageText(message.content)).filter((text) => !text.startsWith(ROOM_STATE_HEADING)).pop() ?? "";
 		const base = { id: `cmpl_${legs.length + 1}`, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: String(parsed?.model ?? "room-model") };
 		res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
 		if (toolMessages.length === 0) {
@@ -128,23 +131,6 @@ const gateway = http.createServer((req, res) => {
 // Helpers
 // ---------------------------------------------------------------------------
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-async function waitForServer(server: ChildProcessWithoutNullStreams): Promise<void> {
-	const deadline = Date.now() + 20_000;
-	let lastError = "server did not respond";
-	while (Date.now() < deadline) {
-		if (server.exitCode != null) throw new Error(`server exited before startup with code ${server.exitCode}`);
-		try {
-			const response = await fetch(`${baseUrl}/healthz`);
-			if (response.ok) return;
-			lastError = `healthz returned ${response.status}`;
-		} catch (error) {
-			lastError = (error as Error).message;
-		}
-		await sleep(150);
-	}
-	throw new Error(`server did not become ready: ${lastError}`);
-}
 
 async function requestJson(pathname: string, init: AuthedFetchInit = {}): Promise<{ status: number; body: any }> {
 	const response = await authedFetch(`${baseUrl}${pathname}`, {
@@ -314,7 +300,7 @@ try {
 	});
 	server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
 	server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
-	await waitForServer(server);
+	await waitForServer(server, baseUrl, 20_000);
 
 	const conversationId = `pointerconv_${Date.now().toString(36)}`;
 	const seeded = await requestJson(`/api/persistent-agents/${encodeURIComponent(roomId)}/threads/${encodeURIComponent(conversationId)}`, {

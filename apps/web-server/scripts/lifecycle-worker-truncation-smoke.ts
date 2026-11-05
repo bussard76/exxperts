@@ -182,37 +182,18 @@ try {
 	assert(/42666/.test(leftAsIs), "the Review card should carry the real token numbers");
 	assert(!/topology|missing Recent Context|is not a note of this group/.test(leftAsIs), "a cut reply must not surface as a structure complaint");
 
-	// 5. Checkpoint: a truncated first attempt refuses immediately — the
-	// missing-fields retry must NOT run (it would re-roll the same dice).
+	// 5. Remember never refuses a cut reply: it climbs the ladder (the next
+	// lower density, a word target) before it keeps what came complete. What the
+	// salvage keeps, and a missing BODY, are remember-never-fails-smoke.ts's.
 	const conversationId = "c_truncation_smoke";
 	const items = [{ kind: "user" as const, id: "u1", text: "Synthetic session message for the truncation smoke." }];
 	writePersistentAgentThread(agentId, conversationId, { state: "active", origin: "home", model: CHECKPOINT_MODEL, items });
 	let checkpointCalls = 0;
-	await expectRejects(
-		() =>
-			buildCheckpointProposal({ agentId, conversationId, model: CHECKPOINT_MODEL, density: "standard", items }, async () => {
-				checkpointCalls += 1;
-				return truncatedResult("TITLE:\nCut checkpoint\n\nSESSION_ARC:\ncut");
-			}),
-		/Remember response was cut off at the model's output limit/,
-		"truncated Remember",
-	);
-	assert(checkpointCalls === 1, `truncated checkpoint must not trigger the missing-fields retry (got ${checkpointCalls} calls)`);
-
-	// 6. Checkpoint retry path: complete-but-incomplete-fields first attempt
-	// (not truncated) still retries; a truncated retry then refuses.
-	checkpointCalls = 0;
-	await expectRejects(
-		() =>
-			buildCheckpointProposal({ agentId, conversationId, model: CHECKPOINT_MODEL, density: "standard", items }, async () => {
-				checkpointCalls += 1;
-				if (checkpointCalls === 1) return { text: "TITLE:\nRetry smoke\n\nSESSION_ARC:\nComplete first attempt missing BODY.\n\nPARKED:\nNone\n" };
-				return truncatedResult("TITLE:\nRetry cut");
-			}),
-		/Remember response was cut off at the model's output limit/,
-		"truncated Remember retry",
-	);
-	assert(checkpointCalls === 2, `missing-fields retry should still run when the first attempt is complete (got ${checkpointCalls} calls)`);
+	await buildCheckpointProposal({ agentId, conversationId, model: CHECKPOINT_MODEL, density: "standard", items }, async () => {
+		checkpointCalls += 1;
+		return truncatedResult("TITLE:\nCut checkpoint\n\nSESSION_ARC:\nThe session was cut.\n\nBODY:\n- A complete point.\n\n- A cut poi");
+	});
+	assert(checkpointCalls === 3, `a cut reply is asked twice more, then kept (got ${checkpointCalls} calls)`);
 
 	// 7. Consult: truncated answer refuses honestly instead of returning a cut answer.
 	await expectRejects(

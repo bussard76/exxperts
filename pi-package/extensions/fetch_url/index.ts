@@ -34,6 +34,7 @@ const DEFAULT_MAX_CHARS = 15_000;
 const HARD_MAX_CHARS = 50_000;
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024; // 5 MB raw download cap
 const MAX_REDIRECTS = 5;
+const SITE_FAILED_EXCERPT_CHARS = 2_000;
 const REQUEST_TIMEOUT_MS = 15_000;
 
 // Below this many characters of extracted text we treat the static HTML as
@@ -279,46 +280,54 @@ interface FetchOutcome {
 }
 
 // Static fetch with manual redirect handling so every hop is SSRF-revalidated.
-async function fetchStatic(startUrl: string): Promise<FetchOutcome> {
+async function fetchStatic(startUrl: string, signal?: AbortSignal): Promise<FetchOutcome> {
 	let currentUrl = startUrl;
 	for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
 		const guardError = await guardUrl(currentUrl);
 		if (guardError) throw new Error(guardError);
 
+		// The turn's stop and the timer both end the request, and the timer runs until the body is read:
+		// a body that trickles in cannot hold the turn open.
 		const controller = new AbortController();
 		const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-		let res: Response;
+		const stop = () => controller.abort();
+		signal?.addEventListener("abort", stop, { once: true });
+		if (signal?.aborted) controller.abort();
 		try {
-			res = await fetch(currentUrl, {
-				redirect: "manual",
-				signal: controller.signal,
-				// undici extension: the guarded dispatcher pins DNS validation to the
-				// connected IP (rebinding-safe). Not in the DOM RequestInit type.
-				dispatcher: guardedDispatcher,
-				headers: {
-					"user-agent": USER_AGENT,
-					"accept-language": ACCEPT_LANGUAGE,
-					accept: "text/html,application/xhtml+xml,application/json,text/plain,*/*",
-				},
-			} as any);
-		} catch (e) {
-			throw new Error(`Request to ${currentUrl} failed: ${(e as Error).message}`);
+			let res: Response;
+			try {
+				res = await fetch(currentUrl, {
+					redirect: "manual",
+					signal: controller.signal,
+					// undici extension: the guarded dispatcher pins DNS validation to the
+					// connected IP (rebinding-safe). Not in the DOM RequestInit type.
+					dispatcher: guardedDispatcher,
+					headers: {
+						"user-agent": USER_AGENT,
+						"accept-language": ACCEPT_LANGUAGE,
+						accept: "text/html,application/xhtml+xml,application/json,text/plain,*/*",
+					},
+				} as any);
+			} catch (e) {
+				throw new Error(`Request to ${currentUrl} failed: ${(e as Error).message}`);
+			}
+
+			if (res.status >= 300 && res.status < 400) {
+				const location = res.headers.get("location");
+				if (!location) throw new Error(`Redirect (${res.status}) from ${currentUrl} had no Location header.`);
+				if (hop === MAX_REDIRECTS) throw new Error(`Too many redirects (>${MAX_REDIRECTS}) starting from ${startUrl}.`);
+				currentUrl = new URL(location, currentUrl).toString();
+				await res.body?.cancel().catch(() => {});
+				continue;
+			}
+
+			const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
+			const { text, truncatedBytes } = await readCapped(res);
+			return { finalUrl: currentUrl, status: res.status, statusText: res.statusText, contentType, body: text, truncatedBytes };
 		} finally {
 			clearTimeout(timer);
+			signal?.removeEventListener("abort", stop);
 		}
-
-		if (res.status >= 300 && res.status < 400) {
-			const location = res.headers.get("location");
-			if (!location) throw new Error(`Redirect (${res.status}) from ${currentUrl} had no Location header.`);
-			if (hop === MAX_REDIRECTS) throw new Error(`Too many redirects (>${MAX_REDIRECTS}) starting from ${startUrl}.`);
-			currentUrl = new URL(location, currentUrl).toString();
-			await res.body?.cancel().catch(() => {});
-			continue;
-		}
-
-		const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
-		const { text, truncatedBytes } = await readCapped(res);
-		return { finalUrl: currentUrl, status: res.status, statusText: res.statusText, contentType, body: text, truncatedBytes };
 	}
 	throw new Error(`Too many redirects (>${MAX_REDIRECTS}) starting from ${startUrl}.`);
 }
@@ -616,7 +625,7 @@ export default function (pi: ExtensionAPI) {
 				Type.Number({ description: `Maximum characters of content to return. Default ${DEFAULT_MAX_CHARS}, max ${HARD_MAX_CHARS}.` }),
 			),
 		}),
-		async execute(_id, { url, max_chars }): Promise<any> {
+		async execute(_id, { url, max_chars }, signal): Promise<any> {
 			if (isDisabled()) {
 				return {
 					content: [{ type: "text", text: "URL fetching is disabled in this environment." }],
@@ -629,7 +638,7 @@ export default function (pi: ExtensionAPI) {
 
 			let outcome: FetchOutcome;
 			try {
-				outcome = await fetchStatic(String(url).trim());
+				outcome = await fetchStatic(String(url).trim(), signal);
 			} catch (e) {
 				return {
 					content: [{ type: "text", text: `Fetch failed: ${(e as Error).message}` }],
@@ -653,8 +662,17 @@ export default function (pi: ExtensionAPI) {
 
 			const isHtml = outcome.contentType.includes("html") || /^\s*<(?:!doctype|html)/i.test(outcome.body);
 
+			// A site that answers 4xx or 5xx gave no page: the room and the model both see a failure.
+			// The model keeps a short part of what the site said, which often names where the page went.
+			const siteFailed = (status: number, said: string) => ({
+				content: [{ type: "text", text: `Couldn't read page: the site answered ${[status, outcome.statusText].filter(Boolean).join(" ")}.${said.trim() ? `\n\nWhat the site sent back:\n\n${said.trim().slice(0, SITE_FAILED_EXCERPT_CHARS)}${said.trim().length > SITE_FAILED_EXCERPT_CHARS ? "…" : ""}` : ""}` }],
+				details: { url, finalUrl: outcome.finalUrl, status, contentType: outcome.contentType },
+				isError: true,
+			});
+
 			// Non-HTML textual payloads (JSON, plain text, XML, CSV) pass through as-is.
 			if (!isHtml) {
+				if (outcome.status >= 400) return siteFailed(outcome.status, outcome.body);
 				if (looksGarbled(outcome.body)) {
 					return {
 						content: [{ type: "text", text: `Cannot read "${outcome.finalUrl}" — ${GARBLED_EXPLANATION}` }],
@@ -713,6 +731,8 @@ export default function (pi: ExtensionAPI) {
 					isError: true,
 				};
 			}
+
+			if (outcome.status >= 400 && !renderedWithBrowser) return siteFailed(outcome.status, extracted.markdown);
 
 			// The page needed the browser fallback but Chromium is not installed:
 			// tell the user how to enable it instead of silently returning a shell.

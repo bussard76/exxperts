@@ -1,0 +1,6 @@
+#!/bin/sh
+# agentic-factory hook (pre-merge-commit)
+set -eu
+d=$(dirname "$0")
+if [ -x "$d/pre-merge-commit.own" ]; then "$d/pre-merge-commit.own" "$@"; fi
+exec sh "$d/pre-commit"

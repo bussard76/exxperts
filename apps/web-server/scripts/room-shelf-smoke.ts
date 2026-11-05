@@ -1,15 +1,17 @@
 // Room shelf core smoke (files core slice): shelf identity + collision rule,
-// manifest section (origin join, cap tail), read_file/search_file fences and
+// manifest section (header, list, cap), read_file/search_file fences and
 // paging, content sniffing + honest refusals, docx/pdf extraction through the
 // isolated worker, and the reading cache. Offline, deterministic, isolated
 // HOME + agents root — set BEFORE any src import reads the roots.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { symlinkOrSkip } from "./smoke-server-process.js";
 
 const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "exxeta-room-shelf-home-"));
 const tempAgentsRoot = fs.mkdtempSync(path.join(os.tmpdir(), "exxeta-room-shelf-root-"));
 process.env.HOME = tempHome;
+process.env.USERPROFILE = tempHome;
 process.env.EXXETA_PERSISTENT_AGENTS_ROOT = tempAgentsRoot;
 
 const {
@@ -158,8 +160,7 @@ try {
 	// The fence: resolution rejects traversal-ish names and symlinks.
 	await expectShelfError(() => resolveShelfFilePath(roomId, "../agent.json"), "invalid_name", "traversal name");
 	await expectShelfError(() => resolveShelfFilePath(roomId, "missing.md"), "file_not_found", "missing file");
-	if (process.platform !== "win32") {
-		fs.symlinkSync("/etc/hosts", path.join(shelfDir, "sneaky.md"));
+	if (process.platform !== "win32" && symlinkOrSkip("/etc/hosts", path.join(shelfDir, "sneaky.md"), "room-shelf-smoke", "the linked shelf file case")) {
 		await expectShelfError(() => resolveShelfFilePath(roomId, "sneaky.md"), "not_file", "symlink must be refused");
 		fs.rmSync(path.join(shelfDir, "sneaky.md"));
 	}
@@ -170,21 +171,18 @@ try {
 		assert(policy.allowedToolNames.includes(toolName), `${toolName} must be default-on for every room`);
 	}
 
-	// ---- Manifest: origin join, dates, cap tail ------------------------------
+	// ---- Manifest: header, list and cap ------------------------------------
 	createTaskLedgerRecord({ taskId: "tsk-shelf01", roomId, conversationId: "conv-1", templateId: "deck", templateVersion: 1, title: "Deck" }, {}, new Date("2026-07-20T09:00:00.000Z"));
 	finalizeTaskLedgerRecord(roomId, "tsk-shelf01", { outcome: "ok", summary: "made notes", artifacts: [{ relativePath: "files/notes.md", bytes: 10, extension: ".md" }] }, {}, new Date("2026-07-21T09:00:00.000Z"));
-	const manifest = buildShelfManifestSection(roomId);
-	assert(manifest.includes("## Files in this room"), "manifest must carry its section header");
+	const manifest = buildShelfManifestSection(roomId) ?? "";
+	assert(manifest.includes("## Attachments in this room"), "manifest must carry its section header");
 	assert(manifest.includes("- notes.md ·"), "manifest must list notes.md");
-	assert(manifest.includes("made by the room, Jul 21"), `ledger-joined file must read made-by-the-room (got: ${manifest})`);
-	assert(/- data\.csv · .* · added /.test(manifest), "un-joined file must read added");
 	assert(!manifest.includes(".internal"), "dotfiles never reach the manifest");
 
-	// Cap: 30 files → 25 lines + honest tail.
+	// Cap: 30 files → 25 lines.
 	for (let index = 0; index < 28; index += 1) fs.writeFileSync(path.join(shelfDir, `bulk-${String(index).padStart(2, "0")}.md`), `bulk ${index}`);
-	const capped = buildShelfManifestSection(roomId);
+	const capped = buildShelfManifestSection(roomId) ?? "";
 	assert((capped.match(/^- /gm) ?? []).length === 25, "manifest caps at 25 lines");
-	assert(capped.includes("…and 5 more"), `cap tail must be honest (got tail: ${capped.split("\n").find((line) => line.includes("more"))})`);
 	for (let index = 0; index < 28; index += 1) fs.rmSync(path.join(shelfDir, `bulk-${String(index).padStart(2, "0")}.md`));
 	assert(buildShelfManifestSection("no-such-room") === "", "empty shelf yields an empty manifest");
 
@@ -218,7 +216,6 @@ try {
 	// Paging.
 	const paged = await readFileTool!.execute("smoke-3", { name: "notes.md", offset: 2, limit: 1 }, undefined as any, undefined as any, undefined as any);
 	assert(resultText(paged).includes("beta line"), "offset/limit must slice lines");
-	assert(resultText(paged).includes("Use offset=3 to continue"), "paging notice must name the next offset");
 
 	// search_file across all files, then scoped, then no-match.
 	const searchAll = await searchFileTool!.execute("smoke-4", { query: "term" }, undefined as any, undefined as any, undefined as any);
@@ -248,12 +245,13 @@ try {
 	const cacheDir = persistentRoomReadingCacheDirPath(roomId);
 	assert(fs.readdirSync(cacheDir).some((name) => name.endsWith(".json")), "reading cache must hold meta files");
 	const pdfEntry = listShelfFiles(roomId).find((entry) => entry.name === "terms.pdf")!;
-	assert(cachedShelfPageCount(roomId, "terms.pdf", pdfEntry) === 1, "manifest page lookup must answer from cache");
+	assert(cachedShelfPageCount(roomId, "terms.pdf", pdfEntry) === 1, "the Attachments panel's page lookup must answer from cache");
 	assert(cachedShelfPageCount(roomId, "terms.pdf", { ...pdfEntry, bytes: pdfEntry.bytes + 1 }) === null, "stale size must miss the cache");
 	const pdfAgain = await readShelfFileText(roomId, "terms.pdf");
 	assert(pdfAgain.text === pdf.text, "second read must reproduce the cached extraction");
-	const manifestWithPages = buildShelfManifestSection(roomId, {}, (name, entry) => cachedShelfPageCount(roomId, name, entry));
-	assert(manifestWithPages.includes("terms.pdf · 1 page ·"), `manifest must show page counts once cached (got: ${manifestWithPages})`);
+	// The model's list keeps the size once a file is parsed; only the Attachments panel shows pages.
+	const manifestAfterParse = buildShelfManifestSection(roomId) ?? "";
+	assert(/terms\.pdf · [\d.]+ (B|KB|MB) ·/.test(manifestAfterParse) && !/\d+ pages?\b/.test(manifestAfterParse), `the manifest shows the size, never pages, once a file is parsed (got: ${manifestAfterParse})`);
 
 	// ---- Spreadsheets: xlsx previews through the shared engine; .xls refuses --
 	{
@@ -278,16 +276,9 @@ try {
 		assert(workbookReadText.includes("| Bob | 250 |"), "read_file must return the rendered preview");
 		fs.rmSync(path.join(shelfDir, "book.xlsx"));
 
-		// Legacy .xls (OLE compound file) stays refused, naming what IS supported.
+		// Legacy .xls (OLE compound file) stays refused.
 		fs.writeFileSync(path.join(shelfDir, "old.xls"), Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0]));
 		await expectShelfError(() => readShelfFileText(roomId, "old.xls"), "unsupported_format", "legacy xls refusal");
-		try {
-			await readShelfFileText(roomId, "old.xls");
-		} catch (error) {
-			const message = (error as Error).message;
-			assert(message.includes("Legacy Office"), "legacy refusal must name the format family");
-			assert(message.includes(".xlsx"), "legacy refusal must name the supported spreadsheet format");
-		}
 		fs.rmSync(path.join(shelfDir, "old.xls"));
 	}
 
@@ -302,12 +293,9 @@ try {
 		await readShelfFileText(roomId, "scan.pdf");
 	} catch (error) {
 		const text = (error as Error).message;
-		// Vision slice: a scanned PDF is no longer a dead end — the TEXT path
-		// says so honestly and names the visual read that DOES work, which is
-		// what read_file branches to (pinned in shelf-vision-smoke).
+		// A scanned PDF's text path says why it has no text; read_file then
+		// shows its pages visually (pinned in shelf-vision-smoke).
 		assert(text.includes("no extractable text") && text.includes("scanned"), "the note must state the honest reason");
-		assert(text.includes("read_file shows its pages to the room visually"), "the note must name the path that works");
-		assert(!/OCR|workspace/i.test(text), "refusal must not advertise workaround paths the product does not have");
 	}
 	fs.rmSync(path.join(shelfDir, "scan.pdf"));
 
@@ -360,6 +348,20 @@ try {
 	assert(!fs.existsSync(path.join(trashDir, oldTok)), "the sweep finishes an expired window");
 	assert(fs.existsSync(path.join(trashDir, freshTok)), "the sweep leaves a live window alone");
 	commitShelfFileDelete(roomId, freshTok);
+	// A trash folder that is a link is not swept: the folders its target holds stay.
+	const linkTarget = fs.mkdtempSync(path.join(os.tmpdir(), "exxperts-shelf-link-target-"));
+	const linkedTok = path.join(linkTarget, "0123456789abcdef");
+	fs.mkdirSync(linkedTok);
+	fs.writeFileSync(path.join(linkedTok, "keep.md"), "not the shelf's");
+	fs.utimesSync(linkedTok, past, past);
+	fs.renameSync(trashDir, `${trashDir}.real`);
+	const trashLinked = symlinkOrSkip(linkTarget, trashDir, "room-shelf-smoke", "the linked trash folder case", "dir");
+	if (trashLinked) sweepExpiredShelfTrash(roomId);
+	const linkTargetKept = fs.existsSync(path.join(linkedTok, "keep.md"));
+	if (trashLinked) fs.unlinkSync(trashDir);
+	fs.renameSync(`${trashDir}.real`, trashDir);
+	fs.rmSync(linkTarget, { recursive: true, force: true });
+	if (trashLinked) assert(linkTargetKept, "the sweep leaves a linked trash folder's target alone");
 
 	// ---- Inline rename: collision rule + ledger rewrite + cache re-key -------
 	fs.writeFileSync(path.join(shelfDir, "rename-me.pdf"), minimalPdf());

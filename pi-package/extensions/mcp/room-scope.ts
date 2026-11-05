@@ -17,7 +17,7 @@
  *    is replaced by a granted-only warm-up in prepareRoomScopedMcpSessionCache;
  *    eager/keep-alive lifecycles and the adapter's direct-tools cache
  *    bootstrap deliberately keep their global warm behavior (the user opted
- *    those servers into background connections; owner decision 2026-08-11);
+ *    those servers into background connections);
  *  - tool RESULTS are sanitized: any delegated result whose details name a
  *    server outside the grant list is replaced by the refusal, so a stray
  *    adapter-side resolution can never hand the room an ungranted answer.
@@ -54,7 +54,7 @@ import {
 } from "../../../apps/web-server/src/persistent-room-mcp-settings.js";
 
 // Non-literal specifiers keep tsc from resolving the adapter's raw .ts
-// sources (same pattern as index.ts and connectors-panel.ts).
+// sources (same pattern as index.ts).
 const ADAPTER_CONFIG = "pi-mcp-adapter/config.ts" as string;
 const ADAPTER_CACHE = "pi-mcp-adapter/metadata-cache.ts" as string;
 const ADAPTER_TYPES = "pi-mcp-adapter/types.ts" as string;
@@ -68,6 +68,7 @@ type PrefixMode = "server" | "none" | "short";
 interface ProxyToolResultLike {
 	content: Array<{ type: "text"; text: string }>;
 	details?: Record<string, unknown>;
+	isError?: boolean;
 }
 
 interface McpProxyParams {
@@ -124,7 +125,7 @@ function ensureAgentDirEnv(): void {
 }
 
 function refusalResult(text: string, details: Record<string, unknown>): ProxyToolResultLike {
-	return { content: [{ type: "text", text }], details };
+	return { content: [{ type: "text", text }], details, isError: true };
 }
 
 function connectorNotEnabledResult(serverName: string): ProxyToolResultLike {
@@ -353,7 +354,45 @@ export interface RoomScopeExecuteOptions {
 	getAllTools?: () => Array<{ name: string }>;
 }
 
+/**
+ * The adapter answers a refusal with `details.error` and no error flag; the
+ * room's card and the model read failures by the flag, so it is set here.
+ */
+function withErrorFlag(result: ProxyToolResultLike): ProxyToolResultLike {
+	return detailsErrorOf(result) && !result.isError ? { ...result, isError: true } : result;
+}
+
+/**
+ * The adapter meets a connector's sign-in refusal while it sets the connection
+ * up, outside the step that reports "needs-auth" (pi-mcp-adapter's
+ * server-manager.ts), so it answers with a failed connection, and with a
+ * back-off for the calls that follow. Both are read as the sign-in they are.
+ */
+const SIGN_IN_REFUSAL = /Re-authentication required for MCP server|requires OAuth authentication/i;
+const signInFailedAt = new Map<string, number>();
+
+function asSignIn(result: ProxyToolResultLike, params: McpProxyParams): ProxyToolResultLike {
+	const error = detailsErrorOf(result);
+	if (error !== "connect_failed" && error !== "server_backoff") return result;
+	const text = result.content?.[0]?.text ?? "";
+	const server = detailsServerOf(result) ?? /MCP server: (\S+)/.exec(text)?.[1] ?? params.server ?? params.connect;
+	if (!server) return result;
+	if (SIGN_IN_REFUSAL.test(text)) signInFailedAt.set(server, Date.now());
+	else {
+		// A back-off names how long ago the failure it waits on happened: the remembered sign-in, or another one.
+		const ago = Number(/\(last failed (\d+)s ago\)/.exec(text)?.[1]);
+		const failedAt = signInFailedAt.get(server);
+		if (error !== "server_backoff" || failedAt === undefined || !Number.isFinite(ago) || Math.abs((Date.now() - failedAt) / 1000 - ago) > 2) return result;
+	}
+	return refusalResult(`Connector "${server}" needs a sign-in before this room can use it. Tell the person; the sign-in happens outside this conversation.`, { mode: result.details?.mode, error: "auth_required", server });
+}
+
 function createRoomScopedProxyExecute(roomId: string, originalExecute: ProxyExecute, executeOptions: RoomScopeExecuteOptions = {}): ProxyExecute {
+	const scoped = createRoomScopedProxyAnswer(roomId, originalExecute, executeOptions);
+	return async (toolCallId, params, signal, onUpdate, ctx) => withErrorFlag(asSignIn(await scoped(toolCallId, params, signal, onUpdate, ctx), params));
+}
+
+function createRoomScopedProxyAnswer(roomId: string, originalExecute: ProxyExecute, executeOptions: RoomScopeExecuteOptions): ProxyExecute {
 	return async (toolCallId, params, signal, onUpdate, ctx) => {
 		const context = await loadRoomGrantContext(roomId);
 		const granted = context.granted;
@@ -554,7 +593,7 @@ export interface RoomMcpMigrationResult {
 
 /**
  * The update-day migration, callable from EVERY room door (web-server boot,
- * CLI room registration): whichever surface boots first migrates, and the
+ * a room session's registration): whichever comes first migrates, and the
  * marker makes the race converge. The adapter's loadMcpConfig silently
  * degrades a corrupt config file to "no servers", which would make this
  * migration grant every legacy room an EMPTY list and stamp the irreversible
@@ -623,8 +662,7 @@ export async function ensureRoomScopedMcpGrantsMigration(options: PersistentRoom
 }
 
 /**
- * Cold-cache session preparation for a room (owner decision 2026-08-11, the
- * middle path): when the adapter's metadata cache file does not exist yet,
+ * Cold-cache session preparation for a room: when the adapter's metadata cache file does not exist yet,
  * its session start would bootstrap-connect EVERY configured server once to
  * warm the cache - ungranted ones included. Instead, create the cache file
  * empty (which switches that bootstrap off) and warm ONLY the room's granted

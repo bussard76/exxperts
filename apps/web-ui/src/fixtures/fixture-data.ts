@@ -4,6 +4,7 @@ import { GaugeIcon, GearIcon, PaperclipIcon, TrashIcon } from "../components/ico
 import type { InRoomChatUsage } from "../components/in-room-chat";
 import type { LauncherRoomThread } from "../components/launcher-room-card";
 import type { ProductSidebarActive } from "../components/product-shell";
+import { modelDisplayName } from "../model-names";
 import type { ChatItem, ContextHealthStatus, PersistentAgentAiProfileSelectionStatus, PersistentAgentStatus, WebChatModelOption, WebChatModelStatus } from "../types";
 
 export const FIXTURE_DEFAULT_AGENT_ID = "personal-coordinator";
@@ -550,25 +551,25 @@ const activeChatUsage: InRoomChatUsage = {
 const contextHealthGreen: ContextHealthStatus = {
 	tokens: 32000,
 	contextWindow: 272000,
-	checkpointTokens: 125000,
-	checkpointPercent: 25.6,
+	checkpointTokens: 108800,
+	checkpointPercent: 29.4,
 	zone: "green",
 	source: "runtime-context-usage",
 };
 
 const contextHealthYellow: ContextHealthStatus = {
-	tokens: 105000,
+	tokens: 91400,
 	contextWindow: 272000,
-	checkpointTokens: 125000,
+	checkpointTokens: 108800,
 	checkpointPercent: 84,
 	zone: "yellow",
 	source: "runtime-context-usage",
 };
 
 const contextHealthRed: ContextHealthStatus = {
-	tokens: 121000,
+	tokens: 105300,
 	contextWindow: 272000,
-	checkpointTokens: 125000,
+	checkpointTokens: 108800,
 	checkpointPercent: 96.8,
 	zone: "red",
 	source: "runtime-context-usage",
@@ -577,7 +578,7 @@ const contextHealthRed: ContextHealthStatus = {
 const contextHealthUnknown: ContextHealthStatus = {
 	tokens: null,
 	contextWindow: 272000,
-	checkpointTokens: 125000,
+	checkpointTokens: 108800,
 	checkpointPercent: null,
 	zone: "unknown",
 	source: "unknown",
@@ -594,7 +595,8 @@ function chatFixture(overrides: Omit<InRoomChatFixtureState, "kind" | "connected
 	return {
 		kind: "in-room-chat",
 		connected: true,
-		currentModelLabel: fixtureModelOptions[0].label,
+		// The page passes the canonical name, as App does.
+		currentModelLabel: modelDisplayName({ modelLabel: fixtureModelOptions[0].label }),
 		topbarActions: roomTopbarActions,
 		...overrides,
 	};
@@ -835,7 +837,7 @@ export const inRoomChatFixtureStates: InRoomChatFixtureState[] = [
 	chatFixture({
 		id: "in-room-active-conversation",
 		label: "In-room / active conversation",
-		description: "Core reading surface with green under-prompt context rail: 32K tokens · 26% of recommended context.",
+		description: "Core reading surface with green under-prompt context rail: 32K tokens · 29% of recommended context.",
 		activeDisplay: "Strategy Room",
 		ownerSecondary: "Persistent room · active thread",
 		busy: false,
@@ -848,11 +850,11 @@ export const inRoomChatFixtureStates: InRoomChatFixtureState[] = [
 	chatFixture({
 		id: "in-room-context-health-yellow",
 		label: "In-room / context health yellow",
-		description: "Under-prompt context rail approaching the recommendation: 105K tokens · 84% of recommended context.",
+		description: "Under-prompt context rail approaching the recommendation: 91K tokens · 84% of recommended context.",
 		activeDisplay: "Strategy Room",
 		ownerSecondary: "Persistent room · approaching the recommendation",
 		busy: false,
-		usage: { ...activeChatUsage, totalTokens: 105000 },
+		usage: { ...activeChatUsage, totalTokens: 91400 },
 		contextHealth: contextHealthYellow,
 		items: activeConversationItems,
 		inputValue: "",
@@ -861,11 +863,11 @@ export const inRoomChatFixtureStates: InRoomChatFixtureState[] = [
 	chatFixture({
 		id: "in-room-context-health-red",
 		label: "In-room / context health red",
-		description: "Under-prompt context rail at the recommendation: 121K tokens · 97% of recommended context.",
+		description: "Under-prompt context rail at the recommendation: 105K tokens · 97% of recommended context.",
 		activeDisplay: "Strategy Room",
 		ownerSecondary: "Persistent room · Remember recommended",
 		busy: false,
-		usage: { ...activeChatUsage, totalTokens: 121000 },
+		usage: { ...activeChatUsage, totalTokens: 105300 },
 		contextHealth: contextHealthRed,
 		items: activeConversationItems,
 		inputValue: "",
@@ -874,7 +876,7 @@ export const inRoomChatFixtureStates: InRoomChatFixtureState[] = [
 	chatFixture({
 		id: "in-room-context-health-measuring",
 		label: "In-room / context health measuring",
-		description: "Under-prompt context rail when exact context position is unavailable: Context measuring · recommended 125K.",
+		description: "Under-prompt context rail when exact context position is unavailable: Context measuring · recommended 109K.",
 		activeDisplay: "Strategy Room",
 		ownerSecondary: "Persistent room · context measuring",
 		busy: false,

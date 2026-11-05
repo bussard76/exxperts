@@ -12,7 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { authedFetch, SMOKE_AUTH_TOKEN, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer } from "./smoke-server-process.js";
+import { authedFetch, SMOKE_AUTH_TOKEN, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer, freePort, waitForServer } from "./smoke-server-process.js";
 
 const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "exxperts-remote-readonly-"));
 process.env.HOME = tempHome;
@@ -20,7 +20,7 @@ process.env.USERPROFILE = tempHome;
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const webServerDir = path.resolve(scriptDir, "..");
-const port = 24000 + Math.floor(Math.random() * 10000);
+const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -33,18 +33,6 @@ fs.mkdirSync(agentDir, { recursive: true, mode: 0o700 });
 fs.writeFileSync(path.join(agentDir, "auth.json"), JSON.stringify({ "openai-codex": { type: "api_key", key: "sk-smoke" } }), { mode: 0o600 });
 
 let server: ChildProcessWithoutNullStreams | null = null;
-
-async function waitForServer(): Promise<void> {
-	for (let attempt = 0; attempt < 100; attempt += 1) {
-		if (server?.exitCode != null) throw new Error(`server exited before startup with code ${server.exitCode}`);
-		try {
-			const res = await fetch(`${baseUrl}/healthz`);
-			if (res.ok) return;
-		} catch { /* not up yet */ }
-		await new Promise((resolve) => setTimeout(resolve, 150));
-	}
-	throw new Error("server did not come up");
-}
 
 const SECTIONS: Array<{ tab: string; honest: string; absent: string[] }> = [
 	{
@@ -89,7 +77,7 @@ try {
 		env: { ...process.env, PORT: String(port), ...SMOKE_SERVER_AUTH_ENV },
 		stdio: ["ignore", "pipe", "pipe"],
 	}) as unknown as ChildProcessWithoutNullStreams;
-	await waitForServer();
+	await waitForServer(server, baseUrl, { tries: 100 });
 	// One room, so Home shows a card whose model label opens Room settings, Model.
 	const created = await authedFetch(`${baseUrl}/api/persistent-agents`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ displayName: "Readonly Room", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
 	assert(created.ok, `room create failed: ${created.status}`);
@@ -103,7 +91,7 @@ try {
 			route.fulfill({ contentType: "application/json", body: JSON.stringify({ remote: true, capability: "read-only" }) }));
 		await page.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
 		await page.waitForLoadState("networkidle");
-		const dismiss = page.locator(".whats-new-foot .btn-primary");
+		const dismiss = page.locator(".whats-new-close");
 		if (await dismiss.count()) await dismiss.click();
 		await page.locator(".product-sidebar-footer button").first().click();
 		await page.locator(".sidebar-config-menu button, .sidebar-config-menu a").filter({ hasText: /Settings/ }).first().click();
@@ -158,7 +146,7 @@ try {
 		const localPage = await localCtx.newPage();
 		await localPage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
 		await localPage.waitForLoadState("networkidle");
-		const localDismiss = localPage.locator(".whats-new-foot .btn-primary");
+		const localDismiss = localPage.locator(".whats-new-close");
 		if (await localDismiss.count()) await localDismiss.click();
 		await localPage.locator(".product-sidebar-footer button").first().click();
 		await localPage.locator(".sidebar-config-menu button, .sidebar-config-menu a").filter({ hasText: /Settings/ }).first().click();
@@ -177,7 +165,7 @@ try {
 		const tunnelPage = await tunnelCtx.newPage();
 		await tunnelPage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
 		await tunnelPage.waitForLoadState("networkidle");
-		const tunnelDismiss = tunnelPage.locator(".whats-new-foot .btn-primary");
+		const tunnelDismiss = tunnelPage.locator(".whats-new-close");
 		if (await tunnelDismiss.count()) await tunnelDismiss.click();
 		await tunnelPage.locator(".product-sidebar-footer button").first().click();
 		await tunnelPage.locator(".sidebar-config-menu button, .sidebar-config-menu a").filter({ hasText: /Settings/ }).first().click();

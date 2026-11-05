@@ -8,7 +8,6 @@ import {
 	buildReviewAssessmentRetryPrompt,
 	buildReviewDiscussionTurnPrompt,
 	buildReviewSignoffPrompt,
-	countNotes,
 	parseReviewAssessment,
 	parseReviewGuidance,
 	parseReviewRetryFeedback,
@@ -84,8 +83,6 @@ assert(assessment.prompt.includes(`"The Nordwind contract" — 6 notes`), "the f
 assert(assessment.prompt.includes("within the budget"), "a room inside its budget should be told so");
 assert(assessment.prompt.includes(`At most ${REVIEW_MAX_QUESTIONS} short questions`), "the first read prompt should cap the questions");
 assert(!assessment.prompt.includes("the prune"), "the Review never calls its work a prune");
-assert(assessment.telemetry.topicCount === 3 && assessment.telemetry.noteCount === 13, "telemetry should count the topics and their notes");
-assert(countNotes(TOPICS) === 13, "countNotes should add up the room's notes");
 
 const overBudget = buildReviewAssessmentPrompt({ ...BASE, reviewTargetTokens: 30000 });
 assert(overBudget.prompt.includes("above the budget"), "a room past its budget should be told so");
@@ -198,22 +195,20 @@ assert(fromNothing.topics.join(" | ") === "The Nordwind contract | How this team
 const quiet = reviewMachineFindings({ ...DOC, topics: [DOC.topics[1], DOC.topics[3]] });
 assert(quiet.saysTheSameTwice.length === 0 && quiet.lookAlikeTopics.length === 0 && quiet.disagree.length === 0 && quiet.conflictNotes.length === 0, "a memory that says nothing twice or differently has empty findings");
 assert(!assessment.prompt.includes("Notes That Say The Same Twice") && !assessment.prompt.includes("Topics That Look The Same"), "the first read prompt never asks the model to find duplicates");
-// The summary notes a saved Memorize read again and left in Unsorted: one
-// line on the first read, and their topic joins the tidy. The count is the
-// Maintain hint's: Deep Memory only, tried set. None means no line, no join.
-assert(findings.waitInUnsorted.length === 0 && quiet.waitInUnsorted.length === 0 && !filled.topics.includes("Unsorted"), "no summary note waits: no line and no join");
+// Every note waiting in Unsorted (Deep Memory only): one line on the first
+// read, and the topic joins the tidy. None means no line, no join.
+assert(findings.waitInUnsorted.length === 0 && quiet.waitInUnsorted.length === 0 && !filled.topics.includes("Unsorted"), "no note waits: no line and no join");
 const CALLS: Record<string, string> = { "m-0002": "Pricing for the Nordwind renewal", "m-0003": "Hiring plan for the spring", "m-0004": "Legal review of the draft", "m-0005": "Office move logistics" };
 const triedNote = (id: string, tried = " tried=openai-compatible/gpt-5.5") => [`<!-- e: id=${id} kind=fact saved=2026-06-01 summary=true${tried} -->`, `- ${CALLS[id]}`, ""];
 const unsortedDoc = parseMemoryDocument(["## Deep Memory", "", "### Terms", "", "<!-- e: id=m-0001 kind=fact saved=2026-06-01 -->", "- A term.", "", "### Unsorted", "", ...triedNote("m-0002"), ...triedNote("m-0003"), ...triedNote("m-0004", ""), "## Active Items", "", "### Unsorted", "", ...triedNote("m-0005"), ""].join("\n"));
 const waiting = reviewMachineFindings(unsortedDoc, "2026-09-14");
-assert(JSON.stringify(waiting.waitInUnsorted) === JSON.stringify(["2 notes wait in Unsorted: conversation summaries that Memorize could not sort. The tidy sorts them into topics."]), `the first read names the two tried notes, got ${JSON.stringify(waiting.waitInUnsorted)}`);
+assert(JSON.stringify(waiting.waitInUnsorted) === JSON.stringify(["3 notes wait in Unsorted. The tidy sorts them into topics."]), `the first read counts every note in Deep Memory's Unsorted, tried or not, got ${JSON.stringify(waiting.waitInUnsorted)}`);
 const joined = withMachineFindings({ ...parsed.fields, topics: [] }, waiting, unsortedDoc.topics.map((topic) => topic.title));
 assert(waiting.duplicateNotes.length === 0 && waiting.conflictNotes.length === 0 && joined.topics.join(" | ") === "Unsorted" && joined.waitInUnsorted?.join("") === waiting.waitInUnsorted.join(""), `Unsorted joins the topics to tidy, got ${JSON.stringify(joined.topics)}`);
-assert(reviewMachineFindings(parseMemoryDocument(["## Deep Memory", "", "### Unsorted", "", ...triedNote("m-0002")].join("\n"))).waitInUnsorted[0] === "1 note waits in Unsorted: a conversation's summary that Memorize could not sort. The tidy sorts it into topics.", "one note reads in the singular");
 
 const available = reviewAvailability({ roomBusy: false, migrated: true, runActive: false, topics: TOPICS, budgetTokens: 20000, reviewTargetTokens: 820 });
 assert(available.available && available.reason === "available", "a quiet migrated room with notes can be reviewed");
-assert(available.topics === 3 && available.notes === 13 && !available.overBudget, "availability should carry the room's own numbers");
+assert(available.topics === 2 && available.notes === 13 && !available.overBudget, `availability counts the topics a person sees by name, as the status does, and every note, got ${available.topics} topics and ${available.notes} notes`);
 assert(available.recommendedDepth === "wording", "availability before the first read recommends the wording tidy");
 
 const busy = reviewAvailability({ roomBusy: true, migrated: true, runActive: false, topics: TOPICS, budgetTokens: 20000, reviewTargetTokens: 820 });
@@ -255,7 +250,7 @@ const signoffPrompt = buildReviewSignoffPrompt(discussionInput);
 for (const heading of Object.values(REVIEW_GUIDANCE_HEADINGS)) {
 	assert(signoffPrompt.prompt.includes(`### ${heading}`), `the sign-off should ask for the "${heading}" section`);
 }
-assert(signoffPrompt.prompt.includes("read by the system, not by a person"), "the sign-off should say who reads it");
+assert(signoffPrompt.prompt.includes("The card shows these lines to the person") && signoffPrompt.prompt.includes("its id in square brackets") && signoffPrompt.prompt.includes("never \"the person\" or \"the user\""), "the sign-off should say the person reads it, how a note is named, and to say you");
 
 // The machine's findings reach the discussion as material, one section each, and an empty finding has no section.
 assert(!turn.prompt.includes("Notes That Say The Same Twice") && !signoffPrompt.prompt.includes("Topics That Look The Same"), "a discussion over a memory with no findings carries no findings section");

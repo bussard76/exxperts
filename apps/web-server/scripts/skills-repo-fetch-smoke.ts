@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { sha256 } from "../src/skills-store.js";
+import { symlinkOrSkip } from "./smoke-server-process.js";
 import {
 	cloneRepoShallow,
 	describeCloneFailure,
@@ -166,6 +167,7 @@ try {
 		fs.writeFileSync(
 			helperScript,
 			[
+				// portability-ok: git runs this helper through its own sh (Git for Windows ships one)
 				"#!/bin/sh",
 				'echo "$1" >> "$FIXTURE_HELPER_LOG"',
 				"cat > /dev/null",
@@ -219,11 +221,25 @@ try {
 			const shorthand = resolveRepoSource(`fixture-user:fixture-pass@gitlab.example.com/group/repo`);
 			assert(!shorthand.ok && shorthand.error === passwordError, `a shorthand address with a password must be refused too, got ${JSON.stringify(shorthand)}`);
 			const requestsBefore = requests;
-			const tempBefore = fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith("exxperts-skill-repo-")).length;
-			const bypass = await failureOf(cloneRepoShallow({ kind: "git", cloneArg: pastedUrl, display: pastedUrl, host: `127.0.0.1:${port}` }));
-			assert(bypass === passwordError, `the clone itself must refuse an address with a password, got: ${bypass}`);
-			assert(requests === requestsBefore && helperOps().length === 0, "an address with a password must reach neither the host nor a helper");
-			assert(fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith("exxperts-skill-repo-")).length === tempBefore, "a refused address must leave no checkout behind");
+			// The checkout count reads a temp folder of this smoke's own: other
+			// skills smokes running beside it make and remove exxperts-skill-repo-*
+			// folders in the shared one.
+			const ownTemp = path.join(workDir, "tmp");
+			fs.mkdirSync(ownTemp);
+			const sharedTemp = { TMPDIR: process.env.TMPDIR, TEMP: process.env.TEMP, TMP: process.env.TMP };
+			Object.assign(process.env, { TMPDIR: ownTemp, TEMP: ownTemp, TMP: ownTemp });
+			try {
+				const tempBefore = fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith("exxperts-skill-repo-")).length;
+				const bypass = await failureOf(cloneRepoShallow({ kind: "git", cloneArg: pastedUrl, display: pastedUrl, host: `127.0.0.1:${port}` }));
+				assert(bypass === passwordError, `the clone itself must refuse an address with a password, got: ${bypass}`);
+				assert(requests === requestsBefore && helperOps().length === 0, "an address with a password must reach neither the host nor a helper");
+				assert(fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith("exxperts-skill-repo-")).length === tempBefore, "a refused address must leave no checkout behind");
+			} finally {
+				for (const [name, value] of Object.entries(sharedTemp)) {
+					if (value === undefined) delete process.env[name];
+					else process.env[name] = value;
+				}
+			}
 
 			// An address with only a user name stays allowed and signs in with the stored password.
 			const named = resolveRepoSource(`http://fixture-user@127.0.0.1:${port}/team/skills.git`);
@@ -403,8 +419,9 @@ try {
 	const symRepo = fs.mkdtempSync(path.join(os.tmpdir(), "exxperts-skills-symlink-"));
 	cleanup.push(symRepo);
 	fs.mkdirSync(path.join(symRepo, "x"));
-	fs.symlinkSync(secretFile, path.join(symRepo, "x", "SKILL.md"));
-	assert(readRepoCandidate(symRepo, "x", "local-fixture") === null, "a symlinked SKILL.md must be refused (no arbitrary file read)");
+	if (symlinkOrSkip(secretFile, path.join(symRepo, "x", "SKILL.md"), "skills-repo-fetch-smoke", "the linked SKILL.md case")) {
+		assert(readRepoCandidate(symRepo, "x", "local-fixture") === null, "a symlinked SKILL.md must be refused (no arbitrary file read)");
+	}
 
 	// --- cheap win: leading-dash hosts rejected independently of git's own fix --
 	assert(!resolveRepoSource("git@-oProxyCommand=x:a/b").ok, "an scp host starting with '-' must be rejected");

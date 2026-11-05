@@ -23,8 +23,7 @@ async function main(): Promise<void> {
 	assert(selected.ok && !selected.cancelled, `selected folder should succeed: ${JSON.stringify(selected)}`);
 	assert(selected.path === "/Users/example/Workspace Folder/", `selected path should be trimmed, got ${selected.path}`);
 	assert(capturedCommand === "/custom/osascript", `runner should receive configured osascript path, got ${capturedCommand}`);
-	assert(capturedArgs.length === 2 && capturedArgs[0] === "-e", `runner should receive osascript -e args, got ${capturedArgs.join(" ")}`);
-	assert(capturedArgs[1]?.includes("choose folder"), "osascript should invoke native choose folder dialog");
+	assert(capturedArgs.length === 4 && capturedArgs[0] === "-l" && capturedArgs[1] === "JavaScript" && capturedArgs[2] === "-e", `runner should receive osascript -l JavaScript -e args, got ${capturedArgs.join(" ")}`);
 	assert(capturedTimeout === 1234, `runner should receive timeout, got ${capturedTimeout}`);
 
 	const cancelledRunner: LocalFolderPickerRunner = async () => {
@@ -138,11 +137,9 @@ async function main(): Promise<void> {
 	const windowsGarbled = await chooseLocalFolder({ platform: "win32", runner: windowsGarbledRunner });
 	assert(!windowsGarbled.ok && windowsGarbled.supported === true && windowsGarbled.code === "choose_folder_failed", `garbled windows output should fail safely: ${JSON.stringify(windowsGarbled)}`);
 
-	// The purpose picks the prompt, and only the two known purposes get one of
-	// their own: anything else lands on the workspace wording rather than
-	// putting a client's text into a native dialog.
-	assert(folderPickerPrompt("workspace") === "Choose workspace folder", `workspace purpose should keep the workspace prompt, got ${folderPickerPrompt("workspace")}`);
-	assert(folderPickerPrompt("data-folder") === "Choose the exxperts data folder", `data-folder purpose should name the data folder, got ${folderPickerPrompt("data-folder")}`);
+	// Only the two known purposes get a prompt of their own: anything else lands
+	// on the workspace wording rather than putting a client's text into a native
+	// dialog.
 	for (const unknown of [undefined, null, "", "toString", "constructor", "Data-Folder", 7, { purpose: "data-folder" }]) {
 		assert(folderPickerPrompt(unknown) === "Choose workspace folder", `unknown purpose ${JSON.stringify(unknown)} should fall back to the workspace prompt`);
 	}
@@ -157,7 +154,7 @@ async function main(): Promise<void> {
 			return { stdout: "/Users/example/Data\n", stderr: "" };
 		},
 	});
-	assert(promptedMacArgs[1]?.includes('with prompt "Choose the exxperts data folder"'), `osascript should carry the data-folder prompt, got ${promptedMacArgs[1]}`);
+	assert(promptedMacArgs[3]?.includes('withPrompt: "Choose the exxperts data folder"'), `osascript should carry the data-folder prompt, got ${promptedMacArgs[3]}`);
 
 	let promptedLinuxArgs: string[] = [];
 	await chooseLocalFolder({
@@ -194,7 +191,7 @@ async function main(): Promise<void> {
 			return { stdout: "/Users/example/Data\n", stderr: "" };
 		},
 	});
-	assert(quotedMacArgs[1] === 'POSIX path of (choose folder with prompt "Choose \\"the\\" folder")', `osascript should escape a quoted prompt, got ${quotedMacArgs[1]}`);
+	assert(quotedMacArgs[3]?.includes('withPrompt: "Choose \\"the\\" folder"'), `osascript should escape a quoted prompt, got ${quotedMacArgs[3]}`);
 
 	let quotedWindowsArgs: string[] = [];
 	await chooseLocalFolder({

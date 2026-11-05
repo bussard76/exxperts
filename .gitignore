@@ -8,9 +8,22 @@ dist-release/
 *.tgz
 .DS_Store
 
-# Personal AI-session context (each contributor can have their own)
-AGENTS.md
-.claude/
+# Personal AI-session context (each contributor can have their own); only the
+# shared session files under the top .claude/ are tracked
+CLAUDE.md
+CLAUDE.local.md
+.claude/*
+!.claude/rules/
+!.claude/agents/
+!.claude/slices/
+!.claude/repo-map.md
+*/**/.claude/
+
+# Personal planning notes
+planning/
+
+# Build output folders besides dist/
+dist-*/
 
 # Obsidian editor config (personal)
 .obsidian/
@@ -21,3 +34,11 @@ AGENTS.md
 # Bench and generator scratch: run folders hold full copies of whatever room
 # was benched, real memory included
 scratch/
+.factory/new/
+.factory/controller/
+.factory/front-agent/
+.factory/server/
+.build/
+.env.*
+!.env.example
+.scratch/

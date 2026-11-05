@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { fetchJson } from "../api";
-import { useRemoteClientContext } from "../remote-client-context";
+import { SHARED_SERVER_ADMIN_LINE, showsComputerOnlyControls, useRemoteClientContext } from "../remote-client-context";
 import { GroupHeader } from "./pane-header";
+import { providerDisplayName } from "../model-names";
+
+// The two subscriptions that search on their own side, named as Models & providers names them.
+const SUBSCRIPTION_ROOMS = `${providerDisplayName("anthropic")} and ${providerDisplayName("openai-codex")} rooms`;
 
 /**
  * Web search, made visible: both kinds of it.
@@ -57,7 +61,7 @@ const OPTIONS: Array<{ id: WebSearchProvider; label: string; blurb: (providerSea
 		// search carries that on the model itself, past anything chosen here.
 		blurb: (providerSearchOn) =>
 			providerSearchOn
-				? "Claude and ChatGPT still search through the provider, gateway models where ticked. Rooms can still open links you give them."
+				? `${SUBSCRIPTION_ROOMS} still search through the provider, gateway models where ticked. Rooms can still open links you give them.`
 				: "Gateway models still search where ticked. Rooms can still open links you give them.",
 	},
 ];
@@ -95,19 +99,19 @@ function setupLine(status: SearxngSetupStatus): ReactNode | null {
 		case "docker-missing":
 			return (
 				<>
-					This needs a container runtime first. Install{" "}
+					This needs a container engine first. Install{" "}
 					<a href="https://orbstack.dev" target="_blank" rel="noreferrer">OrbStack</a> or{" "}
-					<a href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noreferrer">Docker Desktop</a>,
-					then press Start one on this computer.
+					<a href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noreferrer">Docker Desktop</a>
+					{" "}(Colima and Podman work too), then press Start one on this computer.
 				</>
 			);
 		case "docker-stopped":
-			return "Docker is installed but not running. Start Docker Desktop or OrbStack, then press Start one on this computer.";
+			return "Your container engine is installed but not running. Start it (OrbStack, Docker Desktop, Colima or Podman), then press Start one on this computer.";
 		case "ready":
 			return (
 				<>
 					{status.baseUrl ? `Running at ${status.baseUrl}.` : "Running."} The engine keeps running in the
-					background even when the OrbStack or Docker Desktop window is closed.
+					background even when your container engine's window is closed.
 				</>
 			);
 		case "stopped":
@@ -124,6 +128,9 @@ type Pending = null | { kind: "providerSearch"; value: boolean } | { kind: "prov
 
 export function WebSearchSettingsSection() {
 	const remoteClient = useRemoteClientContext();
+	// The SearXNG setup starts a container on this computer: not on a remote
+	// device, and not on a shared server, where its status is not read either.
+	const computerOnlyControls = showsComputerOnlyControls(remoteClient);
 	const [settings, setSettings] = useState<WebSearchSettingsPayload | null>(null);
 	const [loadError, setLoadError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -216,7 +223,7 @@ export function WebSearchSettingsSection() {
 	// does not lose sight of it.
 	const setupRunning = setup?.running ?? false;
 	useEffect(() => {
-		if (remoteClient.remote || shownChoice !== "searxng") return;
+		if (!computerOnlyControls || shownChoice !== "searxng") return;
 		let stopped = false;
 		async function read() {
 			try {
@@ -234,12 +241,12 @@ export function WebSearchSettingsSection() {
 			stopped = true;
 			window.clearInterval(timer);
 		};
-	}, [remoteClient.remote, shownChoice, setupRunning]);
+	}, [computerOnlyControls, shownChoice, setupRunning]);
 
 	// A ready engine is only useful once the address is saved, so the flow
 	// finishes itself through the same save path the field uses.
 	useEffect(() => {
-		if (remoteClient.remote) return;
+		if (!computerOnlyControls) return;
 		const url = setup?.phase === "ready" ? setup.baseUrl : null;
 		if (!url || adoptedBaseUrl.current === url) return;
 		adoptedBaseUrl.current = url;
@@ -251,7 +258,7 @@ export function WebSearchSettingsSection() {
 			{ kind: "provider", value: "searxng" },
 			"Saved. The next search uses it.",
 		);
-	}, [remoteClient.remote, setup?.phase, setup?.baseUrl]);
+	}, [computerOnlyControls, setup?.phase, setup?.baseUrl]);
 
 	async function startSetup() {
 		setSetupStarting(true);
@@ -278,8 +285,8 @@ export function WebSearchSettingsSection() {
 			{ providerSearch: next },
 			{ kind: "providerSearch", value: next },
 			next
-				? "Saved. Claude and ChatGPT rooms search on their own side from the next message."
-				: "Saved. Claude and ChatGPT rooms use the search below from the next message.",
+				? `Saved. ${SUBSCRIPTION_ROOMS} search on their own side from the next message.`
+				: `Saved. ${SUBSCRIPTION_ROOMS} use the search below from the next message.`,
 		);
 	}
 
@@ -305,8 +312,9 @@ export function WebSearchSettingsSection() {
 
 	// A remote device can read this setting but not change it: the PUT route is
 	// local-only in the server's remote route policy, so every control here
-	// would refuse each tap. State the facts and offer nothing operable.
-	if (remoteClient.remote) {
+	// would refuse each tap. State the facts and offer nothing operable. A
+	// shared server reads the same way: only its admin changes the setting.
+	if (remoteClient.remote || remoteClient.sharedServer) {
 		return (
 			<section className="ai-setup-section" aria-label="Web search">
 				{settings.unreadable && (
@@ -321,8 +329,8 @@ export function WebSearchSettingsSection() {
 							<span className="settings-row-label">Provider search</span>
 							<span className="settings-row-sub">
 								{settings.providerSearch
-									? "On. Claude and ChatGPT rooms search on the provider's side."
-									: "Off. Claude and ChatGPT rooms use the search below."}
+									? `On. ${SUBSCRIPTION_ROOMS} search on the provider's side.`
+									: `Off. ${SUBSCRIPTION_ROOMS} use the search below.`}
 							</span>
 						</div>
 					</div>
@@ -339,7 +347,7 @@ export function WebSearchSettingsSection() {
 						</div>
 					</div>
 				</div>
-				<p className="cli-note">Web search is set up on the computer itself.</p>
+				<p className="cli-note">{remoteClient.sharedServer ? SHARED_SERVER_ADMIN_LINE : "Web search is set up on the computer itself."}</p>
 			</section>
 		);
 	}
@@ -364,7 +372,7 @@ export function WebSearchSettingsSection() {
 				<label className={`settings-row${togglePending ? " pending" : ""}`}>
 					<div className="settings-row-main">
 						<span className="settings-row-label">Provider search where available{togglePending ? " (saving…)" : ""}</span>
-						<span className="settings-row-sub">Claude and ChatGPT rooms search on the provider's side; nothing runs on your machine. Gateway models follow their own per-model web search tick, not this switch.</span>
+						<span className="settings-row-sub">{SUBSCRIPTION_ROOMS} search on the provider's side; nothing runs on your machine. Gateway models follow their own per-model web search tick, not this switch. Rooms on a {providerDisplayName("anthropic-api-key")} use the search below.</span>
 					</div>
 					<input
 						className="workspaces-tool-switch"
@@ -381,8 +389,8 @@ export function WebSearchSettingsSection() {
 				<GroupHeader
 					kicker="Everything else"
 					line={providerSearchOn
-						? "The search every room uses except Claude and ChatGPT. Gateway models use it alongside their own."
-						: "The search every room uses, including Claude and ChatGPT while the switch above is off."}
+						? `The search every room uses except ${SUBSCRIPTION_ROOMS}. Gateway models use it alongside their own.`
+						: `The search every room uses, including ${SUBSCRIPTION_ROOMS} while the switch above is off.`}
 				/>
 				{envHeld && (
 					<p className="settings-help web-search-env-note" role="status">

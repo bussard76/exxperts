@@ -25,6 +25,7 @@ const {
 } = await import("../src/persistent-agents.js");
 const {
 	assertPersistentRoomWorkspaceDefaultMutable,
+	persistentRoomSettingsNotAppliedFrame,
 	createPersistentRoomCapabilityPolicy,
 	createPersistentRoomDefaultCapabilityPolicy,
 	deletePersistentRoomDefaultCapabilityPolicy,
@@ -42,12 +43,10 @@ function assert(condition: unknown, message: string): asserts condition {
 	if (!condition) throw new Error(message);
 }
 
-function expectMutationRefused(activeThread: { inFlight: boolean; cancelling: boolean }, expected: RegExp, label: string): void {
+function expectMutationRefused(activeThread: { inFlight: boolean; cancelling: boolean }, label: string): void {
 	try {
 		assertPersistentRoomWorkspaceDefaultMutable(activeThread);
 	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		assert(expected.test(message), `${label}: expected ${expected}, got ${message}`);
 		assert((error as any).statusCode === 409, `${label}: expected 409, got ${(error as any).statusCode}`);
 		assert((error as any).code === "active_turn_in_flight", `${label}: expected active_turn_in_flight code, got ${(error as any).code}`);
 		return;
@@ -182,7 +181,7 @@ try {
 	const effectiveCleared = resolvePersistentRoomEffectiveWorkspacePolicy(agentId, threadA, storage);
 	assert(effectiveCleared.source === "none" && effectiveCleared.workspaceToolsEnabled === false, "cleared default should resolve to no workspace for the running thread");
 	const sectionCleared = buildPersistentRoomCurrentWorkspaceSection(effectiveCleared);
-	assert(sectionCleared.includes("No workspace is configured"), "live workspace stanza should state that no workspace is configured");
+	assert(sectionCleared.includes("No folder is set for this room"), "live workspace stanza should state that no folder is set");
 	writePersistentRoomDefaultCapabilityPolicy(defaultB, storage);
 
 	// A deliberate per-conversation override (the workspace/validate flow) still
@@ -216,8 +215,16 @@ try {
 
 	// The one boundary the live model keeps: a turn in flight refuses the
 	// mutation and finishes under the rules it started with.
-	expectMutationRefused({ inFlight: true, cancelling: false }, /active turn in flight/, "running turn should refuse workspace-default mutation");
-	expectMutationRefused({ inFlight: true, cancelling: true }, /cancelling turn in flight/, "cancelling turn should refuse workspace-default mutation");
+	expectMutationRefused({ inFlight: true, cancelling: false }, "running turn should refuse workspace-default mutation");
+	expectMutationRefused({ inFlight: true, cancelling: true }, "cancelling turn should refuse workspace-default mutation");
+	// A next message the room could not rebuild for: one plain line, the raw text only in details.
+	const rawFailure = new Error("EACCES: permission denied, open '/home/someone/.exxperts/app/personalized-agents/room/L1a.md'");
+	const notApplied = persistentRoomSettingsNotAppliedFrame(rawFailure, false, true);
+	assert(notApplied.message === "The room could not apply its new settings, so your message was not sent. Nothing was lost. Try again; if it repeats, restart exxperts.", `the plain line, got ${notApplied.message}`);
+	assert(notApplied.code === "room_settings_not_applied" && notApplied.details === rawFailure.message, "the raw text goes to details");
+	assert(!notApplied.message.includes("EACCES") && !notApplied.message.includes("L1a.md"), "the line carries none of the raw text");
+	assert(persistentRoomSettingsNotAppliedFrame(rawFailure, true, false).message.endsWith("Try again in a moment; if it repeats, tell your admin."), "on a shared server the line ends with the admin");
+	assert(!("details" in persistentRoomSettingsNotAppliedFrame(rawFailure, false, false)), "a page that may not get paths gets no details");
 	assertPersistentRoomWorkspaceDefaultMutable({ inFlight: false, cancelling: false });
 	assertPersistentRoomWorkspaceDefaultMutable(null);
 
