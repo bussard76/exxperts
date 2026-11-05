@@ -415,6 +415,47 @@ try {
 		assert(fs.readFileSync(guide, "utf8").includes("First line latest navigation"), "navigation save writes draft before switching");
 		console.log("  ok  failed saves, conflicts, reload and navigation retain or discard drafts as chosen");
 
+		for (const failSecond of [false, true]) {
+			await tree.locator(".workspace-file-browser-file", { hasText: "guide.md" }).click();
+			const raceParagraph = page.locator(".markdown-editor-tiptap .ProseMirror p", { hasText: "First line latest navigation" });
+			await raceParagraph.waitFor();
+			let releaseFirst!: () => void;
+			let firstStarted!: () => void;
+			const firstHeld = new Promise<void>((resolve) => { releaseFirst = resolve; });
+			const started = new Promise<void>((resolve) => { firstStarted = resolve; });
+			let puts = 0;
+			await page.route("**/workspace-markdown?**", async (route) => {
+				if (route.request().method() !== "PUT") return route.continue();
+				puts++;
+				if (puts === 1) { firstStarted(); await firstHeld; }
+				else if (failSecond) return route.fulfill({ status: 503, json: { error: "mock second save failure" } });
+				await route.continue();
+			});
+			await raceParagraph.click();
+			await page.keyboard.press("End");
+			const firstEdit = failSecond ? " failed-first" : " saved-first";
+			const secondEdit = failSecond ? " failed-second" : " saved-second";
+			await page.keyboard.type(firstEdit);
+			await page.keyboard.press("Control+s");
+			await started;
+			await page.keyboard.type(secondEdit);
+			await tree.locator(".workspace-file-browser-file", { hasText: "other.md" }).click();
+			await prompt.getByRole("button", { name: "Save and continue" }).click();
+			releaseFirst();
+			if (failSecond) {
+				await page.locator(".markdown-editor-error").waitFor({ state: "visible" });
+				assert(puts === 2 && (await raceParagraph.textContent())?.includes(firstEdit + secondEdit), "failed second save retains editor and both edits");
+				await page.unroute("**/workspace-markdown?**");
+				await tree.locator(".workspace-file-browser-file", { hasText: "other.md" }).click();
+				await prompt.getByRole("button", { name: "Discard changes" }).click();
+			} else {
+				await page.getByRole("complementary", { name: "Markdown editor: other.md" }).waitFor();
+				assert(puts === 2 && fs.readFileSync(guide, "utf8").includes(firstEdit + secondEdit), "navigation waits for both edits to reach disk");
+				await page.unroute("**/workspace-markdown?**");
+			}
+		}
+		console.log("  ok  navigation waits for in-flight and newer saves, retaining the draft on failure");
+
 		const readOnlySetting = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "custom", allowedToolNames: ["ls", "read"] } }) });
 		assert(readOnlySetting.status === 200, "set demo room read-only");
 		await tree.locator(".workspace-file-browser-file", { hasText: "guide.md" }).click();

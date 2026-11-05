@@ -120,7 +120,7 @@ interface SurfaceProps {
 	resolveImageSrc: (src: string) => string | null;
 	setDirty: (dirty: boolean) => void;
 	onDraftChange: (content: string) => void;
-	onSave: (content: string, revision: string) => Promise<boolean>;
+	onSave: (content: string, revision: string) => Promise<string | null>;
 	discardAndApplyExternal: () => void;
 	contentSetterRef: { current: ((content: string) => void) | null };
 }
@@ -151,8 +151,6 @@ function MarkdownEditorSurface({
 	const revisionRef = useRef(revision);
 	revisionRef.current = revision;
 	const saveInFlightRef = useRef<Promise<boolean> | null>(null);
-	const saveQueuedRef = useRef(false);
-	const saveRef = useRef<(() => Promise<boolean>) | null>(null);
 	const headerSaveRef = useRef<(() => Promise<boolean>) | null>(null);
 	const searchStateRef = useRef<SearchDecorationState | null>(null);
 	const resolveImageSrcRef = useRef(resolveImageSrc);
@@ -204,48 +202,41 @@ function MarkdownEditorSurface({
 	editorRef.current = editor;
 
 	const save = useCallback(async (): Promise<boolean> => {
-		if (saveInFlightRef.current) {
-			saveQueuedRef.current = true;
-			return saveInFlightRef.current;
-		}
+		if (saveInFlightRef.current) return saveInFlightRef.current;
 		const current = editorRef.current;
 		if (!current || !canEdit || hasExternalUpdate) return false;
-		const markdown = editorMarkdown(current);
-		draftRef.current = markdown;
-		onDraftChange(markdown);
-		if (markdown === baselineRef.current) {
-			setDirty(false);
-			return true;
-		}
-		const request = onSave(markdown, revisionRef.current);
-		saveInFlightRef.current = request;
-		try {
-			const saved = await request;
-			if (saved) {
-				const latest = editorRef.current ? editorMarkdown(editorRef.current) : markdown;
+		const request = (async () => {
+			while (true) {
+				const markdown = editorMarkdown(current);
+				draftRef.current = markdown;
+				onDraftChange(markdown);
+				if (markdown === baselineRef.current) {
+					setDirty(false);
+					return true;
+				}
+				const savedRevision = await onSave(markdown, revisionRef.current);
+				if (!savedRevision) return false;
+				revisionRef.current = savedRevision;
 				baselineRef.current = markdown;
-				if (latest !== markdown) {
-					draftRef.current = latest;
-					onDraftChange(latest);
-					userEditedRef.current = true;
-					setDirty(true);
-				} else {
+				const latest = editorMarkdown(current);
+				if (latest === markdown) {
 					userEditedRef.current = false;
 					setDirty(false);
+					return true;
 				}
+				draftRef.current = latest;
+				onDraftChange(latest);
+				userEditedRef.current = true;
+				setDirty(true);
 			}
-			return saved;
+		})();
+		saveInFlightRef.current = request;
+		try {
+			return await request;
 		} finally {
-			if (saveInFlightRef.current === request) {
-				saveInFlightRef.current = null;
-				if (saveQueuedRef.current) {
-					saveQueuedRef.current = false;
-					window.setTimeout(() => { void saveRef.current?.(); }, 0);
-				}
-			}
+			if (saveInFlightRef.current === request) saveInFlightRef.current = null;
 		}
 	}, [canEdit, hasExternalUpdate, onDraftChange, onSave, setDirty]);
-	saveRef.current = save;
 	headerSaveRef.current = save;
 
 	const discard = useCallback(() => {
@@ -454,15 +445,15 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		return () => { active = false; window.clearInterval(timer); };
 	}, [agentId, conversationId, file, path, phase, reconcileServerContent]);
 
-	const persist = useCallback(async (content: string, revision: string): Promise<boolean> => {
-		if (!canEdit) return false;
+	const persist = useCallback(async (content: string, revision: string): Promise<string | null> => {
+		if (!canEdit) return null;
 		setPhase("saving");
 		setError(null);
 		try {
 			const next = await putWorkspaceMarkdownFile(agentId, conversationId, path, content, revision);
 			setLoadedFile(next);
 			markSaved(next.content);
-			return true;
+			return next.revision;
 		} catch (cause) {
 			if (cause instanceof WorkspaceMarkdownApiError && (cause.status === 409 || cause.code === "revision_conflict")) {
 				setConflictRevision(cause.currentRevision ?? null);
@@ -472,7 +463,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 				setPhase("error");
 				setError(errorMessage(cause));
 			}
-			return false;
+			return null;
 		}
 	}, [agentId, canEdit, conversationId, markSaved, path, setLoadedFile]);
 

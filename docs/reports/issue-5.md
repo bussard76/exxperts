@@ -90,3 +90,11 @@ The branch includes the original feature contribution, approved spec/reviews and
 ## Tests added or extended
 
 The feature contribution adds `persistent-room-workspace-files-smoke.ts`, `persistent-room-workspace-markdown-files-smoke.ts`, `workspace-markdown-images-smoke.ts`, `workspace-markdown-images-ui-smoke.ts` and `composer-text-insertion-smoke.ts`. This work extended the file, image and integrated browser/route smokes with the policy, privacy, preservation, device, conflict and error cases listed above.
+
+## Rework 1
+
+The browser test `workspace-markdown-images-ui-smoke.ts` holds the first local PUT while a second edit is made and verifies Save and continue writes both edits before navigation; it also fails the second PUT and verifies the editor and draft remain. Both scenarios failed before the fix. Saving now waits for the latest draft and its returned revision before navigation.
+
+The two visual failures from review were reproduced in focused gated runs both on this branch and on clean `origin/main` at `397034345dd38e57cb90e2f5666d8b35dff10b1f`, with independently built UI and runtime: `consult-mention-smoke.ts` reported 1,045 differing pixels (2,048 one pixel off), and `room-topbar-ui-smoke.ts` reported the icon center at 26.50 instead of 25 window points (also 25.75 for maximize at 125%). These are independent of the T5 branch in this environment; no visual tests were changed. Foreign-host network-failure reruns: 0.
+
+Architecture impact: level 3, within the existing Markdown editor and room workspace boundaries under ADR-0002; no new route, dependency, or boundary. Independent conformance must be repeated for this rework.
