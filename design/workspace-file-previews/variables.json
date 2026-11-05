@@ -1,0 +1,17 @@
+{
+  "collection": "exxperts",
+  "modes": ["Light", "Dark"],
+  "colors": {
+    "canvas": { "Light": "#f3f0ea", "Dark": "#242424" },
+    "surface": { "Light": "#fffaf2", "Dark": "#2f2f2f" },
+    "raised": { "Light": "#ebe6dc", "Dark": "#373737" },
+    "hover": { "Light": "#e2ddd3", "Dark": "#414141" },
+    "inset": { "Light": "#f8f5ef", "Dark": "#1f1f1f" },
+    "text": { "Light": "#171717", "Dark": "#f2f0ec" },
+    "soft": { "Light": "#34312d", "Dark": "#d5d0c8" },
+    "muted": { "Light": "#6d675f", "Dark": "#aaa39a" },
+    "border": { "Light": "#c7c0b6", "Dark": "#55504a" }
+  },
+  "type": { "ui": "Sen", "document": "the file's own fonts; Inter stands in for them in the drawing" },
+  "documentColors": { "comment": "Part of the invented files, not app tokens.", "excelHeaderFill": "#1f3864", "excelBandFill": "#eef3fa", "excelNegative": "#c00000", "excelGrid": "#d9d9d9", "wordHeading": "#2f5496", "wordTableHeaderFill": "#d9e2f3" }
+}
