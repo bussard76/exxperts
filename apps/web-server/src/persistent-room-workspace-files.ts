@@ -48,7 +48,7 @@ function hiddenOrDenied(name: string, policy: PersistentRoomCapabilityPolicy): b
 
 function workspaceUnavailableError(error: unknown): Error & { code: string; statusCode: number } {
 	const cause = error as NodeJS.ErrnoException;
-	if (cause?.code !== "EACCES" && cause?.code !== "EPERM") throw error;
+	if (cause?.code !== "EACCES" && cause?.code !== "EPERM" && cause?.code !== "workspace_unavailable") throw error;
 	const unavailable = new Error("The workspace folder is not readable. Check OneDrive permissions or make the folder available offline.") as Error & { code: string; statusCode: number };
 	unavailable.code = "workspace_unavailable";
 	unavailable.statusCode = 503;
@@ -60,13 +60,19 @@ export function listPersistentRoomWorkspaceFiles(policy: PersistentRoomCapabilit
 	if (!policy || !grant || !persistentRoomWorkspaceToolNamesForPolicy(policy).includes("ls")) return { root: null, path: "", entries: [] };
 
 	const relativePath = normalizeRelativePath(requestedPath);
-	const guarded = resolvePersistentRoomWorkspacePath(policy, relativePath || ".", "list");
+	let guarded: ReturnType<typeof resolvePersistentRoomWorkspacePath>;
+	try { guarded = resolvePersistentRoomWorkspacePath(policy, relativePath || ".", "list"); } catch (error) { throw workspaceUnavailableError(error); }
 	const root = guarded.rootRealpath;
 	const current = guarded.absolutePath;
 	let ancestor = root;
 	for (const segment of relativePath.split("/").filter(Boolean)) {
 		ancestor = path.join(ancestor, segment);
-		if (fs.lstatSync(ancestor).isSymbolicLink()) throw new Error("Workspace folder not found.");
+		try {
+			if (fs.lstatSync(ancestor).isSymbolicLink()) throw new Error("Workspace folder not found.");
+		} catch (error) {
+			if (["EACCES", "EPERM"].includes((error as NodeJS.ErrnoException).code ?? "")) throw workspaceUnavailableError(error);
+			throw new Error("Workspace folder not found.");
+		}
 	}
 	if (!pathInside(current, root)) throw new Error("Workspace path is outside the configured folder.");
 	let currentRealpath: string;

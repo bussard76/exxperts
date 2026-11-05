@@ -387,7 +387,8 @@ export function resolvePersistentRoomWorkspacePath(
 	let lstat: fs.Stats;
 	try {
 		lstat = fs.lstatSync(absolutePath);
-	} catch {
+	} catch (error) {
+		if (["EACCES", "EPERM"].includes((error as NodeJS.ErrnoException).code ?? "")) throw new PersistentRoomWorkspaceToolError("workspace_unavailable", "No selected workspace is available for this room.");
 		throw new PersistentRoomWorkspaceToolError(purpose === "read" ? "file_not_found" : "path_not_found", purpose === "read" ? "File not found in selected workspace." : "Path not found in selected workspace.");
 	}
 

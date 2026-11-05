@@ -47,6 +47,8 @@ fs.writeFileSync(path.join(folder, "Library", "LaunchAgents", "example.md"), "pr
 fs.mkdirSync(path.join(folder, "node_modules", "hidden"), { recursive: true });
 fs.writeFileSync(path.join(folder, "node_modules", "hidden", "secret.md"), "hidden");
 fs.symlinkSync(path.join(folder, "docs"), path.join(folder, "shortcut"));
+fs.symlinkSync(path.join(folder, "docs", "guide.md"), path.join(folder, "symlink.md"));
+fs.symlinkSync(path.join(folder, "docs", "img", "pixel.png"), path.join(folder, "symlink.png"));
 fs.writeFileSync(path.join(folder, "docs", "other.md"), "# Other\n");
 const guide = path.join(folder, "docs", "guide.md");
 const IMAGE_LINES = ["![near](img/pixel.png \"Near\")", "![above](<../top pixel.png>)", "[![badge](img/pixel.png)](https://example.invalid)", "[text ![mixed](img/pixel.png)](https://example.invalid)", "![encoded](../top%20pixel.png)", "![missing alt](img/missing.png)", "![blocked alt](../node_modules/hidden/secret.png)", "![remote alt](https://images.invalid/remote.png)", "![relative alt](//images.invalid/relative.png)"];
@@ -226,13 +228,35 @@ try {
 		assert(response.status === 200 && response.headers.get("content-type")?.startsWith(type), `image content type ${extension}`);
 		assert(response.headers.get("content-security-policy") === "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:" && response.headers.get("x-content-type-options") === "nosniff" && response.headers.get("referrer-policy") === "no-referrer" && response.headers.get("cache-control") === "no-store", "image security headers");
 	}
+	for (const [route, file] of [["workspace-markdown", "symlink.md"], ["workspace-markdown", "shortcut/guide.md"], ["workspace-image", "symlink.png"], ["workspace-image", "shortcut/img/pixel.png"]]) {
+		const local = await authedFetch(`${baseUrl}${matrixQuery(route, file)}`);
+		assert(local.status !== 200, `symlink refused: ${file}`);
+		for (const device of devices) {
+			const remote = await remoteRequest(port, matrixQuery(route, file), { headers: { Cookie: device.cookie } });
+			assert(remote.status !== 200 && !remote.body.includes(folder), `paired symlink refused: ${file}`);
+		}
+	}
 	fs.writeFileSync(path.join(folder, "large.png"), ONE_PIXEL_PNG);
+	fs.truncateSync(path.join(folder, "large.png"), 20 * 1024 * 1024);
+	const boundaryImage = await authedFetch(`${baseUrl}${matrixQuery("workspace-image", "large.png")}`);
+	assert(boundaryImage.status === 200 && (await boundaryImage.arrayBuffer()).byteLength === 20 * 1024 * 1024, "image size boundary accepted");
 	fs.truncateSync(path.join(folder, "large.png"), 20 * 1024 * 1024 + 1);
 	assert((await authedFetch(`${baseUrl}${matrixQuery("workspace-image", "large.png")}`)).status === 413, "oversized image rejected");
 	for (const [file, expected] of [["../demo.png", 400], ["missing.png", 404], ["notes.txt", 400], ["node_modules/hidden/x.png", 403]] as const) {
 		assert((await authedFetch(`${baseUrl}${matrixQuery("workspace-image", file)}`)).status === expected, `image validation ${file}`);
 	}
 
+	if (process.platform !== "win32") {
+		const locked = path.join(folder, "locked");
+		fs.mkdirSync(path.join(locked, "child"), { recursive: true });
+		fs.writeFileSync(path.join(locked, "child", "secret.md"), "private");
+		fs.chmodSync(locked, 0);
+		const deniedTree = await api(matrixQuery("workspace-files", "locked/child"));
+		const deniedFile = await api(matrixQuery("workspace-markdown", "locked/child/secret.md"));
+		fs.chmodSync(locked, 0o700);
+		assert(deniedTree.status === 503 && deniedFile.status === 503, "permission errors report unavailable without exposing workspace paths");
+		assert(!JSON.stringify(deniedTree.body).includes(folder) && !JSON.stringify(deniedFile.body).includes(folder), "permission errors hide absolute paths");
+	}
 	const browser = await chromium.launch();
 	try {
 		const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
