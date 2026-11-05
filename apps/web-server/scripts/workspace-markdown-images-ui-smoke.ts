@@ -194,6 +194,45 @@ try {
 	const resetGrant = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: folder, workspaceAccessMode: "localFiles" }) });
 	assert(resetGrant.status === 200, "restore workspace root");
 
+	const rootListing = await api(matrixQuery("workspace-files", ""));
+	assert(rootListing.status === 200 && rootListing.body.root.basename === "handbook" && rootListing.body.path === "", "tree root shape");
+	assert(rootListing.body.entries.every((entry: any) => !["node_modules", "shortcut"].includes(entry.name)), "tree hides denied entries and symlinks");
+	fs.mkdirSync(path.join(folder, "empty"));
+	const emptyListing = await api(matrixQuery("workspace-files", "empty"));
+	assert(emptyListing.status === 200 && emptyListing.body.entries.length === 0, "empty directory");
+	assert((await api(matrixQuery("workspace-files", "../other"))).status === 400, "tree rejects traversal");
+	const routeRead = await api(matrixQuery("workspace-markdown", "docs/guide.md"));
+	assert(routeRead.status === 200 && routeRead.body.content === originalContent && routeRead.body.encoding === "utf-8" && routeRead.body.bytes === Buffer.byteLength(originalContent) && /^sha256:[a-f0-9]{64}$/.test(routeRead.body.revision) && routeRead.body.readOnly === false, "Markdown response fields");
+	for (const [file, expected] of [["../guide.md", 400], ["docs/guide.txt", 400], ["docs/missing.md", 404]] as const) {
+		assert((await api(matrixQuery("workspace-markdown", file))).status === expected, `Markdown invalid ${file}`);
+	}
+	for (const [name, bytes, expected] of [["limit.md", Buffer.alloc(128 * 1024, 65), 200], ["big.md", Buffer.alloc(128 * 1024 + 1, 65), 413], ["binary.md", Buffer.from([65, 0]), 415], ["invalid.md", Buffer.from([255]), 415]] as const) {
+		fs.writeFileSync(path.join(folder, name), bytes);
+		assert((await api(matrixQuery("workspace-markdown", name))).status === expected, `Markdown validation ${name}`);
+	}
+	for (const body of [{ content: 3, revision: routeRead.body.revision }, { content: "ok", revision: "bad" }]) {
+		assert((await api(matrixQuery("workspace-markdown", "docs/guide.md"), { method: "PUT", body: JSON.stringify(body) })).status === 400, "invalid write body");
+	}
+	const missingWrite = await api(matrixQuery("workspace-markdown", "docs/missing.md"), { method: "PUT", body: JSON.stringify({ content: "new", revision: routeRead.body.revision }) });
+	assert(missingWrite.status === 404 && !fs.existsSync(path.join(folder, "docs", "missing.md")), "PUT does not create a file");
+	const changed = await api(matrixQuery("workspace-markdown", "docs/guide.md"), { method: "PUT", body: JSON.stringify({ content: originalContent + "change", revision: routeRead.body.revision }) });
+	assert(changed.status === 200 && changed.body.content === originalContent + "change" && changed.body.revision !== routeRead.body.revision, "PUT returns replacement and revision");
+	const stale = await api(matrixQuery("workspace-markdown", "docs/guide.md"), { method: "PUT", body: JSON.stringify({ content: "stale", revision: routeRead.body.revision }) });
+	assert(stale.status === 409 && stale.body.currentRevision === changed.body.revision && fs.readFileSync(guide, "utf8") === originalContent + "change", "stale PUT retains current bytes and revision");
+	assert((await api(matrixQuery("workspace-markdown", "docs/guide.md"), { method: "PUT", body: JSON.stringify({ content: originalContent, revision: changed.body.revision }) })).status === 200, "restore demo content");
+	for (const [extension, type] of [["png", "image/png"], ["jpg", "image/jpeg"], ["jpeg", "image/jpeg"], ["gif", "image/gif"], ["webp", "image/webp"], ["svg", "image/svg+xml"]]) {
+		fs.writeFileSync(path.join(folder, `demo.${extension}`), ONE_PIXEL_PNG);
+		const response = await authedFetch(`${baseUrl}${matrixQuery("workspace-image", `demo.${extension}`)}`);
+		assert(response.status === 200 && response.headers.get("content-type")?.startsWith(type), `image content type ${extension}`);
+		assert(response.headers.get("content-security-policy") === "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:" && response.headers.get("x-content-type-options") === "nosniff" && response.headers.get("referrer-policy") === "no-referrer" && response.headers.get("cache-control") === "no-store", "image security headers");
+	}
+	fs.writeFileSync(path.join(folder, "large.png"), ONE_PIXEL_PNG);
+	fs.truncateSync(path.join(folder, "large.png"), 20 * 1024 * 1024 + 1);
+	assert((await authedFetch(`${baseUrl}${matrixQuery("workspace-image", "large.png")}`)).status === 413, "oversized image rejected");
+	for (const [file, expected] of [["../demo.png", 400], ["missing.png", 404], ["notes.txt", 400], ["node_modules/hidden/x.png", 403]] as const) {
+		assert((await authedFetch(`${baseUrl}${matrixQuery("workspace-image", file)}`)).status === expected, `image validation ${file}`);
+	}
+
 	const browser = await chromium.launch();
 	try {
 		const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
