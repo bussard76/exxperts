@@ -36,6 +36,7 @@ New features go from the outside in. Nothing is built until Sascha has signed of
 - Developer: targeted checks only (typecheck, lint, affected suites, the browser specs covering the change). No full suites.
 - Tester and wave: full `npm run build && npm run smokes` and `the browser suite` on current `main` plus the branch.
 - Release only: `the release gates`. Never per task or per wave.
+- UI checks run in the web UI on the server; the Electron client need not be tested there, and Sascha sees it at acceptance (decided by Sascha, 2026-11-05: "Teste die Webübersicht und du musst nicht zwangsläufig in dem Fatclient testen").
 - Every full gate runs through `gate` (fair slots, pooled by unit and browser), as `gate bash -c '<command>'` because `gate` starts a program without a shell.
 
 ## Capacity by measurement (decided by Sascha, 2026-11-04)
