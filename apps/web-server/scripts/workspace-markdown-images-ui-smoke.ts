@@ -42,6 +42,10 @@ fs.mkdirSync(path.join(folder, "docs", "img"), { recursive: true });
 const ONE_PIXEL_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==", "base64");
 fs.writeFileSync(path.join(folder, "docs", "img", "pixel.png"), ONE_PIXEL_PNG);
 fs.writeFileSync(path.join(folder, "top pixel.png"), ONE_PIXEL_PNG);
+fs.writeFileSync(path.join(folder, "file2.txt"), "two");
+fs.writeFileSync(path.join(folder, "file10.txt"), "ten");
+fs.writeFileSync(path.join(folder, ".hidden"), "hidden");
+fs.writeFileSync(path.join(folder, "demo.pem"), "hidden");
 fs.mkdirSync(path.join(folder, "Library", "LaunchAgents"), { recursive: true });
 fs.writeFileSync(path.join(folder, "Library", "LaunchAgents", "example.md"), "protected");
 fs.mkdirSync(path.join(folder, "node_modules", "hidden"), { recursive: true });
@@ -95,6 +99,8 @@ try {
 	const created = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Handbook", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
 	assert(created.status === 201, `the room is created, got ${created.status}`);
 	const agentId = String(created.body?.agent?.id ?? "");
+	const noFolder = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-files?conversationId=empty-room`);
+	assert(noFolder.status === 200 && noFolder.body.root === null && noFolder.body.path === "" && noFolder.body.entries.length === 0, "no workspace has an empty root response");
 	const saved = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: folder, workspaceAccessMode: "localFiles" }) });
 	assert(saved.status === 200, `the folder is saved, got ${saved.status} ${JSON.stringify(saved.body)}`);
 
@@ -205,7 +211,10 @@ try {
 
 	const rootListing = await api(matrixQuery("workspace-files", ""));
 	assert(rootListing.status === 200 && rootListing.body.root.basename === "handbook" && rootListing.body.path === "", "tree root shape");
-	assert(rootListing.body.entries.every((entry: any) => !["node_modules", "shortcut"].includes(entry.name)), "tree hides denied entries and symlinks");
+	assert(rootListing.body.entries.every((entry: any) => !["node_modules", "shortcut", ".hidden", "demo.pem"].includes(entry.name)), "tree hides denied entries, dotfiles and symlinks");
+	const listedNames = rootListing.body.entries.map((entry: any) => entry.name);
+	assert(listedNames.indexOf("file2.txt") < listedNames.indexOf("file10.txt"), "tree uses numeric sorting");
+	assert(rootListing.body.entries.every((entry: any, index: number, all: any[]) => (entry.kind !== "directory" || all.slice(0, index).every((previous) => previous.kind === "directory")) && typeof entry.relativePath === "string" && typeof entry.modifiedAt === "string" && typeof entry.extension === "string" && (entry.kind === "directory" ? entry.bytes === null && entry.extension === "" : typeof entry.bytes === "number")), "tree entry fields and directory ordering");
 	fs.mkdirSync(path.join(folder, "empty"));
 	const emptyListing = await api(matrixQuery("workspace-files", "empty"));
 	assert(emptyListing.status === 200 && emptyListing.body.entries.length === 0, "empty directory");
@@ -305,6 +314,7 @@ try {
 		const images = page.locator('.markdown-editor-tiptap .ProseMirror img[alt="near"], .markdown-editor-tiptap .ProseMirror img[alt="above"]');
 		await waitUntil(async () => (await images.count()) === 2, "both images are in the editor");
 		await waitUntil(() => images.evaluateAll((all) => all.every((img) => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth > 0)), "both images have loaded");
+		const imageUrl = new URL(await images.first().evaluate((img) => (img as HTMLImageElement).src));
 		const sources = await images.evaluateAll((all) => all.map((img) => new URLSearchParams((img as HTMLImageElement).src.split("?")[1]).get("path")));
 		assert(JSON.stringify(sources) === JSON.stringify(["docs/img/pixel.png", "top pixel.png"]), `images resolve against the file, got ${JSON.stringify(sources)}`);
 		console.log("  ok  linked images show, near the file and above it");
@@ -389,25 +399,32 @@ try {
 		await page.locator(".markdown-editor-save").click();
 		await page.locator(".markdown-editor-conflict").waitFor({ state: "visible" });
 		await page.getByRole("button", { name: "Reload", exact: true }).click();
-		await page.locator(".markdown-editor-tiptap .ProseMirror p", { hasText: "First line latest" }).waitFor();
+		const latest = page.locator(".markdown-editor-tiptap .ProseMirror p", { hasText: "First line latest" });
+		await latest.waitFor();
+		await latest.click();
+		await page.keyboard.press("End");
+		await page.keyboard.type(" navigation");
+		await tree.locator(".workspace-file-browser-file", { hasText: "other.md" }).click();
+		await prompt.getByRole("button", { name: "Save and continue" }).click();
+		await page.getByRole("complementary", { name: "Markdown editor: other.md" }).waitFor();
+		assert(fs.readFileSync(guide, "utf8").includes("First line latest navigation"), "navigation save writes draft before switching");
 		console.log("  ok  failed saves, conflicts, reload and navigation retain or discard drafts as chosen");
 
 		const readOnlySetting = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "custom", allowedToolNames: ["ls", "read"] } }) });
 		assert(readOnlySetting.status === 200, "set demo room read-only");
-		await tree.locator(".workspace-file-browser-file", { hasText: "other.md" }).click();
+		await tree.locator(".workspace-file-browser-file", { hasText: "guide.md" }).click();
 		await page.getByText("Read-only", { exact: true }).waitFor();
 		assert(await page.locator(".markdown-editor-save").isDisabled(), "read-only file cannot be saved");
 		const writableSetting = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "standard" } }) });
 		assert(writableSetting.status === 200, "restore demo writer");
-		await tree.locator(".workspace-file-browser-file", { hasText: "guide.md" }).click();
-		await page.getByRole("complementary", { name: "Markdown editor: guide.md" }).waitFor();
+		await tree.locator(".workspace-file-browser-file", { hasText: "other.md" }).click();
+		await page.getByRole("complementary", { name: "Markdown editor: other.md" }).waitFor();
 		const composer = page.locator("textarea").first();
 		await composer.fill("Read ");
 		await tree.locator(".workspace-file-browser-file", { hasText: "guide.md" }).dragTo(composer);
 		await waitUntil(async () => (await composer.inputValue()).includes("docs/guide.md"), "the dragged path is in the composer");
 		console.log("  ok  a file dragged onto the composer inserts its path");
 
-		const imageUrl = new URL(await images.first().evaluate((img) => (img as HTMLImageElement).src));
 		const conversationId = imageUrl.searchParams.get("conversationId")!;
 		const treeRoute = (relative: string) => `/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-files?${new URLSearchParams({ conversationId, path: relative })}`;
 		for (const denied of ["node_modules", "node_modules/hidden", "shortcut/img", "outside-link"]) {
