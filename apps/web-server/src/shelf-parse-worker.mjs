@@ -257,6 +257,12 @@ async function parseDocx(buffer) {
 	return { text: extractDocxText(documentXml), pages: null };
 }
 
+// Conversion only: mammoth does not read files a document links to.
+async function docxToHtml(buffer) {
+	const { default: mammoth } = await import("mammoth");
+	return (await mammoth.convertToHtml({ buffer })).value;
+}
+
 (async () => {
 	try {
 		const request = JSON.parse(process.argv[2] ?? "");
@@ -265,6 +271,10 @@ async function parseDocx(buffer) {
 		if (kind === "image") {
 			const image = await prepareImage(buffer, request.image);
 			post({ ok: true, image });
+			return;
+		}
+		if (kind === "docx-html") {
+			post({ ok: true, html: await docxToHtml(buffer) });
 			return;
 		}
 		if (kind === "pdf-raster") {

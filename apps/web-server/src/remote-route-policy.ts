@@ -171,6 +171,7 @@ const POLICY: Record<string, RemoteRouteClass> = {
 	"GET /api/persistent-agents/:id/workspace-files": "read",
 	"GET /api/persistent-agents/:id/workspace-markdown": "read",
 	"GET /api/persistent-agents/:id/workspace-image": "read",
+	"GET /api/persistent-agents/:id/workspace-preview": "read",
 	"PUT /api/persistent-agents/:id/workspace-markdown": "write",
 	"GET /api/persistent-agents/:id/prompt-diagnostics": "local",
 

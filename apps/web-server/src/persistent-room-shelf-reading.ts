@@ -185,6 +185,7 @@ export function cachedShelfPageCount(roomId: string, name: string, entry: ShelfF
 interface ShelfWorkerMessage {
 	ok: boolean;
 	text?: string;
+	html?: string;
 	pages?: number | null;
 	truncated?: boolean;
 	image?: { imageBase64: string; mimeType: string; width: number; height: number; downscaled: boolean };
@@ -260,6 +261,12 @@ export async function runShelfParseWorker(absolutePath: string, kind: "pdf" | "d
 	const message = await runShelfWorker({ absolutePath, kind, maxPages: SHELF_PARSE_MAX_PDF_PAGES, maxChars: SHELF_PARSE_MAX_EXTRACT_CHARS }, SHELF_PARSE_TIMEOUT_MS);
 	if (typeof message.text !== "string") throw new PersistentRoomShelfError("parse_failed", "The document could not be parsed: the parser returned no text.");
 	return { text: message.text, pages: typeof message.pages === "number" ? message.pages : null, truncated: message.truncated === true };
+}
+
+export async function runShelfDocxHtmlWorker(absolutePath: string): Promise<string> {
+	const message = await runShelfWorker({ absolutePath, kind: "docx-html" }, SHELF_PARSE_TIMEOUT_MS);
+	if (typeof message.html !== "string") throw new PersistentRoomShelfError("parse_failed", "The document could not be parsed.");
+	return message.html;
 }
 
 export interface ShelfFileText {

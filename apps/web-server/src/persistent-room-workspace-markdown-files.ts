@@ -61,7 +61,7 @@ function invalidPath(message: string): PersistentRoomWorkspaceMarkdownError {
 	return new PersistentRoomWorkspaceMarkdownError("invalid_path", 400, message);
 }
 
-function normalizeRelativePath(rawPath: unknown): string {
+export function normalizeRelativePath(rawPath: unknown): string {
 	const raw = String(rawPath ?? "").trim();
 	if (!raw) throw invalidPath("Markdown file path is required.");
 	if (raw.includes("\0") || raw.startsWith("~")) throw invalidPath("Markdown file path must stay inside the workspace.");
@@ -84,23 +84,23 @@ function normalizeMarkdownPath(rawPath: unknown): string {
 	return relativePath;
 }
 
-function toMarkdownError(error: unknown): PersistentRoomWorkspaceMarkdownError {
+export function toMarkdownError(error: unknown): PersistentRoomWorkspaceMarkdownError {
 	if (error instanceof PersistentRoomWorkspaceMarkdownError) return error;
 	if (error instanceof PersistentRoomWorkspaceToolError) {
 		if (error.code === "workspace_unavailable") return new PersistentRoomWorkspaceMarkdownError(error.code, 503, "The workspace folder is not readable. Check OneDrive permissions or make the folder available offline.");
-		if (error.code === "file_not_found") return new PersistentRoomWorkspaceMarkdownError("file_not_found", 404, "Markdown file not found in the selected workspace.");
+		if (error.code === "file_not_found") return new PersistentRoomWorkspaceMarkdownError("file_not_found", 404, "File not found in the selected workspace.");
 		if (error.code === "blocked_by_policy") return new PersistentRoomWorkspaceMarkdownError(error.code, 403, "Path is blocked by workspace policy.");
 		if (error.code === "outside_workspace") return new PersistentRoomWorkspaceMarkdownError(error.code, 403, "Path is outside the selected workspace.");
-		if (error.code === "not_file") return new PersistentRoomWorkspaceMarkdownError(error.code, 400, "Path is not a regular Markdown file.");
+		if (error.code === "not_file") return new PersistentRoomWorkspaceMarkdownError(error.code, 400, "Path is not a regular file.");
 		return new PersistentRoomWorkspaceMarkdownError(error.code, 400, error.message);
 	}
 	const code = (error as NodeJS.ErrnoException | undefined)?.code;
 	if (code === "EACCES" || code === "EPERM") return new PersistentRoomWorkspaceMarkdownError("workspace_unavailable", 503, "The workspace folder is not readable. Check OneDrive permissions or make the folder available offline.");
-	if (code === "ENOENT") return new PersistentRoomWorkspaceMarkdownError("file_not_found", 404, "Markdown file not found in the selected workspace.");
+	if (code === "ENOENT") return new PersistentRoomWorkspaceMarkdownError("file_not_found", 404, "File not found in the selected workspace.");
 	return new PersistentRoomWorkspaceMarkdownError("workspace_file_error", 500, error instanceof Error ? error.message : String(error));
 }
 
-function requirePolicy(agentId: string, conversationId: string, options: PersistentRoomWorkspacePolicyStorageOptions): WorkspaceMarkdownPolicyContext {
+export function requireWorkspaceReadPolicy(agentId: string, conversationId: string, options: PersistentRoomWorkspacePolicyStorageOptions): WorkspaceMarkdownPolicyContext {
 	const effective = resolvePersistentRoomEffectiveWorkspacePolicy(agentId, conversationId, options);
 	if (!effective.policy) throw new PersistentRoomWorkspaceMarkdownError("workspace_not_found", 404, "No workspace is configured for this room.");
 	if (!effective.workspaceToolsEnabled || effective.policy.modes.read !== true) {
@@ -152,7 +152,7 @@ export function readWorkspaceMarkdownFile(
 	rawPath: unknown,
 	options: PersistentRoomWorkspacePolicyStorageOptions = {},
 ): WorkspaceMarkdownFileResponse {
-	return readWithPolicy(requirePolicy(agentId, conversationId, options), rawPath);
+	return readWithPolicy(requireWorkspaceReadPolicy(agentId, conversationId, options), rawPath);
 }
 
 export function readWorkspaceMarkdownFileWithPolicy(
@@ -184,7 +184,7 @@ export function readWorkspaceImageFile(
 	rawPath: unknown,
 	options: PersistentRoomWorkspacePolicyStorageOptions = {},
 ): WorkspaceImageFileResponse {
-	return readImageWithPolicy(requirePolicy(agentId, conversationId, options), rawPath);
+	return readImageWithPolicy(requireWorkspaceReadPolicy(agentId, conversationId, options), rawPath);
 }
 
 export function readWorkspaceImageFileWithPolicy(
@@ -289,6 +289,6 @@ export function writeWorkspaceMarkdownFile(
 	revision: unknown,
 	options: PersistentRoomWorkspacePolicyStorageOptions = {},
 ): WorkspaceMarkdownFileResponse {
-	const context = requirePolicy(agentId, conversationId, options);
+	const context = requireWorkspaceReadPolicy(agentId, conversationId, options);
 	return writeWorkspaceMarkdownFileWithPolicy(context.policy, rawPath, content, revision);
 }

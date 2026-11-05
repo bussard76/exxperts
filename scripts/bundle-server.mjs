@@ -59,6 +59,7 @@ export const EXTERNAL_PACKAGES = [
 export const FILE_PACKAGES = [
 	{ name: "qrcode-terminal", reason: "remote-qr.ts loads it through createRequire, which esbuild cannot follow" },
 	{ name: "jszip", reason: "the shelf worker, a separate forked file, opens docx and xlsx with it" },
+	{ name: "mammoth", reason: "the shelf worker, a separate forked file, turns docx into HTML with it" },
 ];
 
 // A file of one of our runtime packages, whether esbuild reached it through

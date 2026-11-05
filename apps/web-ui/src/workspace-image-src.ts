@@ -1,3 +1,8 @@
+export function workspaceFileUrl(agentId: string, conversationId: string, route: "workspace-image" | "workspace-preview", path: string): string {
+	const query = new URLSearchParams({ conversationId, path });
+	return `/api/persistent-agents/${encodeURIComponent(agentId)}/${route}?${query}`;
+}
+
 // A Markdown image keeps the source its author wrote; only what the browser loads
 // is rewritten. Relative sources resolve against the Markdown file, a leading
 // slash means the workspace root, and anything above the root does not resolve.
@@ -22,6 +27,5 @@ export function workspaceImageUrl(agentId: string, conversationId: string, markd
 		} else segments.push(segment);
 	}
 	if (segments.length === 0) return null;
-	const query = new URLSearchParams({ conversationId, path: segments.join("/") });
-	return `/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-image?${query}`;
+	return workspaceFileUrl(agentId, conversationId, "workspace-image", segments.join("/"));
 }

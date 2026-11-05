@@ -10,11 +10,12 @@
     "typecheck:scripts": "tsc --noEmit -p tsconfig.scripts.json"
   },
   "dependencies": {
-    "@fastify/websocket": "^11.2.0",
     "@exxeta/exxperts-runtime": "*",
+    "@fastify/websocket": "^11.2.0",
     "dotenv": "^16.4.5",
     "fastify": "^5.12.1",
     "jszip": "^3.10.1",
+    "mammoth": "^1.13.0",
     "pdfjs-dist": "5.4.394",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },

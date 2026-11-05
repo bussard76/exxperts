@@ -5,6 +5,7 @@ import { createPersistentAgentInstance, saveWithOpenConversationCheck, getPersis
 import { normalizePersistentRoomWorkspaceToolSelectionInput } from "./persistent-room-tool-policy.js";
 import { PersistentRoomWorkspacePolicyError, resolvePersistentRoomEffectiveWorkspacePolicy, assertPersistentRoomWorkspaceDefaultMutable, releasePersistentRoomThreadWorkspaceMirror, type PersistentRoomCapabilityPolicy, persistentRoomCapabilityPolicyView, readPersistentRoomCapabilityPolicy, PERSISTENT_ROOM_WORKSPACE_POLICY_STORAGE_SOURCE, deletePersistentRoomCapabilityPolicy, readPersistentRoomDefaultCapabilityPolicy, PERSISTENT_ROOM_WORKSPACE_DEFAULT_STORAGE_SOURCE, missingPersistentRoomWorkspaceRootWarnings, normalizePersistentRoomWorkspaceAccessModeInput, createPersistentRoomDefaultCapabilityPolicy, updatePersistentRoomCapabilityPolicyWorkspaceSettings, writePersistentRoomDefaultCapabilityPolicy, deletePersistentRoomDefaultCapabilityPolicy, createPersistentRoomCapabilityPolicy, writePersistentRoomCapabilityPolicy } from "./persistent-room-workspace-policy.js";
 import { listPersistentRoomWorkspaceFiles } from "./persistent-room-workspace-files.js";
+import { readWorkspacePreview } from "./persistent-room-workspace-preview.js";
 import { PersistentRoomWorkspaceMarkdownError, readWorkspaceImageFile, readWorkspaceMarkdownFile, writeWorkspaceMarkdownFile } from "./persistent-room-workspace-markdown-files.js";
 import { readPersistentRoomMaintenanceSettings, writePersistentRoomMaintenanceSettings } from "./persistent-room-maintenance-settings.js";
 import { settleMemoryBudget } from "./memory-entries-store.js";
@@ -149,6 +150,24 @@ app.get("/api/persistent-agents/:id/workspace-image", async (req, reply) => {
 		if (!conversationId) throw new Error("conversationId is required");
 		const image = readWorkspaceImageFile(status.id, conversationId, query.path);
 		return reply.headers(ARTIFACT_SECURITY_HEADERS).type(image.contentType).send(image.bytes);
+	} catch (e) {
+		const payload = persistentRoomWorkspaceErrorPayload(e);
+		return reply.code(payload.statusCode).send(payload.body);
+	}
+});
+
+app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
+	const idRaw = String((req.params as any).id ?? "").trim();
+	try {
+		const status = getUsablePersistentAgentStatusForNormalUse(idRaw);
+		const query = (req.query ?? {}) as any;
+		const conversationId = String(query.conversationId ?? "").trim();
+		if (!conversationId) throw new Error("conversationId is required");
+		const preview = await readWorkspacePreview(status.id, conversationId, query.path);
+		reply.headers(ARTIFACT_SECURITY_HEADERS);
+		if (preview.kind === "pdf") return reply.type("application/pdf").send(preview.bytes);
+		if (preview.kind === "word") return reply.type("text/html; charset=utf-8").send(preview.html);
+		return reply.send({ sheets: preview.sheets, truncatedSheets: preview.truncatedSheets });
 	} catch (e) {
 		const payload = persistentRoomWorkspaceErrorPayload(e);
 		return reply.code(payload.statusCode).send(payload.body);
