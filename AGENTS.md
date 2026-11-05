@@ -6,6 +6,7 @@ Read first: `ARCHITECTURE.md` (if present), your task, and `docs/coordinator.md`
 
 - This clone works on the fork `bussard76/exxperts` (`origin`). `EXXETA/exxperts` (`upstream`) is read-only.
 - **Never push to `EXXETA/exxperts` and never open a pull request, issue or comment there.** Pass `--repo bussard76/exxperts` to every `gh` call that writes.
+- Only Sascha contributes to EXXETA, from the separate clone `~/Development/exxperts-upstream`, which holds no factory files. `tools/exxeta-pr-guard.sh` rejects pushes of factory files on branches bound for EXXETA (`exxeta/*` or an open PR there).
 
 ## Layout
 
@@ -39,6 +40,10 @@ After editing `runtime/`: `cd runtime && npm run build && cd ..`
 ## Way of working
 
 - **One task, its scope only.** Do exactly the task you were given. Out-of-scope findings go into your final report; do not fix them.
+- **Think before you build.** State your assumptions first. If a task can be read several ways, name the readings instead of picking one silently. If something is unclear, stop and ask the coordinator. If a simpler way exists, say so.
+- **Simplest thing that works.** Nothing beyond what was asked: no speculative features, no abstractions for single-use code, no unrequested configurability, no error handling for impossible cases. If 200 lines could be 50, rewrite them.
+- **Surgical changes.** Every changed line traces to your task. Match the existing style, and leave adjacent code, comments and formatting alone. Remove only what your own change made unused; mention other dead code in your report.
+- **Verifiable goals.** Turn the task into checks you can run, and for several steps write a short plan with one check per step. Keep going until they pass.
 - **TDD.** For every behaviour: write a failing test first, make it pass, then refactor. Test through public entry points, not internals.
 - **Done means:** `npm run build && npm run smokes` is green, the task's acceptance checks pass, and your report lists files changed, tests added and any assumptions.
 - **Never weaken tests.** Do not delete, skip or loosen existing tests. If a test is wrong, escalate.

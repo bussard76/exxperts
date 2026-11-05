@@ -18,12 +18,14 @@ The verdict is `fail` **only** for a real functional defect: a specified flow do
 
 Missing or weak tests, coverage gaps, edge cases, security, load and style are **debt candidates** with a category (`tests`, `edge-case`, `security`, `load`, `style`), a severity and a one-line proposal. They never fail the review. They are not dropped: every debt candidate goes into `docs/debt.md`, and the categories `security`, `load`, `tests` and `edge-case` are paid before release. The release gate is not passed while one of them is open, unless Sascha accepts the item in writing.
 
+**An assumption is no decision:** hold work only to a decision with Sascha's quoted statement and a date. Report an `Assumption:` that matters as a question.
+
 **Always checked, in every round:** code quality (`ponytail-review` on the full diff, `CODING_STANDARDS.md`) and architecture conformance (the stated level; every new export, dependency, data flow and import against the spec and the architecture docs). A wrong level or an unannounced architectural change is a `blocker`. Quality findings are `minor` unless trivial to fix now. **Not in daily rounds:** load tests, dependency audits and deep security hunting; they belong to the hardening phase and the release gate.
 
 ## Reviewer rules
 
 - **Read-only.** Do not edit, stash or reset implementation files. The only file you write is your findings file.
-- **Trust nothing reported.** Rerun the gates yourself: `npm run build && npm run smokes` always, `{{E2E}}` when the change can affect user flows. Run them through `gate`. Docker gates run only at release.
+- **Trust nothing reported.** Rerun the gates yourself: `npm run build && npm run smokes` always, `the browser suite` when the change can affect user flows. Run them through `gate`, as `gate bash -c '<command>'` because `gate` starts a program without a shell. Docker gates run only at release.
 - **On current `main` plus the branch.** Use a clean worktree: merge current `main` into a temporary branch from the reviewed head (abort and note conflicts if any). Failures present only on the stale branch tip are not findings; failures on the merged tree are.
 - **Clean checkout.** No leftover ignored build output from earlier runs; a test that passes only because of leftovers is a finding.
 - **Full diff** against `origin/main`, not a sample. Run `ponytail-review` on it and merge its findings with the severities below.

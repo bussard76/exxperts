@@ -9,6 +9,9 @@
     "humanName": "Sascha",
     "adoptedOn": "2026-11-04"
   },
+  "architecture": {
+    "mode": "off"
+  },
   "rhythm": {
     "mode": "continuous",
     "$modes": "day-plan-night-build: the human plans, tests and decides by day, the Controller builds unattended at night, morning handover; continuous: the Controller builds whenever signed-off work exists and asks as questions arise; custom: quietHours define when the Controller may start new work",
@@ -28,7 +31,7 @@
     "$comment": "A remote server is an option, not a must. The controller runs on one host (the local machine or a remote one). Workers run on zero or more hosts; each has its own paths, Orca environment and capacity. With no remote hosts everything runs locally.",
     "controller": {
       "host": "workhorse2",
-      "controllerDir": "~/controller"
+      "controllerDir": "~/controller-exxperts"
     },
     "workers": [
       {
@@ -118,16 +121,13 @@
     }
   },
   "commands": {
-    "install": "npm ci",
+    "install": "npm ci && npm run build",
     "typecheck": "npx tsc --noEmit -p apps/web-ui/tsconfig.json && npm run typecheck:scripts",
     "lint": "",
     "unit": "npm run test:scripts",
     "verify": "npm run build && npm run smokes",
     "e2e": "",
-    "release": [
-      "pnpm e2e:compose",
-      "pnpm test:images"
-    ]
+    "release": []
   },
   "reviews": {
     "functionalOnly": true,

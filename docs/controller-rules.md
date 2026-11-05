@@ -1,0 +1,2 @@
+- **Never start `./scripts/exxperts-web` or `./scripts/exxeta-web` on the shared host.** They SIGKILL whatever listens on ports 8787 and 5173, at start and at stop, whichever project owns it. To run the web app, use the built launcher on a port of the worker's own: `node bin/exxperts-web.cjs --port <free port> --no-open`.
+- **`EXXETA/exxperts` is read-only.** Never push to it and never open a pull request, issue or comment there. Pass `--repo bussard76/exxperts` to every `gh` call that writes. This project's clones have no remote for it.

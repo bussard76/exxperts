@@ -32,4 +32,8 @@ Record the full branch-tip SHA. Commit only `docs/reviews/<task>-architecture-co
 
 ## After each merged wave: stewardship
 
-Run `ponytail-audit` on the merged code. Compare modules, responsibilities, exports, allowed imports and data flow with the architecture docs; name every drift with file evidence. Reconcile findings into `docs/debt.md` with origin, risk, proposal and size. Propose bounded refactor tasks with levels and acceptance checks. Architecture doc changes go through an ADR.
+Run `ponytail-audit` on the merged code. Compare modules, responsibilities, exports, allowed imports and data flow with the architecture docs; name every drift with file evidence. Reconcile findings into `docs/debt.md` with origin, risk, proposal and size. Propose bounded refactor tasks with levels and acceptance checks. Architecture doc changes go through an ADR. Runs only when this project chose a maintained `ARCHITECTURE.md`.
+
+## Architecture document
+
+This project has not chosen a maintained `ARCHITECTURE.md` (`architecture.mode` in `factory.config.json`), so there is no baseline and no stewardship. Spec and conformance reviews still run. To turn it on, set the mode to `architect` and run `agentic-factory update`.
