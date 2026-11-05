@@ -3,10 +3,10 @@
 // Source: https://github.com/omnigent-ai/omnigent/tree/da7555532be25cd127a3cdee8bf8bb32071932fb
 // Copyright (2026) Databricks, Inc.; Apache-2.0.
 // Changes: exxperts keeps the textarea-era workspace API, revision conflicts,
-// room dirty-navigation guard, and existing MarkdownRenderer preview.
+// room dirty-navigation guard, and adds a read-only TipTap preview.
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
-import type { Editor } from "@tiptap/core";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type MouseEvent, type Ref } from "react";
+import { mergeAttributes, Node, type Editor } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { StarterKit } from "@tiptap/starter-kit";
 import { ListItem, TaskItem, TaskList } from "@tiptap/extension-list";
@@ -15,7 +15,6 @@ import { Markdown } from "@tiptap/markdown";
 import "@tiptap/markdown";
 import "@tiptap/extension-list";
 import "@tiptap/extension-table";
-import { MarkdownRenderer } from "./Markdown";
 import {
 	getWorkspaceMarkdownFile,
 	putWorkspaceMarkdownFile,
@@ -39,6 +38,7 @@ interface Props {
 	path: string;
 	onClose: () => void;
 	onDirtyChange: (dirty: boolean) => void;
+	onOpenMarkdown?: (path: string) => void;
 }
 
 type EditorPhase = "loading" | "ready" | "saving" | "conflict" | "error";
@@ -48,6 +48,50 @@ type EditorMode = "edit" | "preview" | "raw";
 // nested list. Relaxing the stock paragraph-first schema keeps those files
 // editable instead of failing on the first transaction.
 const SafeListItem = ListItem.extend({ content: "block+" });
+
+const WikiLink = Node.create({
+	name: "wikiLink",
+	inline: true,
+	group: "inline",
+	content: "text*",
+	selectable: false,
+	addOptions() {
+		return { HTMLAttributes: {} };
+	},
+	addAttributes() {
+		return { href: { default: "" } };
+	},
+	parseHTML() {
+		return [{ tag: 'a[data-wiki-link="true"]' }];
+	},
+	renderHTML({ node, HTMLAttributes }) {
+		const href = String(node.attrs?.href ?? "");
+		const safeHref = /^[a-z][a-z\\d+.-]*:/i.test(href) || href.startsWith("//") ? "" : href;
+		return ["a", mergeAttributes(this.options.HTMLAttributes, HTMLAttributes, { href: safeHref, "data-wiki-link": "true" }), 0];
+	},
+	markdownTokenName: "wikiLink",
+	markdownTokenizer: {
+		name: "wikiLink",
+		level: "inline",
+		start: "[[",
+		tokenize(src, _tokens, lexer) {
+			const match = /^\[\[([^\]\n]+)\]\]/.exec(src);
+			if (!match) return;
+			const inner = match[1].trim();
+			const separator = inner.indexOf("|");
+			const href = (separator < 0 ? inner : inner.slice(0, separator)).trim();
+			const label = (separator < 0 ? inner : inner.slice(separator + 1)).trim() || href;
+			if (!href || !label) return;
+			return { type: "wikiLink", raw: match[0], href, tokens: lexer.inlineTokens(label) };
+		},
+	},
+	parseMarkdown: (token, helpers) => helpers.createNode("wikiLink", { href: token.href }, helpers.parseInline(token.tokens || [])),
+	renderMarkdown: (node, helpers) => {
+		const href = String(node.attrs?.href ?? "");
+		const label = helpers.renderChildren(node);
+		return label === href ? `[[${href}]]` : `[[${href}|${label}]]`;
+	},
+});
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -69,6 +113,8 @@ interface SurfaceProps {
 	hasExternalUpdate: boolean;
 	isSaving: boolean;
 	saveError: boolean;
+	readOnly: boolean;
+	onPreviewLink?: (href: string, isWikiLink?: boolean) => boolean;
 	setDirty: (dirty: boolean) => void;
 	onDraftChange: (content: string) => void;
 	onSave: (content: string, revision: string) => Promise<boolean>;
@@ -84,6 +130,8 @@ function MarkdownEditorSurface({
 	hasExternalUpdate,
 	isSaving,
 	saveError,
+	readOnly,
+	onPreviewLink,
 	setDirty,
 	onDraftChange,
 	onSave,
@@ -107,6 +155,7 @@ function MarkdownEditorSurface({
 			listItem: false,
 			link: { openOnClick: false, autolink: false },
 		}),
+		WikiLink.configure({ HTMLAttributes: { "data-wiki-link": "true" } }),
 		SafeListItem,
 		TaskList,
 		TaskItem.configure({ nested: true }),
@@ -122,7 +171,7 @@ function MarkdownEditorSurface({
 		extensions,
 		content,
 		contentType: "markdown",
-		editable: canEdit,
+		editable: canEdit && !readOnly,
 		onCreate: ({ editor: created }) => {
 			baselineRef.current = created.getMarkdown();
 			draftRef.current = created.getMarkdown();
@@ -219,7 +268,7 @@ function MarkdownEditorSurface({
 
 	useEffect(() => {
 		if (!editor) return;
-		editor.setEditable(canEdit);
+		editor.setEditable(canEdit && !readOnly);
 		contentSetterRef.current = (next: string) => {
 			if (editor.isDestroyed) return;
 			editor.commands.setContent(next, { emitUpdate: false, contentType: "markdown" });
@@ -232,7 +281,7 @@ function MarkdownEditorSurface({
 		return () => {
 			if (contentSetterRef.current) contentSetterRef.current = null;
 		};
-	}, [canEdit, contentSetterRef, editor, onDraftChange, setDirty]);
+	}, [canEdit, contentSetterRef, editor, onDraftChange, readOnly, setDirty]);
 
 	useEffect(() => {
 		const handler = (event: KeyboardEvent) => {
@@ -254,11 +303,21 @@ function MarkdownEditorSurface({
 		return () => window.clearTimeout(timer);
 	}, [canEdit, hasExternalUpdate, isDirty, isSaving, save]);
 
+	const handlePreviewLinkClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
+		if (!readOnly || !onPreviewLink) return;
+		const target = event.target instanceof Element ? event.target.closest("a") : null;
+		if (!(target instanceof HTMLAnchorElement)) return;
+		const href = target.getAttribute("href");
+		if (!href) return;
+		const isWikiLink = target.dataset.wikiLink === "true";
+		if (onPreviewLink(href, isWikiLink)) event.preventDefault();
+	}, [onPreviewLink, readOnly]);
+
 	return (
 		<div className="markdown-editor-rich-surface">
-			<MarkdownSearchBar editor={editor} stateRef={searchStateRef} open={searchOpen} onClose={() => setSearchOpen(false)} />
-			<MarkdownEditorToolbar editor={editor} canEdit={canEdit} onSave={() => { void save(); }} isSaving={isSaving} isDirty={isDirty} saveError={saveError} hasExternalUpdate={hasExternalUpdate} onSearch={() => setSearchOpen((open) => !open)} searchOpen={searchOpen} />
-			<div className="markdown-editor-rich-scroll">
+			{!readOnly && <MarkdownSearchBar editor={editor} stateRef={searchStateRef} open={searchOpen} onClose={() => setSearchOpen(false)} />}
+			{!readOnly && <MarkdownEditorToolbar editor={editor} canEdit={canEdit} onSave={() => { void save(); }} isSaving={isSaving} isDirty={isDirty} saveError={saveError} hasExternalUpdate={hasExternalUpdate} onSearch={() => setSearchOpen((open) => !open)} searchOpen={searchOpen} />}
+			<div className="markdown-editor-rich-scroll" onClick={handlePreviewLinkClick}>
 				<EditorContent editor={editor} className="markdown-editor-tiptap" />
 			</div>
 		</div>
@@ -267,7 +326,34 @@ function MarkdownEditorSurface({
 
 const MarkdownEditorSurfaceWithRef = forwardRef(MarkdownEditorSurface);
 
-export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agentId, conversationId, path, onClose, onDirtyChange }: Props, ref: Ref<MarkdownEditorHandle>) {
+function resolveWorkspaceMarkdownPath(currentPath: string, href: string, allowExtensionless = false): string | null {
+	const trimmed = href.trim();
+	if (!trimmed || trimmed.startsWith("#") || trimmed.includes("\\") || /^[a-z][a-z\d+.-]*:/i.test(trimmed) || trimmed.startsWith("//")) return null;
+	const pathPart = trimmed.split(/[?#]/, 1)[0];
+	const segments = pathPart.startsWith("/") ? [] : currentPath.split("/").slice(0, -1);
+	for (const rawSegment of pathPart.split("/")) {
+		if (!rawSegment || rawSegment === ".") continue;
+		let segment: string;
+		try {
+			segment = decodeURIComponent(rawSegment);
+		} catch {
+			return null;
+		}
+		if (segment === "..") {
+			if (segments.length === 0) return null;
+			segments.pop();
+			continue;
+		}
+		if (!segment || segment.includes("/") || segment.includes("\\") || segment.includes("\0") || segment.startsWith(".")) return null;
+		segments.push(segment);
+	}
+	const resolved = segments.join("/");
+	if (!resolved) return null;
+	if (/\.md$/i.test(resolved)) return resolved;
+	return allowExtensionless ? `${resolved}.md` : null;
+}
+
+export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agentId, conversationId, path, onClose, onDirtyChange, onOpenMarkdown }: Props, ref: Ref<MarkdownEditorHandle>) {
 	const [file, setFile] = useState<WorkspaceMarkdownFile | null>(null);
 	const fileRef = useRef<WorkspaceMarkdownFile | null>(null);
 	const [draft, setDraft] = useState("");
@@ -384,6 +470,18 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 	const save = useCallback(() => surfaceRef.current?.save() ?? Promise.resolve(false), []);
 	const discard = useCallback(() => surfaceRef.current?.discard(), []);
 	const focus = useCallback(() => surfaceRef.current?.focus(), []);
+	const handlePreviewLink = useCallback((href: string, isWikiLink = false): boolean => {
+		const workspacePath = resolveWorkspaceMarkdownPath(path, href, isWikiLink);
+		if (workspacePath && onOpenMarkdown) {
+			onOpenMarkdown(workspacePath);
+			return true;
+		}
+		if (/^(?:https?:|mailto:|tel:)/i.test(href)) {
+			window.open(href, "_blank", "noopener,noreferrer");
+			return true;
+		}
+		return false;
+	}, [onOpenMarkdown, path]);
 	const setEditorMode = useCallback((nextMode: EditorMode) => {
 		// TipTap is the source of truth after a formatting command. Mirror it
 		// before switching views so Preview/RAW never show a stale React draft.
@@ -451,8 +549,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			{error && <p className="markdown-editor-error" role="alert">{error}</p>}
 			<div className="markdown-editor-body">
 				{phase === "loading" && <p className="markdown-editor-placeholder">Loading file…</p>}
-				{phase !== "loading" && file && <div className={mode === "edit" ? "markdown-editor-surface" : "markdown-editor-surface markdown-editor-surface-hidden"}><MarkdownEditorSurfaceWithRef key={`${conversationId}:${path}:${editorKey}`} ref={surfaceRef} content={draft} revision={file.revision} canEdit={canEdit} isDirty={isDirty} hasExternalUpdate={hasExternalUpdate || phase === "conflict"} isSaving={phase === "saving"} saveError={phase === "error"} setDirty={setDirty} onDraftChange={handleDraftChange} onSave={persist} discardAndApplyExternal={discardAndApplyExternal} contentSetterRef={contentSetterRef} /></div>}
-				{phase !== "loading" && mode === "preview" && <div className="markdown-editor-preview"><MarkdownRenderer>{draft}</MarkdownRenderer></div>}
+				{phase !== "loading" && file && <div className={mode === "raw" ? "markdown-editor-surface markdown-editor-surface-hidden" : "markdown-editor-surface"}><MarkdownEditorSurfaceWithRef key={`${conversationId}:${path}:${editorKey}`} ref={surfaceRef} content={draft} revision={file.revision} canEdit={canEdit} isDirty={isDirty} hasExternalUpdate={hasExternalUpdate || phase === "conflict"} isSaving={phase === "saving"} saveError={phase === "error"} readOnly={mode === "preview"} onPreviewLink={handlePreviewLink} setDirty={setDirty} onDraftChange={handleDraftChange} onSave={persist} discardAndApplyExternal={discardAndApplyExternal} contentSetterRef={contentSetterRef} /></div>}
 				{phase !== "loading" && mode === "raw" && <pre className="markdown-editor-raw" aria-label="Raw Markdown source">{draft}</pre>}
 			</div>
 			{conflict && <div className="markdown-editor-conflict" role="alert"><strong>This file changed outside the editor.</strong>{conflictRevision ? <span> Reload the latest version or save your draft over it.</span> : <span> Reload the latest version or keep your local draft.</span>}<div className="markdown-editor-conflict-actions"><button type="button" onClick={() => void reloadLatest()}>Reload</button><button type="button" onClick={() => void keepMine()} disabled={!canEdit}>Keep mine</button></div></div>}

@@ -8610,6 +8610,7 @@ export function App() {
 					path={rightPane.path}
 					onClose={requestCloseMarkdownEditor}
 					onDirtyChange={onMarkdownEditorDirtyChange}
+					onOpenMarkdown={(path) => openWorkspaceMarkdown({ relativePath: path, extension: ".md" })}
 				/>
 			)}
 			{rightPane?.kind === "taskRun" && taskState.phase !== "none" && taskState.taskId === rightPane.taskId && (

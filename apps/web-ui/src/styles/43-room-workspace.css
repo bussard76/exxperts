@@ -105,7 +105,7 @@ html.sidebar-collapsed .sidebar-resizer { display: none; }
 .markdown-editor-tiptap .ProseMirror code { padding: 2px 4px; border-radius: 3px; background: var(--panel-2); font-family: var(--exx-font-mono, ui-monospace, monospace); font-size: .9em; }
 .markdown-editor-tiptap .ProseMirror pre { overflow: auto; padding: 12px; border-radius: 5px; background: var(--panel-2); font: 12px/1.5 var(--exx-font-mono, ui-monospace, monospace); }
 .markdown-editor-tiptap .ProseMirror pre code { padding: 0; background: transparent; }
-.markdown-editor-tiptap .ProseMirror a { color: var(--accent, #6ea8fe); text-decoration: underline; }
+.markdown-editor-tiptap .ProseMirror a { color: var(--accent, #6ea8fe); cursor: pointer; text-decoration: underline; }
 .markdown-editor-tiptap .ProseMirror hr { border: 0; border-top: 1px solid var(--border); }
 .markdown-editor-tiptap .ProseMirror table { width: 100%; margin: 14px 0; border-collapse: collapse; table-layout: fixed; overflow: hidden; }
 .markdown-editor-tiptap .ProseMirror th, .markdown-editor-tiptap .ProseMirror td { position: relative; min-width: 80px; padding: 6px 8px; border: 1px solid var(--border); vertical-align: top; text-align: left; }
