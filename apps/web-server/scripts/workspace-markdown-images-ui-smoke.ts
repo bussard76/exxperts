@@ -49,7 +49,7 @@ fs.writeFileSync(path.join(folder, "node_modules", "hidden", "secret.md"), "hidd
 fs.symlinkSync(path.join(folder, "docs"), path.join(folder, "shortcut"));
 fs.writeFileSync(path.join(folder, "docs", "other.md"), "# Other\n");
 const guide = path.join(folder, "docs", "guide.md");
-const IMAGE_LINES = ["![near](img/pixel.png \"Near\")", "![above](<../top pixel.png>)", "[![badge](img/pixel.png)](https://example.invalid)", "[text ![mixed](img/pixel.png)](https://example.invalid)", "![encoded](../top%20pixel.png)", "![remote alt](https://images.invalid/remote.png)", "![relative alt](//images.invalid/relative.png)"];
+const IMAGE_LINES = ["![near](img/pixel.png \"Near\")", "![above](<../top pixel.png>)", "[![badge](img/pixel.png)](https://example.invalid)", "[text ![mixed](img/pixel.png)](https://example.invalid)", "![encoded](../top%20pixel.png)", "![missing alt](img/missing.png)", "![blocked alt](../node_modules/hidden/secret.png)", "![remote alt](https://images.invalid/remote.png)", "![relative alt](//images.invalid/relative.png)"];
 fs.writeFileSync(guide, `# Guide\n\nFirst line\n\n${IMAGE_LINES.join("\n\n")}\n`);
 
 // A provider at an address nobody answers: the room only has to open, never answer.
@@ -237,6 +237,16 @@ try {
 	try {
 		const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 		const page = await context.newPage();
+		let treeMode: "loading" | "no-folder" | "empty" | "error" | "normal" = "loading";
+		let releaseTree!: () => void;
+		const treeDelay = new Promise<void>((resolve) => { releaseTree = resolve; });
+		await page.route("**/workspace-files?**", async (route) => {
+			if (treeMode === "loading") { await treeDelay; }
+			if (treeMode === "no-folder") return route.fulfill({ json: { root: null, path: "", entries: [] } });
+			if (treeMode === "empty") return route.fulfill({ json: { root: { displayLabel: "Demo", basename: "demo" }, path: "", entries: [] } });
+			if (treeMode === "error") return route.fulfill({ status: 503, json: { error: "Demo unavailable" } });
+			await route.continue();
+		});
 		let externalRequests = 0;
 		await page.route("**/images.invalid/**", async (route) => { externalRequests++; await route.abort(); });
 		await page.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
@@ -249,6 +259,15 @@ try {
 		await card.getByRole("button", { name: /^(Enter|Resume)$/ }).click();
 
 		const tree = page.locator(".sidebar-workspace-files");
+		await tree.getByText("Loading…").waitFor();
+		treeMode = "no-folder";
+		releaseTree();
+		await tree.getByText("No workspace folder connected.").waitFor();
+		treeMode = "empty";
+		await tree.getByText("The workspace is empty.").waitFor({ timeout: 10000 });
+		treeMode = "error";
+		await tree.getByText("Demo unavailable").waitFor({ timeout: 10000 });
+		treeMode = "normal";
 		await tree.locator(".workspace-file-browser-directory", { hasText: "docs" }).click({ timeout: 15_000 });
 		await tree.locator(".workspace-file-browser-file", { hasText: "guide.md" }).click({ timeout: 15_000 });
 
@@ -258,6 +277,11 @@ try {
 		const sources = await images.evaluateAll((all) => all.map((img) => new URLSearchParams((img as HTMLImageElement).src.split("?")[1]).get("path")));
 		assert(JSON.stringify(sources) === JSON.stringify(["docs/img/pixel.png", "top pixel.png"]), `images resolve against the file, got ${JSON.stringify(sources)}`);
 		console.log("  ok  linked images show, near the file and above it");
+		for (const alt of ["missing alt", "blocked alt"]) {
+			const image = page.locator(`.markdown-editor-tiptap img[alt="${alt}"]`);
+			await image.waitFor({ state: "visible" });
+			await waitUntil(() => image.evaluate((item) => (item as HTMLImageElement).complete && (item as HTMLImageElement).naturalWidth === 0), `${alt} is shown without image bytes`);
+		}
 		for (const mode of ["Edit", "Preview"]) {
 			await page.getByRole("button", { name: mode, exact: true }).click();
 			for (const alt of ["remote alt", "relative alt"]) {
@@ -337,6 +361,15 @@ try {
 		await page.locator(".markdown-editor-tiptap .ProseMirror p", { hasText: "First line latest" }).waitFor();
 		console.log("  ok  failed saves, conflicts, reload and navigation retain or discard drafts as chosen");
 
+		const readOnlySetting = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "custom", allowedToolNames: ["ls", "read"] } }) });
+		assert(readOnlySetting.status === 200, "set demo room read-only");
+		await tree.locator(".workspace-file-browser-file", { hasText: "other.md" }).click();
+		await page.getByText("Read-only", { exact: true }).waitFor();
+		assert(await page.locator(".markdown-editor-save").isDisabled(), "read-only file cannot be saved");
+		const writableSetting = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "standard" } }) });
+		assert(writableSetting.status === 200, "restore demo writer");
+		await tree.locator(".workspace-file-browser-file", { hasText: "guide.md" }).click();
+		await page.getByRole("complementary", { name: "Markdown editor: guide.md" }).waitFor();
 		const composer = page.locator("textarea").first();
 		await composer.fill("Read ");
 		await tree.locator(".workspace-file-browser-file", { hasText: "guide.md" }).dragTo(composer);
