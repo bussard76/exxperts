@@ -21,7 +21,9 @@ import {
 	WorkspaceMarkdownApiError,
 	type WorkspaceMarkdownFile,
 } from "../workspace-markdown-api";
+import { workspaceImageUrl } from "../workspace-image-src";
 import { useMarkdownEditorSync } from "./useMarkdownEditorSync";
+import { createWorkspaceImageExtension } from "./WorkspaceImageExtension";
 import { MarkdownEditorToolbar } from "./MarkdownEditorToolbar";
 import { MarkdownSearchBar } from "./MarkdownSearchBar";
 import { createSearchDecorationExtension, type SearchDecorationState } from "./TipTapSearchExtension";
@@ -115,6 +117,7 @@ interface SurfaceProps {
 	saveError: boolean;
 	readOnly: boolean;
 	onPreviewLink?: (href: string, isWikiLink?: boolean) => boolean;
+	resolveImageSrc: (src: string) => string | null;
 	setDirty: (dirty: boolean) => void;
 	onDraftChange: (content: string) => void;
 	onSave: (content: string, revision: string) => Promise<boolean>;
@@ -132,6 +135,7 @@ function MarkdownEditorSurface({
 	saveError,
 	readOnly,
 	onPreviewLink,
+	resolveImageSrc,
 	setDirty,
 	onDraftChange,
 	onSave,
@@ -149,6 +153,8 @@ function MarkdownEditorSurface({
 	const saveRef = useRef<(() => Promise<boolean>) | null>(null);
 	const headerSaveRef = useRef<(() => Promise<boolean>) | null>(null);
 	const searchStateRef = useRef<SearchDecorationState | null>(null);
+	const resolveImageSrcRef = useRef(resolveImageSrc);
+	resolveImageSrcRef.current = resolveImageSrc;
 	const [searchOpen, setSearchOpen] = useState(false);
 	const extensions = useMemo(() => [
 		StarterKit.configure({
@@ -163,6 +169,7 @@ function MarkdownEditorSurface({
 		TableRow,
 		TableCell,
 		TableHeader,
+		createWorkspaceImageExtension(resolveImageSrcRef),
 		Markdown,
 		createSearchDecorationExtension(searchStateRef),
 	], [searchStateRef]);
@@ -527,6 +534,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		}
 	}, [agentId, conversationId, dismissExternalUpdate, path, persist]);
 
+	const resolveImageSrc = useCallback((src: string) => workspaceImageUrl(agentId, conversationId, path, src), [agentId, conversationId, path]);
 	const filename = path.split("/").pop() || path;
 	const conflict = phase === "conflict" || hasExternalUpdate;
 	const status = phase === "loading" ? "Loading…" : phase === "saving" ? "Saving…" : conflict ? "Conflict" : phase === "error" ? "Error" : isDirty ? "Unsaved" : canEdit ? "Saved" : "Read-only";
@@ -549,7 +557,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			{error && <p className="markdown-editor-error" role="alert">{error}</p>}
 			<div className="markdown-editor-body">
 				{phase === "loading" && <p className="markdown-editor-placeholder">Loading file…</p>}
-				{phase !== "loading" && file && <div className={mode === "raw" ? "markdown-editor-surface markdown-editor-surface-hidden" : "markdown-editor-surface"}><MarkdownEditorSurfaceWithRef key={`${conversationId}:${path}:${editorKey}`} ref={surfaceRef} content={draft} revision={file.revision} canEdit={canEdit} isDirty={isDirty} hasExternalUpdate={hasExternalUpdate || phase === "conflict"} isSaving={phase === "saving"} saveError={phase === "error"} readOnly={mode === "preview"} onPreviewLink={handlePreviewLink} setDirty={setDirty} onDraftChange={handleDraftChange} onSave={persist} discardAndApplyExternal={discardAndApplyExternal} contentSetterRef={contentSetterRef} /></div>}
+				{phase !== "loading" && file && <div className={mode === "raw" ? "markdown-editor-surface markdown-editor-surface-hidden" : "markdown-editor-surface"}><MarkdownEditorSurfaceWithRef key={`${conversationId}:${path}:${editorKey}`} ref={surfaceRef} resolveImageSrc={resolveImageSrc} content={draft} revision={file.revision} canEdit={canEdit} isDirty={isDirty} hasExternalUpdate={hasExternalUpdate || phase === "conflict"} isSaving={phase === "saving"} saveError={phase === "error"} readOnly={mode === "preview"} onPreviewLink={handlePreviewLink} setDirty={setDirty} onDraftChange={handleDraftChange} onSave={persist} discardAndApplyExternal={discardAndApplyExternal} contentSetterRef={contentSetterRef} /></div>}
 				{phase !== "loading" && mode === "raw" && <pre className="markdown-editor-raw" aria-label="Raw Markdown source">{draft}</pre>}
 			</div>
 			{conflict && <div className="markdown-editor-conflict" role="alert"><strong>This file changed outside the editor.</strong>{conflictRevision ? <span> Reload the latest version or save your draft over it.</span> : <span> Reload the latest version or keep your local draft.</span>}<div className="markdown-editor-conflict-actions"><button type="button" onClick={() => void reloadLatest()}>Reload</button><button type="button" onClick={() => void keepMine()} disabled={!canEdit}>Keep mine</button></div></div>}

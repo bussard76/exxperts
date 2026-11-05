@@ -10,6 +10,16 @@ import {
 import { persistentRoomWorkspaceToolNamesForPolicy } from "./persistent-room-tool-policy.js";
 
 export const MAX_WORKSPACE_MARKDOWN_EDITOR_BYTES = 128 * 1024;
+export const MAX_WORKSPACE_IMAGE_BYTES = 20 * 1024 * 1024;
+
+const WORKSPACE_IMAGE_TYPES: Record<string, string> = {
+	".png": "image/png",
+	".jpg": "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif": "image/gif",
+	".webp": "image/webp",
+	".svg": "image/svg+xml",
+};
 
 export interface WorkspaceMarkdownFileResponse {
 	path: string;
@@ -18,6 +28,11 @@ export interface WorkspaceMarkdownFileResponse {
 	bytes: number;
 	revision: string;
 	readOnly: boolean;
+}
+
+export interface WorkspaceImageFileResponse {
+	contentType: string;
+	bytes: Buffer;
 }
 
 export class PersistentRoomWorkspaceMarkdownError extends Error {
@@ -46,7 +61,7 @@ function invalidPath(message: string): PersistentRoomWorkspaceMarkdownError {
 	return new PersistentRoomWorkspaceMarkdownError("invalid_path", 400, message);
 }
 
-function normalizeMarkdownPath(rawPath: unknown): string {
+function normalizeRelativePath(rawPath: unknown): string {
 	const raw = String(rawPath ?? "").trim();
 	if (!raw) throw invalidPath("Markdown file path is required.");
 	if (raw.includes("\0") || raw.startsWith("~")) throw invalidPath("Markdown file path must stay inside the workspace.");
@@ -58,7 +73,11 @@ function normalizeMarkdownPath(rawPath: unknown): string {
 	if (segments.some((segment) => !segment || segment === "." || segment === ".." || segment.startsWith("."))) {
 		throw invalidPath("Markdown file path contains an invalid segment.");
 	}
-	const relativePath = segments.join("/");
+	return segments.join("/");
+}
+
+function normalizeMarkdownPath(rawPath: unknown): string {
+	const relativePath = normalizeRelativePath(rawPath);
 	if (path.extname(relativePath).toLowerCase() !== ".md") {
 		throw new PersistentRoomWorkspaceMarkdownError("unsupported_file_type", 400, "Only .md files can be edited.");
 	}
@@ -142,6 +161,38 @@ export function readWorkspaceMarkdownFileWithPolicy(
 ): WorkspaceMarkdownFileResponse {
 	if (policy.modes.read !== true || persistentRoomWorkspaceToolNamesForPolicy(policy).length === 0) throw new PersistentRoomWorkspaceMarkdownError("workspace_read_forbidden", 403, "Workspace reading is not enabled for this room.");
 	return readWithPolicy({ policy }, rawPath);
+}
+
+function readImageWithPolicy(context: WorkspaceMarkdownPolicyContext, rawPath: unknown): WorkspaceImageFileResponse {
+	const relativePath = normalizeRelativePath(rawPath);
+	const contentType = WORKSPACE_IMAGE_TYPES[path.extname(relativePath).toLowerCase()];
+	if (!contentType) throw new PersistentRoomWorkspaceMarkdownError("unsupported_file_type", 400, "Only image files can be shown.");
+	try {
+		const guarded = resolvePersistentRoomWorkspaceExistingFile(context.policy, relativePath);
+		if (guarded.stat.size > MAX_WORKSPACE_IMAGE_BYTES) {
+			throw new PersistentRoomWorkspaceMarkdownError("file_too_large", 413, "Image is too large to show (20 MiB maximum).");
+		}
+		return { contentType, bytes: fs.readFileSync(guarded.absolutePath) };
+	} catch (error) {
+		throw toMarkdownError(error);
+	}
+}
+
+export function readWorkspaceImageFile(
+	agentId: string,
+	conversationId: string,
+	rawPath: unknown,
+	options: PersistentRoomWorkspacePolicyStorageOptions = {},
+): WorkspaceImageFileResponse {
+	return readImageWithPolicy(requirePolicy(agentId, conversationId, options), rawPath);
+}
+
+export function readWorkspaceImageFileWithPolicy(
+	policy: PersistentRoomCapabilityPolicy,
+	rawPath: unknown,
+): WorkspaceImageFileResponse {
+	if (policy.modes.read !== true || persistentRoomWorkspaceToolNamesForPolicy(policy).length === 0) throw new PersistentRoomWorkspaceMarkdownError("workspace_read_forbidden", 403, "Workspace reading is not enabled for this room.");
+	return readImageWithPolicy({ policy }, rawPath);
 }
 
 function encodeMarkdown(content: unknown): Buffer {
