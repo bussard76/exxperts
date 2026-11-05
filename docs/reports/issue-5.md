@@ -32,7 +32,7 @@ Level 3: the approved browser-to-room-to-granted-workspace flow, four routes, an
 - `gate bash -c 'npm run test:scripts'`: passed (49 tests).
 - Under `gate`, the affected `persistent-room-workspace-files-smoke.ts`, `persistent-room-workspace-markdown-files-smoke.ts`, `workspace-markdown-images-smoke.ts`, `composer-text-insertion-smoke.ts`, `persistent-room-workspace-tools-smoke.ts`, and `persistent-room-workspace-policy-smoke.ts`: passed after merging current main.
 - `gate bash -c 'npx tsx apps/web-server/scripts/workspace-markdown-images-ui-smoke.ts'`: passed after merging current main, with Chromium and a dedicated free port, using `node bin/exxperts-web.cjs --port <free-port> --no-open`.
-- `git diff --check origin/main`: passed. No Docker, live model APIs, real user files, external services or committed binaries were used. Screenshots captured: none; signed-off reference screenshots were read from the design branch.
+- `git diff --check origin/main`: passed. No Docker, live model APIs, real user files or committed binaries were used in the tests. Screenshots captured: none; signed-off reference screenshots were read from the design branch.
 - During test development two browser attempts timed out because the newly extended test targeted an already-open file and then an image after navigating away; both test sequencing issues were corrected and the final runs passed. One test fixture incorrectly assumed `*.secret` was a default denial and was corrected to the actual denied `*.pem` pattern. Foreign-host network/load failures: 0. The historical `settings-look-ui-smoke` timeout was not rerun in the targeted Developer stage; the independent Tester owns the full gate.
 
 ## Assumptions, decisions and debt

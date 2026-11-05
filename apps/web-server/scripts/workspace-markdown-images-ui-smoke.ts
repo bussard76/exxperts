@@ -231,6 +231,11 @@ try {
 	for (const body of [{ content: 3, revision: routeRead.body.revision }, { content: "ok", revision: "bad" }]) {
 		assert((await api(matrixQuery("workspace-markdown", "docs/guide.md"), { method: "PUT", body: JSON.stringify(body) })).status === 400, "invalid write body");
 	}
+	const limitRead = await api(matrixQuery("workspace-markdown", "limit.md"));
+	for (const [content, expected] of [["a".repeat(128 * 1024), 200], ["a".repeat(128 * 1024 + 1), 413], ["binary\0text", 415]] as const) {
+		const response = await api(matrixQuery("workspace-markdown", "limit.md"), { method: "PUT", body: JSON.stringify({ content, revision: limitRead.body.revision }) });
+		assert(response.status === expected, `Markdown PUT boundary: ${expected}`);
+	}
 	const missingWrite = await api(matrixQuery("workspace-markdown", "docs/missing.md"), { method: "PUT", body: JSON.stringify({ content: "new", revision: routeRead.body.revision }) });
 	assert(missingWrite.status === 404 && !fs.existsSync(path.join(folder, "docs", "missing.md")), "PUT does not create a file");
 	const changed = await api(matrixQuery("workspace-markdown", "docs/guide.md"), { method: "PUT", body: JSON.stringify({ content: originalContent + "change", revision: routeRead.body.revision }) });
