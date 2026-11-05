@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { insertTextAtSelection, WORKSPACE_PATH_DRAG_TYPE } from "../composer-text-insertion";
 import type { ClipboardEvent, CSSProperties, KeyboardEvent, MutableRefObject, PointerEvent as ReactPointerEvent, ReactNode, Ref } from "react";
 import { approvalAsking, confirmApprovalLabels } from "./Approval";
 import { BubbleEditor, ConsultThreadItem, Message, QueuedBubbles, TaskThreadItem, type FailureLineActions, type MessageAttachmentAccess, type QueuedBubbleActions } from "./Message";
@@ -944,7 +945,7 @@ export function ComposerInput({
 		el.style.height = `${el.scrollHeight}px`;
 	}, [draft]);
 
-	// Restore the caret after a mention completion rewrote the draft.
+	// Restore the caret after a programmatic draft update.
 	useLayoutEffect(() => {
 		const el = textareaNodeRef.current;
 		if (!el || pendingCaretRef.current == null) return;
@@ -1028,6 +1029,14 @@ export function ComposerInput({
 		setMentionDismissed(false);
 		setDraft(text);
 	}, [draft, caret]);
+
+	const insertComposerText = useCallback((text: string, selectionStart: number, selectionEnd: number) => {
+		const insertion = insertTextAtSelection(draft, text, selectionStart, selectionEnd);
+		pendingCaretRef.current = insertion.caret;
+		setMentionDismissed(false);
+		setConsultGateNotice(null);
+		setDraft(insertion.value);
+	}, [draft]);
 
 	const submitDraft = useCallback(() => {
 		if (sendDisabled) return;
@@ -1147,6 +1156,17 @@ export function ComposerInput({
 					onSelect={(e) => syncCaret(e.currentTarget)}
 					onKeyDown={handleComposerKeyDown}
 					onPaste={handleComposerPaste}
+				onDragOver={(event) => {
+					if (!Array.from(event.dataTransfer.types).includes(WORKSPACE_PATH_DRAG_TYPE)) return;
+					event.preventDefault();
+					event.dataTransfer.dropEffect = "copy";
+				}}
+				onDrop={(event) => {
+					const relativePath = event.dataTransfer.getData(WORKSPACE_PATH_DRAG_TYPE);
+					if (!relativePath) return;
+					event.preventDefault();
+					insertComposerText(relativePath, event.currentTarget.selectionStart, event.currentTarget.selectionEnd);
+				}}
 					onScroll={(e) => { if (mirrorRef.current) mirrorRef.current.scrollTop = e.currentTarget.scrollTop; }}
 					onCompositionStart={() => setComposing(true)}
 					onCompositionEnd={() => setComposing(false)}

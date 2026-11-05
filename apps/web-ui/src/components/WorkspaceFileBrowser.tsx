@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { WORKSPACE_PATH_DRAG_TYPE } from "../composer-text-insertion";
 import { listWorkspaceFiles, type WorkspaceFileEntry } from "../workspace-files-api";
 
 interface Props {
@@ -139,6 +140,12 @@ export function WorkspaceFileBrowser({ agentId, conversationId, selectedPath = n
 							aria-current={selectedPath === entry.relativePath ? "true" : undefined}
 							style={{ paddingLeft: `${24 + depth * 14}px` }}
 							title={onFileSelect ? entry.relativePath : "File actions will be added later"}
+							draggable
+							onDragStart={(event) => {
+								event.dataTransfer.setData(WORKSPACE_PATH_DRAG_TYPE, entry.relativePath);
+								event.dataTransfer.setData("text/plain", entry.relativePath);
+								event.dataTransfer.effectAllowed = "copy";
+							}}
 							onClick={() => onFileSelect?.(entry)}
 						>
 							<span className="workspace-file-browser-icon workspace-file-browser-document" aria-hidden="true" />
