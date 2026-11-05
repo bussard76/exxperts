@@ -42,7 +42,7 @@
         "projectsDir": "~/projects",
         "workspacesDir": "~/orca/workspaces",
         "orcaEnvironment": "Workhorse2",
-        "orcaRepoId": "",
+        "orcaRepoId": "f3a658da-3ac4-469c-8f34-f1339cbb6029",
         "capacity": {
           "suiteWorkersMax": 8,
           "readOnlyWorkersMax": 6,
