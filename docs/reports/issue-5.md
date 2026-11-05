@@ -38,6 +38,6 @@ Level 3: existing approved room workspace routes and UI modules; ADR-0002 and th
 
 Pending implementation.
 
-## Blocker
+## Image test decision
 
-`apps/web-server/scripts/workspace-markdown-images-smoke.ts` asserts that HTTPS, data and protocol-relative image sources are returned unchanged for loading. The approved spec and ADR-0002 require external images to be blocked with no request, and this conflicts with the repository instruction to escalate an incorrect existing test rather than loosen or change it. No feature behavior or targeted checks were completed; coordinator direction is required for correcting those expectations.
+The coordinator confirmed that ADR-0002 supersedes the old HTTPS and protocol-relative pass-through expectations; these assertions were updated to require blocking while retaining other coverage. `workspace-markdown-images-ui-smoke.ts` exercises both editor modes with intercepted mock URLs, preserved source and zero external requests.

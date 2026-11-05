@@ -67,9 +67,9 @@ assert.equal(pathOf(url("docs/guide.md", "my%20picture.png")), "docs/my picture.
 assert.equal(pathOf(url("docs/guide.md", "a.png?raw=1#top")), "docs/a.png");
 assert.equal(url("guide.md", "../../secret.png"), null, "a source above the workspace should not resolve");
 assert.equal(url("guide.md", ""), null);
-assert.equal(url("guide.md", "https://example.com/a.png"), "https://example.com/a.png");
-assert.equal(url("guide.md", "data:image/png;base64,AAAA"), "data:image/png;base64,AAAA");
-assert.equal(url("guide.md", "//example.com/a.png"), "//example.com/a.png");
+assert.equal(url("guide.md", "https://example.com/a.png"), null);
+assert.equal(url("guide.md", "data:image/png;base64,AAAA"), null);
+assert.equal(url("guide.md", "//example.com/a.png"), null);
 assert.ok(url("guide.md", "a.png")?.startsWith("/api/persistent-agents/room%201/workspace-image?"), "the room id should be encoded");
 assert.ok(url("guide.md", "a.png")?.includes("conversationId=conv"));
 

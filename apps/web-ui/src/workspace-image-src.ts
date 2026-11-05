@@ -4,7 +4,7 @@
 export function workspaceImageUrl(agentId: string, conversationId: string, markdownPath: string, src: string): string | null {
 	const source = src.trim();
 	if (!source) return null;
-	if (/^[a-z][a-z0-9+.-]*:/i.test(source) || source.startsWith("//")) return source;
+	if (/^[a-z][a-z0-9+.-]*:/i.test(source) || source.startsWith("//")) return null;
 	const bare = source.split(/[?#]/, 1)[0];
 	let decoded: string;
 	try {
