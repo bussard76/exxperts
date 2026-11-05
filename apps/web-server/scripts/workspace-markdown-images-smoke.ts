@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { getSchema } from "@tiptap/core";
 import { MarkdownManager } from "@tiptap/markdown";
 import { StarterKit } from "@tiptap/starter-kit";
-import { createWorkspaceImageExtension } from "../../web-ui/src/components/WorkspaceImageExtension.js";
+import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
+import { createWorkspaceImageExtension, WorkspaceLink, WorkspaceParagraph } from "../../web-ui/src/components/WorkspaceImageExtension.js";
 import { workspaceImageUrl } from "../../web-ui/src/workspace-image-src.js";
 import { hashPersistentRoomPath } from "../src/persistent-room-workspace-policy.js";
 import { classifyRemoteRoute } from "../src/remote-route-policy.js";
@@ -16,9 +18,18 @@ import {
 
 // Saving must never drop an image: the Markdown keeps its own relative source.
 const seen: string[] = [];
-const manager = new MarkdownManager({
-	extensions: [StarterKit, createWorkspaceImageExtension({ current: (src) => { seen.push(src); return `/resolved/${src}`; } })],
-});
+const extensions = [
+	StarterKit.configure({ paragraph: false, link: false }),
+	WorkspaceLink,
+	WorkspaceParagraph,
+	Table,
+	TableRow,
+	TableCell,
+	TableHeader,
+	createWorkspaceImageExtension({ current: (src) => { seen.push(src); return `/resolved/${src}`; } }),
+];
+const manager = new MarkdownManager({ extensions });
+const schema = getSchema(extensions);
 for (const markdown of [
 	"Before ![a diagram](img/diagram.png \"Cap\") after",
 	"![alone](../pic.jpg)",
@@ -27,8 +38,17 @@ for (const markdown of [
 	"![quote](a.png \"say \\\"hi\\\"\")",
 	"![](no-alt.png)",
 	"Two ![a](a.png) and ![b](b.png) inline",
+	"![one](a.png) ![two](b.png)",
+	"- ![in a list](a.png)",
+	"> ![in a quote](a.png)",
+	"| Head                 |\n| -------------------- |\n| ![in a table](a.png) |",
+	"[![linked](a.png)](https://example.com)",
+	"[![badge](a.svg \"Badge\")](https://example.com \"Site\")",
+	"Text [plain link](https://example.com) stays",
 	"![remote](https://example.com/a.png)",
 ]) {
+	// An invalid document takes the whole page down when the editor loads it.
+	schema.nodeFromJSON(manager.parse(markdown)).check();
 	const once = manager.serialize(manager.parse(markdown));
 	const twice = manager.serialize(manager.parse(once));
 	assert.equal(once.trim(), markdown, "an image should survive a load and save unchanged");

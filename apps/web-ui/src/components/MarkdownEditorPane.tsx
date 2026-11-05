@@ -23,7 +23,7 @@ import {
 } from "../workspace-markdown-api";
 import { workspaceImageUrl } from "../workspace-image-src";
 import { useMarkdownEditorSync } from "./useMarkdownEditorSync";
-import { createWorkspaceImageExtension } from "./WorkspaceImageExtension";
+import { createWorkspaceImageExtension, WorkspaceLink, WorkspaceParagraph } from "./WorkspaceImageExtension";
 import { MarkdownEditorToolbar } from "./MarkdownEditorToolbar";
 import { MarkdownSearchBar } from "./MarkdownSearchBar";
 import { createSearchDecorationExtension, type SearchDecorationState } from "./TipTapSearchExtension";
@@ -159,8 +159,10 @@ function MarkdownEditorSurface({
 	const extensions = useMemo(() => [
 		StarterKit.configure({
 			listItem: false,
-			link: { openOnClick: false, autolink: false },
+			paragraph: false,
+			link: false,
 		}),
+		WorkspaceLink.configure({ openOnClick: false, autolink: false }),
 		WikiLink.configure({ HTMLAttributes: { "data-wiki-link": "true" } }),
 		SafeListItem,
 		TaskList,
@@ -169,6 +171,7 @@ function MarkdownEditorSurface({
 		TableRow,
 		TableCell,
 		TableHeader,
+		WorkspaceParagraph,
 		createWorkspaceImageExtension(resolveImageSrcRef),
 		Markdown,
 		createSearchDecorationExtension(searchStateRef),
