@@ -112,6 +112,25 @@ try {
 	const restored = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "standard" } }) });
 	assert(restored.status === 200, "restore standard tools");
 
+	const alias = path.join(tempHome, "workspace-alias");
+	const other = path.join(tempHome, "workspace-other");
+	fs.mkdirSync(other);
+	fs.symlinkSync(folder, alias);
+	const aliasGrant = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: alias, workspaceAccessMode: "localFiles" }) });
+	assert(aliasGrant.status === 200, "grant alias root");
+	fs.unlinkSync(alias);
+	fs.symlinkSync(other, alias);
+	const aliasTree = await api(matrixQuery("workspace-files", ""));
+	assert(aliasTree.status !== 200 || aliasTree.body.root === null, "retargeted grant must not list the old root");
+	const aliasRead = await api(matrixQuery("workspace-markdown", "docs/guide.md"));
+	assert(aliasRead.status !== 200, "retargeted grant must not read the old root");
+	const aliasImage = await authedFetch(`${baseUrl}${matrixQuery("workspace-image", "docs/img/pixel.png")}`);
+	assert(aliasImage.status !== 200, "retargeted grant must not read images");
+	const aliasWrite = await api(matrixQuery("workspace-markdown", "docs/guide.md"), { method: "PUT", body: JSON.stringify({ content: "overwrite", revision: `sha256:${(await import("node:crypto")).createHash("sha256").update(originalContent).digest("hex")}` }) });
+	assert(aliasWrite.status !== 200 && fs.readFileSync(guide, "utf8") === originalContent, "retargeted grant must not write the old root");
+	const resetGrant = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: folder, workspaceAccessMode: "localFiles" }) });
+	assert(resetGrant.status === 200, "restore workspace root");
+
 	const browser = await chromium.launch();
 	try {
 		const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });

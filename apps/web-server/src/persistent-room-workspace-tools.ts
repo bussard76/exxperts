@@ -347,7 +347,7 @@ function createRuntime(policy: PersistentRoomCapabilityPolicy): WorkspaceToolPol
 	if (!isPersistentRoomWorkspaceToolBundleEnabled(policy) || policy.modes.read !== true || policy.roots.length < 1) return null;
 	const root = policy.roots[0];
 	if (!root) return null;
-	const rootRealpath = safeRealpath(root.realpath) ?? safeRealpath(root.path);
+	const rootRealpath = safeRealpath(root.path);
 	if (!rootRealpath) return null;
 	try {
 		if (!fs.statSync(rootRealpath).isDirectory()) return null;
