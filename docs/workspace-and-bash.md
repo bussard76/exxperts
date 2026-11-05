@@ -27,7 +27,7 @@ only adding new ones.
 
 The sidebar shows the room's granted folder as a tree when **List** is enabled. Open a Markdown file from the tree to edit it on the right, or drag a file into the composer to insert its relative path. Opening Markdown and its local images requires **Read**; saving also requires a selected writing tool. Paired devices need permission to write as well.
 
-The editor saves after a short pause and offers Edit, Preview and RAW views. If a file changes elsewhere while you have a draft, choose Reload to discard the draft or Keep mine to save it over the latest version. A failed save keeps the draft open. External images are not fetched; their alt text and original Markdown source remain in the document.
+The editor saves after a short pause and offers Edit, Preview and RAW views. If a file changes elsewhere while you have a draft, choose Reload to discard the draft or Keep mine to save it over the latest version. Edits typed while Keep mine is saving remain unsaved until they are saved too; leaving the editor offers the usual save, discard and cancel choices. A failed save keeps the draft open. External images are not fetched; their alt text and original Markdown source remain in the document.
 
 ## Tool toggles, and read-only as a consequence
 

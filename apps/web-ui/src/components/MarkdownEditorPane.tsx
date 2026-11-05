@@ -256,10 +256,12 @@ function MarkdownEditorSurface({
 
 	const markSaved = useCallback((saved: string) => {
 		baselineRef.current = saved;
-		draftRef.current = saved;
-		userEditedRef.current = false;
-		setDirty(false);
-	}, [setDirty]);
+		const latest = editorRef.current ? editorMarkdown(editorRef.current) : draftRef.current;
+		draftRef.current = latest;
+		onDraftChange(latest);
+		userEditedRef.current = latest !== saved;
+		setDirty(userEditedRef.current);
+	}, [onDraftChange, setDirty]);
 
 	useImperativeHandle(ref, () => ({
 		save,

@@ -456,6 +456,80 @@ try {
 		}
 		console.log("  ok  navigation waits for in-flight and newer saves, retaining the draft on failure");
 
+		const keepMineFailures: string[] = [];
+		for (const failSecond of [false, true]) {
+			const scenario = failSecond ? "Keep mine retains later edits after a failed subsequent save" : "Keep mine protects later edits before navigation";
+			const markdownRoute = `/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-markdown?${new URLSearchParams({ conversationId: imageUrl.searchParams.get("conversationId")!, path: "docs/guide.md" })}`;
+			let releaseKeepMine!: () => void;
+			const held = new Promise<void>((resolve) => { releaseKeepMine = resolve; });
+			try {
+				const before = await api(markdownRoute);
+				assert(before.status === 200, "read demo file before Keep mine scenario");
+				const reset = await api(markdownRoute, { method: "PUT", body: JSON.stringify({ content: "# Guide\n\nKeep mine draft\n", revision: before.body.revision }) });
+				assert(reset.status === 200, "reset demo file through the public route");
+				await tree.locator(".workspace-file-browser-file", { hasText: "guide.md" }).click();
+				const keepParagraph = page.locator(".markdown-editor-tiptap .ProseMirror p", { hasText: "Keep mine draft" });
+				await keepParagraph.click();
+				await page.keyboard.press("End");
+				await page.keyboard.type(" first-edit");
+				const external = await api(markdownRoute, { method: "PUT", body: JSON.stringify({ content: "# Guide\n\nExternal revision\n", revision: reset.body.revision }) });
+				assert(external.status === 200, "create an external conflict through the public route");
+				await page.keyboard.press("Control+s");
+				await page.locator(".markdown-editor-conflict").waitFor({ state: "visible" });
+				let keepMineStarted = false;
+				let puts = 0;
+				await page.route("**/workspace-markdown?**", async (route) => {
+					if (route.request().method() !== "PUT") return route.continue();
+					puts++;
+					if (puts === 1) { keepMineStarted = true; await held; }
+					else if (failSecond) return route.fulfill({ status: 503, json: { error: "mock subsequent Keep mine save failure" } });
+					await route.continue();
+				});
+				await page.getByRole("button", { name: "Keep mine", exact: true }).click();
+				await waitUntil(() => keepMineStarted, "Keep mine PUT is held");
+				await keepParagraph.click();
+				await page.keyboard.press("End");
+				await page.keyboard.type(" late-edit");
+				const firstResponse = page.waitForResponse((response) => response.url().includes("/workspace-markdown?") && response.request().method() === "PUT");
+				releaseKeepMine();
+				assert((await firstResponse).status() === 200, "held Keep mine snapshot reaches the demo server");
+				await waitUntil(async () => (await page.locator(".markdown-editor-status").textContent()) !== "Saving…", "Keep mine save settles");
+				await tree.locator(".workspace-file-browser-file", { hasText: "other.md" }).click();
+				const otherEditor = page.getByRole("complementary", { name: "Markdown editor: other.md", exact: true });
+				await waitUntil(async () => await prompt.isVisible() || await otherEditor.isVisible(), "navigation saves the late edit or asks about the draft");
+				if (await prompt.isVisible()) {
+					await prompt.getByRole("button", { name: "Cancel", exact: true }).click();
+					assert((await keepParagraph.textContent())?.includes("first-edit late-edit"), `${scenario}: cancel retains both edits`);
+					await tree.locator(".workspace-file-browser-file", { hasText: "other.md" }).click();
+					await prompt.getByRole("button", { name: "Save and continue", exact: true }).click();
+				}
+				if (failSecond) {
+					assert(!(await otherEditor.isVisible()), `${scenario}: navigation must retain the editor and both edits`);
+					await page.locator(".markdown-editor-error").waitFor({ state: "visible" });
+					assert(puts >= 2 && (await keepParagraph.textContent())?.includes("first-edit late-edit"), `${scenario}: both edits remain after the failed save`);
+					const persisted = await api(markdownRoute);
+					assert(persisted.body.content === "# Guide\n\nKeep mine draft first-edit\n", "failed later save leaves the first snapshot persisted");
+				} else {
+					await otherEditor.waitFor();
+					const persisted = await api(markdownRoute);
+					assert(persisted.body.content === "# Guide\n\nKeep mine draft first-edit late-edit\n", `${scenario}: both edits must be persisted before leaving`);
+				}
+				console.log(`  ok  ${scenario}`);
+			} catch (cause) {
+				const message = `${scenario}: ${cause instanceof Error ? cause.message : String(cause)}`;
+				console.error(`  FAIL  ${message}`);
+				keepMineFailures.push(message);
+			} finally {
+				releaseKeepMine();
+				await page.unroute("**/workspace-markdown?**");
+				await tree.locator(".workspace-file-browser-file", { hasText: "other.md" }).click();
+				await waitUntil(async () => await prompt.isVisible() || await page.getByRole("complementary", { name: "Markdown editor: other.md", exact: true }).isVisible(), "leave the Keep mine scenario");
+				if (await prompt.isVisible()) await prompt.getByRole("button", { name: "Discard changes", exact: true }).click();
+				await page.getByRole("complementary", { name: "Markdown editor: other.md", exact: true }).waitFor();
+			}
+		}
+		assert(keepMineFailures.length === 0, keepMineFailures.join("\n"));
+
 		const readOnlySetting = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "custom", allowedToolNames: ["ls", "read"] } }) });
 		assert(readOnlySetting.status === 200, "set demo room read-only");
 		await tree.locator(".workspace-file-browser-file", { hasText: "guide.md" }).click();

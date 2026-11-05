@@ -98,3 +98,20 @@ The browser test `workspace-markdown-images-ui-smoke.ts` holds the first local P
 The two visual failures from review were reproduced in focused gated runs both on this branch and on clean `origin/main` at `397034345dd38e57cb90e2f5666d8b35dff10b1f`, with independently built UI and runtime: `consult-mention-smoke.ts` reported 1,045 differing pixels (2,048 one pixel off), and `room-topbar-ui-smoke.ts` reported the icon center at 26.50 instead of 25 window points (also 25.75 for maximize at 125%). These are independent of the T5 branch in this environment; no visual tests were changed. Foreign-host network-failure reruns: 0.
 
 Architecture impact: level 3, within the existing Markdown editor and room workspace boundaries under ADR-0002; no new route, dependency, or boundary. Independent conformance must be repeated for this rework.
+
+## Rework 2
+
+Review-2's Keep mine data-loss blocker is addressed by comparing the live editor draft with the acknowledged snapshot. The saved snapshot becomes the baseline, while newer edits remain in the draft and keep the navigation guard dirty. A subsequent failed save retains both edits and the editor.
+
+`workspace-markdown-images-ui-smoke.ts` adds two independent real Chromium scenarios through the public local demo room API:
+
+- **Keep mine protects later edits before navigation:** create a revision conflict, hold the Keep mine PUT, type `late-edit`, release the PUT, and navigate. Require the later edit on disk before navigation, or retain it through the unsaved prompt and Save and continue.
+- **Keep mine retains later edits after a failed subsequent save:** repeat the held PUT while failing subsequent PUTs with a mock 503. Require the editor and both edits to remain, with only the first snapshot persisted.
+
+Both scenarios failed against the unchanged implementation before the fix: the first lost the later edit on navigation, and the second navigated away instead of retaining the draft. Both pass after the fix. The previous round's held-save navigation success and failure scenarios remain unchanged and pass in the same run.
+
+Targeted checks passed: `npx tsc --noEmit -p apps/web-ui/tsconfig.json && npm run typecheck:scripts`; `gate bash -c 'npm run test:scripts'` (49 tests); the six affected workspace-files, workspace-markdown-files, Markdown-images, composer-insertion, workspace-tools and workspace-policy suites; and gated `workspace-markdown-images-ui-smoke.ts` with existing Chromium, invented files, mock devices and a free local port. Full smokes and the two unchanged visual failures were left to the independent Tester, as instructed. Foreign-host network-failure reruns: 0.
+
+This fresh worktree started clean on `bussard76/t5-rework2`; `agents/t5-rework2` was created from the exact rework-1 commit `9625237c1ccd397b87cc3cab241d81b01d45f0c7`, then review-2 was merged. No pre-existing lockfile edit was present here, and no other worktree was modified. `EXXETA_SKIP_BROWSER_INSTALL=1 PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --no-audit --no-fund` installed dependencies without changing the tracked lockfile or downloading a browser; installation used the normal npm cache/logs outside the worktree. Runtime package and UI build artifacts were prepared locally for browser testing; the full build/smokes gate was not run. Demo files were temporary and removed by the smoke, and `gate` used its normal temporary queues and Controller journal.
+
+Files changed in this rework: `MarkdownEditorPane.tsx`, `workspace-markdown-images-ui-smoke.ts`, this report, and `docs/workspace-and-bash.md`. No debt candidate or existing test was weakened or changed. Assumption: the existing save/discard/cancel choices apply to edits typed during Keep mine, as required by the review. Architecture impact remains level 3 within ADR-0002, with no new public export, dependency, route, store or boundary; fresh independent conformance and Sascha's real preview acceptance remain required.
