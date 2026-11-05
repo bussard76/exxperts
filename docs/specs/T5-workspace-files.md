@@ -10,6 +10,8 @@ Level 3: the web UI tree and editor use room routes and workspace modules to rea
 
 The feature branch adds these ten UI dependencies, each `^3.31.3`: `@tiptap/core`, `@tiptap/extension-image`, `@tiptap/extension-link`, `@tiptap/extension-list`, `@tiptap/extension-paragraph`, `@tiptap/extension-table`, `@tiptap/markdown`, `@tiptap/pm`, `@tiptap/react`, and `@tiptap/starter-kit`. If work is split, server and UI work share the contracts below and the integrated browser/server test depends on both.
 
+The Controller's 2026-11-05 level-2 decision also approves the server-internal export `resolvePersistentRoomWorkspaceExistingFile(policy, rawPath)` from `apps/web-server/src/persistent-room-workspace-tools.ts` for the Markdown and local-image workspace modules. It must remain within the existing read-policy, regular-file and symlink guards in ADR-0002's approved room-to-workspace flow. Any write must separately apply the write-purpose policy; this approval adds no route or broader filesystem permission.
+
 ## Authorized public contracts
 
 All routes are under `/api/persistent-agents/:id/`; `id` is a usable room agent ID and the required, nonblank query `conversationId` selects the effective room/thread policy. URL-encode query values. Existing successful responses are HTTP 200. Normal room status and remote-device authorization also apply. Errors use JSON `{error: string, code?: string}`; policy errors may include `forbiddenRoot`, and a revision conflict also carries `currentRevision`. A missing `conversationId` returns 400 with `error: "conversationId is required"`. Generic errors default to 400, though an error with a status code keeps that status. Do not expose absolute workspace paths to remote clients.
