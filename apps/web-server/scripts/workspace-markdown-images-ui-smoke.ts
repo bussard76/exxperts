@@ -49,6 +49,13 @@ fs.writeFileSync(path.join(folder, "node_modules", "hidden", "secret.md"), "hidd
 fs.symlinkSync(path.join(folder, "docs"), path.join(folder, "shortcut"));
 fs.symlinkSync(path.join(folder, "docs", "guide.md"), path.join(folder, "symlink.md"));
 fs.symlinkSync(path.join(folder, "docs", "img", "pixel.png"), path.join(folder, "symlink.png"));
+const outside = path.join(tempHome, "outside");
+fs.mkdirSync(outside);
+fs.writeFileSync(path.join(outside, "outside.md"), "outside secret");
+fs.writeFileSync(path.join(outside, "outside.png"), ONE_PIXEL_PNG);
+fs.symlinkSync(outside, path.join(folder, "outside-link"));
+fs.symlinkSync(path.join(outside, "outside.md"), path.join(folder, "outside.md"));
+fs.symlinkSync(path.join(outside, "outside.png"), path.join(folder, "outside.png"));
 fs.writeFileSync(path.join(folder, "docs", "other.md"), "# Other\n");
 const guide = path.join(folder, "docs", "guide.md");
 const IMAGE_LINES = ["![near](img/pixel.png \"Near\")", "![above](<../top pixel.png>)", "[![badge](img/pixel.png)](https://example.invalid)", "[text ![mixed](img/pixel.png)](https://example.invalid)", "![encoded](../top%20pixel.png)", "![missing alt](img/missing.png)", "![blocked alt](../node_modules/hidden/secret.png)", "![remote alt](https://images.invalid/remote.png)", "![relative alt](//images.invalid/relative.png)"];
@@ -228,7 +235,7 @@ try {
 		assert(response.status === 200 && response.headers.get("content-type")?.startsWith(type), `image content type ${extension}`);
 		assert(response.headers.get("content-security-policy") === "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:" && response.headers.get("x-content-type-options") === "nosniff" && response.headers.get("referrer-policy") === "no-referrer" && response.headers.get("cache-control") === "no-store", "image security headers");
 	}
-	for (const [route, file] of [["workspace-markdown", "symlink.md"], ["workspace-markdown", "shortcut/guide.md"], ["workspace-image", "symlink.png"], ["workspace-image", "shortcut/img/pixel.png"]]) {
+	for (const [route, file] of [["workspace-markdown", "symlink.md"], ["workspace-markdown", "shortcut/guide.md"], ["workspace-image", "symlink.png"], ["workspace-image", "shortcut/img/pixel.png"], ["workspace-markdown", "outside.md"], ["workspace-markdown", "outside-link/outside.md"], ["workspace-image", "outside.png"], ["workspace-image", "outside-link/outside.png"]]) {
 		const local = await authedFetch(`${baseUrl}${matrixQuery(route, file)}`);
 		assert(local.status !== 200, `symlink refused: ${file}`);
 		for (const device of devices) {
@@ -403,7 +410,7 @@ try {
 		const imageUrl = new URL(await images.first().evaluate((img) => (img as HTMLImageElement).src));
 		const conversationId = imageUrl.searchParams.get("conversationId")!;
 		const treeRoute = (relative: string) => `/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-files?${new URLSearchParams({ conversationId, path: relative })}`;
-		for (const denied of ["node_modules", "node_modules/hidden", "shortcut/img"]) {
+		for (const denied of ["node_modules", "node_modules/hidden", "shortcut/img", "outside-link"]) {
 			const response = await api(treeRoute(denied));
 			assert(response.status !== 200, `direct listing of ${denied} must be denied`);
 		}
