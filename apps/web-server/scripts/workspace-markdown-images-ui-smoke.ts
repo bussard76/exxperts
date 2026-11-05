@@ -46,6 +46,7 @@ fs.writeFileSync(path.join(folder, "Library", "LaunchAgents", "example.md"), "pr
 fs.mkdirSync(path.join(folder, "node_modules", "hidden"), { recursive: true });
 fs.writeFileSync(path.join(folder, "node_modules", "hidden", "secret.md"), "hidden");
 fs.symlinkSync(path.join(folder, "docs"), path.join(folder, "shortcut"));
+fs.writeFileSync(path.join(folder, "docs", "other.md"), "# Other\n");
 const guide = path.join(folder, "docs", "guide.md");
 const IMAGE_LINES = ["![near](img/pixel.png \"Near\")", "![above](<../top pixel.png>)", "[![badge](img/pixel.png)](https://example.invalid)", "[text ![mixed](img/pixel.png)](https://example.invalid)", "![encoded](../top%20pixel.png)", "![remote alt](https://images.invalid/remote.png)", "![relative alt](//images.invalid/relative.png)"];
 fs.writeFileSync(guide, `# Guide\n\nFirst line\n\n${IMAGE_LINES.join("\n\n")}\n`);
@@ -179,6 +180,61 @@ try {
 		const written = fs.readFileSync(guide, "utf8");
 		assert(written === originalContent.replace("First line", "First line edited"), `saving preserves every original byte apart from the edit: ${JSON.stringify(written)}`);
 		console.log("  ok  saving an edit keeps the images' Markdown");
+
+		await page.route("**/workspace-markdown?**", async (route) => {
+			if (route.request().method() === "PUT") await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "mock save failure" }) });
+			else await route.continue();
+		});
+		const paragraph = page.locator(".markdown-editor-tiptap .ProseMirror p", { hasText: "First line edited" });
+		await paragraph.click();
+		await page.keyboard.press("End");
+		await page.keyboard.type(" draft");
+		await page.locator(".markdown-editor-error").waitFor({ state: "visible" });
+		assert((await paragraph.textContent())?.includes(" draft"), "failed save retains the draft");
+		await page.unroute("**/workspace-markdown?**");
+		fs.writeFileSync(guide, written.replace("First line edited", "First line external"));
+		await page.locator(".markdown-editor-save").click();
+		await page.locator(".markdown-editor-conflict").waitFor({ state: "visible" });
+		assert((await paragraph.textContent())?.includes(" draft"), "conflict retains the draft");
+		await page.getByRole("button", { name: "Keep mine" }).click();
+		await waitUntil(() => fs.readFileSync(guide, "utf8").includes("First line edited draft"), "keep mine saves the draft");
+		await page.route("**/workspace-markdown?**", async (route) => {
+			if (route.request().method() === "PUT") await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "mock save failure" }) });
+			else await route.continue();
+		});
+		await paragraph.click();
+		await page.keyboard.press("End");
+		await page.keyboard.type(" unsaved");
+		await tree.locator(".workspace-file-browser-file", { hasText: "other.md" }).click();
+		const prompt = page.getByRole("dialog", { name: "Unsaved Markdown changes" });
+		await prompt.getByRole("button", { name: "Cancel" }).click();
+		assert((await paragraph.textContent())?.includes(" unsaved"), "cancel retains draft");
+		await tree.locator(".workspace-file-browser-file", { hasText: "other.md" }).click();
+		await prompt.getByRole("button", { name: "Save and continue" }).click();
+		await page.locator(".markdown-editor-error").waitFor({ state: "visible" });
+		assert((await paragraph.textContent())?.includes(" unsaved"), "failed navigation save retains editor and draft");
+		await tree.locator(".workspace-file-browser-file", { hasText: "other.md" }).click();
+		await prompt.getByRole("button", { name: "Discard changes" }).click();
+		await page.getByRole("complementary", { name: "Markdown editor: other.md" }).waitFor();
+		await page.unroute("**/workspace-markdown?**");
+		await tree.locator(".workspace-file-browser-file", { hasText: "guide.md" }).click();
+		const reopened = page.locator(".markdown-editor-tiptap .ProseMirror p", { hasText: "First line edited draft" });
+		await reopened.waitFor();
+		await page.route("**/workspace-markdown?**", async (route) => {
+			if (route.request().method() === "PUT") await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "mock save failure" }) });
+			else await route.continue();
+		});
+		await reopened.click();
+		await page.keyboard.press("End");
+		await page.keyboard.type(" reload draft");
+		await page.locator(".markdown-editor-error").waitFor({ state: "visible" });
+		await page.unroute("**/workspace-markdown?**");
+		fs.writeFileSync(guide, fs.readFileSync(guide, "utf8").replace("First line edited draft", "First line latest"));
+		await page.locator(".markdown-editor-save").click();
+		await page.locator(".markdown-editor-conflict").waitFor({ state: "visible" });
+		await page.getByRole("button", { name: "Reload", exact: true }).click();
+		await page.locator(".markdown-editor-tiptap .ProseMirror p", { hasText: "First line latest" }).waitFor();
+		console.log("  ok  failed saves, conflicts, reload and navigation retain or discard drafts as chosen");
 
 		const composer = page.locator("textarea").first();
 		await composer.fill("Read ");
