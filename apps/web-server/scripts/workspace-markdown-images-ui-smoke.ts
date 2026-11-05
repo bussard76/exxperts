@@ -9,6 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { authedFetch, SMOKE_AUTH_TOKEN, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, smokeHomeEnv, stopSmokeServer, freePort, type AuthedFetchInit } from "./smoke-server-process.js";
+import { pairDevice, remoteRequest } from "./smoke-pairing.js";
 import { waitEvery } from "./smoke-wait.js";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -76,7 +77,7 @@ try {
 		shell: process.platform === "win32",
 		...SMOKE_SERVER_SPAWN_TREE_OPTIONS,
 		cwd: repoRoot,
-		env: smokeHomeEnv(tempHome, { PORT: String(port), ...SMOKE_SERVER_AUTH_ENV, EXXETA_HOME: repoRoot, EXXPERTS_CODING_AGENT_DIR: agentDir, EXXETA_PERSISTENT_AGENTS_ROOT: agentsRoot }) as NodeJS.ProcessEnv,
+		env: smokeHomeEnv(tempHome, { PORT: String(port), ...SMOKE_SERVER_AUTH_ENV, EXXETA_HOME: repoRoot, EXXPERTS_CODING_AGENT_DIR: agentDir, EXXETA_PERSISTENT_AGENTS_ROOT: agentsRoot, EXXPERTS_REMOTE_TEST_ADDRESS: "::1" }) as NodeJS.ProcessEnv,
 	});
 	server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
 	server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
@@ -88,16 +89,22 @@ try {
 	const saved = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: folder, workspaceAccessMode: "localFiles" }) });
 	assert(saved.status === 200, `the folder is saved, got ${saved.status} ${JSON.stringify(saved.body)}`);
 
+	const remoteEnabled = await api("/api/remote/enable", { method: "POST" });
+	assert(remoteEnabled.status === 200, "mock remote listener enabled");
+	const exposed = await api("/api/remote/rooms/exposure", { method: "POST", body: JSON.stringify({ id: agentId, exposed: true }) });
+	assert(exposed.status === 200, "demo room exposed to mock devices");
+	const devices = [await pairDevice(port, "Demo reader", "read-only"), await pairDevice(port, "Demo writer", "full")];
 	const matrixQuery = (route: string, file: string) => `/api/persistent-agents/${encodeURIComponent(agentId)}/${route}?${new URLSearchParams({ conversationId: "matrix-test", path: file })}`;
 	const originalContent = fs.readFileSync(guide, "utf8");
-	for (const [tools, canList, canRead, canWrite] of [
-		[[], false, false, false],
+	for (const [tools, canList, canRead, canWrite, bash] of [
+		[[], false, false, false, true],
+		[[], false, false, false, false],
 		[["ls"], true, false, false],
 		[["read"], false, true, false],
 		[["write"], false, false, false],
 		[["read", "write"], false, true, true],
 	] as const) {
-		const configured = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "custom", allowedToolNames: tools } }) });
+		const configured = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "custom", allowedToolNames: tools }, bashEnabled: bash === true }) });
 		assert(configured.status === 200, `configure matrix tools ${tools}`);
 		const listing = await api(matrixQuery("workspace-files", ""));
 		assert(listing.status === 200 && Boolean(listing.body.root) === canList, `tree permission for ${tools}`);
@@ -109,6 +116,18 @@ try {
 		const put = await api(matrixQuery("workspace-markdown", "docs/guide.md"), { method: "PUT", body: JSON.stringify({ content: originalContent, revision }) });
 		assert((put.status === 200) === canWrite, `Markdown write permission for ${tools}`);
 		assert(fs.readFileSync(guide, "utf8") === originalContent, `matrix preserves content for ${tools}`);
+		for (const [index, device] of devices.entries()) {
+			const headers = { Cookie: device.cookie };
+			const remoteTree = await remoteRequest(port, matrixQuery("workspace-files", ""), { headers });
+			assert(remoteTree.status === 200 && Boolean(JSON.parse(remoteTree.body).root) === canList, `device ${index} tree permission for ${tools}`);
+			const remoteMarkdown = await remoteRequest(port, matrixQuery("workspace-markdown", "docs/guide.md"), { headers });
+			assert((remoteMarkdown.status === 200) === canRead, `device ${index} Markdown permission for ${tools}`);
+			const remoteImage = await remoteRequest(port, matrixQuery("workspace-image", "docs/img/pixel.png"), { headers });
+			assert((remoteImage.status === 200) === canRead, `device ${index} image permission for ${tools}`);
+			const remoteWrite = await remoteRequest(port, matrixQuery("workspace-markdown", "docs/guide.md"), { method: "PUT", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ content: originalContent, revision }) });
+			assert((remoteWrite.status === 200) === (index === 1 && canWrite), `device ${index} write permission for ${tools}`);
+			assert(fs.readFileSync(guide, "utf8") === originalContent, `device ${index} preserves content for ${tools}`);
+		}
 	}
 	const restored = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "standard" } }) });
 	assert(restored.status === 200, "restore standard tools");
@@ -129,6 +148,13 @@ try {
 	assert(aliasImage.status !== 200, "retargeted grant must not read images");
 	const aliasWrite = await api(matrixQuery("workspace-markdown", "docs/guide.md"), { method: "PUT", body: JSON.stringify({ content: "overwrite", revision: `sha256:${(await import("node:crypto")).createHash("sha256").update(originalContent).digest("hex")}` }) });
 	assert(aliasWrite.status !== 200 && fs.readFileSync(guide, "utf8") === originalContent, "retargeted grant must not write the old root");
+	for (const device of devices) {
+		for (const [route, file] of [["workspace-files", ""], ["workspace-markdown", "docs/guide.md"], ["workspace-image", "docs/img/pixel.png"]]) {
+			const response = await remoteRequest(port, matrixQuery(route, file), { headers: { Cookie: device.cookie } });
+			assert(response.status !== 200 || (route === "workspace-files" && JSON.parse(response.body).root === null), "device cannot read retargeted grant");
+			assert(!response.body.includes(folder) && !response.body.includes(originalContent), "device response hides workspace path and content");
+		}
+	}
 	const resetGrant = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: folder, workspaceAccessMode: "localFiles" }) });
 	assert(resetGrant.status === 200, "restore workspace root");
 
@@ -255,6 +281,8 @@ try {
 		assert(protectedFile.status === 200, "protected file is readable");
 		const blockedWrite = await api(protectedRoute, { method: "PUT", body: JSON.stringify({ content: "overwritten", revision: protectedFile.body.revision }) });
 		assert(blockedWrite.status === 403 && fs.readFileSync(path.join(folder, "Library", "LaunchAgents", "example.md"), "utf8") === "protected", "write restrictions prevent replacement of a protected file");
+		const remoteProtected = await remoteRequest(port, protectedRoute, { method: "PUT", headers: { Cookie: devices[1].cookie, "content-type": "application/json" }, body: JSON.stringify({ content: "overwritten", revision: protectedFile.body.revision }) });
+		assert(remoteProtected.status === 403 && fs.readFileSync(path.join(folder, "Library", "LaunchAgents", "example.md"), "utf8") === "protected", "paired writer cannot replace a protected file");
 		const beforeSwap = await api(fileRoute("workspace-markdown", "docs/guide.md"));
 		assert(beforeSwap.status === 200, "Markdown is readable before the root changes");
 		const replacement = path.join(tempHome, "replacement");
