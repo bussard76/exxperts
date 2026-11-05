@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { hashPersistentRoomPath } from "../src/persistent-room-workspace-policy.js";
 import { listPersistentRoomWorkspaceFiles } from "../src/persistent-room-workspace-files.js";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "persistent-room-workspace-files-"));
@@ -15,7 +16,7 @@ try {
 	fs.writeFileSync(path.join(root, "src", "nested", "data.xyz"), "ok");
 
 	const policy = {
-		roots: [{ displayLabel: "Workspace", basename: path.basename(root), path: root, realpath: fs.realpathSync.native(root) }],
+		roots: [{ displayLabel: "Workspace", basename: path.basename(root), path: root, realpath: fs.realpathSync.native(root), pathHash: hashPersistentRoomPath(fs.realpathSync.native(root)) }],
 		workspaceAccessMode: "bounded",
 		modes: { read: true, write: false },
 		allowedToolNames: ["ls", "find", "grep", "read"],

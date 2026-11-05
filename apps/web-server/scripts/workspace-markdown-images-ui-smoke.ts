@@ -41,6 +41,9 @@ fs.mkdirSync(path.join(folder, "docs", "img"), { recursive: true });
 const ONE_PIXEL_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==", "base64");
 fs.writeFileSync(path.join(folder, "docs", "img", "pixel.png"), ONE_PIXEL_PNG);
 fs.writeFileSync(path.join(folder, "top pixel.png"), ONE_PIXEL_PNG);
+fs.mkdirSync(path.join(folder, "node_modules", "hidden"), { recursive: true });
+fs.writeFileSync(path.join(folder, "node_modules", "hidden", "secret.md"), "hidden");
+fs.symlinkSync(path.join(folder, "docs"), path.join(folder, "shortcut"));
 const guide = path.join(folder, "docs", "guide.md");
 const IMAGE_LINES = ["![near](img/pixel.png \"Near\")", "![above](<../top pixel.png>)", "![remote alt](https://images.invalid/remote.png)", "![relative alt](//images.invalid/relative.png)"];
 fs.writeFileSync(guide, `# Guide\n\nFirst line\n\n${IMAGE_LINES.join("\n\n")}\n`);
@@ -136,13 +139,37 @@ try {
 		await tree.locator(".workspace-file-browser-file", { hasText: "guide.md" }).dragTo(composer);
 		await waitUntil(async () => (await composer.inputValue()).includes("docs/guide.md"), "the dragged path is in the composer");
 		console.log("  ok  a file dragged onto the composer inserts its path");
+
+		const imageUrl = new URL(await images.first().evaluate((img) => (img as HTMLImageElement).src));
+		const conversationId = imageUrl.searchParams.get("conversationId")!;
+		const treeRoute = (relative: string) => `/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-files?${new URLSearchParams({ conversationId, path: relative })}`;
+		for (const denied of ["node_modules", "node_modules/hidden", "shortcut/img"]) {
+			const response = await api(treeRoute(denied));
+			assert(response.status !== 200, `direct listing of ${denied} must be denied`);
+		}
+		const fileRoute = (route: string, relative: string) => `/api/persistent-agents/${encodeURIComponent(agentId)}/${route}?${new URLSearchParams({ conversationId, path: relative })}`;
+		const beforeSwap = await api(fileRoute("workspace-markdown", "docs/guide.md"));
+		assert(beforeSwap.status === 200, "Markdown is readable before the root changes");
+		const replacement = path.join(tempHome, "replacement");
+		fs.mkdirSync(path.join(replacement, "docs", "img"), { recursive: true });
+		fs.writeFileSync(path.join(replacement, "docs", "guide.md"), "replacement private");
+		fs.writeFileSync(path.join(replacement, "docs", "img", "pixel.png"), ONE_PIXEL_PNG);
+		fs.renameSync(folder, `${folder}-original`);
+		fs.symlinkSync(replacement, folder);
+		for (const url of [treeRoute(""), fileRoute("workspace-markdown", "docs/guide.md"), fileRoute("workspace-image", "docs/img/pixel.png")]) {
+			const response = await authedFetch(`${baseUrl}${url}`);
+			const body = await response.text();
+			assert(response.status !== 200 || (!body.includes("replacement private") && !body.includes("guide.md") && !body.includes("PNG")), "retargeted root must not expose replacement data");
+		}
+		const attempt = await api(fileRoute("workspace-markdown", "docs/guide.md"), { method: "PUT", body: JSON.stringify({ content: "overwrite", revision: beforeSwap.body.revision }) });
+		assert(attempt.status !== 200 && fs.readFileSync(path.join(replacement, "docs", "guide.md"), "utf8") === "replacement private", "retargeted root must not be written");
 		await context.close();
 	} finally {
 		await browser.close();
 	}
 	console.log("workspace-markdown-images-ui smoke: ok");
 } catch (error) {
-	console.error(serverOutput.join("").slice(-4000));
+	console.error(serverOutput.join("").slice(-4000).replace(/token=[^\s]+/g, "token=<redacted>"));
 	throw error;
 } finally {
 	await stopSmokeServer(server);

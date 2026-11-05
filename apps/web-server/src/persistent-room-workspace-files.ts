@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { PersistentRoomCapabilityPolicy } from "./persistent-room-workspace-policy.js";
 import { persistentRoomWorkspaceToolNamesForPolicy } from "./persistent-room-tool-policy.js";
+import { resolvePersistentRoomWorkspacePath } from "./persistent-room-workspace-tools.js";
 
 export interface PersistentRoomWorkspaceFileEntry {
 	name: string;
@@ -45,18 +46,6 @@ function hiddenOrDenied(name: string, policy: PersistentRoomCapabilityPolicy): b
 	return policy.denyFilenameGlobs.some((glob) => globMatches(name, glob));
 }
 
-function existingWorkspaceRoot(policy: PersistentRoomCapabilityPolicy): string {
-	const grant = policy.roots[0];
-	if (!grant) throw new Error("This room has no workspace folder configured.");
-	try {
-		const root = fs.realpathSync.native(grant.realpath || grant.path);
-		if (!fs.statSync(root).isDirectory()) throw new Error("The room workspace folder is not available.");
-		return root;
-	} catch (error) {
-		throw workspaceUnavailableError(error);
-	}
-}
-
 function workspaceUnavailableError(error: unknown): Error & { code: string; statusCode: number } {
 	const cause = error as NodeJS.ErrnoException;
 	if (cause?.code !== "EACCES" && cause?.code !== "EPERM") throw error;
@@ -71,8 +60,14 @@ export function listPersistentRoomWorkspaceFiles(policy: PersistentRoomCapabilit
 	if (!policy || !grant || !persistentRoomWorkspaceToolNamesForPolicy(policy).includes("ls")) return { root: null, path: "", entries: [] };
 
 	const relativePath = normalizeRelativePath(requestedPath);
-	const root = existingWorkspaceRoot(policy);
-	const current = path.resolve(root, ...relativePath.split("/").filter(Boolean));
+	const guarded = resolvePersistentRoomWorkspacePath(policy, relativePath || ".", "list");
+	const root = guarded.rootRealpath;
+	const current = guarded.absolutePath;
+	let ancestor = root;
+	for (const segment of relativePath.split("/").filter(Boolean)) {
+		ancestor = path.join(ancestor, segment);
+		if (fs.lstatSync(ancestor).isSymbolicLink()) throw new Error("Workspace folder not found.");
+	}
 	if (!pathInside(current, root)) throw new Error("Workspace path is outside the configured folder.");
 	let currentRealpath: string;
 	try {
@@ -93,6 +88,7 @@ export function listPersistentRoomWorkspaceFiles(policy: PersistentRoomCapabilit
 	}
 	const entries = directoryEntries.flatMap((entry) => {
 		if (entry.name.startsWith(".") || hiddenOrDenied(entry.name, policy) || entry.isSymbolicLink()) return [];
+		try { resolvePersistentRoomWorkspacePath(policy, [relativePath, entry.name].filter(Boolean).join("/"), "list"); } catch { return []; }
 		const absolutePath = path.join(currentRealpath, entry.name);
 		let stat: fs.Stats;
 		let realpath: string;
