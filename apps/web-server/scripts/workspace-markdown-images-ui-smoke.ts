@@ -132,6 +132,42 @@ try {
 	const restored = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "standard" } }) });
 	assert(restored.status === 200, "restore standard tools");
 
+	const policyPath = path.join(agentsRoot, agentId, "runtime", "workspace-default.json");
+	const storedPolicy = JSON.parse(fs.readFileSync(policyPath, "utf8"));
+	storedPolicy.modes.write = false;
+	fs.writeFileSync(policyPath, JSON.stringify(storedPolicy));
+	const inconsistentRevision = `sha256:${(await import("node:crypto")).createHash("sha256").update(originalContent).digest("hex")}`;
+	const normalizedWrite = await api(matrixQuery("workspace-markdown", "docs/guide.md"), { method: "PUT", body: JSON.stringify({ content: originalContent, revision: inconsistentRevision }) });
+	assert(normalizedWrite.status === 200, "selected writer enables writes despite a stale stored flag");
+	for (const [index, device] of devices.entries()) {
+		const response = await remoteRequest(port, matrixQuery("workspace-markdown", "docs/guide.md"), { method: "PUT", headers: { Cookie: device.cookie, "content-type": "application/json" }, body: JSON.stringify({ content: originalContent, revision: inconsistentRevision }) });
+		assert((response.status === 200) === (index === 1), "normalized writer still respects the paired device capability");
+	}
+	assert(fs.readFileSync(guide, "utf8") === originalContent, "normalization test preserves file contents");
+	storedPolicy.modes.read = false;
+	fs.writeFileSync(policyPath, JSON.stringify(storedPolicy));
+	const disabledTree = await api(matrixQuery("workspace-files", ""));
+	assert(disabledTree.status === 200 && disabledTree.body.root === null, "disabled read mode hides the tree");
+	for (const route of ["workspace-markdown", "workspace-image"]) {
+		const file = route === "workspace-image" ? "docs/img/pixel.png" : "docs/guide.md";
+		const local = await authedFetch(`${baseUrl}${matrixQuery(route, file)}`);
+		assert(local.status !== 200, `disabled read mode denies local ${route}`);
+		for (const device of devices) {
+			const remote = await remoteRequest(port, matrixQuery(route, file), { headers: { Cookie: device.cookie } });
+			assert(remote.status !== 200 && !remote.body.includes(originalContent), `disabled read mode denies paired ${route}`);
+		}
+	}
+	const disabledPut = await api(matrixQuery("workspace-markdown", "docs/guide.md"), { method: "PUT", body: JSON.stringify({ content: "overwrite", revision: inconsistentRevision }) });
+	assert(disabledPut.status !== 200 && fs.readFileSync(guide, "utf8") === originalContent, "disabled read mode denies writes");
+	for (const device of devices) {
+		const remoteTree = await remoteRequest(port, matrixQuery("workspace-files", ""), { headers: { Cookie: device.cookie } });
+		assert(remoteTree.status === 200 && JSON.parse(remoteTree.body).root === null, "disabled read mode hides tree from paired devices");
+		const remotePut = await remoteRequest(port, matrixQuery("workspace-markdown", "docs/guide.md"), { method: "PUT", headers: { Cookie: device.cookie, "content-type": "application/json" }, body: JSON.stringify({ content: "overwrite", revision: inconsistentRevision }) });
+		assert(remotePut.status !== 200 && fs.readFileSync(guide, "utf8") === originalContent, "disabled read mode denies paired writes");
+	}
+	storedPolicy.modes.read = true;
+	fs.writeFileSync(policyPath, JSON.stringify(storedPolicy));
+
 	const alias = path.join(tempHome, "workspace-alias");
 	const other = path.join(tempHome, "workspace-other");
 	fs.mkdirSync(other);
