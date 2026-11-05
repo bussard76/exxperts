@@ -47,7 +47,7 @@ fs.mkdirSync(path.join(folder, "node_modules", "hidden"), { recursive: true });
 fs.writeFileSync(path.join(folder, "node_modules", "hidden", "secret.md"), "hidden");
 fs.symlinkSync(path.join(folder, "docs"), path.join(folder, "shortcut"));
 const guide = path.join(folder, "docs", "guide.md");
-const IMAGE_LINES = ["![near](img/pixel.png \"Near\")", "![above](<../top pixel.png>)", "![remote alt](https://images.invalid/remote.png)", "![relative alt](//images.invalid/relative.png)"];
+const IMAGE_LINES = ["![near](img/pixel.png \"Near\")", "![above](<../top pixel.png>)", "[![badge](img/pixel.png)](https://example.invalid)", "[text ![mixed](img/pixel.png)](https://example.invalid)", "![encoded](../top%20pixel.png)", "![remote alt](https://images.invalid/remote.png)", "![relative alt](//images.invalid/relative.png)"];
 fs.writeFileSync(guide, `# Guide\n\nFirst line\n\n${IMAGE_LINES.join("\n\n")}\n`);
 
 // A provider at an address nobody answers: the room only has to open, never answer.
@@ -177,7 +177,7 @@ try {
 		await page.keyboard.press("Control+s");
 		await waitUntil(() => fs.readFileSync(guide, "utf8").includes("First line edited"), "the edit is saved");
 		const written = fs.readFileSync(guide, "utf8");
-		for (const line of IMAGE_LINES) assert(written.includes(line), `saving keeps ${line}, got: ${written}`);
+		assert(written === originalContent.replace("First line", "First line edited"), `saving preserves every original byte apart from the edit: ${JSON.stringify(written)}`);
 		console.log("  ok  saving an edit keeps the images' Markdown");
 
 		const composer = page.locator("textarea").first();

@@ -11,17 +11,36 @@ export const WorkspaceParagraph = Paragraph.extend({
 		if (tokens.length === 1 && tokens[0].type === "image") return helpers.createNode("paragraph", undefined, helpers.parseInline(tokens));
 		return Paragraph.config.parseMarkdown!.call(this, token, helpers);
 	},
+	renderMarkdown(node, helpers, context) {
+		const content = node.content ?? [];
+		if (!content.some((child) => child.type === "image" && child.attrs?.linkHref)) return Paragraph.config.renderMarkdown!.call(this, node, helpers, context);
+		let output = "";
+		for (let i = 0; i < content.length;) {
+			const child = content[i];
+			const link = child.type === "image" && child.attrs?.linkHref ? { href: child.attrs.linkHref, title: child.attrs.linkTitle } : child.marks?.find((mark) => mark.type === "link")?.attrs;
+			if (!link?.href) { output += helpers.renderChildren([child]); i++; continue; }
+			const group = [];
+			while (i < content.length) {
+				const item = content[i];
+				const itemLink = item.type === "image" && item.attrs?.linkHref ? { href: item.attrs.linkHref, title: item.attrs.linkTitle } : item.marks?.find((mark) => mark.type === "link")?.attrs;
+				if (itemLink?.href !== link.href || (itemLink?.title ?? null) !== (link.title ?? null)) break;
+				group.push({ ...item, marks: item.marks?.filter((mark) => mark.type !== "link"), attrs: item.type === "image" ? { ...item.attrs, linkHref: null, linkTitle: null } : item.attrs });
+				i++;
+			}
+			output += `[${helpers.renderChildren(group)}](${link.href}${markdownTitle(link.title)})`;
+		}
+		return output;
+	},
 });
 
 // Marks only apply to text, so a linked image would lose its link on save. It keeps the link on itself instead.
 export const WorkspaceLink = Link.extend({
 	parseMarkdown(token, helpers) {
 		const tokens = token.tokens ?? [];
-		if (tokens.length === 1 && tokens[0].type === "image") {
-			return helpers.parseInline(tokens).map((node) => ({
-				...node,
-				attrs: { ...node.attrs, linkHref: token.href, linkTitle: token.title || null },
-			}));
+		if (tokens.some((part) => part.type === "image")) {
+			return helpers.parseInline(tokens).map((node) => node.type === "image"
+				? { ...node, attrs: { ...node.attrs, linkHref: token.href, linkTitle: token.title || null } }
+				: { ...node, marks: [...(node.marks ?? []), { type: "link", attrs: { href: token.href, title: token.title || null } }] });
 		}
 		return Link.config.parseMarkdown!.call(this, token, helpers);
 	},

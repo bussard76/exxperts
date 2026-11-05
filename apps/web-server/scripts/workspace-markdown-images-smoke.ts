@@ -43,6 +43,7 @@ for (const markdown of [
 	"> ![in a quote](a.png)",
 	"| Head                 |\n| -------------------- |\n| ![in a table](a.png) |",
 	"[![linked](a.png)](https://example.com)",
+	"[text ![x](a.png)](https://example.com)",
 	"[![badge](a.svg \"Badge\")](https://example.com \"Site\")",
 	"Text [plain link](https://example.com) stays",
 	"![remote](https://example.com/a.png)",

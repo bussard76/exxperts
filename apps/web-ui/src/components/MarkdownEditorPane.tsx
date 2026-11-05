@@ -142,6 +142,8 @@ function MarkdownEditorSurface({
 	discardAndApplyExternal,
 	contentSetterRef,
 }: SurfaceProps, ref: Ref<SurfaceHandle>) {
+	const trailingNewlinesRef = useRef(content.match(/(?:\r?\n)+$/)?.[0] ?? "");
+	const editorMarkdown = (current: Editor) => current.getMarkdown() + trailingNewlinesRef.current;
 	const baselineRef = useRef(content);
 	const editorRef = useRef<Editor | null>(null);
 	const userEditedRef = useRef(false);
@@ -183,11 +185,11 @@ function MarkdownEditorSurface({
 		contentType: "markdown",
 		editable: canEdit && !readOnly,
 		onCreate: ({ editor: created }) => {
-			baselineRef.current = created.getMarkdown();
-			draftRef.current = created.getMarkdown();
+			baselineRef.current = editorMarkdown(created);
+			draftRef.current = editorMarkdown(created);
 		},
 		onUpdate: ({ editor: changed }) => {
-			const markdown = changed.getMarkdown();
+			const markdown = editorMarkdown(changed);
 			draftRef.current = markdown;
 			onDraftChange(markdown);
 			if (!changed.isFocused && !userEditedRef.current) {
@@ -208,7 +210,7 @@ function MarkdownEditorSurface({
 		}
 		const current = editorRef.current;
 		if (!current || !canEdit || hasExternalUpdate) return false;
-		const markdown = current.getMarkdown();
+		const markdown = editorMarkdown(current);
 		draftRef.current = markdown;
 		onDraftChange(markdown);
 		if (markdown === baselineRef.current) {
@@ -220,7 +222,7 @@ function MarkdownEditorSurface({
 		try {
 			const saved = await request;
 			if (saved) {
-				const latest = editorRef.current?.getMarkdown() ?? markdown;
+				const latest = editorRef.current ? editorMarkdown(editorRef.current) : markdown;
 				baselineRef.current = markdown;
 				if (latest !== markdown) {
 					draftRef.current = latest;
@@ -272,7 +274,7 @@ function MarkdownEditorSurface({
 		save,
 		discard,
 		focus: () => editorRef.current?.commands.focus(),
-		getContent: () => editorRef.current?.getMarkdown() ?? draftRef.current,
+		getContent: () => editorRef.current ? editorMarkdown(editorRef.current) : draftRef.current,
 		markSaved,
 	}), [discard, markSaved, save]);
 
@@ -281,6 +283,7 @@ function MarkdownEditorSurface({
 		editor.setEditable(canEdit && !readOnly);
 		contentSetterRef.current = (next: string) => {
 			if (editor.isDestroyed) return;
+			trailingNewlinesRef.current = next.match(/(?:\r?\n)+$/)?.[0] ?? "";
 			editor.commands.setContent(next, { emitUpdate: false, contentType: "markdown" });
 			baselineRef.current = next;
 			draftRef.current = next;
