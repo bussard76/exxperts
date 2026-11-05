@@ -87,6 +87,31 @@ try {
 	const saved = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: folder, workspaceAccessMode: "localFiles" }) });
 	assert(saved.status === 200, `the folder is saved, got ${saved.status} ${JSON.stringify(saved.body)}`);
 
+	const matrixQuery = (route: string, file: string) => `/api/persistent-agents/${encodeURIComponent(agentId)}/${route}?${new URLSearchParams({ conversationId: "matrix-test", path: file })}`;
+	const originalContent = fs.readFileSync(guide, "utf8");
+	for (const [tools, canList, canRead, canWrite] of [
+		[[], false, false, false],
+		[["ls"], true, false, false],
+		[["read"], false, true, false],
+		[["write"], false, false, false],
+		[["read", "write"], false, true, true],
+	] as const) {
+		const configured = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "custom", allowedToolNames: tools } }) });
+		assert(configured.status === 200, `configure matrix tools ${tools}`);
+		const listing = await api(matrixQuery("workspace-files", ""));
+		assert(listing.status === 200 && Boolean(listing.body.root) === canList, `tree permission for ${tools}`);
+		const markdown = await api(matrixQuery("workspace-markdown", "docs/guide.md"));
+		assert((markdown.status === 200) === canRead, `Markdown read permission for ${tools}`);
+		const image = await authedFetch(`${baseUrl}${matrixQuery("workspace-image", "docs/img/pixel.png")}`);
+		assert((image.status === 200) === canRead, `image read permission for ${tools}`);
+		const revision = `sha256:${(await import("node:crypto")).createHash("sha256").update(originalContent).digest("hex")}`;
+		const put = await api(matrixQuery("workspace-markdown", "docs/guide.md"), { method: "PUT", body: JSON.stringify({ content: originalContent, revision }) });
+		assert((put.status === 200) === canWrite, `Markdown write permission for ${tools}`);
+		assert(fs.readFileSync(guide, "utf8") === originalContent, `matrix preserves content for ${tools}`);
+	}
+	const restored = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "standard" } }) });
+	assert(restored.status === 200, "restore standard tools");
+
 	const browser = await chromium.launch();
 	try {
 		const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });

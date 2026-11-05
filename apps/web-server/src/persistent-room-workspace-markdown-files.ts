@@ -104,7 +104,7 @@ function toMarkdownError(error: unknown): PersistentRoomWorkspaceMarkdownError {
 function requirePolicy(agentId: string, conversationId: string, options: PersistentRoomWorkspacePolicyStorageOptions): WorkspaceMarkdownPolicyContext {
 	const effective = resolvePersistentRoomEffectiveWorkspacePolicy(agentId, conversationId, options);
 	if (!effective.policy) throw new PersistentRoomWorkspaceMarkdownError("workspace_not_found", 404, "No workspace is configured for this room.");
-	if (!effective.workspaceToolsEnabled || effective.policy.modes.read !== true) {
+	if (!effective.workspaceToolsEnabled || !persistentRoomWorkspaceToolNamesForPolicy(effective.policy).includes("read")) {
 		throw new PersistentRoomWorkspaceMarkdownError("workspace_read_forbidden", 403, "Workspace reading is not enabled for this room.");
 	}
 	return { policy: effective.policy };
@@ -112,7 +112,7 @@ function requirePolicy(agentId: string, conversationId: string, options: Persist
 
 function markdownWriteEnabled(policy: PersistentRoomCapabilityPolicy): boolean {
 	const selectedTools = new Set(persistentRoomWorkspaceToolNamesForPolicy(policy));
-	return policy.modes.write === true && (selectedTools.has("write") || selectedTools.has("edit") || policy.allowedToolNames.includes("write_markdown_file"));
+	return policy.modes.write === true && (selectedTools.has("write") || selectedTools.has("edit"));
 }
 
 function requireWritePolicy(policy: PersistentRoomCapabilityPolicy): void {
@@ -160,7 +160,7 @@ export function readWorkspaceMarkdownFileWithPolicy(
 	policy: PersistentRoomCapabilityPolicy,
 	rawPath: unknown,
 ): WorkspaceMarkdownFileResponse {
-	if (policy.modes.read !== true || persistentRoomWorkspaceToolNamesForPolicy(policy).length === 0) throw new PersistentRoomWorkspaceMarkdownError("workspace_read_forbidden", 403, "Workspace reading is not enabled for this room.");
+	if (policy.modes.read !== true || !persistentRoomWorkspaceToolNamesForPolicy(policy).includes("read")) throw new PersistentRoomWorkspaceMarkdownError("workspace_read_forbidden", 403, "Workspace reading is not enabled for this room.");
 	return readWithPolicy({ policy }, rawPath);
 }
 
@@ -192,7 +192,7 @@ export function readWorkspaceImageFileWithPolicy(
 	policy: PersistentRoomCapabilityPolicy,
 	rawPath: unknown,
 ): WorkspaceImageFileResponse {
-	if (policy.modes.read !== true || persistentRoomWorkspaceToolNamesForPolicy(policy).length === 0) throw new PersistentRoomWorkspaceMarkdownError("workspace_read_forbidden", 403, "Workspace reading is not enabled for this room.");
+	if (policy.modes.read !== true || !persistentRoomWorkspaceToolNamesForPolicy(policy).includes("read")) throw new PersistentRoomWorkspaceMarkdownError("workspace_read_forbidden", 403, "Workspace reading is not enabled for this room.");
 	return readImageWithPolicy({ policy }, rawPath);
 }
 
@@ -272,6 +272,7 @@ export function writeWorkspaceMarkdownFileWithPolicy(
 	content: unknown,
 	revision: unknown,
 ): WorkspaceMarkdownFileResponse {
+	if (!persistentRoomWorkspaceToolNamesForPolicy(policy).includes("read")) throw new PersistentRoomWorkspaceMarkdownError("workspace_read_forbidden", 403, "Workspace reading is not enabled for this room.");
 	requireWritePolicy(policy);
 	const relativePath = normalizeMarkdownPath(rawPath);
 	const expectedRevision = assertRevision(revision);
