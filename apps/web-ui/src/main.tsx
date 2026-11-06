@@ -31,8 +31,9 @@ createRoot(document.getElementById("root")!).render(
 		<div className="desktop-drag-strip" aria-hidden="true" />
 		{/* A render error shows one sentence and Reload, not a blank page. */}
 		<AppErrorBoundary>
-			<SidebarCollapsedAffordance />
 			<App />
+			{/* Keep the no-drag toggle after the room's draggable topbar. */}
+			<SidebarCollapsedAffordance />
 			<ConfirmDialogHost />
 			<KeysList />
 		</AppErrorBoundary>

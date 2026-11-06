@@ -35,6 +35,11 @@ try {
 		assert(await page.evaluate(() => document.documentElement.classList.contains("desktop-app-mac")), "desktop user agent enables mac look");
 		for (let cycle = 0; cycle < 2; cycle++) {
 			const show = page.getByRole("button", { name: "Show sidebar" });
+			const topbar = await show.evaluate((button) => {
+				const bar = document.querySelector(".topbar");
+				return { after: !!bar && Boolean(bar.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING), region: bar && getComputedStyle(bar).getPropertyValue("-webkit-app-region") };
+			});
+			assert(topbar.after && topbar.region === "drag", `${room} cycle ${cycle + 1}: floating toggle follows the draggable topbar: ${JSON.stringify(topbar)}`);
 			await show.waitFor();
 			const geometry = await show.evaluate((button) => {
 				const rect = button.getBoundingClientRect();
