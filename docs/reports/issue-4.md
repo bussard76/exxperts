@@ -53,3 +53,8 @@ The following checklist covers every Result and Observable acceptance item in [i
 - `workspace-file-preview-smoke.ts` now contains a test-first invented one-page PDF request. It currently fails as expected with HTTP 503 because the preview child mode is not implemented. It must not be counted as passing until the real guarded route and child deliver the specified complete result.
 - `workspace-file-tabs-ui-smoke.ts` has additional in-progress large-SVG fit and old `.doc` error-tab checks; they have not executed. The queued gated browser run and the queued gated existing-consumer run were cancelled before they started when escalating this seam question; those checks remain outstanding.
 - Progress only: the full issue, PDF/Word/Excel parsing, all-sheet support, open action, remaining guard cases and required package/Windows evidence are unfinished. No screenshots were captured.
+
+## Continued work after seam approval
+
+- Controller approved the single server-internal `runWorkspacePreviewWorker` export; the seam question above is resolved. Independent Tester and conformance review must check this seam, its child lifecycle and existing shelf consumers.
+- The gated `workspace-file-tabs-ui-smoke` initially failed on the added old `.doc` error tab; after implementation it passed (1/1, 5.4s), including the large-SVG fit assertion. Full B1/B2/B5 coverage remains open.
