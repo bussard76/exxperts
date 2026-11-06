@@ -208,13 +208,17 @@ try {
 		await treeFile("report.pdf").click();
 		assert(previewRequests === 1, "switching back does not refetch the PDF");
 		await tab("report.pdf").locator(".workspace-tab-close").click();
+		let corruptWorkbook = false;
 		await page.route("**/workspace-preview?*", async (route) => {
 			const url = new URL(route.request().url());
 			if (url.searchParams.get("path") !== "sample.xlsx") return route.continue();
 			const font = { family: "Arial", sizePt: 11, color: "#CC2200", bold: true, italic: false, underline: "none", strike: false };
 			const style = { fill: "#FFFF00", font, borders: { top: null, right: null, bottom: null, left: null }, align: { horizontal: "left", vertical: "bottom", wrap: false } };
 			const sheet = (id: string, name: string, text: string, wide = false) => ({ id, name, visibility: "visible", rowCount: wide ? 80 : 1, columnCount: wide ? 12 : 1, defaultRowHeightPx: 20, defaultColumnWidthPx: 64, rows: [], columns: [{ index: 1, widthPx: 173 }], cells: [{ row: 1, column: 1, text, style: 0, runs: null, valueKind: "text" }, ...(wide ? [{ row: 2, column: 2, text: "—", style: 0, runs: null, valueKind: "formula-result-unavailable" }, { row: 80, column: 12, text: "Last cell", style: 0, runs: null, valueKind: "text" }] : [])], merges: [] });
-			await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ schemaVersion: 1, agentId, conversationId: url.searchParams.get("conversationId"), path: "sample.xlsx", notices: [], kind: "spreadsheet", workbook: { dateSystem: "1900", styles: [style], sheets: [sheet("1", "Summary", "Invented total", true), sheet("2", "Detail", "Second sheet")] } }) });
+			const summary = sheet("1", "Summary", "Invented total", true);
+			if (corruptWorkbook) summary.cells[0].style = 77;
+			const empty = { ...sheet("3", "Empty", ""), visibility: "hidden", rowCount: 0, columnCount: 0, columns: [], cells: [] };
+			await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ schemaVersion: 1, agentId, conversationId: url.searchParams.get("conversationId"), path: "sample.xlsx", notices: [], kind: "spreadsheet", workbook: { dateSystem: "1900", styles: [style], sheets: [summary, sheet("2", "Detail", "Second sheet"), empty] } }) });
 		});
 		await treeFile("sample.xlsx").click();
 		const sheetCell = page.getByText("Invented total", { exact: true });
@@ -232,6 +236,13 @@ try {
 		await treeFile("notes.md").click();
 		await treeFile("sample.xlsx").click();
 		assert(await page.getByText("Second sheet", { exact: true }).count() === 1 && previewRequests === requestsAfterSheet, "the selected sheet survives tab switches without refetch");
+		await page.getByRole("button", { name: "Empty", exact: true }).click();
+		await page.getByText("This sheet is empty.", { exact: true }).waitFor();
+		await tab("sample.xlsx").locator(".workspace-tab-close").click();
+		corruptWorkbook = true;
+		await treeFile("sample.xlsx").click();
+		await page.getByText("This file could not be previewed.", { exact: true }).waitFor();
+		assert(await page.getByText("Invented total", { exact: true }).count() === 0, "invalid style references never render a partial workbook");
 		await tab("sample.xlsx").locator(".workspace-tab-close").click();
 		let externalRequests = 0;
 		await page.route("**/*", async (route) => {
