@@ -90,7 +90,7 @@
     "hosted-git-info": "^9.0.2",
     "ignore": "^7.0.5",
     "jiti": "^2.7.0",
-    "jsdom": "^29.1.1",
+    "jsdom": "26.1.0",
     "jszip": "^3.10.1",
     "marked": "^15.0.12",
     "minimatch": "^11.0.1",
