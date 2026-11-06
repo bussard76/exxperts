@@ -34,10 +34,10 @@ New features go from the outside in. Nothing is built until Sascha has signed of
 ## Test stages (decided by Sascha, 2026-11-04)
 
 - Developer: targeted checks only (typecheck, lint, affected suites, the browser specs covering the change). No full suites.
-- Tester and wave: full `npm run build && npm run smokes` and `the browser suite` on current `main` plus the branch.
+- Tester and wave: full `npm run build && npm run smokes -- --jobs 1` and `the browser suite` on current `main` plus the branch.
 - Release only: `the release gates`. Never per task or per wave.
 - UI checks run in the web UI on the server; the Electron client need not be tested there, and Sascha sees it at acceptance (decided by Sascha, 2026-11-05: "Teste die Webübersicht und du musst nicht zwangsläufig in dem Fatclient testen").
-- Full gates run on workhorse2, one after the other (`npm run smokes -- --jobs 1`). Sascha accepts the suite's known side effects on that shared host; no separate VM is required (decided by Sascha, 2026-11-06, answering "Wo soll der Controller die volle Testsuite laufen lassen?": "Weiter auf workhorse2"). A single failing smoke is rerun alone on the same commit and both results are reported; other work does not stop for it.
+- Full gates run on workhorse2, one after the other, through `gate`; run all smokes sequentially with `npm run smokes -- --jobs 1`, without skipping or weakening tests. Sascha accepts the known public doctor requests and fixed temp file effects on that host; no VM or further isolation work is needed before gates (decided by Sascha, 2026-11-06, answering "Wo soll der Controller die volle Testsuite laufen lassen?": "Weiter auf workhorse2"). If exactly one smoke fails, rerun that same smoke once alone on the same commit and report both results under "Needs Sascha" while other independent work continues.
 - Every full gate runs through `gate` (fair slots, pooled by unit and browser), as `gate bash -c '<command>'` because `gate` starts a program without a shell.
 
 ## Capacity by measurement (decided by Sascha, 2026-11-04)
@@ -58,7 +58,7 @@ The Controller runs `node capacity.mjs` before every start and follows its verdi
 2. Tester failed → rework in the same worktree with the findings unchanged; after two failures one tier higher.
 3. Tester passed → conformance review for level 2/3, else into the next wave.
 4. A wave starts when 2 passed tasks wait, one has waited 60 minutes, or a task is on the critical path. The wave merges, runs the full gates once, and pushes to `main`.
-5. A red wave: a known load flake gets one isolated rerun; three green isolated runs are the evidence. A real failure goes back to the task.
+5. A red wave with exactly one failing smoke follows the single-smoke rule above. Otherwise, a known load flake gets one isolated rerun; three green isolated runs are the evidence. A real failure goes back to the task.
 6. Merge conflicts are resolved by the task's Developer on its branch and checked by a Tester.
 
 ## Cleanup after every cycle (decided by Sascha, 2026-11-04)
