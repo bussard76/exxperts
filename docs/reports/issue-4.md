@@ -29,3 +29,4 @@ Scope assumption: `.xls` and `.xlsm` retain the no-preview sentence and Open but
 - `workspace-file-tabs-ui-smoke.ts` timed out waiting for the image before the image tab implementation; after the UI build, the gated browser smoke passed. This covers the initial image/Markdown tab, reuse, tree marking and close flow; other formats and fuller tab cases remain open.
 - The gated browser smoke now checks the dirty Markdown guard when switching to an image; its wording assertion failed before the change and passed after it.
 - The invented PDF route test failed with 503 before the renderer; `workspace-file-preview-smoke.ts` and the gated `workspace-file-tabs-ui-smoke.ts` passed after transfer. PDF scroll and broader fidelity tests remain to be transferred.
+- PDF scrolling assertion in the gated browser smoke failed before the layout correction and passed afterward.

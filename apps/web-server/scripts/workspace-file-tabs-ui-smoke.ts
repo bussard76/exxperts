@@ -37,9 +37,14 @@ const agentDir = path.join(tempHome, ".exxperts", "agent");
 const appDir = path.join(tempHome, ".exxperts", "app");
 for (const dir of [agentsRoot, agentDir]) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 
-function onePagePdf(): Buffer {
-	const stream = "1 0 0 rg 10 10 180 80 re f";
-	const objects = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents 4 0 R >>", `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`];
+function ninePagePdf(): Buffer {
+	const objects: string[] = [];
+	const kids = Array.from({ length: 9 }, (_, index) => `${3 + index * 2} 0 R`).join(" ");
+	objects.push("<< /Type /Catalog /Pages 2 0 R >>", `<< /Type /Pages /Kids [${kids}] /Count 9 >>`);
+	for (let index = 0; index < 9; index++) {
+		const stream = "1 0 0 rg 10 10 180 80 re f";
+		objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents ${4 + index * 2} 0 R >>`, `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
+	}
 	let body = "%PDF-1.4\n";
 	const offsets: number[] = [];
 	objects.forEach((object, index) => { offsets.push(body.length); body += `${index + 1} 0 obj\n${object}\nendobj\n`; });
@@ -52,7 +57,7 @@ function onePagePdf(): Buffer {
 const folder = path.join(tempHome, "Projects", "archive");
 fs.mkdirSync(folder, { recursive: true });
 fs.writeFileSync(path.join(folder, "photo.png"), ONE_PIXEL_PNG);
-fs.writeFileSync(path.join(folder, "report.pdf"), onePagePdf());
+fs.writeFileSync(path.join(folder, "report.pdf"), ninePagePdf());
 fs.writeFileSync(path.join(folder, "large.svg"), '<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="2000"><rect width="2000" height="2000" fill="red"/></svg>');
 fs.writeFileSync(path.join(folder, "notes.md"), "# Notes\n\nSome text\n");
 fs.writeFileSync(path.join(folder, "old.doc"), "legacy");
@@ -118,7 +123,11 @@ try {
 		const tabNames = async () => (await tabs.locator(".workspace-tab-select").allTextContents()).map((name) => name.trim());
 
 		let imageRequests = 0;
-		page.on("request", (request) => { if (request.url().includes("/workspace-image?")) imageRequests += 1; });
+		let pdfRequests = 0;
+		page.on("request", (request) => {
+			if (request.url().includes("/workspace-image?")) imageRequests += 1;
+			if (request.url().includes("/workspace-preview?")) pdfRequests += 1;
+		});
 		await treeFile("notes.md").click();
 		await page.locator(".markdown-editor-tiptap .ProseMirror").waitFor({ timeout: 20_000 });
 		await treeFile("photo.png").click();
@@ -156,9 +165,26 @@ try {
 		await tab("old.doc").locator(".workspace-tab-close").click();
 		await treeFile("report.pdf").click();
 		const pdfPage = page.locator(".workspace-preview-pdf img");
-		await waitUntil(() => pdfPage.evaluate((img) => (img as HTMLImageElement).naturalWidth > 0).catch(() => false), "the rendered PDF page appears");
+		await waitUntil(async () => (await pdfPage.count()) === 9 && await pdfPage.first().evaluate((img) => (img as HTMLImageElement).naturalWidth > 0).catch(() => false), "all nine rendered PDF pages appear");
 		assert((await activeName()) === "report.pdf", "PDF opens in its own tab");
-		assert(await pdfPage.getAttribute("alt") === "Page 1", "PDF page has an accessible name");
+		assert(await pdfPage.nth(8).getAttribute("alt") === "Page 9", "each PDF page has an accessible name");
+		const painted = await pdfPage.first().evaluate((img) => {
+			const image = img as HTMLImageElement;
+			const canvas = document.createElement("canvas"); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+			const context = canvas.getContext("2d")!; context.drawImage(image, 0, 0);
+			const pixel = context.getImageData(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2), 1, 1).data;
+			return pixel[0] > 200 && pixel[1] < 80 && pixel[2] < 80;
+		});
+		assert(painted, "the displayed PDF retains its color landmark");
+		const scrollable = page.locator(".workspace-preview-pdf");
+		const scrollMetrics = await scrollable.evaluate((node) => {
+			node.scrollTop = node.scrollHeight;
+			return { top: node.scrollTop, height: node.clientHeight, content: node.scrollHeight, parent: node.parentElement?.clientHeight, pane: node.closest(".workspace-pane")?.clientHeight };
+		});
+		assert(scrollMetrics.top > 0, `PDF pages scroll vertically: ${JSON.stringify(scrollMetrics)}`);
+		await treeFile("notes.md").click();
+		await treeFile("report.pdf").click();
+		assert(pdfRequests === 1, "switching back does not refetch the PDF");
 		await tab("report.pdf").locator(".workspace-tab-close").click();
 		await tab("notes.md").locator(".workspace-tab-close").click();
 		await waitUntil(async () => (await tabs.count()) === 0, "closing the last tab closes the pane");
