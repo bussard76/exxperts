@@ -223,7 +223,7 @@ export function ArtifactViewer({ taskId, templateLabel, artifact, onClose, maxim
 							aria-label="Open in a new tab"
 							title="Open in a new browser tab"
 						>
-							⧉
+							<svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"><path d="M5 3H13V11H11M3 5H11V13H3Z" /></svg>
 						</button>
 						<button
 							type="button"
@@ -233,7 +233,7 @@ export function ArtifactViewer({ taskId, templateLabel, artifact, onClose, maxim
 							aria-label={maximized ? "Restore panel size" : "Maximize panel"}
 							title={maximized ? "Restore panel size" : "Maximize panel"}
 						>
-							{maximized ? "⤡" : "⤢"}
+							<svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{maximized ? <path d="M2 2L6 6M3 6H6V3M14 14L10 10M13 10H10V13" /> : <path d="M6 6L2 2M2 5V2H5M10 10L14 14M14 11V14H11" />}</svg>
 						</button>
 						<button
 							type="button"

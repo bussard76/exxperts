@@ -216,12 +216,6 @@ html.desktop-app-mac .artifact-viewer-head-right {
 	align-self: flex-start;
 	margin-top: calc(var(--mac-row-centre) - 14.5px);
 }
-/* The open-in-a-new-tab glyph (⧉) draws 1px above its line's centre, so
-   its button's content box starts 2px lower to put the glyph's ink on the
-   row with its neighbours. */
-html.desktop-app-mac .artifact-viewer-open-tab {
-	padding-top: 2px;
-}
 /* The preview's kicker line has more air above its letters than its title
    line has below, so their ink sits 1.75px above the block's centre: the
    block starts 3.5px lower to put it on the row. */

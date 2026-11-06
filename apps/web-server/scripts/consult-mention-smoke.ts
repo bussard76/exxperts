@@ -520,7 +520,7 @@ async function checkMessageBox(chromium: BrowserType): Promise<void> {
 		await waitForServer(server, baseUrl, 30_000);
 
 		// Scrollbars drawn, as on a real screen (headless hides them), at a Mac's and a phone's pixel density.
-		const browser = await chromium.launch({ ignoreDefaultArgs: ["--hide-scrollbars"] });
+		const browser = await chromium.launch({ ignoreDefaultArgs: ["--hide-scrollbars"], args: ["--disable-lcd-text"] });
 		try {
 			for (const [width, theme] of PASSES) {
 				const label = `${width} ${theme}`;
@@ -640,7 +640,7 @@ async function checkMessageBox(chromium: BrowserType): Promise<void> {
 			await browser.close();
 		}
 	} catch (error) {
-		console.error(serverOutput.join("").split("\n").filter((line) => !line.includes("token=")).join("\n").slice(-4000));
+		console.error(serverOutput.join("").split("\n").filter((line) => !/token[=]/.test(line)).join("\n").slice(-4000));
 		throw error;
 	} finally {
 		await stopSmokeServer(server);
