@@ -32,7 +32,7 @@ import { AppearancePane } from "./components/appearance-pane";
 import { isSignInFailure } from "./sign-in-failure";
 import { PaneHeader } from "./components/pane-header";
 import { sharedServerReleases, WhatsNewDialog, type WhatsNewSections } from "./components/whats-new-dialog";
-import { fetchRemoteClientContext, sharedServerRole, knownRemoteClientContext, pagePersonProtocols, personHasChanged, refreshRemoteClientContext, reloadForNewPerson, showsComputerOnlyControls, usePersonChanged, useRemoteClientContext } from "./remote-client-context";
+import { fetchRemoteClientContext, sharedServerRole, knownRemoteClientContext, pagePersonProtocols, personHasChanged, refreshRemoteClientContext, reloadForNewPerson, showsComputerOnlyControls, useConfirmedLocalClientContext, usePersonChanged, useRemoteClientContext } from "./remote-client-context";
 import { RemoteAccessPage } from "./components/remote-access-page";
 import { StateProfileSection } from "./components/state-profile-section";
 import { GlobalInstructionsSection } from "./components/GlobalInstructionsSection";
@@ -135,6 +135,31 @@ const SWITCH_READ_RETRY_MS = 1_000;
 type LastMessageEditState =
 	| { phase: "editing"; id: string; text: string }
 	| { phase: "sent"; replaces: string; oldIds: string[]; newId: string; text: string };
+
+function WorkspaceOpenAction({ agentId, conversationId, path }: { agentId: string; conversationId: string; path: string }) {
+	const local = useConfirmedLocalClientContext();
+	const [pending, setPending] = useState(false);
+	const [failed, setFailed] = useState(false);
+	const pendingRef = useRef(false);
+	if (!local) return null;
+	const label = /\.pdf$/i.test(path) ? "Open PDF" : /\.docx$/i.test(path) ? "Open in Word" : /\.xls(?:x|m)?$/i.test(path) ? "Open in Excel" : "Open in default app";
+	const open = async () => {
+		if (pendingRef.current) return;
+		pendingRef.current = true;
+		setPending(true);
+		setFailed(false);
+		try {
+			const response = await apiFetch(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-open`, {
+				method: "POST", headers: { "content-type": "application/json", "x-exxperts-local-action": "open-workspace-file" },
+				body: JSON.stringify({ conversationId, path }),
+			});
+			const result: unknown = await response.json();
+			if (response.status !== 202 || !result || typeof result !== "object" || Array.isArray(result) || Object.keys(result).length !== 1 || (result as { accepted?: unknown }).accepted !== true) throw new Error("refused");
+		} catch { setFailed(true); }
+		finally { pendingRef.current = false; setPending(false); }
+	};
+	return <div className="workspace-open-action"><button type="button" disabled={pending} onClick={() => void open()}>{label}</button>{failed && <p role="alert">This file could not be opened in another program.</p>}</div>;
+}
 
 export function App() {
 	const [view, setView] = useState<MainView>("home");
@@ -8638,6 +8663,7 @@ export function App() {
 			{persistentChat && !personChanged && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId && (
 				<div className="workspace-pane" hidden={activeWorkspacePath(rightPane) === null}>
 					<WorkspaceFileTabs tabs={workspaceTabs.paths} active={activeWorkspacePath(rightPane)} onSelect={(path) => openWorkspaceMarkdown({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} />
+					{rightPane && (rightPane.kind === "workspaceImage" || rightPane.kind === "workspacePdf" || rightPane.kind === "workspaceWord") && <WorkspaceOpenAction key={JSON.stringify([persistentChat.agentId, persistentChat.conversationId, rightPane.path])} agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={rightPane.path} />}
 					{rightPane?.kind === "markdownEditor" && <MarkdownEditorPane
 						ref={markdownEditorRef}
 						agentId={persistentChat.agentId}
