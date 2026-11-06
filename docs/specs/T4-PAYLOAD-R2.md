@@ -1,6 +1,6 @@
 # T4-PAYLOAD-R2 — desktop staging specification
 
-Status: draft for fresh independent specification review; no implementation authorization.
+Status: revised specification ready for fresh independent review; no implementation authorization.
 Date: 2026-11-06.
 
 ## Architecture impact
@@ -31,7 +31,7 @@ Specification work checklist:
 - [x] Correct F1 with exact desktop-only ownership, synchronous operation and graph preservation.
 - [x] Specify public bundle, retained entries/resources, complete attribution and target/count conditions.
 - [x] Name public test-first hooks, installed/pruned real-producer/browser/CLI and negative proofs.
-- [ ] Self-review every binding instruction, reconcile current main, validate documentation, sign/commit/push and report SHA.
+- [x] Self-review every binding instruction, reconcile current main, validate documentation, sign/commit/push; exact final SHA in worker handoff.
 
 ## Evidence and decision precedence
 
@@ -183,4 +183,6 @@ Assumptions: 216 outside-node_modules files and the historical closure are provi
 
 Existing debt candidate: `tests`, major — Windows opener/native behavior unverified on a real system under Sascha's explicit waiver; run authorized invented-data native/installed/opener acceptance when an approved host/user is available. Missing notices, actual installed/pruned closure/count, unresolved Excel correctness and unproven Node compatibility remain required evidence/dispositions, not newly waived optional debt. No separate debt file changes in this task.
 
-Current-dispatch validation and final reconciliation will be recorded below before the final signed push. Product/UI typechecks, browser suites, runtime/full builds, package installation, actual packaging/pruning, advisory services and real files/openers are not run in this specification-only dispatch. No screenshots or temporary checkout were created.
+Current-dispatch validation: `git diff --check` passed. A read-only documentation check passed for the ten original Result/Observable rows, required pinned/seam/consumer/count/failure contracts, both frozen source objects, consistent Markdown table columns, the one-file scope against origin/main and active `.githooks`. Item-by-item self-review above found no remaining specification gap; none of the named future product checks is claimed as executed. Normal signed documentation commits passed the active commit/push hooks; the hook explicitly classified this as documentation-only and skipped static code checks.
+
+Final reconciliation: fetched origin and merged origin/main, already up to date at `cc075a4d371bbdfea6cead35f515df6086f8df28`; repeated documentation scope/whitespace checks on the reconciled revision. Branch: `agents/t4-payload-spec-r2`, signed revisions pushed to origin; exact final head SHA is in the Orca worker handoff. Environment/load reruns: zero. Tests added/changed: none. Product/UI typechecks, browser suites, runtime/full builds, dependency installation, actual packaging/pruning, advisory services and real files/openers were not run under the specialized specification-only override. No screenshots, binaries or temporary checkout were created. Next owner action: fresh independent revised-spec review before any implementation or deletion.
