@@ -1,8 +1,8 @@
 # T6 review, round 1
 
-Verdict: fail
+Verdict: pass
 Reviewed commit: 9c2dfbb592275cd77a24f2538245e047af159b99
-Gates: first full gate failed (372/375 smokes); targeted browser checks passed.
+Gates: corrected full gate passed (375/375 smokes); first full gate failed (372/375) as recorded below; targeted browser checks passed.
 Ponytail: reviewed the full diff and connected sidebar, styles, smoke and room setup; no product defect established. Expected load is one interactive local desktop user.
 
 What this change does: It places the existing floating sidebar toggle after the room UI in document order, while leaving its existing no-drag styling in place. The new browser smoke checks the ordering and two cycles in each of two invented rooms.
@@ -18,7 +18,7 @@ What this change does: It places the existing floating sidebar toggle after the 
 
 ## Findings
 
-### [blocker] Full gate did not pass
+### [resolved blocker] First full gate did not pass
 - Where: first full gate log `.build/t6-full-gate.log`, `scripts/patch-mcp-adapter.mjs:2`, `apps/web-server/scripts/memory-search-index-smoke.ts:446`.
 - Problem: The build passed but only 372/375 smokes passed. The reviewer's offline `npm ci --ignore-scripts` omitted the required adapter postinstall; the two MCP tests failed both in the full run and their first isolated runs. The memory index timing test failed at 1070 ms and passed alone. The unpatched setup is a reviewer error, not an established defect in this task; the timing cause is not established.
 - Violates: `docs/review-protocol.md` requires a passing full gate.
@@ -42,3 +42,9 @@ What this change does: It places the existing floating sidebar toggle after the 
 | --- | --- | --- | --- |
 | tests | medium | `apps/web-server/scripts/sidebar-reopen-ui-smoke.ts:38` | Add a native Electron pointer and drag-region regression when a safe Mac test seam exists; the order guard does not reproduce the native failure. |
 | tests | low | `apps/web-ui/src/main.tsx:36` | Add sequential keyboard focus coverage for the moved toggle, including longer room content. |
+
+## Corrected full gate
+
+The coordinator authorized a second full gate after the first result was committed and pushed. On temporary branch `t6-review-gate`, HEAD was exactly `9c2dfbb592275cd77a24f2538245e047af159b99`; current `origin/main` had already merged without changes. `node scripts/patch-mcp-adapter.mjs` confirmed the required patches were present, then the exact authorized full-gate command above passed: build succeeded, 375/375 smokes passed in 645 seconds wall time with default six-way parallelism, exit 0. Full raw output: `.build/t6-corrected-full-gate.log`. The earlier failed gate and its reruns remain recorded unchanged above; the two MCP tests and memory timing test also passed in this corrected parallel run. There were no failed smokes to rerun from the corrected gate and no observed foreign-network failure.
+
+The corrected run reported the same `fd` and case-sensitive-filesystem skips and other-system-only portions as the first run. The sidebar and topbar browser smokes both actually ran and passed. Sascha's reported hand confirmation is for opening and closing the equivalent Mac change; native title-row dragging and explicit hand confirmation of the restored file tree remain acceptance checks, not claims of this review.
