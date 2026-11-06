@@ -1,0 +1,21 @@
+{
+  "installed_equals_tested": true,
+  "installed_sha256": "80c7707f9147a079019dc5a3c45cfada5d815a887debd105bb185f8255f95403",
+  "original_sha256": "ce29185833778dbc23235ec52aa2bb8eba2510ff6054d03512132dabf34423d6",
+  "harness_sha256": "5314b286346d7bf664e9f2682d10ddf78d1acf6096a8da5ca72063ae345ecd0f",
+  "manifest_equals_actual": true,
+  "total": 4399,
+  "inherited": 4036,
+  "added": 363,
+  "preservation": {
+    "inherited_harness_unchanged": true,
+    "completeness_completion_parser_unchanged": true,
+    "noise_validators_unchanged": true,
+    "action_accounting_paths_unchanged": true,
+    "canonical_id_validation_unchanged": true
+  },
+  "pending_removed": true,
+  "live_cleanup_invoked": false,
+  "unexpected_failures": 0,
+  "environment_load_network_retries": 0
+}

@@ -1,0 +1,3 @@
+# Parked cleanup work (WIP)
+
+Sascha parked this work on 2026-11-06. This is an unapproved snapshot for the separate factory issue bussard76/agentic-factory#20. Do not run or integrate the script. R13 had 4,399 reported synthetic passes; its independent safety review was stopped before its verdict and the partial report is not a final review. The copied harness and runner were written for the original controller directory layout and need adaptation in the factory repository. External writers remain unfenced and service completeness/honesty remain assumptions. This branch contains no release or live-use approval.
