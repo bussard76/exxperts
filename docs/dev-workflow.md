@@ -171,7 +171,7 @@ Der Controller setzt für jeden vollen Gate-Aufruf `GATE_SLOTS=1`, auch für Bro
 | klein | Mechanisches nach Checkliste |
 | groß | ADRs und Architektur auf Stufe 3 |
 
-**Eskalationsleiter:** Scheitert ein Worker zweimal an derselben Aufgabe, läuft der nächste Versuch eine Stufe höher. **Kontingent-Fallback:** Sinkt das Wochenlimit des Standard-Agenten unter 10 %, starten neue Worker mit dem Ersatz-Agenten auf der entsprechenden Stufe. Laufende Worker arbeiten zu Ende. Nach dem Reset geht es zurück. **Kalibrierung:** Die Stufe pro Rolle ist ein Startwert. Bestehensquote und Runden aus dem Journal setzen eine Rolle herab, wenn sie leicht besteht, und herauf, wenn sich Fehlschläge häufen.
+**Eskalationsleiter:** Scheitert ein Worker zweimal an derselben Aufgabe, läuft der nächste Versuch eine Stufe höher. **Kontingent:** Worker bleiben unabhängig vom Wochenlimit bei den OpenAI-Modellen; kein Claude-Fallback. Bei knappem oder erreichtem Limit pusht der Controller den aktuellen Stand und bittet Sascha in `status.md` um den Reset mit Credits. Der Controller spart kein Kontingent durch serielle Arbeit und wartet nicht auf einen Kalendertag. **Kalibrierung:** Die Stufe pro Rolle ist ein Startwert. Bestehensquote und Runden aus dem Journal setzen eine Rolle herab, wenn sie leicht besteht, und herauf, wenn sich Fehlschläge häufen. (Entschieden von Sascha am 06.11.2026.)
 
 Aufträge folgen festen **Vorlagen pro Rolle**: nummerierte Schritte, „fertig wenn“, Abbruchkriterien, Antwortformat. Jede Spec wird aus der Vorlage mit Parametern erzeugt, nie durch Abwandeln der Spec einer anderen Aufgabe.
 
@@ -190,9 +190,9 @@ Der Rhythmus ist eine Einstellung (`rhythm.mode`), keine Regel:
 
 Bei jedem Ereignis eines Workers, sonst alle 10 Minuten:
 
-1. **Ereignisse lesen:** Fertigmeldungen, Fragen und Eskalationen, neue Einträge in `inbox.md`, aktueller `main`.
+1. **Ereignisse und Promptzustand lesen:** Fertigmeldungen, Fragen und Eskalationen, neue Einträge in `inbox.md`, aktueller `main`. Bei jedem Heartbeat prüft der Controller zusätzlich den angezeigten Prompt jedes aktiven Worker-Terminals. Ein lebender Orca-Dispatch beweist nicht, dass der Agent arbeitet. Steht er am Eingabeprompt, liest der Controller die letzte Ausgabe, sendet einen konkreten Fortsetzungsauftrag über Orca und ins Terminal und bestätigt den gestarteten Turn.
 2. **Reagieren:** Developer fertig → Tester. Tester gescheitert → Nacharbeit im selben Worktree, nach zwei Fehlschlägen eine Modellstufe höher, nach der Rundengrenze Frage an den Menschen. Tester bestanden → bei Stufe 2/3 Konformität, sonst nächste Wave. Frage eines Workers → selbst entscheiden, wenn durch Regeln gedeckt, und schriftlich festhalten; sonst Frage an den Menschen.
-3. **Hänger erkennen:** Eine Stall-Watch prüft alle Worker-Terminals. Ein Worker, der still am Prompt steht, „Modell überlastet“ meldet oder vorzeitig aufhört, bekommt einen Anstoß direkt ins Terminal.
+3. **Hänger erkennen:** Eine Stall-Watch prüft alle Worker-Terminals. Ein Worker, der still am Prompt steht, „Modell überlastet“ meldet oder vorzeitig aufhört, bekommt einen Anstoß direkt ins Terminal. Beobachteten Promptzustand und bestätigtes Aufwecken dokumentiert der Controller in `status.md`.
 4. **Freie Plätze füllen:** nach dem Kapazitäts-Urteil und der Reihenfolge bei Engpass.
 5. **Aufräumen, in jedem Zyklus:** Terminals fertiger Worker schließen, Worker freigeben, Worktrees mit gemergtem oder sicher gepushtem Branch entfernen (ungesicherte Änderungen vorher als WIP-Branch pushen), gemergte Branches löschen. Worktrees aktiver oder pausierter Aufgaben bleiben.
 6. **Status schreiben:** `status.md` mit Zeitstempel.

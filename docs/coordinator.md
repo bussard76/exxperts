@@ -56,7 +56,7 @@ The Controller runs `node capacity.mjs` before every start and follows its verdi
 - `gpt-6-luna` for mechanical checklist work.
 - `gpt-6.1-sol` only for ADRs and level-3 work, and at the top of the escalation ladder.
 - **Escalation ladder:** after two failures on the same task the next attempt runs one tier higher.
-- **Quota fallback:** below 10 % of codex's weekly quota, new workers start with claude (gpt-6-luna → haiku, gpt-6.1-terra → sonnet, gpt-6.1-sol → opus). Running workers finish. Switch back after the reset. Record every reading in `status.md`.
+- **Quota:** keep workers on the OpenAI models at every quota level; do not use the Claude fallback. Work normally under the measured capacity rules. When the weekly limit is near or reached, push current work and put the credit-reset request under "Needs Sascha" in `status.md`. Do not serialize work to save quota or wait for a calendar reset. Record quota readings there (decided by Sascha, 2026-11-06).
 
 ## Review loop
 
@@ -66,6 +66,10 @@ The Controller runs `node capacity.mjs` before every start and follows its verdi
 4. A wave starts when 2 passed tasks wait, one has waited 60 minutes, or a task is on the critical path. The wave merges, runs the full gates once, and pushes to `main`.
 5. A red wave: rerun each failed parallel smoke alone on the same commit and report both results as above. For other known load flakes, one isolated rerun is allowed; three green isolated runs are the evidence. A real failure goes back to the task.
 6. Merge conflicts are resolved by the task's Developer on its branch and checked by a Tester.
+
+## Worker prompt state on every heartbeat (decided by Sascha, 2026-11-06)
+
+On every heartbeat, the Controller checks the rendered prompt screen of each active worker terminal in addition to its Orca dispatch state. A live dispatch does not prove that an agent is working. If the screen shows an idle prompt, the Controller reads the recent output, sends a precise continuation through Orca and into the terminal, and confirms that the prompt started a new turn. The Controller records the observed prompt state and wake result in `status.md` and repeats this check on every heartbeat.
 
 ## Cleanup after every cycle (decided by Sascha, 2026-11-04)
 
