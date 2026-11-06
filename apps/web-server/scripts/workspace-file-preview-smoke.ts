@@ -74,6 +74,12 @@ try {
 	const missingConversation = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=missing-demo&path=book.xlsx`);
 	assert(missingConversation.status === 404, "a nonexistent conversation cannot fall back to the room workspace");
 	assert((await missingConversation.json()).code === "conversation_not_found", "missing conversation has the approved error code");
+	const seeded = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/threads/demo-thread`, { method: "PUT", body: JSON.stringify({ state: "active", origin: "launcher", model: { provider: "fake-claude", model: "claude-fake" }, items: [] }) });
+	assert(seeded.status === 200, `demo conversation exists, got ${seeded.status}`);
+	const configured = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "custom", allowedToolNames: [] }, bashEnabled: false }) });
+	assert(configured.status === 200, "workspace read can be disabled");
+	const forbidden = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=book.xlsx`);
+	assert(forbidden.status === 403 && (await forbidden.json()).code === "workspace_read_forbidden", "preview respects current workspace read permission");
 
 	console.log("workspace-file-preview smoke: ok");
 } catch (error) {
