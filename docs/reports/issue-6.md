@@ -1,5 +1,33 @@
 # Issue 6 developer report
 
+## Gate isolated follow-up — 2026-11-06
+
+Sascha's decision limits this follow-up to controller wave handling and process documentation. Issue 6 was already integrated at c61bba4; the historical issue checklist and evidence below are retained, and its feature work is not repeated.
+
+### Architecture impact
+
+Level 1: existing controller wave handling and process documentation; no new public export, dependency, route, store, or product data flow is authorized.
+
+### Acceptance checklist
+
+- [x] Historical Result: sidebar closes and reopens repeatedly with and without a workspace folder. This is the already-integrated issue, not new work in this follow-up.
+- [x] Historical Observable: UI smoke exercises two collapse/reopen cycles; see the original report below.
+- [ ] Historical Observable: Sascha's macOS Electron preview acceptance; see the original report below.
+- [ ] Full build must pass before any failed smoke can be accepted.
+- [ ] Identify the complete, exact set of parallel smoke failures; rerun each individually on the unchanged integration commit and preserve both results.
+- [ ] Permit push only for zero failures, or one or two parallel failures with all individual reruns passing; three or more, missing or ambiguous evidence, changed commit, non-smoke failure, or individual failure remains red.
+- [ ] Preserve serialized host full gates, all tests and hooks; no live wave or full gate in this task.
+- [ ] Test the wave public entry point with fake commands and temporary repositories: zero, one, two and three failures, individual failure, build failure, ambiguous log, changed commit and push gating.
+- [ ] Update `docs/coordinator.md` and `docs/dev-workflow.md` together in one commit, citing Sascha's 2026-11-06 decision.
+- [ ] Back up the controller-only wave script and provide its full diff for independent review before use.
+- [ ] Run requested targeted checks, merge current origin/main, rerun affected suites, complete this report and push the task branch.
+
+### Blocker and self-review
+
+The existing `scripts/run-smokes.mjs` writes arbitrary failure output after its summary and emits no final runner completion marker. The controller's `smoke-failures.mjs` explicitly marks every failed run unresolved because it cannot verify that the failure tail is complete. `integ-wave.sh` appends its own marker only after the verification command exits, which does not establish that the runner itself finished rather than an interruption or later non-smoke failure. Its configurable `VERIFY_CMD` also does not separately establish build success. Thus exact complete extraction and the build prerequisite cannot be proven from the present combined log; treating it as green would violate the fail-closed rule. The task explicitly requires escalation when exact extraction cannot be proven from the real runner format. No controller script or process documentation has been changed; independent review remains mandatory before any future use.
+
+Assumption: the current checked-in runner format and existing controller parser are the relevant production evidence. No new tests or screenshots were added, and no live gate was run. The only follow-up file changed is this report. Debt candidate: the human-readable runner output lacks independently verifiable completion evidence; any remedy requiring a runner contract or new data flow needs the coordinator's architectural decision.
+
 ## Architecture impact
 
 Level 1: existing sidebar and layout CSS; no new public boundary, dependency, route, store, or data flow.
