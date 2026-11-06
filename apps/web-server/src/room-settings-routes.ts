@@ -98,8 +98,16 @@ async function openWorkspacePreviewFile(absolutePath: string, signal: AbortSigna
 			let result: "accepted" | "opener_unavailable" | "open_failed" | "open_timeout" = "open_failed";
 			const finish = (value: typeof result) => { if (!settled) { settled = true; clearTimeout(timer); signal.removeEventListener("abort", abort); resolve(value); } };
 			let child: ReturnType<typeof fork> | undefined;
-			const timer = setTimeout(() => { finish("open_timeout"); try { child?.kill(); } catch { /* The response deadline still applies. */ } }, 10_000);
-			const abort = () => { finish("open_failed"); try { child?.kill(); } catch { /* Client has gone; do not retry. */ } };
+			const dispose = () => {
+				if (!child) return;
+				const target = child;
+				const cleanup = setTimeout(() => { console.warn("workspace opener cleanup timed out"); target.unref?.(); }, 1_000);
+				cleanup.unref();
+				target.once("close", () => clearTimeout(cleanup));
+				try { target.kill(); } catch { /* Cleanup is still bounded and recorded. */ }
+			};
+			const timer = setTimeout(() => { finish("open_timeout"); dispose(); }, 10_000);
+			const abort = () => { finish("open_failed"); dispose(); };
 			signal.addEventListener("abort", abort, { once: true });
 			if (signal.aborted) { abort(); return; }
 			try {
@@ -122,7 +130,7 @@ async function openWorkspacePreviewFile(absolutePath: string, signal: AbortSigna
 				child.send({ path: absolutePath }, (error) => { if (error) { processError = true; result = "open_failed"; } });
 			} catch (error) {
 				finish(["ENOENT", "ENOSYS"].includes((error as NodeJS.ErrnoException).code ?? "") ? "opener_unavailable" : "open_failed");
-				try { child?.kill(); } catch { /* A failed child cannot be retried. */ }
+				dispose();
 			}
 		});
 	}
