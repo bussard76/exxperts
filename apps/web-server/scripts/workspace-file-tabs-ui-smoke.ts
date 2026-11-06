@@ -37,9 +37,23 @@ const agentDir = path.join(tempHome, ".exxperts", "agent");
 const appDir = path.join(tempHome, ".exxperts", "app");
 for (const dir of [agentsRoot, agentDir]) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 
+function onePagePdf(): Buffer {
+	const stream = "1 0 0 rg 10 10 180 80 re f";
+	const objects = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents 4 0 R >>", `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`];
+	let body = "%PDF-1.4\n";
+	const offsets: number[] = [];
+	objects.forEach((object, index) => { offsets.push(body.length); body += `${index + 1} 0 obj\n${object}\nendobj\n`; });
+	const xref = body.length;
+	body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+	for (const offset of offsets) body += `${String(offset).padStart(10, "0")} 00000 n \n`;
+	return Buffer.from(body + `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`, "latin1");
+}
+
 const folder = path.join(tempHome, "Projects", "archive");
 fs.mkdirSync(folder, { recursive: true });
 fs.writeFileSync(path.join(folder, "photo.png"), ONE_PIXEL_PNG);
+fs.writeFileSync(path.join(folder, "report.pdf"), onePagePdf());
+fs.writeFileSync(path.join(folder, "large.svg"), '<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="2000"><rect width="2000" height="2000" fill="red"/></svg>');
 fs.writeFileSync(path.join(folder, "notes.md"), "# Notes\n\nSome text\n");
 fs.writeFileSync(path.join(folder, "old.doc"), "legacy");
 fs.writeFileSync(path.join(folder, "plain.txt"), "plain");
@@ -128,6 +142,24 @@ try {
 		assert(await tree.locator(".workspace-file-browser-file[aria-current='true']").filter({ hasText: "photo.png" }).count() === 1, "tree marks the active file");
 		await tab("photo.png").locator(".workspace-tab-close").click();
 		assert((await activeName()) === "notes.md", "closing the active tab selects its neighbour");
+		await treeFile("large.svg").click();
+		const svg = page.locator(".workspace-preview-image img:visible");
+		await waitUntil(() => svg.evaluate((img) => (img as HTMLImageElement).naturalWidth === 2000).catch(() => false), "the SVG is shown as an image");
+		const imageBounds = await svg.boundingBox();
+		const paneBounds = await page.locator(".workspace-pane").boundingBox();
+		assert(imageBounds && paneBounds && imageBounds.width <= paneBounds.width && imageBounds.height <= paneBounds.height, "a large image fits its pane");
+		await tab("large.svg").locator(".workspace-tab-close").click();
+		await treeFile("old.doc").click();
+		await page.getByText("Save this old .doc file as .docx to preview it here.", { exact: true }).waitFor();
+		assert((await activeName()) === "old.doc", "old Word file has an error-only tab");
+		assert(await page.getByRole("button", { name: /open in/i }).count() === 0, "old Word tab does not offer external opening");
+		await tab("old.doc").locator(".workspace-tab-close").click();
+		await treeFile("report.pdf").click();
+		const pdfPage = page.locator(".workspace-preview-pdf img");
+		await waitUntil(() => pdfPage.evaluate((img) => (img as HTMLImageElement).naturalWidth > 0).catch(() => false), "the rendered PDF page appears");
+		assert((await activeName()) === "report.pdf", "PDF opens in its own tab");
+		assert(await pdfPage.getAttribute("alt") === "Page 1", "PDF page has an accessible name");
+		await tab("report.pdf").locator(".workspace-tab-close").click();
 		await tab("notes.md").locator(".workspace-tab-close").click();
 		await waitUntil(async () => (await tabs.count()) === 0, "closing the last tab closes the pane");
 

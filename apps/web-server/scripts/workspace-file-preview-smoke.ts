@@ -1,6 +1,6 @@
 // The preview route rejects invalid requests with safe, inert responses.
 // Offline: the room's model is never asked. Throwaway HOME.
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -19,15 +19,89 @@ const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "exxperts-file-tabs-"));
+const malformedChild = process.argv.includes("--malformed-child");
+const admissionChild = process.argv.includes("--admission-child");
+const timeoutChild = process.argv.includes("--timeout-child");
+const extraChild = process.argv.includes("--extra-child");
+const crashChild = process.argv.includes("--crash-child");
+const exitRaceChild = process.argv.includes("--exit-race-child");
+const fakeChild = malformedChild || admissionChild || timeoutChild || extraChild || crashChild || exitRaceChild;
+const spawnMarker = path.join(tempRoot, "preview-spawns");
+const preload = path.join(tempRoot, "fake-preview-child.cjs");
+if (fakeChild) fs.writeFileSync(preload, `
+const childProcess = require("node:child_process");
+const { EventEmitter } = require("node:events");
+const { syncBuiltinESMExports } = require("node:module");
+const original = childProcess.fork;
+const fs = require("node:fs");
+let count = 0;
+childProcess.fork = function(file, args, options) {
+  if (!String(file).endsWith("shelf-parse-worker.mjs") || !String(args[0]).includes("workspace-preview-v1")) return original.apply(this, arguments);
+  const child = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => { setImmediate(() => child.emit("close", 0, null)); return true; };
+  count++;
+  fs.appendFileSync(${JSON.stringify(spawnMarker)}, "x");
+  if (${malformedChild}) setImmediate(() => child.emit("message", { ok: true, schemaVersion: 1, notices: [], result: { kind: "pdf", totalPages: 1, pages: [{ page: 1, mimeType: "image/jpeg", imageBase64: "AAAA", widthPx: 1, heightPx: 1 }] } }));
+  else if (${crashChild}) setImmediate(() => { child.emit("exit", 1, null); child.emit("close", 1, null); });
+  else if (${exitRaceChild}) setImmediate(() => { child.emit("exit", 0, null); setTimeout(() => child.emit("message", { ok: false, schemaVersion: 1, code: "renderer_unavailable" }), 20); });
+  else if (${extraChild}) setImmediate(() => child.emit("message", { ok: false, schemaVersion: 1, code: "renderer_unavailable", extra: "unexpected" }));
+  else if (count > (${admissionChild} ? 2 : 1)) setImmediate(() => child.emit("message", { ok: false, schemaVersion: 1, code: "renderer_unavailable" }));
+  return child;
+};
+syncBuiltinESMExports();
+`);
 const tempHome = path.join(tempRoot, "home");
 const agentsRoot = path.join(tempHome, ".exxperts", "app", "personalized-agents");
 const agentDir = path.join(tempHome, ".exxperts", "agent");
 const appDir = path.join(tempHome, ".exxperts", "app");
 for (const dir of [agentsRoot, agentDir]) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 
+function onePagePdf(): Buffer {
+	const stream = "BT /F1 24 Tf 40 700 Td (Invented preview) Tj ET";
+	const objects = [
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+		`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+	];
+	let body = "%PDF-1.4\n";
+	const offsets: number[] = [];
+	objects.forEach((object, index) => { offsets.push(body.length); body += `${index + 1} 0 obj\n${object}\nendobj\n`; });
+	const xref = body.length;
+	body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+	for (const offset of offsets) body += `${String(offset).padStart(10, "0")} 00000 n \n`;
+	body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+	return Buffer.from(body, "latin1");
+}
+
+function multiplePagePdf(pageCount: number): Buffer {
+	const objects: string[] = [];
+	const kids = Array.from({ length: pageCount }, (_, index) => `${3 + index * 2} 0 R`).join(" ");
+	objects.push("<< /Type /Catalog /Pages 2 0 R >>", `<< /Type /Pages /Kids [${kids}] /Count ${pageCount} >>`);
+	for (let index = 0; index < pageCount; index++) {
+		const content = "1 0 0 rg 10 10 180 80 re f";
+		objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents ${4 + index * 2} 0 R >>`, `<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
+	}
+	let body = "%PDF-1.4\n";
+	const offsets: number[] = [];
+	objects.forEach((object, index) => { offsets.push(body.length); body += `${index + 1} 0 obj\n${object}\nendobj\n`; });
+	const xref = body.length;
+	body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+	for (const offset of offsets) body += `${String(offset).padStart(10, "0")} 00000 n \n`;
+	return Buffer.from(body + `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`, "latin1");
+}
+
 const folder = path.join(tempHome, "Projects", "archive");
 fs.mkdirSync(folder, { recursive: true });
 fs.writeFileSync(path.join(folder, "book.xlsx"), "invented");
+fs.writeFileSync(path.join(folder, "report.pdf"), onePagePdf());
+fs.writeFileSync(path.join(folder, "pages.pdf"), multiplePagePdf(9));
+fs.writeFileSync(path.join(folder, "too-many.pdf"), multiplePagePdf(201));
+fs.writeFileSync(path.join(folder, "broken.pdf"), "invented broken data");
+fs.writeFileSync(path.join(folder, "oversize.pdf"), "%PDF-");
+fs.truncateSync(path.join(folder, "oversize.pdf"), 26_214_401);
 fs.writeFileSync(path.join(folder, "old.doc"), "invented");
 fs.writeFileSync(path.join(folder, "notes.txt"), "invented");
 fs.symlinkSync(path.join(folder, "book.xlsx"), path.join(folder, "link.xlsx"));
@@ -58,7 +132,7 @@ try {
 		shell: process.platform === "win32",
 		...SMOKE_SERVER_SPAWN_TREE_OPTIONS,
 		cwd: webServerDir,
-		env: smokeHomeEnv(tempHome, { PORT: String(port), ...SMOKE_SERVER_AUTH_ENV, EXXETA_HOME: repoRoot, EXXPERTS_CODING_AGENT_DIR: agentDir, EXXETA_PERSISTENT_AGENTS_ROOT: agentsRoot }) as NodeJS.ProcessEnv,
+		env: smokeHomeEnv(tempHome, { PORT: String(port), ...SMOKE_SERVER_AUTH_ENV, EXXETA_HOME: repoRoot, EXXPERTS_CODING_AGENT_DIR: agentDir, EXXETA_PERSISTENT_AGENTS_ROOT: agentsRoot, ...(fakeChild ? { NODE_OPTIONS: `--require=${preload}` } : {}) }) as NodeJS.ProcessEnv,
 	});
 	server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
 	server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
@@ -103,6 +177,66 @@ try {
 	assert(oldWord.status === 415 && (await oldWord.json()).code === "legacy_doc", "old Word files receive the approved error");
 	const unsupported = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=notes.txt`);
 	assert(unsupported.status === 415 && (await unsupported.json()).code === "unsupported_file_type", "unapproved types receive a controlled refusal");
+	const pdfUrl = `${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=report.pdf`;
+	if (admissionChild) {
+		const first = new AbortController();
+		const second = new AbortController();
+		const pending = [authedFetch(pdfUrl, { signal: first.signal }).catch(() => null), authedFetch(pdfUrl, { signal: second.signal }).catch(() => null)];
+		await waitUntil(() => fs.existsSync(spawnMarker) && fs.readFileSync(spawnMarker, "utf8").length === 2, "two preview children start");
+		const busy = await authedFetch(pdfUrl);
+		assert(busy.status === 503 && (await busy.json()).code === "preview_busy", "the third preview is refused without another child");
+		first.abort(); second.abort();
+		await Promise.all(pending);
+		await waitUntil(async () => {
+			const response = await authedFetch(pdfUrl);
+			return response.status === 503 && (await response.json()).code === "renderer_unavailable";
+		}, "aborted previews release their slots");
+	} else if (crashChild || exitRaceChild) {
+		const response = await authedFetch(pdfUrl);
+		const body = await response.json();
+		assert(crashChild ? response.status === 500 && body.code === "preview_failed" : response.status === 503 && body.code === "renderer_unavailable", "child exit and IPC are settled correctly");
+	} else if (timeoutChild) {
+		const timeout = await authedFetch(pdfUrl);
+		assert(timeout.status === 504 && (await timeout.json()).code === "preview_timeout", "the worker deadline returns a timeout");
+		const after = await authedFetch(pdfUrl);
+		assert(after.status === 503 && (await after.json()).code === "renderer_unavailable", "the timed-out worker releases its slot");
+	} else {
+	const pdf = await authedFetch(pdfUrl);
+	if (malformedChild || extraChild) {
+		assert(pdf.status === 500 && (await pdf.json()).code === "preview_failed", "a malformed child envelope cannot become a successful preview");
+	} else {
+	assert(pdf.status === 200, `invented PDF is previewed, got ${pdf.status}`);
+	const pdfBody = await pdf.json();
+	assert(pdfBody.kind === "pdf" && pdfBody.totalPages === 1 && pdfBody.pages.length === 1, "every PDF page is returned");
+	assert(pdfBody.pages[0].mimeType === "image/jpeg" && pdfBody.pages[0].widthPx > 0 && pdfBody.pages[0].heightPx > 0 && pdfBody.pages[0].imageBase64.length > 0, "the page is a raster image with dimensions");
+	const canvasApi = await import("@napi-rs/canvas");
+	const textPage = await canvasApi.loadImage(Buffer.from(pdfBody.pages[0].imageBase64, "base64"));
+	const textCanvas = canvasApi.createCanvas(textPage.width, textPage.height);
+	const textContext = textCanvas.getContext("2d");
+	textContext.drawImage(textPage, 0, 0);
+	const textPixels = textContext.getImageData(0, 0, textPage.width, textPage.height).data;
+	let darkPixels = 0;
+	for (let i = 0; i < textPixels.length; i += 4) if (textPixels[i] < 100 && textPixels[i + 1] < 100 && textPixels[i + 2] < 100) darkPixels++;
+	assert(darkPixels > 20, "PDF text paints visible dark pixels");
+	const many = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=pages.pdf`);
+	assert(many.status === 200, `multi-page PDF is previewed, got ${many.status}`);
+	const manyBody = await many.json();
+	assert(manyBody.totalPages === 9 && manyBody.pages.map((page: { page: number }) => page.page).join(",") === "1,2,3,4,5,6,7,8,9", "all nine pages remain ordered");
+	const { createCanvas, loadImage } = await import("@napi-rs/canvas");
+	const first = await loadImage(Buffer.from(manyBody.pages[0].imageBase64, "base64"));
+	const canvas = createCanvas(first.width, first.height);
+	const context = canvas.getContext("2d");
+	context.drawImage(first, 0, 0);
+	const pixel = context.getImageData(Math.floor(first.width / 2), Math.floor(first.height / 2), 1, 1).data;
+	assert(pixel[0] > 200 && pixel[1] < 80 && pixel[2] < 80, "a PDF color landmark is painted");
+	const over = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=too-many.pdf`);
+	assert(over.status === 413 && (await over.json()).code === "preview_too_complex", "PDF page limit refuses the complete document");
+	const broken = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=broken.pdf`);
+	assert(broken.status === 422 && (await broken.json()).code === "damaged_file", "a damaged PDF has a controlled error");
+	const oversized = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=oversize.pdf`);
+	assert(oversized.status === 413 && (await oversized.json()).code === "file_too_large", "the PDF input cap is enforced");
+	}
+	}
 	console.log("workspace-file-preview smoke: ok");
 } catch (error) {
 	console.error(serverOutput.join("").slice(-4000));
@@ -110,4 +244,11 @@ try {
 } finally {
 	await stopSmokeServer(server);
 	fs.rmSync(tempRoot, { recursive: true, force: true });
+}
+
+if (!fakeChild) {
+	for (const testCase of ["--malformed-child", "--extra-child", "--admission-child", "--crash-child", "--exit-race-child", "--timeout-child"]) {
+		const check = spawnSync(process.execPath, ["--import", "tsx", fileURLToPath(import.meta.url), testCase], { encoding: "utf8", timeout: 90_000 });
+		assert(check.status === 0, `${testCase} check failed: ${check.stderr || check.stdout}`);
+	}
 }
