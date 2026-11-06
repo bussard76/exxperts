@@ -255,6 +255,8 @@ try {
 	const agentId = String(created.body?.agent?.id ?? "");
 	const saved = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: folder, workspaceAccessMode: "localFiles" }) });
 	assert(saved.status === 200, `the folder is saved, got ${saved.status} ${JSON.stringify(saved.body)}`);
+	const invalidOpen = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-open`, { method: "POST", headers: { origin: baseUrl, "x-exxperts-local-action": "open-workspace-file" }, body: JSON.stringify({}) });
+	assert(invalidOpen.status === 400 && invalidOpen.body.code === "invalid_request" && invalidOpen.body.error === "This file could not be opened in another program.", "local open rejects an invalid request with the approved safe response");
 
 	const response = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview`);
 	assert(response.status === 400, `missing query is rejected, got ${response.status}`);

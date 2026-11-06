@@ -143,6 +143,11 @@ app.get("/api/persistent-agents/:id/workspace-markdown", async (req, reply) => {
 	}
 });
 
+app.post("/api/persistent-agents/:id/workspace-open", async (_req, reply) => {
+	return reply.headers({ "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" })
+		.code(400).send({ code: "invalid_request", error: "This file could not be opened in another program." });
+});
+
 app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 	reply.headers({
 		"Cache-Control": "no-store",
