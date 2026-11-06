@@ -158,6 +158,12 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 	if (typeof query.conversationId !== "string" || !query.conversationId || typeof query.path !== "string" || !query.path) {
 		return reply.code(400).send({ code: "invalid_request", error: "Choose a valid workspace file to preview." });
 	}
+	const relativePath = query.path.replaceAll("\\", "/");
+	if (relativePath.includes("\0") || relativePath.startsWith("~") || relativePath.startsWith("/") || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(relativePath)
+		|| relativePath.split("/").some((segment) => !segment || segment.startsWith("."))
+		|| (process.platform === "win32" && relativePath.includes(":"))) {
+		return reply.code(400).send({ code: "invalid_path", error: "Choose a valid workspace file to preview." });
+	}
 	let conversationExists = false;
 	try { conversationExists = getPersistentAgentThread(agentId, query.conversationId) !== null; } catch { /* Invalid thread identifiers are not conversations. */ }
 	if (!conversationExists) return reply.code(404).send({ code: "conversation_not_found", error: "This file is no longer available in this workspace." });

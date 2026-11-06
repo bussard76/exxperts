@@ -80,6 +80,13 @@ try {
 	assert(configured.status === 200, "workspace read can be disabled");
 	const forbidden = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=book.xlsx`);
 	assert(forbidden.status === 403 && (await forbidden.json()).code === "workspace_read_forbidden", "preview respects current workspace read permission");
+	const restored = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "standard" } }) });
+	assert(restored.status === 200, "workspace read restored");
+	for (const file of ["../secret.xlsx", "/absolute.xlsx", "C:drive.xlsx", ".hidden.xlsx", "folder//book.xlsx"]) {
+		const query = new URLSearchParams({ conversationId: "demo-thread", path: file });
+		const invalid = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?${query}`);
+		assert(invalid.status === 400 && (await invalid.json()).code === "invalid_path", `invalid path rejected: ${file}`);
+	}
 
 	console.log("workspace-file-preview smoke: ok");
 } catch (error) {
