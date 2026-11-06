@@ -140,6 +140,7 @@ export const REVIEWED_BARE_REQUIRES = [
 // package whose folder holds `file`, so the copy matches the inlined version.
 export const BUNDLE_ASSETS = [
 	{ file: "shelf-parse-worker.mjs", source: "apps/web-server/src/shelf-parse-worker.mjs", reason: "persistent-room-shelf-reading.ts forks it from its own folder" },
+	{ file: "workspace-open-worker.mjs", source: "apps/web-server/src/workspace-open-worker.mjs", reason: "the private Windows opener runs beside the server" },
 	{ file: "photon_rs_bg.wasm", package: "@silvia-odwyer/photon-node", reason: "photon-node reads its wasm from its own __dirname" },
 	{ file: "app-bridge.bundle.js", package: "pi-mcp-adapter", reason: "the adapter's ui-server.ts reads it from import.meta.dirname" },
 ];
@@ -417,13 +418,13 @@ export function checkServerFiles(root, out = DEFAULT_OUT) {
 	return [...problems, ...shippedPackageDirs(root).missing];
 }
 
-// Packages the forked shelf worker imports; it runs as its own file, so each
+// Packages the forked private workers import; each runs as its own file, so each
 // must ship as files.
 async function workerPackages(root) {
-	const worker = BUNDLE_ASSETS.find((asset) => asset.file === "shelf-parse-worker.mjs").source;
-	const result = await esbuild.build({
+	const workers = BUNDLE_ASSETS.filter((asset) => asset.file === "shelf-parse-worker.mjs" || asset.file === "workspace-open-worker.mjs");
+	const results = await Promise.all(workers.map((worker) => esbuild.build({
 		absWorkingDir: root,
-		entryPoints: [worker],
+		entryPoints: [worker.source],
 		bundle: true,
 		packages: "external",
 		platform: "node",
@@ -431,8 +432,8 @@ async function workerPackages(root) {
 		write: false,
 		metafile: true,
 		logLevel: "silent",
-	});
-	const specifiers = Object.values(result.metafile.outputs).flatMap((out) => out.imports.filter((imp) => imp.external).map((imp) => imp.path));
+	})));
+	const specifiers = results.flatMap((result) => Object.values(result.metafile.outputs).flatMap((out) => out.imports.filter((imp) => imp.external).map((imp) => imp.path)));
 	return [...new Set(specifiers.filter((specifier) => !isBuiltin(specifier)))];
 }
 
@@ -461,7 +462,7 @@ async function bundleProblems(root, text, metafile, packages, out) {
 	const shipped = new Set([...EXTERNAL_PACKAGES.filter((pkg) => pkg.ships), ...FILE_PACKAGES].map((pkg) => pkg.name));
 	for (const specifier of await workerPackages(root)) {
 		if (!shipped.has(packageName(specifier))) {
-			problems.push(`the shelf worker imports ${specifier}, but ${packageName(specifier)} does not ship as files; add it to FILE_PACKAGES with the reason`);
+			problems.push(`a private worker imports ${specifier}, but ${packageName(specifier)} does not ship as files; add it to FILE_PACKAGES with the reason`);
 		}
 	}
 

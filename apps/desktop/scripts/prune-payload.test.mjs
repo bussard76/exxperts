@@ -116,6 +116,7 @@ test("keeps only the listed paths outside node_modules", () => {
 		"apps/web-server/dist/server.mjs",
 		`apps/web-server/dist/${LICENCES_FILE}`,
 		"apps/web-server/dist/shelf-parse-worker.mjs",
+		"apps/web-server/dist/workspace-open-worker.mjs",
 		"apps/web-ui/dist/index.html",
 		"bin/lib/product-state-paths.cjs",
 		"bin/lib/room-lock.cjs",
