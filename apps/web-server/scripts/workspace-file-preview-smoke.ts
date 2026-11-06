@@ -25,9 +25,29 @@ const agentDir = path.join(tempHome, ".exxperts", "agent");
 const appDir = path.join(tempHome, ".exxperts", "app");
 for (const dir of [agentsRoot, agentDir]) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 
+function onePagePdf(): Buffer {
+	const stream = "BT /F1 24 Tf 40 700 Td (Invented preview) Tj ET";
+	const objects = [
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+		`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+	];
+	let body = "%PDF-1.4\n";
+	const offsets: number[] = [];
+	objects.forEach((object, index) => { offsets.push(body.length); body += `${index + 1} 0 obj\n${object}\nendobj\n`; });
+	const xref = body.length;
+	body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+	for (const offset of offsets) body += `${String(offset).padStart(10, "0")} 00000 n \n`;
+	body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+	return Buffer.from(body, "latin1");
+}
+
 const folder = path.join(tempHome, "Projects", "archive");
 fs.mkdirSync(folder, { recursive: true });
 fs.writeFileSync(path.join(folder, "book.xlsx"), "invented");
+fs.writeFileSync(path.join(folder, "report.pdf"), onePagePdf());
 fs.writeFileSync(path.join(folder, "old.doc"), "invented");
 fs.writeFileSync(path.join(folder, "notes.txt"), "invented");
 fs.symlinkSync(path.join(folder, "book.xlsx"), path.join(folder, "link.xlsx"));
@@ -103,6 +123,11 @@ try {
 	assert(oldWord.status === 415 && (await oldWord.json()).code === "legacy_doc", "old Word files receive the approved error");
 	const unsupported = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=notes.txt`);
 	assert(unsupported.status === 415 && (await unsupported.json()).code === "unsupported_file_type", "unapproved types receive a controlled refusal");
+	const pdf = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=report.pdf`);
+	assert(pdf.status === 200, `invented PDF is previewed, got ${pdf.status}`);
+	const pdfBody = await pdf.json();
+	assert(pdfBody.kind === "pdf" && pdfBody.totalPages === 1 && pdfBody.pages.length === 1, "every PDF page is returned");
+	assert(pdfBody.pages[0].mimeType === "image/jpeg" && pdfBody.pages[0].widthPx > 0 && pdfBody.pages[0].heightPx > 0 && pdfBody.pages[0].imageBase64.length > 0, "the page is a raster image with dimensions");
 	console.log("workspace-file-preview smoke: ok");
 } catch (error) {
 	console.error(serverOutput.join("").slice(-4000));
