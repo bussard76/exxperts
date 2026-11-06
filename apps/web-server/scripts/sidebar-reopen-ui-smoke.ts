@@ -20,7 +20,7 @@ try {
 	await openRoom("Plain Room");
 	browser = await chromium.launch();
 	for (const room of ["Folder Room", "Plain Room"]) {
-		const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+		const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36 ExxpertsDesktop" });
 		await context.addInitScript(() => {
 			localStorage.setItem("exxperts.sidebarCollapsed", "1");
 			localStorage.setItem("exxperts.first-run-guide-seen", "1");
@@ -32,7 +32,7 @@ try {
 		if (await dismiss.count()) await dismiss.click();
 		await page.locator(".persistent-agent-card").filter({ hasText: room }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
 		await page.locator("textarea").first().waitFor();
-		await page.evaluate(() => document.documentElement.classList.add("desktop-app-mac"));
+		assert(await page.evaluate(() => document.documentElement.classList.contains("desktop-app-mac")), "desktop user agent enables mac look");
 		for (let cycle = 0; cycle < 2; cycle++) {
 			const show = page.getByRole("button", { name: "Show sidebar" });
 			await show.waitFor();
