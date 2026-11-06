@@ -19,3 +19,11 @@ The following checklist covers every Result and Observable acceptance item in [i
 - [ ] A3 — Formula cells display results, not formulas. Proof: P2/B3 with formatted numeric, string, boolean, error, stale and absent caches.
 - [ ] A4 — Sascha tries his real Excel/Word files locally, switches sheets and reactivates tabs on the preview. Human gate only; workers never obtain those files. Electron acceptance also belongs to Sascha.
 - [ ] Added signed-off result — A separate header click opens the original file in the OS-assigned application on the server computer; works from local browser and Electron, hidden on paired devices, omitted in Markdown, approved error sentence on failure. Proof: O1–O4/B6, fake opener only; local OS/Electron observation remains human acceptance.
+
+## Developer progress and blocker
+
+- The accepted ADR-0003 is present on fetched `origin/main`; the R4 architecture review was merged onto `agents/t4` and this checklist was committed before implementation.
+- Installed the existing lock with `EXXETA_SKIP_BROWSER_INSTALL=1 npm ci` (passed; no browser download). No product changes or tests have been added.
+- The approved Word renderer requires jsdom 29.1.1, which is installed at that exact version. On the advertised minimum Node 20.6.0, `npm exec --yes --package=node@20.6.0 -- node -e 'require("jsdom")'` fails: `html-encoding-sniffer` 6.0.0 uses `require()` on the ES module `@exodus/bytes/encoding-lite.js`, which that Node version rejects. This is a direct package-load reproduction, not an installed preview or end-to-end test.
+- The package review requires escalation of a real supported-Node incompatibility without silently changing the Node policy or approved packages. Controller decision is needed on that compatibility conflict before this implementation can meet the binding package condition.
+- All acceptance boxes remain open. Targeted typechecks, affected suites, browser checks, full gates, human acceptance and independent review have not run. No screenshots were captured; no debt candidates have been assessed.
