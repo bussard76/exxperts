@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { FastifyRequest } from "fastify";
 import { ARTIFACT_SECURITY_HEADERS } from "./request-checks.js";
 import { MAINTENANCE_DIAGNOSTICS_KEEP, MAINTENANCE_DIAGNOSTICS_DEFAULT_LIMIT, listMaintenanceDiagnostics, exportMaintenanceDiagnostics } from "./maintenance-diagnostics.js";
@@ -189,6 +190,11 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 			return reply.code(403).send({ code: "blocked_by_policy", error: "This file is not available under the current workspace permissions." });
 		}
 		return reply.code(500).send({ code: "preview_failed", error: "This file could not be previewed." });
+	}
+	const extension = path.extname(relativePath).toLowerCase();
+	if (extension === ".doc") return reply.code(415).send({ code: "legacy_doc", error: "Save this old .doc file as .docx to preview it here." });
+	if (![".xlsx", ".xlsm", ".xls", ".docx", ".pdf"].includes(extension)) {
+		return reply.code(415).send({ code: "unsupported_file_type", error: "This file type cannot be previewed here." });
 	}
 	return reply.code(503).send({ code: "renderer_unavailable", error: "Preview rendering is unavailable on this system." });
 });

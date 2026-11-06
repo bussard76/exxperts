@@ -28,6 +28,8 @@ for (const dir of [agentsRoot, agentDir]) fs.mkdirSync(dir, { recursive: true, m
 const folder = path.join(tempHome, "Projects", "archive");
 fs.mkdirSync(folder, { recursive: true });
 fs.writeFileSync(path.join(folder, "book.xlsx"), "invented");
+fs.writeFileSync(path.join(folder, "old.doc"), "invented");
+fs.writeFileSync(path.join(folder, "notes.txt"), "invented");
 fs.symlinkSync(path.join(folder, "book.xlsx"), path.join(folder, "link.xlsx"));
 fs.mkdirSync(path.join(folder, "directory.xlsx"));
 
@@ -97,6 +99,10 @@ try {
 	assert(link.status === 403, "preview refuses a symlink as a policy restriction");
 	const directory = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=directory.xlsx`);
 	assert(directory.status === 400 && (await directory.json()).code === "not_file", "preview refuses a directory");
+	const oldWord = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=old.doc`);
+	assert(oldWord.status === 415 && (await oldWord.json()).code === "legacy_doc", "old Word files receive the approved error");
+	const unsupported = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=notes.txt`);
+	assert(unsupported.status === 415 && (await unsupported.json()).code === "unsupported_file_type", "unapproved types receive a controlled refusal");
 	console.log("workspace-file-preview smoke: ok");
 } catch (error) {
 	console.error(serverOutput.join("").slice(-4000));
