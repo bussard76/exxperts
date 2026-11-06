@@ -106,14 +106,17 @@ childProcess.fork = function(file, args, options) {
   }
   if (${windowsParentChild} && String(file).endsWith("workspace-open-worker.mjs")) {
     const child = new EventEmitter();
-    child.kill = () => { fs.appendFileSync(${JSON.stringify(killMarker)}, "x"); setImmediate(() => child.emit("close", null, "SIGTERM")); return true; };
+    let requestPath = "";
+    child.kill = () => { fs.appendFileSync(${JSON.stringify(killMarker)}, "x"); if (!requestPath.endsWith("win-stuck.pdf")) setImmediate(() => child.emit("close", null, "SIGTERM")); return true; };
     child.send = (message, callback) => {
+      requestPath = message.path;
       fs.appendFileSync(${JSON.stringify(spawnMarker)}, JSON.stringify({ file, args, options: { shell: options.shell, execArgv: options.execArgv, hasNodeOptions: Object.hasOwn(options.env, "NODE_OPTIONS"), hasNodePath: Object.hasOwn(options.env, "NODE_PATH") }, message }) + "\\n");
       setImmediate(() => {
         if (callback) callback(null);
         const name = require("node:path").basename(message.path);
 	        if (name === "win-abort.pdf") return;
 	        if (name === "win-timeout.pdf") { setTimeout(() => child.emit("message", { accepted: true }), 10_500); return; }
+	        if (name === "win-stuck.pdf") return;
         if (name === "win-empty.pdf") { child.emit("close", 0, null); return; }
         if (name === "win-unavailable.pdf") child.emit("message", { accepted: false, code: "opener_unavailable" });
         else if (name === "win-extra.pdf") child.emit("message", { accepted: true, extra: true });
@@ -303,7 +306,7 @@ fs.writeFileSync(path.join(folder, "elements.docx"), await tooManyElementsDocx()
 if (!fakeChild) fs.writeFileSync(path.join(folder, "oversized-text.docx"), await oversizedTextDocx());
 fs.writeFileSync(path.join(folder, "report.pdf"), onePagePdf());
 if (openChild) for (const name of ["missing-opener.pdf", "denied-opener.pdf", "signal.pdf", "exit2.pdf", "exit3.pdf", "timeout.pdf", "- invented $ ` ; & % ' ü.pdf"]) fs.writeFileSync(path.join(folder, name), "invented");
-if (windowsParentChild) for (const name of ["win-empty.pdf", "win-unavailable.pdf", "win-extra.pdf", "win-race.pdf", "win-double.pdf", "win-crash.pdf", "win-abort.pdf", "win-timeout.pdf"]) fs.writeFileSync(path.join(folder, name), "invented");
+if (windowsParentChild) for (const name of ["win-empty.pdf", "win-unavailable.pdf", "win-extra.pdf", "win-race.pdf", "win-double.pdf", "win-crash.pdf", "win-abort.pdf", "win-timeout.pdf", "win-stuck.pdf"]) fs.writeFileSync(path.join(folder, name), "invented");
 if (windowsNativeChild) for (const name of ["win-com-fail.pdf", "win-com-sfalse.pdf", "win-bad-version.pdf", "win-bad-layout.pdf", "win?invalid.pdf", "win ü 🚀.pdf", ...[0, 2, 3, 5, 32, 126, 193, 1155, 1156, 1157, 1223, 1459, 1460, 9999].map((code) => `win-native-error-${code}.pdf`)]) fs.writeFileSync(path.join(folder, name), "invented");
 fs.writeFileSync(path.join(folder, "pages.pdf"), multiplePagePdf(9));
 fs.writeFileSync(path.join(folder, "too-many.pdf"), multiplePagePdf(201));
@@ -442,6 +445,10 @@ try {
 		await waitUntil(() => fs.existsSync(killMarker), "aborting the request stops the private dispatcher", 3_000);
 		const timedOut = await openRequest({ conversationId: "demo-thread", path: "win-timeout.pdf" });
 		assert(timedOut.status === 504 && timedOut.body.code === "open_timeout", "Windows dispatcher deadline does not accept a late reply");
+		const stuck = await openRequest({ conversationId: "demo-thread", path: "win-stuck.pdf" });
+		assert(stuck.status === 504 && stuck.body.code === "open_timeout", "a stuck dispatcher still meets the response deadline");
+		await waitUntil(() => serverOutput.some((line) => line.includes("workspace opener cleanup timed out")), "bounded dispatcher cleanup fault is recorded", 3_000);
+		assert(!serverOutput.find((line) => line.includes("workspace opener cleanup timed out"))!.includes(folder), "cleanup fault does not expose the workspace path");
 	}
 	if (windowsNativeChild) {
 		const opened = await openRequest({ conversationId: "demo-thread", path: "report.pdf" });

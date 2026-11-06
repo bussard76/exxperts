@@ -92,6 +92,18 @@ function stagedApp(overrides = {}) {
 	});
 }
 
+test("the retained packages omit declarations while keeping their runtime files and notices", () => {
+	const dir = stagedApp({
+		"node_modules/jszip/types/index.d.ts": "export {};\n",
+		"node_modules/jszip/lib/index.js": "module.exports = {};\n",
+		"node_modules/jszip/LICENSE": "invented license\n",
+	});
+	pruneDesktopPayload(dir, { log: () => {} });
+	assert.equal(fs.existsSync(path.join(dir, "node_modules/jszip/types/index.d.ts")), false);
+	assert.equal(fs.existsSync(path.join(dir, "node_modules/jszip/lib/index.js")), true);
+	assert.equal(fs.existsSync(path.join(dir, "node_modules/jszip/LICENSE")), true);
+});
+
 test("keeps only the listed paths outside node_modules", () => {
 	const dir = stagedApp();
 	pruneDesktopPayload(dir, { log: () => {} });
