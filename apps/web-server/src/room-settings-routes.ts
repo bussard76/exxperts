@@ -1,4 +1,6 @@
 import path from "node:path";
+import fs from "node:fs";
+import { spawn } from "node:child_process";
 import type { FastifyRequest } from "fastify";
 import { ARTIFACT_SECURITY_HEADERS, remoteMode } from "./request-checks.js";
 import { MAINTENANCE_DIAGNOSTICS_KEEP, MAINTENANCE_DIAGNOSTICS_DEFAULT_LIMIT, listMaintenanceDiagnostics, exportMaintenanceDiagnostics } from "./maintenance-diagnostics.js";
@@ -84,6 +86,27 @@ function requestGetsLocalPaths(req: FastifyRequest): boolean {
 
 function workspacePolicyViewFor(req: FastifyRequest, policy: PersistentRoomCapabilityPolicy) {
 	return persistentRoomCapabilityPolicyView(policy, { withPaths: requestGetsLocalPaths(req) });
+}
+
+async function openWorkspacePreviewFile(absolutePath: string): Promise<"accepted" | "opener_unavailable" | "open_failed" | "open_timeout"> {
+	if (process.platform !== "linux" && process.platform !== "darwin") return "opener_unavailable";
+	if (process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) return "opener_unavailable";
+	return new Promise((resolve) => {
+		let failure: "opener_unavailable" | "open_failed" | "open_timeout" | undefined;
+		let child: ReturnType<typeof spawn>;
+		try {
+			child = spawn(process.platform === "linux" ? "/usr/bin/xdg-open" : "/usr/bin/open", [absolutePath], { shell: false, detached: false, windowsHide: true, stdio: "ignore" });
+		} catch (error) {
+			resolve(["ENOENT", "ENOSYS"].includes((error as NodeJS.ErrnoException).code ?? "") ? "opener_unavailable" : "open_failed");
+			return;
+		}
+		const timer = setTimeout(() => { failure = "open_timeout"; child.kill(); }, 10_000);
+		child.once("error", (error: NodeJS.ErrnoException) => { failure ??= ["ENOENT", "ENOSYS"].includes(error.code ?? "") ? "opener_unavailable" : "open_failed"; });
+		child.once("close", (code, signal) => {
+			clearTimeout(timer);
+			resolve(failure ?? (code === 0 && !signal ? "accepted" : process.platform === "linux" && code === 3 ? "opener_unavailable" : "open_failed"));
+		});
+	});
 }
 
 app.get("/api/persistent-agents/:id/workspace-policy", async (req, reply) => {
@@ -174,16 +197,32 @@ app.post("/api/persistent-agents/:id/workspace-open", async (req, reply) => {
 	const effective = resolvePersistentRoomEffectiveWorkspacePolicy(agentId, fields.conversationId);
 	if (!effective.policy) return refuse(404, "workspace_not_found");
 	if (!effective.workspaceToolsEnabled || !effective.policy.modes.read || !persistentRoomWorkspaceToolNamesForPolicy(effective.policy).includes("read")) return refuse(403, "workspace_read_forbidden");
-	try { resolvePersistentRoomWorkspaceExistingFile(effective.policy, relativePath); }
+	let guarded: ReturnType<typeof resolvePersistentRoomWorkspaceExistingFile>;
+	try { guarded = resolvePersistentRoomWorkspaceExistingFile(effective.policy, relativePath); }
 	catch (error) {
 		if (error instanceof PersistentRoomWorkspaceToolError) {
 			if (error.code === "file_not_found") return refuse(404, "file_not_found");
+			if (error.code === "not_file") {
+				try { if (!resolvePersistentRoomWorkspacePath(effective.policy, relativePath, "read").lstat.isSymbolicLink()) return refuse(400, "not_file"); } catch { /* Refuse a changed target. */ }
+			}
 			return refuse(403, "blocked_by_policy");
 		}
 		return refuse(500, "open_failed");
 	}
 	if (![".xlsx", ".xlsm", ".xls", ".docx", ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"].includes(path.extname(relativePath).toLowerCase())) return refuse(415, "unsupported_file_type");
-	return refuse(503, "opener_unavailable");
+	let initial: fs.BigIntStats;
+	try { initial = fs.statSync(guarded.absolutePath, { bigint: true }); } catch { return refuse(409, "file_changed"); }
+	if (Number(initial.dev) !== guarded.stat.dev || Number(initial.ino) !== guarded.stat.ino || Number(initial.size) !== guarded.stat.size || Number(initial.mtimeNs) / 1e6 !== guarded.stat.mtimeMs || Number(initial.ctimeNs) / 1e6 !== guarded.stat.ctimeMs) return refuse(409, "file_changed");
+	try {
+		const current = resolvePersistentRoomEffectiveWorkspacePolicy(agentId, fields.conversationId);
+		if (!current.policy || !current.workspaceToolsEnabled || !current.policy.modes.read || !persistentRoomWorkspaceToolNamesForPolicy(current.policy).includes("read") || current.fingerprint.value !== effective.fingerprint.value) return refuse(403, "workspace_read_forbidden");
+		const again = resolvePersistentRoomWorkspaceExistingFile(current.policy, relativePath);
+		const stat = fs.statSync(again.absolutePath, { bigint: true });
+		if (again.absolutePath !== guarded.absolutePath || again.rootRealpath !== guarded.rootRealpath || again.relativePath !== guarded.relativePath || stat.dev !== initial.dev || stat.ino !== initial.ino || stat.size !== initial.size || stat.mtimeNs !== initial.mtimeNs || stat.ctimeNs !== initial.ctimeNs) return refuse(409, "file_changed");
+		const outcome = await openWorkspacePreviewFile(again.absolutePath);
+		if (outcome === "accepted") return reply.code(202).send({ accepted: true });
+		return refuse(outcome === "opener_unavailable" ? 503 : outcome === "open_timeout" ? 504 : 500, outcome);
+	} catch { return refuse(403, "workspace_read_forbidden"); }
 });
 
 app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
