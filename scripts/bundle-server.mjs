@@ -47,7 +47,7 @@ export const EXTERNAL_PACKAGES = [
 	{ name: "recheck", ships: true, reason: "the MCP adapter checks regex search queries with checkSync, which starts ./synckit-worker and the native checker from recheck's own folder" },
 	{ name: "esbuild", ships: false, reason: "only tsx uses it, and the bundled server never runs tsx" },
 	{ name: "tsx", ships: false, reason: "the TypeScript loader the bundle replaces" },
-	{ name: "koffi", ships: false, reason: "only the CLI's native clipboard reaches it" },
+	{ name: "koffi", ships: true, reason: "the private Windows workspace opener loads the native adapter" },
 	{ name: "@mariozechner/clipboard", ships: false, reason: "only the CLI's terminal clipboard reaches it" },
 	{ name: "fsevents", ships: false, reason: "optional macOS file watcher, never reached by the server" },
 	{ name: "bufferutil", ships: false, reason: "optional native speedup for ws, never installed" },
@@ -60,6 +60,7 @@ export const FILE_PACKAGES = [
 	{ name: "qrcode-terminal", reason: "remote-qr.ts loads it through createRequire, which esbuild cannot follow" },
 	{ name: "jszip", reason: "the shelf worker, a separate forked file, opens docx and xlsx with it" },
 	{ name: "docx-preview", reason: "the shelf worker renders workspace Word previews with it" },
+	{ name: "exceljs", reason: "the shelf worker renders workspace OOXML spreadsheets with it" },
 ];
 
 // A file of one of our runtime packages, whether esbuild reached it through

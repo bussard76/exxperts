@@ -282,6 +282,47 @@ function hasExactKeys(value: object, keys: string[]): boolean {
 	return actual.length === keys.length && keys.slice().sort().every((key, index) => actual[index] === key);
 }
 
+const color = (value: unknown): value is string => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
+const dimension = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 10_000;
+const integer = (value: unknown, min: number, max: number): value is number => Number.isInteger(value) && (value as number) >= min && (value as number) <= max;
+const keys = (value: unknown, names: string[]): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).sort().join(",") === names.slice().sort().join(",");
+const borderStyles = ["hair", "thin", "medium", "thick", "double", "dotted", "dashed", "dashDot", "dashDotDot", "mediumDashed", "mediumDashDot", "mediumDashDotDot", "slantDashDot"];
+
+function validPreviewWorkbook(value: unknown): boolean {
+	if (!keys(value, ["dateSystem", "styles", "sheets"]) || !["1900", "1904"].includes(value.dateSystem) || !Array.isArray(value.styles) || value.styles.length < 1 || !Array.isArray(value.sheets) || value.sheets.length < 1) return false;
+	for (const style of value.styles) {
+		if (!keys(style, ["fill", "font", "borders", "align"]) || !(style.fill === null || color(style.fill)) || !keys(style.font, ["family", "sizePt", "color", "bold", "italic", "underline", "strike"]) || typeof style.font.family !== "string" || style.font.family.length < 1 || style.font.family.length > 128 || /[\x00-\x1f]/.test(style.font.family) || typeof style.font.sizePt !== "number" || !Number.isFinite(style.font.sizePt) || style.font.sizePt < 1 || style.font.sizePt > 409 || !color(style.font.color) || typeof style.font.bold !== "boolean" || typeof style.font.italic !== "boolean" || typeof style.font.strike !== "boolean" || !["none", "single", "double"].includes(style.font.underline) || !keys(style.borders, ["top", "right", "bottom", "left"]) || !keys(style.align, ["horizontal", "vertical", "wrap"]) || !["left", "center", "right"].includes(style.align.horizontal) || !["top", "middle", "bottom"].includes(style.align.vertical) || typeof style.align.wrap !== "boolean") return false;
+		for (const border of Object.values(style.borders)) if (border !== null && (!keys(border, ["style", "color"]) || !borderStyles.includes(border.style) || !color(border.color))) return false;
+	}
+	let slots = 0, cells = 0;
+	for (const [index, sheet] of value.sheets.entries()) {
+		if (!keys(sheet, ["id", "name", "visibility", "rowCount", "columnCount", "defaultRowHeightPx", "defaultColumnWidthPx", "rows", "columns", "cells", "merges"]) || sheet.id !== String(index + 1) || typeof sheet.name !== "string" || !sheet.name || !["visible", "hidden", "veryHidden"].includes(sheet.visibility) || !integer(sheet.rowCount, 0, 100_000) || !integer(sheet.columnCount, 0, 16_384) || ((sheet.rowCount === 0) !== (sheet.columnCount === 0)) || !dimension(sheet.defaultRowHeightPx) || !dimension(sheet.defaultColumnWidthPx) || !Array.isArray(sheet.rows) || !Array.isArray(sheet.columns) || !Array.isArray(sheet.cells) || !Array.isArray(sheet.merges)) return false;
+		slots += sheet.rowCount * sheet.columnCount; cells += sheet.cells.length;
+		if (slots > 200_000 || cells > 100_000) return false;
+		for (const [entries, max, field] of [[sheet.rows, sheet.rowCount, "heightPx"], [sheet.columns, sheet.columnCount, "widthPx"]] as const) {
+			let previous = 0;
+			for (const entry of entries) { if (!keys(entry, ["index", field]) || !integer(entry.index, 1, max) || entry.index <= previous || !dimension(entry[field])) return false; previous = entry.index; }
+		}
+		let previous = 0;
+		for (const cell of sheet.cells) {
+			if (!keys(cell, ["row", "column", "text", "style", "runs", "valueKind"]) || !integer(cell.row, 1, sheet.rowCount) || !integer(cell.column, 1, sheet.columnCount) || typeof cell.text !== "string" || cell.text.length > 32_767 || !integer(cell.style, 0, value.styles.length - 1) || !["empty", "text", "number", "date", "boolean", "error", "formula-result", "formula-result-unavailable"].includes(cell.valueKind)) return false;
+			const position = (cell.row - 1) * sheet.columnCount + cell.column;
+			if (position <= previous) return false; previous = position;
+			if (cell.runs !== null && (!Array.isArray(cell.runs) || !cell.runs.every((run: unknown) => keys(run, ["text", "style"]) && typeof run.text === "string" && integer(run.style, 0, value.styles.length - 1)) || cell.runs.map((run: { text: string }) => run.text).join("") !== cell.text)) return false;
+		}
+		const covered = new Set<number>();
+		const anchors = new Set<number>();
+		for (const merge of sheet.merges) {
+			if (!keys(merge, ["top", "left", "bottom", "right"]) || !integer(merge.top, 1, sheet.rowCount) || !integer(merge.bottom, merge.top, sheet.rowCount) || !integer(merge.left, 1, sheet.columnCount) || !integer(merge.right, merge.left, sheet.columnCount)) return false;
+			anchors.add((merge.top - 1) * sheet.columnCount + merge.left);
+			for (let row = merge.top; row <= merge.bottom; row++) for (let column = merge.left; column <= merge.right; column++) { const pos = (row - 1) * sheet.columnCount + column; if (covered.has(pos)) return false; covered.add(pos); }
+		}
+		for (const cell of sheet.cells) { const pos = (cell.row - 1) * sheet.columnCount + cell.column; if (covered.has(pos) && !anchors.has(pos)) return false; }
+	}
+	return true;
+}
+
+
 function previewJpegDimensions(bytes: Buffer): { width: number; height: number } | null {
 	if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[bytes.length - 2] !== 0xff || bytes[bytes.length - 1] !== 0xd9) return null;
 	let offset = 2;
@@ -326,6 +367,12 @@ export async function runWorkspacePreviewWorker(job: WorkspacePreviewJob, signal
 			const word = result.result as { kind?: unknown; html?: unknown };
 			const validNotice = (notice: any) => notice && hasExactKeys(notice, ["code", "text"]) && notice.code === "external_resources_blocked" && notice.text === "External document resources are blocked.";
 			if (!hasExactKeys(word, ["kind", "html"]) || word.kind !== "word" || typeof word.html !== "string" || Buffer.byteLength(word.html) > 16_777_216 || !word.html.startsWith(WORD_PREVIEW_PREFIX) || result.notices.length > 1 || !result.notices.every(validNotice)) return { ok: false, schemaVersion: 1, code: "preview_failed" };
+			return result;
+		}
+		if (job.kind === "spreadsheet") {
+			const spreadsheet = result.result as { kind?: unknown; workbook?: unknown };
+			const validNotice = (notice: any) => notice && hasExactKeys(notice, ["code", "text"]) && ((notice.code === "excel_charts_omitted" && notice.text === "Charts are not shown in this preview.") || (notice.code === "excel_unusual_formatting" && notice.text === "Some unusual spreadsheet formatting is not shown."));
+			if (!hasExactKeys(spreadsheet, ["kind", "workbook"]) || spreadsheet.kind !== "spreadsheet" || !result.notices.every(validNotice) || !validPreviewWorkbook(spreadsheet.workbook) || Buffer.byteLength(JSON.stringify(result)) > 50_331_648) return { ok: false, schemaVersion: 1, code: "preview_failed" };
 			return result;
 		}
 		if (job.kind !== "pdf" || result.notices.length !== 0) {

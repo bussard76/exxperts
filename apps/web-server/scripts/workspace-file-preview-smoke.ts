@@ -31,7 +31,8 @@ const replaceChild = process.argv.includes("--replace-child");
 const badWordChild = process.argv.includes("--bad-word-child");
 const networkChild = process.argv.includes("--network-child");
 const openChild = process.argv.includes("--open-child");
-const fakeChild = malformedChild || admissionChild || timeoutChild || extraChild || crashChild || exitRaceChild || revokeChild || replaceChild || badWordChild || networkChild || openChild;
+const excelChild = process.argv.includes("--excel-child");
+const fakeChild = malformedChild || admissionChild || timeoutChild || extraChild || crashChild || exitRaceChild || revokeChild || replaceChild || badWordChild || networkChild || openChild || excelChild;
 const spawnMarker = path.join(tempRoot, "preview-spawns");
 const releaseMarker = path.join(tempRoot, "preview-release");
 const networkMarker = path.join(tempRoot, "network-probes");
@@ -66,7 +67,7 @@ childProcess.spawn = function(file, args, options) {
 };
 let count = 0;
 childProcess.fork = function(file, args, options) {
-  if (${networkChild || openChild} || !String(file).endsWith("shelf-parse-worker.mjs") || !String(args[0]).includes("workspace-preview-v1")) return original.apply(this, arguments);
+  if (${networkChild || openChild || excelChild} || !String(file).endsWith("shelf-parse-worker.mjs") || !String(args[0]).includes("workspace-preview-v1")) return original.apply(this, arguments);
   if (${badWordChild} && JSON.parse(args[0]).kind !== "word") return original.apply(this, arguments);
   const child = new EventEmitter();
   child.stderr = new EventEmitter();
@@ -218,6 +219,19 @@ async function oversizedExpansionDocx(): Promise<Buffer> {
 const folder = path.join(tempHome, "Projects", "archive");
 fs.mkdirSync(folder, { recursive: true });
 fs.writeFileSync(path.join(folder, "book.xlsx"), "invented");
+if (excelChild) {
+	const { default: ExcelJS } = await import("exceljs");
+	const workbook = new ExcelJS.Workbook();
+	const sheet = workbook.addWorksheet("Summary");
+	sheet.getCell("A1").value = "Invented total";
+	sheet.getCell("A1").font = { name: "Arial", size: 11, bold: true, color: { argb: "FFCC2200" } };
+	sheet.getCell("A1").fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF00" } };
+	sheet.getColumn(1).width = 24;
+	sheet.getCell("B2").value = { formula: "SUM(20,34)", result: 54 };
+	sheet.getCell("B2").numFmt = '"$"#,##0.00';
+	workbook.addWorksheet("Detail").getCell("A1").value = "Second sheet";
+	fs.writeFileSync(path.join(folder, "actual.xlsx"), Buffer.from(await workbook.xlsx.writeBuffer()));
+}
 fs.writeFileSync(path.join(folder, "report.docx"), await smallDocx());
 fs.writeFileSync(path.join(folder, "streamed.docx"), await streamedDocx());
 fs.writeFileSync(path.join(folder, "css-only.docx"), await cssOnlyDocx());
@@ -304,6 +318,17 @@ try {
 	assert(forbidden.status === 403 && (await forbidden.json()).code === "workspace_read_forbidden", "preview respects current workspace read permission");
 	const restored = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "standard" } }) });
 	assert(restored.status === 200, "workspace read restored");
+	if (excelChild) {
+		const response = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=actual.xlsx`);
+		const body = await response.json();
+		assert(response.status === 200 && body.kind === "spreadsheet", `an invented two-sheet OOXML workbook is rendered through the real route and child: ${response.status} ${JSON.stringify(body)}`);
+		assert(body.workbook.sheets.length === 2 && body.workbook.sheets[0].name === "Summary" && body.workbook.sheets[1].name === "Detail", "every sheet retains its workbook order and name");
+		const first = body.workbook.sheets[0];
+		assert(first.cells.find((cell: { row: number; column: number }) => cell.row === 2 && cell.column === 2)?.text === "$54.00", "the stored formula result is formatted without exposing its formula");
+		const cell = first.cells.find((item: { row: number; column: number }) => item.row === 1 && item.column === 1);
+		const style = body.workbook.styles[cell.style];
+		assert(style.fill === "#FFFF00" && style.font.bold && style.font.color === "#CC2200" && first.columns.some((column: { index: number; widthPx: number }) => column.index === 1 && column.widthPx === 173), "the required fill, font and column width survive");
+	}
 	const openRequest = (body: unknown) => api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-open`, { method: "POST", headers: { origin: baseUrl, "x-exxperts-local-action": "open-workspace-file" }, body: JSON.stringify(body) });
 	for (const [body, status, code] of [
 		[{ conversationId: "demo-thread", path: "report.pdf", extra: true }, 400, "invalid_request"],

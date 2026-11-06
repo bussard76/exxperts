@@ -310,10 +310,10 @@ test("a package loaded by name at run time must ship as files or be reviewed", a
 
 test("an external that does not ship may not be imported at the top of the bundle", async () => {
 	const dir = fixtureTree({
-		"apps/web-server/src/index.ts": 'import "@silvia-odwyer/photon-node";\nimport "pi-mcp-adapter/ui-server.ts";\nimport "koffi";\n',
-		"node_modules/koffi/package.json": JSON.stringify({ name: "koffi", version: "2.9.0", license: "MIT" }),
+		"apps/web-server/src/index.ts": 'import "@silvia-odwyer/photon-node";\nimport "pi-mcp-adapter/ui-server.ts";\nimport "tsx";\n',
+		"node_modules/tsx/package.json": JSON.stringify({ name: "tsx", version: "4.0.0", license: "MIT" }),
 	});
-	await assert.rejects(bundleServer({ root: dir, log: () => {} }), /koffi/);
+	await assert.rejects(bundleServer({ root: dir, log: () => {} }), /tsx does not ship/);
 });
 
 test("the shelf worker may import only packages that ship as files", async () => {
@@ -322,6 +322,28 @@ test("the shelf worker may import only packages that ship as files", async () =>
 		"node_modules/left-pad/package.json": JSON.stringify({ name: "left-pad", version: "1.3.0", license: "WTFPL" }),
 	});
 	await assert.rejects(bundleServer({ root: dir, log: () => {} }), /left-pad/);
+});
+
+test("a child import of Koffi retains the package", async () => {
+	const dir = fixtureTree({
+		"apps/web-server/src/shelf-parse-worker.mjs": 'await import("koffi");\n',
+		"node_modules/koffi/package.json": JSON.stringify({ name: "koffi", version: "2.16.2", license: "MIT" }),
+	});
+	await bundleServer({ root: dir, log: () => {} });
+	assert.deepEqual(checkServerFiles(dir), []);
+	fs.rmSync(path.join(dir, "node_modules/koffi"), { recursive: true });
+	assert.match(checkServerFiles(dir).join("\n"), /koffi/);
+});
+
+test("a child import of ExcelJS retains the package", async () => {
+	const dir = fixtureTree({
+		"apps/web-server/src/shelf-parse-worker.mjs": 'await import("exceljs");\n',
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "4.4.0", license: "MIT" }),
+	});
+	await bundleServer({ root: dir, log: () => {} });
+	assert.deepEqual(checkServerFiles(dir), []);
+	fs.rmSync(path.join(dir, "node_modules/exceljs"), { recursive: true });
+	assert.match(checkServerFiles(dir).join("\n"), /exceljs/);
 });
 
 test("the shelf child retains the Word renderer package", async () => {

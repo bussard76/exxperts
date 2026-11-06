@@ -277,11 +277,10 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 	}
 	const extension = path.extname(relativePath).toLowerCase();
 	if (extension === ".doc") return reply.code(415).send({ code: "legacy_doc", error: "Save this old .doc file as .docx to preview it here." });
-	if (![".xlsx", ".xlsm", ".xls", ".docx", ".pdf"].includes(extension)) {
+	if (![".xlsx", ".docx", ".pdf"].includes(extension)) {
 		return reply.code(415).send({ code: "unsupported_file_type", error: "This file type cannot be previewed here." });
 	}
-	if (extension !== ".pdf" && extension !== ".docx") return reply.code(503).send({ code: "renderer_unavailable", error: "Preview rendering is unavailable on this system." });
-	const kind = extension === ".pdf" ? "pdf" : "word";
+	const kind = extension === ".pdf" ? "pdf" : extension === ".docx" ? "word" : "spreadsheet";
 	const controller = new AbortController();
 	const abort = () => { if (!reply.raw.writableEnded) controller.abort(); };
 	req.raw.once("aborted", abort);
@@ -294,10 +293,7 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 			expected: { dev: String(stat.dev), ino: String(stat.ino), size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs },
 			limits: { inputBytes: 26214400, timeoutMs: kind === "pdf" ? 60000 : 30000, zipEntries: 10000, zipTotalBytes: 134217728, zipEntryBytes: 33554432, zipExpansionRatio: 200,
 				gridSlots: 200000, cells: 100000, maxRow: 100000, maxColumn: 16384, cellTextChars: 32767, gridDimensionPx: 10000,
-				cfbSectors: 51200, cfbChainLinks: 200000, cfbDirectoryEntries: 16384, cfbDirectoryVisits: 65536, cfbDirectoryDepth: 128,
-				cfbWorkbookBytes: 26214400, cfbExtractedBytes: 52428800, biffRecords: 200000, biffPayloadBytes: 33554432, biffRecordBytes: 8224,
-				biffContinuations: 1024, biffLogicalBytes: 1048576, biffSheets: 1024, biffStyles: 16384, biffFonts: 4096, biffFormats: 4096,
-				biffMerges: 100000, biffReferences: 400000, wordHtmlBytes: 16777216, wordElements: 200000, imagePixels: 40000000,
+				wordHtmlBytes: 16777216, wordElements: 200000, imagePixels: 40000000,
 				totalImagePixels: 80000000, unknownImageBytes: 2097152, pdfPages: 200, pdfPagePixels: 4000000, pdfTotalPixels: 80000000,
 				pdfJpegBytes: 33554432, resultJsonBytes: 50331648 },
 		}, controller.signal);

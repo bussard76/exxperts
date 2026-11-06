@@ -440,6 +440,16 @@ function countXmlElements(text, current) {
 	return current;
 }
 
+function inflatePreviewEntry(buffer, entry) {
+	let output;
+	try {
+		const compressed = buffer.subarray(entry.dataOffset, entry.dataOffset + entry.compressed);
+		output = entry.method === 0 ? compressed : inflateRawSync(compressed, { maxOutputLength: Math.max(1, entry.expanded) });
+	} catch { throw previewError("damaged_file"); }
+	if (output.length !== entry.expanded || crc32(output) !== entry.checksum) throw previewError("damaged_file");
+	return output;
+}
+
 async function preflightPreviewZip(buffer) {
 	const entries = previewZipEntries(buffer);
 	const relationships = new Map();
@@ -758,6 +768,58 @@ async function previewPdf(buffer) {
 	}
 }
 
+function previewSpreadsheet(workbook) {
+	const color = (value, fallback) => /^[0-9a-f]{8}$/i.test(value?.argb ?? "") ? `#${value.argb.slice(2).toUpperCase()}` : fallback;
+	const styles = [];
+	const styleIds = new Map();
+	const addStyle = (source = {}) => {
+		const font = source.font ?? {}, alignment = source.alignment ?? {}, borders = source.border ?? {};
+		const side = (item) => item?.style ? { style: item.style, color: color(item.color, "#000000") } : null;
+		const style = { fill: source.fill?.type === "pattern" && source.fill.pattern === "solid" ? color(source.fill.fgColor, null) : null,
+			font: { family: font.name || "Arial", sizePt: font.size || 11, color: color(font.color, "#000000"), bold: !!font.bold, italic: !!font.italic, underline: font.underline === "double" ? "double" : font.underline ? "single" : "none", strike: !!font.strike },
+			borders: { top: side(borders.top), right: side(borders.right), bottom: side(borders.bottom), left: side(borders.left) },
+			align: { horizontal: ["left", "center", "right"].includes(alignment.horizontal) ? alignment.horizontal : "left", vertical: ["top", "middle", "bottom"].includes(alignment.vertical) ? alignment.vertical : "bottom", wrap: !!alignment.wrapText } };
+		const key = JSON.stringify(style);
+		if (!styleIds.has(key)) { styleIds.set(key, styles.length); styles.push(style); }
+		return styleIds.get(key);
+	};
+	addStyle();
+	const sheets = workbook.worksheets.map((sheet, index) => {
+		const merges = Object.values(sheet.model.merges ?? {}).map((range) => {
+			const match = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(range);
+			const column = (name) => [...name].reduce((n, char) => n * 26 + char.charCodeAt(0) - 64, 0);
+			return { top: Number(match[2]), left: column(match[1]), bottom: Number(match[4]), right: column(match[3]) };
+		});
+		const rowCount = sheet.rowCount, columnCount = sheet.columnCount;
+		const cells = [], rows = [], columns = [];
+		sheet.eachRow((row, rowNumber) => {
+			if (row.height) rows.push({ index: rowNumber, heightPx: row.height * 4 / 3 });
+			row.eachCell((cell, columnNumber) => {
+				if (merges.some((merge) => rowNumber >= merge.top && rowNumber <= merge.bottom && columnNumber >= merge.left && columnNumber <= merge.right && (rowNumber !== merge.top || columnNumber !== merge.left))) return;
+				let value = cell.value, valueKind = "text";
+				if (value && typeof value === "object" && !(value instanceof Date) && ("formula" in value || "sharedFormula" in value)) { value = value.result; valueKind = value == null ? "formula-result-unavailable" : "formula-result"; }
+				else if (value instanceof Date) valueKind = "date";
+				else if (typeof value === "number") valueKind = "number";
+				else if (typeof value === "boolean") valueKind = "boolean";
+				else if (value?.error) valueKind = "error";
+				let text = value == null ? "" : value instanceof Date ? value.toISOString() : value?.error ?? value?.text ?? (value?.richText ? value.richText.map((run) => run.text).join("") : String(value));
+				// shortcut: common numeric formats only; use a compatible formatter when broader fidelity is approved.
+				if (typeof value === "number" && cell.numFmt && /[0#]/.test(cell.numFmt)) {
+					const format = cell.numFmt.split(";")[0], decimal = /\.([0#]+)/.exec(format), percent = format.includes("%");
+					const digits = Math.min(decimal?.[1].length ?? 0, 20);
+					text = (percent ? value * 100 : value).toLocaleString("en-US", { useGrouping: format.includes(","), minimumFractionDigits: digits, maximumFractionDigits: digits });
+					const prefix = /^"([^"]*)"/.exec(format)?.[1] ?? (/^\$/.test(format) ? "$" : "");
+					text = prefix + text + (percent ? "%" : "");
+				}
+				cells.push({ row: rowNumber, column: columnNumber, text, style: addStyle(cell.style), runs: null, valueKind });
+			});
+		});
+		for (let i = 1; i <= columnCount; i++) { const width = sheet.getColumn(i).width; if (width) columns.push({ index: i, widthPx: Math.round(width * 7 + 5) }); }
+		return { id: String(index + 1), name: sheet.name, visibility: sheet.state, rowCount, columnCount, defaultRowHeightPx: (sheet.properties.defaultRowHeight || 15) * 4 / 3, defaultColumnWidthPx: Math.round((sheet.properties.defaultColWidth || 8.43) * 7 + 5), rows, columns, cells, merges };
+	});
+	return { ok: true, schemaVersion: 1, notices: [], result: { kind: "spreadsheet", workbook: { dateSystem: workbook.properties.date1904 ? "1904" : "1900", styles, sheets } } };
+}
+
 async function parseDocx(buffer) {
 	const { default: JSZip } = await import("jszip");
 	const zip = await JSZip.loadAsync(buffer);
@@ -775,6 +837,16 @@ async function parseDocx(buffer) {
 			const buffer = readPreviewSnapshot(request);
 			if (kind === "pdf") post(await previewPdf(buffer));
 			else if (kind === "word") post(await previewWord(buffer));
+			else if (kind === "spreadsheet") {
+				for (const entry of previewZipEntries(buffer)) inflatePreviewEntry(buffer, entry);
+				let ExcelJS;
+				try { ({ default: ExcelJS } = await import("exceljs")); } catch { throw previewError("renderer_unavailable"); }
+				denyPreviewNetwork();
+				let workbook;
+				try { workbook = await new ExcelJS.Workbook().xlsx.load(buffer); }
+				catch (error) { if (error?.previewCode) throw error; throw previewError("damaged_file"); }
+				post(previewSpreadsheet(workbook));
+			}
 			else throw previewError("renderer_unavailable");
 			return;
 		}
