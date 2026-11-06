@@ -27,3 +27,8 @@ The following checklist covers every Result and Observable acceptance item in [i
 - The approved Word renderer requires jsdom 29.1.1, which is installed at that exact version. On the advertised minimum Node 20.6.0, `npm exec --yes --package=node@20.6.0 -- node -e 'require("jsdom")'` fails: `html-encoding-sniffer` 6.0.0 uses `require()` on the ES module `@exodus/bytes/encoding-lite.js`, which that Node version rejects. This is a direct package-load reproduction, not an installed preview or end-to-end test.
 - The package review requires escalation of a real supported-Node incompatibility without silently changing the Node policy or approved packages. Controller decision is needed on that compatibility conflict before this implementation can meet the binding package condition.
 - All acceptance boxes remain open. Targeted typechecks, affected suites, browser checks, full gates, human acceptance and independent review have not run. No screenshots were captured; no debt candidates have been assessed.
+
+## In-progress implementation
+
+- Route classifications: `workspace-markdown-images-smoke.ts` proves the planned preview GET is `read` and open POST is `local`; it failed before these entries and passes after. The routes and independent local authorization remain to be implemented, so these entries alone do not complete any acceptance item.
+- Browser tab test is in progress; the first run could not start the server because the fresh checkout had no runtime build. Runtime packages and the web UI were built for this targeted browser test, whose rerun is queued through `gate` behind the current host gate.
