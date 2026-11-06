@@ -15,23 +15,23 @@ Issue #4 acceptance is retained, not certified by this staging review:
 
 | Item | Result or observable acceptance | Review scope/status |
 | --- | --- | --- |
-| R1 | PDF/image/Word/Excel tabs beside Markdown | Product implementation and browser proof remain outside this review |
-| R2 | Reactivation without duplicate tab; active tree marking | Product proof remains open |
-| R3 | Close active tab to neighbour; last closes pane | Product proof remains open |
-| R4 | Every Excel sheet; switching/scrolling; stored results; fills/fonts/borders/widths/number formats | Staging must retain dependencies; producer/browser proof remains open |
-| R5 | Word text/tables/images and basic look | Staging must retain dependencies; producer/browser proof remains open |
-| R6 | Read-only, no editing/saving/downloading controls | Product proof remains open |
-| O1 | Build/smokes including workspace-file-preview and workspace-file-tabs-ui | Independent Tester/wave; explicitly not run here |
-| O2 | Invented styled two-sheet/cached-formula workbook and styled Word/image fixtures | Genuine producer proof remains separate from mock packaging fixtures |
-| O3 | Display cached formula result, not formula | Product proof remains open |
-| O4 | Sascha checks real Excel/Word appearance, sheet switching and tab return | Sascha only; no worker access to real files |
+| R1 | PDF/image/Word/Excel tabs beside Markdown | Future R2 P1–P4/B1/B3/B4/B7; product/browser proof outside this review |
+| R2 | Reactivation without duplicate tab; active tree marking | Future B1/B2 in workspace-file-tabs-ui; product proof open |
+| R3 | Close active tab to neighbour; last closes pane | Future B2 in workspace-file-tabs-ui; product proof open |
+| R4 | Every Excel sheet; switching/scrolling; stored results; fills/fonts/borders/widths/number formats | Retain dependencies; future P2/B3 with real producer, open |
+| R5 | Word text/tables/images and basic look | Retain dependencies; future P3/B4 with real producer, open |
+| R6 | Read-only, no editing/saving/downloading controls | Future B5; product proof open |
+| O1 | Build/smokes including workspace-file-preview and workspace-file-tabs-ui | Independent Tester/wave named suites; explicitly not run here |
+| O2 | Invented styled two-sheet/cached-formula workbook and styled Word/image fixtures | Future P2/P3/B3/B4; genuine producer proof separate from mock packaging fixtures |
+| O3 | Display cached formula result, not formula | Future P2/B3; product proof open |
+| O4 | Sascha checks real Excel/Word appearance, sheet switching and tab return | H1, Sascha only; no worker access to real files |
 
 Review deliverables, in order; commit and push completed slices:
 
 - [x] Read repository/worker rules, issue #4, skills and frozen target identifiers; establish a clean branch from fetched origin/main.
 - [x] Trace actual extraction, platform support, prune callers and public tests; define trusted physical stage and stable identity with precise race limitations and adversarial checks.
 - [x] Specify coverage-preserving, test-first fixture migration and the exact approval needed to correct existing tests; distinguish mock provenance from unresolved real notices/artifact proof.
-- [ ] Record bounded algorithm, architecture scope, risks, verdict and item-by-item self-review; reconcile current origin/main, run appropriate documentation checks, commit and push.
+- [x] Record bounded algorithm, architecture scope, risks, verdict and item-by-item self-review; reconcile current origin/main, run appropriate documentation checks, commit and push.
 
 Assumptions: review-only instructions control; existing synchronous public prune is the agreed seam; isolated invented fixtures only; no real service, opener, browser, release or packaging run. No notices are invented or accepted by this review.
 
@@ -176,7 +176,7 @@ The real source archive may already lack notice text after generic pruning. R2 r
 
 Recommendation: adopt the bounded trusted-parent/canonical-root correction and the exact coverage-preserving test correction above, at level 1 within `apps/desktop/scripts/package.mjs`, `prune-payload.mjs` and the existing public test harness. No public export/dependency/route/store/data-flow change and no ADR is needed for that limited implementation. Full T4's existing level-3 approvals remain separate. Do not re-open unrelated Excel producer, parser or UI decisions in this change.
 
-Verdict remains **change-spec** for the blanket ancestor policy and ambiguous physical identity, with explicit Controller approval still required for the test correction and trust/race contract. If arbitrary adversarial concurrent-writer confinement is actually required, the level-1 scope cannot satisfy it and needs escalation, not a false guarantee. Unverified real attribution remains an implementation/acceptance blocker; it is not made optional by this review.
+Verdict remains **change-spec** for the blanket ancestor policy and ambiguous physical identity, with explicit Controller approval still required for the test correction and trust/race clarification within the repository's existing threat model. If arbitrary adversarial concurrent-writer confinement is actually required, the level-1 scope cannot satisfy it and needs escalation, not a false guarantee. Unverified real attribution remains an implementation/acceptance blocker; it is not made optional by this review.
 
 | Risk / debt candidate | Category, severity and action |
 | --- | --- |
@@ -184,3 +184,25 @@ Verdict remains **change-spec** for the blanket ancestor policy and ambiguous ph
 | No native macOS/Windows identity/junction execution in this review | Tests, major; run authorized native invented-fixture checks when available, preserving Sascha's Windows-host waiver. Linux simulations do not certify either host. |
 | No deterministic in-prune scheduling seam today | Tests, minor; obtain the limited harness approval or record the precise missing race coverage. Do not add a production hook. |
 | Real notices, actual artifact count/closure and real producer behavior | Preserved required proof, not optional debt; stop acceptance until the separately owned obligations are met. |
+
+## Final checks and self-review
+
+Final reconciliation: fetched origin and merged origin/main, already up to date at `cc075a4d371bbdfea6cead35f515df6086f8df28`. The implementation remote still points exactly to reviewed `59b08928499c2a91de41d5f9fa1656bc517fa316`. Repeated the unchanged frozen public desktop suite after reconciliation: **12/12 passed**, zero skipped. This repeat was the required final verification, not a retry hiding a failure; environment/load retry count remains zero. The red S2/S4 probe results remain red evidence and are not reported as fixed.
+
+| Binding instruction / deliverable | Evidence and disposition |
+| --- | --- |
+| Independent exact-target compatibility review only | Read the frozen implementation, exact 7c62e29 R2 spec and exact 91ab0a3 review, actual package/extraction/prune code and public tests. No helper worker, product implementation or other project directory. |
+| Every Result/Observable acceptance item | Initial ten-row checklist preserves all six Result/four Observable items with named future public proofs. No product item is falsely accepted; added local-open obligations remain fake-only worker checks under existing R2. |
+| Safe physical stage, legitimate aliases, stable identity | F1/S2 and F2/S4 reproduce failures; bounded algorithm and A1–A12 prescribe canonical-root use, owned-child link/hardlink refusal and explicit atomic-race limits. No claim that pathname checks defeat arbitrary concurrent writers. |
+| Test-first coverage-preserving migration | F3/S3, M1–M7 and exact quoted correction approval preserve every existing semantic assertion. Real exact inputs stay distinct from controlled graph overlays; no production bypass, skipped test or invented original notice. Future red-to-green work stays with the builder. |
+| Architecture level and simplicity | Level 1 for this docs change and the proposed existing-module correction under the stated trust model. No exports/options/dependencies/routes/stores/flows/import rules change. Stronger confinement requires separate level-3 approval. No generalized framework proposed. |
+| Targeted checks and honest limits | Public frozen suite passed twice at 12/12. Red reproduction probe 2/4 is intentional evidence. Documentation whitespace, requirement/checklist and one-file scope checks pass. TypeScript checks and browser specs do not apply to the sole Markdown change and were not run; no full build/smokes/gate. |
+| Data, outward effects, original provenance | Invented fixture directories only; offline normal-lifecycle npm ci with approved browser skips. No real account/data/service/model/opener, archive packaging, browser download, signing or release. Unresolved original notices explicitly remain unresolved. |
+| Reviewer writes only findings file | Sole tracked file changed: `docs/reviews/T4-STAGE-architecture-spec.md`. `docs/reports/issue-4.md`, implementation, tests, locks, protected files and debt ledger are untouched. |
+| Tests added/changed and screenshots | No tracked tests added or changed; disposable S1–S4 probes only, removed with their source snapshot/dependencies and fixture roots before handoff. No screenshots or binaries created/committed. |
+| Assumptions, risks and remaining work | Trusted matching archive and exclusive writer are explicit. Native target/race scheduling debt is listed separately from required real notice/artifact/producer proof. No correction approval or release acceptance is inferred. |
+| Commits, pushes and branch hygiene | Checklist and completed review slices signed and pushed after each item, normal hooks active; never main/upstream and no PR/comment. Final head/branch/check results sent once through Orca worker_done. |
+
+The review deliverable is complete. Controller action remains: approve the precise fixture/ancestor-test correction and the stated trust/race scope, return the concrete path defects to the builder, and supply verified original attribution before authorizing any completed reduction. This does not authorize an actual package or certify a working #4 preview.
+
+Not checked: full/runtime build, TypeScript/browser gates, real packaging/extraction or release, real producer/CLI initialization, complete upstream notice verification, native macOS/Windows execution or arbitrary hostile filesystem races. Those limits are not hidden passes.
