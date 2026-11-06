@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { authedFetch, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, smokeHomeEnv, stopSmokeServer, freePort, type AuthedFetchInit } from "./smoke-server-process.js";
 import { waitEvery } from "./smoke-wait.js";
+import { smallDocx } from "./workspace-preview-fixtures.js";
 
 function assert(condition: unknown, message: string): asserts condition {
 	if (!condition) throw new Error(message);
@@ -25,8 +26,19 @@ const timeoutChild = process.argv.includes("--timeout-child");
 const extraChild = process.argv.includes("--extra-child");
 const crashChild = process.argv.includes("--crash-child");
 const exitRaceChild = process.argv.includes("--exit-race-child");
-const fakeChild = malformedChild || admissionChild || timeoutChild || extraChild || crashChild || exitRaceChild;
+const revokeChild = process.argv.includes("--revoke-child");
+const replaceChild = process.argv.includes("--replace-child");
+const badWordChild = process.argv.includes("--bad-word-child");
+const networkChild = process.argv.includes("--network-child");
+const fakeChild = malformedChild || admissionChild || timeoutChild || extraChild || crashChild || exitRaceChild || revokeChild || replaceChild || badWordChild || networkChild;
 const spawnMarker = path.join(tempRoot, "preview-spawns");
+const releaseMarker = path.join(tempRoot, "preview-release");
+const networkMarker = path.join(tempRoot, "network-probes");
+let validJpeg = "";
+if (revokeChild || replaceChild) {
+	const { createCanvas } = await import("@napi-rs/canvas");
+	validJpeg = createCanvas(1, 1).toBuffer("image/jpeg", 82).toString("base64");
+}
 const preload = path.join(tempRoot, "fake-preview-child.cjs");
 if (fakeChild) fs.writeFileSync(preload, `
 const childProcess = require("node:child_process");
@@ -36,7 +48,8 @@ const original = childProcess.fork;
 const fs = require("node:fs");
 let count = 0;
 childProcess.fork = function(file, args, options) {
-  if (!String(file).endsWith("shelf-parse-worker.mjs") || !String(args[0]).includes("workspace-preview-v1")) return original.apply(this, arguments);
+  if (${networkChild} || !String(file).endsWith("shelf-parse-worker.mjs") || !String(args[0]).includes("workspace-preview-v1")) return original.apply(this, arguments);
+  if (${badWordChild} && JSON.parse(args[0]).kind !== "word") return original.apply(this, arguments);
   const child = new EventEmitter();
   child.stderr = new EventEmitter();
   child.kill = () => { setImmediate(() => child.emit("close", 0, null)); return true; };
@@ -45,11 +58,42 @@ childProcess.fork = function(file, args, options) {
   if (${malformedChild}) setImmediate(() => child.emit("message", { ok: true, schemaVersion: 1, notices: [], result: { kind: "pdf", totalPages: 1, pages: [{ page: 1, mimeType: "image/jpeg", imageBase64: "AAAA", widthPx: 1, heightPx: 1 }] } }));
   else if (${crashChild}) setImmediate(() => { child.emit("exit", 1, null); child.emit("close", 1, null); });
   else if (${exitRaceChild}) setImmediate(() => { child.emit("exit", 0, null); setTimeout(() => child.emit("message", { ok: false, schemaVersion: 1, code: "renderer_unavailable" }), 20); });
+  else if (${badWordChild}) setImmediate(() => child.emit("message", { ok: true, schemaVersion: 1, notices: [], result: { kind: "word", html: '<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content=""><img src="https://example.invalid/attack"></head><body></body></html>' } }));
+  else if (${revokeChild || replaceChild}) {
+    const timer = setInterval(() => {
+      if (!fs.existsSync(${JSON.stringify(releaseMarker)})) return;
+      clearInterval(timer);
+      child.emit("message", { ok: true, schemaVersion: 1, notices: [], result: { kind: "pdf", totalPages: 1, pages: [{ page: 1, mimeType: "image/jpeg", imageBase64: ${JSON.stringify(validJpeg)}, widthPx: 1, heightPx: 1 }] } });
+    }, 10);
+  }
   else if (${extraChild}) setImmediate(() => child.emit("message", { ok: false, schemaVersion: 1, code: "renderer_unavailable", extra: "unexpected" }));
   else if (count > (${admissionChild} ? 2 : 1)) setImmediate(() => child.emit("message", { ok: false, schemaVersion: 1, code: "renderer_unavailable" }));
   return child;
 };
 syncBuiltinESMExports();
+if (${networkChild} && String(process.argv[1]).endsWith("shelf-parse-worker.mjs") && JSON.parse(process.argv[2]).kind === "word") {
+  const install = (owner, key, label) => {
+    let value = owner[key];
+    Object.defineProperty(owner, key, { configurable: true, get: () => value, set: (next) => {
+      let denied = false;
+      try { next(); } catch { denied = true; }
+      fs.appendFileSync(${JSON.stringify(networkMarker)}, label + ":control:" + denied + "\\n");
+      value = function(...args) { fs.appendFileSync(${JSON.stringify(networkMarker)}, label + ":attempt\\n"); return next.apply(this, args); };
+    } });
+  };
+  const http = require("node:http"), https = require("node:https"), net = require("node:net"), tls = require("node:tls"), dns = require("node:dns"), dgram = require("node:dgram"), http2 = require("node:http2");
+  install(globalThis, "fetch", "fetch");
+  install(globalThis, "WebSocket", "websocket");
+  install(http, "request", "http");
+  install(https, "request", "https");
+  install(net, "connect", "socket");
+  install(tls, "connect", "tls");
+  install(dns, "lookup", "dns");
+  install(dns.Resolver.prototype, "resolve4", "dns-resolver");
+  install(dns.promises.Resolver.prototype, "resolve4", "dns-promise-resolver");
+  install(dgram, "createSocket", "udp");
+  install(http2, "connect", "http2");
+}
 `);
 const tempHome = path.join(tempRoot, "home");
 const agentsRoot = path.join(tempHome, ".exxperts", "app", "personalized-agents");
@@ -93,9 +137,77 @@ function multiplePagePdf(pageCount: number): Buffer {
 	return Buffer.from(body + `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`, "latin1");
 }
 
+
+async function cssOnlyDocx(): Promise<Buffer> {
+	const { default: JSZip } = await import("jszip");
+	const zip = await JSZip.loadAsync(await smallDocx());
+	let relations = await zip.file("word/_rels/document.xml.rels")!.async("string");
+	relations = relations.replace(/<Relationship[^>]*TargetMode="External"\/>/g, "");
+	zip.file("word/_rels/document.xml.rels", relations);
+	let document = await zip.file("word/document.xml")!.async("string");
+	document = document.replace(/<w:p><w:hyperlink r:id="rId2">.*?<\/w:p>/, "");
+	const link = document.indexOf('r:link="rId3"');
+	const first = document.lastIndexOf("<w:p>", link), last = document.indexOf("</w:p>", link);
+	document = document.slice(0, first) + document.slice(last + 6);
+	zip.file("word/document.xml", document);
+	let styles = await zip.file("word/styles.xml")!.async("string");
+	styles = styles.replace("Arial&lt;/style&gt;&lt;img src=&quot;https://example.invalid/css&quot;&gt;", "Arial; background: u\\72l(https://example.invalid/css)");
+	zip.file("word/styles.xml", styles);
+	return zip.generateAsync({ type: "nodebuffer" });
+}
+
+async function streamedDocx(): Promise<Buffer> {
+	const { default: JSZip } = await import("jszip");
+	const zip = await JSZip.loadAsync(await smallDocx());
+	return zip.generateAsync({ type: "nodebuffer", streamFiles: true });
+}
+
+async function conflictingZipDocx(): Promise<Buffer> {
+	const bytes = Buffer.from(await smallDocx());
+	bytes.writeUInt32LE(bytes.readUInt32LE(18) + 1, 18);
+	return bytes;
+}
+
+async function wrongImageTypeDocx(): Promise<Buffer> {
+	const { default: JSZip } = await import("jszip");
+	const zip = await JSZip.loadAsync(await smallDocx());
+	zip.file("word/media/pixel.png", Buffer.from("R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==", "base64"));
+	return zip.generateAsync({ type: "nodebuffer" });
+}
+
+async function tooManyElementsDocx(): Promise<Buffer> {
+	const { default: JSZip } = await import("jszip");
+	const zip = await JSZip.loadAsync(await smallDocx());
+	zip.file("word/custom.xml", `<root>${"<x/>".repeat(200_001)}</root>`);
+	return zip.generateAsync({ type: "nodebuffer" });
+}
+
+async function oversizedTextDocx(): Promise<Buffer> {
+	const { default: JSZip } = await import("jszip");
+	const zip = await JSZip.loadAsync(await smallDocx());
+	const document = await zip.file("word/document.xml")!.async("string");
+	zip.file("word/document.xml", document.replace("</w:body>", `<w:p><w:r><w:t>${"x".repeat(16_777_217)}</w:t></w:r></w:p></w:body>`));
+	return zip.generateAsync({ type: "nodebuffer" });
+}
+
+async function oversizedExpansionDocx(): Promise<Buffer> {
+	const { default: JSZip } = await import("jszip");
+	const zip = new JSZip();
+	zip.file("word/document.xml", "x".repeat(1_000_000));
+	return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+}
+
 const folder = path.join(tempHome, "Projects", "archive");
 fs.mkdirSync(folder, { recursive: true });
 fs.writeFileSync(path.join(folder, "book.xlsx"), "invented");
+fs.writeFileSync(path.join(folder, "report.docx"), await smallDocx());
+fs.writeFileSync(path.join(folder, "streamed.docx"), await streamedDocx());
+fs.writeFileSync(path.join(folder, "css-only.docx"), await cssOnlyDocx());
+fs.writeFileSync(path.join(folder, "conflicting.docx"), await conflictingZipDocx());
+fs.writeFileSync(path.join(folder, "wrong-image.docx"), await wrongImageTypeDocx());
+fs.writeFileSync(path.join(folder, "expansion.docx"), await oversizedExpansionDocx());
+fs.writeFileSync(path.join(folder, "elements.docx"), await tooManyElementsDocx());
+if (!fakeChild) fs.writeFileSync(path.join(folder, "oversized-text.docx"), await oversizedTextDocx());
 fs.writeFileSync(path.join(folder, "report.pdf"), onePagePdf());
 fs.writeFileSync(path.join(folder, "pages.pdf"), multiplePagePdf(9));
 fs.writeFileSync(path.join(folder, "too-many.pdf"), multiplePagePdf(201));
@@ -191,6 +303,17 @@ try {
 			const response = await authedFetch(pdfUrl);
 			return response.status === 503 && (await response.json()).code === "renderer_unavailable";
 		}, "aborted previews release their slots");
+	} else if (revokeChild || replaceChild) {
+		const pending = authedFetch(pdfUrl);
+		await waitUntil(() => fs.existsSync(spawnMarker), "preview child starts before policy or file changes");
+		if (revokeChild) {
+			const revoked = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "custom", allowedToolNames: [] }, bashEnabled: false }) });
+			assert(revoked.status === 200, "workspace read was revoked during rendering");
+		} else fs.appendFileSync(path.join(folder, "report.pdf"), "changed");
+		fs.writeFileSync(releaseMarker, "release");
+		const response = await pending;
+		const body = await response.json();
+		assert(revokeChild ? response.status === 403 && body.code === "workspace_read_forbidden" : response.status === 409 && body.code === "file_changed", "stale preview cannot be returned after a policy or file change");
 	} else if (crashChild || exitRaceChild) {
 		const response = await authedFetch(pdfUrl);
 		const body = await response.json();
@@ -218,6 +341,50 @@ try {
 	let darkPixels = 0;
 	for (let i = 0; i < textPixels.length; i += 4) if (textPixels[i] < 100 && textPixels[i + 1] < 100 && textPixels[i + 2] < 100) darkPixels++;
 	assert(darkPixels > 20, "PDF text paints visible dark pixels");
+	const word = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=report.docx`);
+	if (badWordChild) {
+		assert(word.status === 500 && (await word.json()).code === "preview_failed", "a Word result without the required CSP is rejected");
+	} else {
+	assert(word.status === 200, `invented Word document is previewed, got ${word.status}`);
+	const wordBody = await word.json();
+	assert(wordBody.kind === "word" && wordBody.html.includes("Invented heading") && wordBody.html.includes("Invented cell") && wordBody.html.includes("data:image/png;base64,") && wordBody.html.includes("External label"), "Word text, table and embedded image reach the real preview route");
+	assert(!wordBody.html.includes("example.invalid") && !/href\s*=/.test(wordBody.html), "external Word links are inert");
+	assert(wordBody.html.includes("&lt;script&gt;invented&lt;/script&gt;") && !wordBody.html.includes("<script>"), "script-like document text remains inert text");
+	if (networkChild) {
+		const probes = fs.readFileSync(networkMarker, "utf8");
+		for (const name of ["fetch", "websocket", "http", "https", "socket", "tls", "dns", "dns-resolver", "dns-promise-resolver", "udp", "http2"]) assert(probes.includes(`${name}:control:true`), `${name} deny control executed`);
+		assert(!probes.includes(":attempt"), "the document made no instrumented outbound attempt");
+	}
+	assert(wordBody.html.includes("External image blocked.") && wordBody.notices.some((notice: { code: string }) => notice.code === "external_resources_blocked"), "linked images become an inert placeholder and notice");
+	const { JSDOM } = await import("jsdom");
+	const wordDom = new JSDOM(wordBody.html);
+	const heading = [...wordDom.window.document.querySelectorAll("span")].find((node) => node.textContent === "Invented heading");
+	const cell = wordDom.window.document.querySelector("td");
+	assert(heading && wordDom.window.getComputedStyle(heading).fontWeight === "bold" && wordDom.window.getComputedStyle(heading).color === "rgb(204, 34, 0)", "Word bold and color survive rendering");
+	assert(cell && wordDom.window.getComputedStyle(cell).backgroundColor === "rgb(255, 255, 0)", "Word table shading survives rendering");
+	const embeddedSrc = wordDom.window.document.querySelector("img")?.getAttribute("src") ?? "";
+	const embedded = await canvasApi.loadImage(Buffer.from(embeddedSrc.split(",")[1] ?? "", "base64"));
+	assert(embedded.width === 1 && embedded.height === 1, "the embedded image decodes with its invented dimensions");
+	wordDom.window.close();
+	const cssOnly = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=css-only.docx`);
+	const cssBody = await cssOnly.json();
+	assert(cssOnly.status === 200 && !cssBody.html.includes("example.invalid") && cssBody.notices.some((notice: { code: string }) => notice.code === "external_resources_blocked"), "escaped external CSS is blocked and announced even without external relationships");
+	const streamed = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=streamed.docx`);
+	assert(streamed.status === 200 && (await streamed.json()).kind === "word", "valid streamed ZIP descriptors are accepted");
+	const conflicting = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=conflicting.docx`);
+	assert(conflicting.status === 422 && (await conflicting.json()).code === "damaged_file", "conflicting local and central ZIP metadata is refused");
+	const wrongImage = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=wrong-image.docx`);
+	assert(wrongImage.status === 422 && (await wrongImage.json()).code === "damaged_file", "a mismatched embedded image is refused rather than rendered blank");
+	const controlsBeforeElements = networkChild ? fs.readFileSync(networkMarker, "utf8") : "";
+	const elements = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=elements.docx`);
+	assert(elements.status === 413 && (await elements.json()).code === "preview_too_complex", "XML element work exceeds its budget");
+	if (networkChild) assert(fs.readFileSync(networkMarker, "utf8") === controlsBeforeElements, "oversized XML is refused before renderer setup");
+	if (!fakeChild) {
+		const oversizedText = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=oversized-text.docx`);
+		assert(oversizedText.status === 413 && (await oversizedText.json()).code === "preview_too_complex", "Word output exceeding its text budget is refused");
+	}
+	const expansion = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=expansion.docx`);
+	assert(expansion.status === 413 && (await expansion.json()).code === "expanded_content_too_large", "excessive ZIP expansion is refused before rendering");
 	const many = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=pages.pdf`);
 	assert(many.status === 200, `multi-page PDF is previewed, got ${many.status}`);
 	const manyBody = await many.json();
@@ -237,6 +404,7 @@ try {
 	assert(oversized.status === 413 && (await oversized.json()).code === "file_too_large", "the PDF input cap is enforced");
 	}
 	}
+	}
 	console.log("workspace-file-preview smoke: ok");
 } catch (error) {
 	console.error(serverOutput.join("").slice(-4000));
@@ -247,7 +415,7 @@ try {
 }
 
 if (!fakeChild) {
-	for (const testCase of ["--malformed-child", "--extra-child", "--admission-child", "--crash-child", "--exit-race-child", "--timeout-child"]) {
+	for (const testCase of ["--malformed-child", "--extra-child", "--bad-word-child", "--admission-child", "--revoke-child", "--replace-child", "--crash-child", "--exit-race-child", "--network-child", "--timeout-child"]) {
 		const check = spawnSync(process.execPath, ["--import", "tsx", fileURLToPath(import.meta.url), testCase], { encoding: "utf8", timeout: 90_000 });
 		assert(check.status === 0, `${testCase} check failed: ${check.stderr || check.stdout}`);
 	}

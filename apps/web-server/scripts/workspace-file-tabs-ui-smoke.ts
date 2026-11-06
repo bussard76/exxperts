@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { authedFetch, SMOKE_AUTH_TOKEN, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, smokeHomeEnv, stopSmokeServer, freePort, type AuthedFetchInit } from "./smoke-server-process.js";
 import { waitEvery } from "./smoke-wait.js";
+import { smallDocx } from "./workspace-preview-fixtures.js";
 const ONE_PIXEL_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==", "base64");
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -58,6 +59,7 @@ const folder = path.join(tempHome, "Projects", "archive");
 fs.mkdirSync(folder, { recursive: true });
 fs.writeFileSync(path.join(folder, "photo.png"), ONE_PIXEL_PNG);
 fs.writeFileSync(path.join(folder, "report.pdf"), ninePagePdf());
+fs.writeFileSync(path.join(folder, "report.docx"), await smallDocx());
 fs.writeFileSync(path.join(folder, "large.svg"), '<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="2000"><rect width="2000" height="2000" fill="red"/></svg>');
 fs.writeFileSync(path.join(folder, "notes.md"), "# Notes\n\nSome text\n");
 fs.writeFileSync(path.join(folder, "old.doc"), "legacy");
@@ -123,10 +125,10 @@ try {
 		const tabNames = async () => (await tabs.locator(".workspace-tab-select").allTextContents()).map((name) => name.trim());
 
 		let imageRequests = 0;
-		let pdfRequests = 0;
+		let previewRequests = 0;
 		page.on("request", (request) => {
 			if (request.url().includes("/workspace-image?")) imageRequests += 1;
-			if (request.url().includes("/workspace-preview?")) pdfRequests += 1;
+			if (request.url().includes("/workspace-preview?")) previewRequests += 1;
 		});
 		await treeFile("notes.md").click();
 		await page.locator(".markdown-editor-tiptap .ProseMirror").waitFor({ timeout: 20_000 });
@@ -184,8 +186,50 @@ try {
 		assert(scrollMetrics.top > 0, `PDF pages scroll vertically: ${JSON.stringify(scrollMetrics)}`);
 		await treeFile("notes.md").click();
 		await treeFile("report.pdf").click();
-		assert(pdfRequests === 1, "switching back does not refetch the PDF");
+		assert(previewRequests === 1, "switching back does not refetch the PDF");
 		await tab("report.pdf").locator(".workspace-tab-close").click();
+		let externalRequests = 0;
+		await page.route("**/*", async (route) => {
+			if (route.request().url().includes("example.invalid")) { externalRequests++; await route.abort(); }
+			else await route.continue();
+		});
+		await treeFile("report.docx").click();
+		const wordFrame = page.locator(".workspace-preview-word iframe");
+		await wordFrame.waitFor({ timeout: 20_000 });
+		assert(await wordFrame.getAttribute("sandbox") === "", "Word uses an empty sandbox");
+		const word = page.frameLocator(".workspace-preview-word iframe");
+		const heading = word.getByText("Invented heading", { exact: true });
+		await heading.waitFor();
+		const headingStyle = await heading.evaluate((node) => ({ color: getComputedStyle(node).color, weight: getComputedStyle(node).fontWeight }));
+		assert(headingStyle.color === "rgb(204, 34, 0)" && Number(headingStyle.weight) >= 700, "Word heading retains color and bold");
+		const cell = word.locator("td").filter({ hasText: "Invented cell" });
+		assert(await cell.evaluate((node) => getComputedStyle(node).backgroundColor) === "rgb(255, 255, 0)", "Word table retains shading");
+		const border = await cell.evaluate((node) => ({ width: getComputedStyle(node).borderTopWidth, style: getComputedStyle(node).borderTopStyle }));
+		assert(parseFloat(border.width) > 0 && border.style === "solid", "Word table retains its border");
+		const embedded = word.locator("img");
+		await waitUntil(() => embedded.evaluate((node) => (node as HTMLImageElement).naturalWidth === 1 && (node as HTMLImageElement).naturalHeight === 1).catch(() => false), "Word image decodes");
+		const wordPixel = await embedded.evaluate((node) => {
+			const canvas = document.createElement("canvas"); canvas.width = 1; canvas.height = 1;
+			const context = canvas.getContext("2d")!; context.drawImage(node as HTMLImageElement, 0, 0);
+			return [...context.getImageData(0, 0, 1, 1).data];
+		});
+		assert(wordPixel[0] < 20 && wordPixel[1] > 230 && wordPixel[2] < 20 && wordPixel[3] === 255, "Word image paints its green pixel");
+		await word.getByText("External label", { exact: true }).click();
+		assert(externalRequests === 0, "Word does not request or navigate to external resources");
+		const parentAccess = await word.locator("body").evaluate(() => { try { return Boolean(window.parent.document.body); } catch { return false; } });
+		assert(!parentAccess, "the Word frame cannot read the parent document");
+		assert(await word.getByText("External image blocked.").count() === 1, "linked image shows an inert placeholder");
+		assert(await page.getByText("External document resources are blocked.", { exact: true }).count() === 1, "the blocked-resource notice is visible");
+		const requestsAfterWord = previewRequests;
+		await treeFile("notes.md").click();
+		await treeFile("report.docx").click();
+		assert(previewRequests === requestsAfterWord, "switching back does not refetch Word");
+		await tab("report.docx").locator(".workspace-tab-close").click();
+		const restricted = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "custom", allowedToolNames: ["ls"] }, bashEnabled: false }) });
+		assert(restricted.status === 200, "the invented workspace read permission was disabled");
+		await treeFile("report.docx").click();
+		await page.getByText("This file is not available under the current workspace permissions.", { exact: true }).waitFor();
+		await tab("report.docx").locator(".workspace-tab-close").click();
 		await tab("notes.md").locator(".workspace-tab-close").click();
 		await waitUntil(async () => (await tabs.count()) === 0, "closing the last tab closes the pane");
 

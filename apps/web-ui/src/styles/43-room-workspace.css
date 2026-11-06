@@ -305,3 +305,5 @@ html.desktop-app-mac .markdown-editor-header input {
 .workspace-preview-pdf img { display: block; width: 100%; height: auto; margin: 0 auto 16px; background: white; }
 .workspace-preview-content { flex: 1; min-height: 0; }
 .workspace-preview-image { height: 100%; box-sizing: border-box; }
+.workspace-preview-word { height: 100%; overflow: hidden; display: flex; flex-direction: column; }
+.workspace-preview-word iframe { width: 100%; flex: 1; min-height: 0; border: 0; }

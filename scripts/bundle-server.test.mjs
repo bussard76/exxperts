@@ -324,6 +324,17 @@ test("the shelf worker may import only packages that ship as files", async () =>
 	await assert.rejects(bundleServer({ root: dir, log: () => {} }), /left-pad/);
 });
 
+test("the shelf child retains the Word renderer package", async () => {
+	const dir = fixtureTree({
+		"apps/web-server/src/shelf-parse-worker.mjs": 'await import("docx-preview");\n',
+		"node_modules/docx-preview/package.json": JSON.stringify({ name: "docx-preview", version: "0.4.1", license: "Apache-2.0" }),
+	});
+	await bundleServer({ root: dir, log: () => {} });
+	assert.deepEqual(checkServerFiles(dir), []);
+	fs.rmSync(path.join(dir, "node_modules/docx-preview"), { recursive: true });
+	assert.match(checkServerFiles(dir).join("\n"), /docx-preview/);
+});
+
 test("a package with neither a licence file nor a license field fails the bundle", async () => {
 	const dir = fixtureTree({
 		"apps/web-server/src/index.ts": 'import "@silvia-odwyer/photon-node";\nimport "pi-mcp-adapter/ui-server.ts";\nimport { x } from "unlicensed";\nconsole.log(x);\n',
