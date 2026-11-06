@@ -41,6 +41,7 @@ New features go from the outside in. Nothing is built until Sascha has signed of
 - One full gate at a time on the host, and inside it the smokes run in parallel with the runner's default (`npm run smokes`, 6 at a time there). Sascha, 2026-11-06: "inwieweit es möglich ist, die Tests zu parallelisieren und nicht seriell hintereinander auszuführen ... Wenn die Testausführung so lange dauert, ist das negativ". Measured on workhorse2: 374 smokes take about 56 minutes one after the other and about 10 minutes at 6 at a time. Two gates at once are what must not happen: sign-in smokes bind fixed callback ports (53692, 1455) and some smokes use fixed temp paths. Run the full gate as `GATE_SLOTS=1 gate bash -c 'npm run build && npm run smokes'`.
 - The Controller enforces `GATE_SLOTS=1` on every full-gate caller, including browser gates, and also sets `GATE_E2E_SLOTS=1` for browser gates because the browser pool reads that variable. The Controller coordinates full gates globally on the host: callers using higher slot values can overlap, and unit and browser pools are separate, so these settings alone do not enforce the host-wide limit.
 - Each smoke that fails in the parallel run is rerun alone on the same commit. If it passes alone, the gate counts as passed and the work is integrated; the failure and the rerun are recorded in the review or wave report. At most two such smokes per run; a third, or a smoke that also fails alone, keeps the gate red. No smoke is skipped or loosened (decided by Sascha, 2026-11-06, answering "Wie soll der Controller mit einem Test umgehen, der im parallelen Gesamtlauf scheitert, aber einzeln auf demselben Stand besteht?": "Einzeln grün zählt").
+- The Controller applies this rule by hand and records each case in its report; no mechanism is built to enforce or prove it, and a run without complete evidence stays red (decided by Sascha, 2026-11-06, answering "Wie weit soll der Controller die Testregel „einzeln grün zählt" technisch absichern?": "Keine neue Technik").
 - Documentation-only changes get no full gate.
 - Every full gate runs through `gate` (fair slots, pooled by unit and browser), as `GATE_SLOTS=1 GATE_E2E_SLOTS=1 gate bash -c '<command>'` because `gate` starts a program without a shell.
 
@@ -68,6 +69,8 @@ The Controller runs `node capacity.mjs` before every start and follows its verdi
 ## Cleanup after every cycle (decided by Sascha, 2026-11-04)
 
 Close finished workers' terminals, release or abandon their dispatches, remove worktrees whose branch is merged or safely pushed (push a WIP branch first if anything is uncommitted), delete merged branches, keep active and paused tasks. Run `node cleanup.mjs` at the end of every cycle and report the counts in `status.md`.
+
+Work on the cleanup script itself is parked (decided by Sascha, 2026-11-06, answering "Das Aufräumskript wird seit Runde 12 nachgebessert ... Wie weiter?": "Parken, von Hand aufräumen"). Until the factory ships a fixed script, the Controller cleans by hand every cycle: for finished workers, discard a change that is only the lockfile rewritten by the install, remove worktrees that are clean and merged or pushed, delete `agents/` branches merged into `main`, and keep running workers, the integration worktree and anything unpushed.
 
 ## Audit and improvement workflow (decided by Sascha, 2026-11-04)
 
