@@ -103,6 +103,8 @@ try {
 		const activeName = async () => (await page.locator(".workspace-tab[data-active='true'] .workspace-tab-select").textContent())?.trim();
 		const tabNames = async () => (await tabs.locator(".workspace-tab-select").allTextContents()).map((name) => name.trim());
 
+		let imageRequests = 0;
+		page.on("request", (request) => { if (request.url().includes("/workspace-image?")) imageRequests += 1; });
 		await treeFile("notes.md").click();
 		await page.locator(".markdown-editor-tiptap .ProseMirror").waitFor({ timeout: 20_000 });
 		await treeFile("photo.png").click();
@@ -110,7 +112,18 @@ try {
 		await waitUntil(() => image.evaluate((img) => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth > 0).catch(() => false), "the image has loaded");
 		assert(JSON.stringify(await tabNames()) === JSON.stringify(["notes.md", "photo.png"]), "Markdown and image each have a tab");
 		await treeFile("notes.md").click();
+		const editor = page.locator(".markdown-editor-tiptap .ProseMirror");
+		await editor.click();
+		await page.keyboard.type(" new draft");
 		await treeFile("photo.png").click();
+		const prompt = page.getByRole("dialog", { name: "Unsaved Markdown changes" });
+		await prompt.waitFor();
+		assert((await prompt.textContent())?.includes("before opening another file"), "the guard describes switching to any file");
+		await prompt.getByRole("button", { name: "Cancel" }).click();
+		assert((await activeName()) === "notes.md", "cancel keeps the draft active");
+		await treeFile("photo.png").click();
+		await prompt.getByRole("button", { name: "Discard changes" }).click();
+		assert(imageRequests === 1, "reactivating an image does not refetch it");
 		assert((await tabs.count()) === 2 && (await activeName()) === "photo.png", "reopening activates the existing tab");
 		assert(await tree.locator(".workspace-file-browser-file[aria-current='true']").filter({ hasText: "photo.png" }).count() === 1, "tree marks the active file");
 		await tab("photo.png").locator(".workspace-tab-close").click();
