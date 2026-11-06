@@ -257,6 +257,16 @@ try {
 	assert(saved.status === 200, `the folder is saved, got ${saved.status} ${JSON.stringify(saved.body)}`);
 	const invalidOpen = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-open`, { method: "POST", headers: { origin: baseUrl, "x-exxperts-local-action": "open-workspace-file" }, body: JSON.stringify({}) });
 	assert(invalidOpen.status === 400 && invalidOpen.body.code === "invalid_request" && invalidOpen.body.error === "This file could not be opened in another program.", "local open rejects an invalid request with the approved safe response");
+	for (const headers of [
+		{ "x-exxperts-local-action": "open-workspace-file" },
+		{ origin: "null", "x-exxperts-local-action": "open-workspace-file" },
+		{ origin: "http://localhost:9123", "x-exxperts-local-action": "open-workspace-file" },
+		{ origin: baseUrl },
+		{ origin: baseUrl, "x-exxperts-local-action": "incorrect" },
+	] as Record<string, string>[]) {
+		const refused = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-open`, { method: "POST", headers, body: JSON.stringify({ conversationId: "demo-thread", path: "report.pdf" }) });
+		assert(refused.status === 403, "local open requires its exact local origin and intent");
+	}
 
 	const response = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview`);
 	assert(response.status === 400, `missing query is rejected, got ${response.status}`);
@@ -275,6 +285,18 @@ try {
 	assert(forbidden.status === 403 && (await forbidden.json()).code === "workspace_read_forbidden", "preview respects current workspace read permission");
 	const restored = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "standard" } }) });
 	assert(restored.status === 200, "workspace read restored");
+	const openRequest = (body: unknown) => api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-open`, { method: "POST", headers: { origin: baseUrl, "x-exxperts-local-action": "open-workspace-file" }, body: JSON.stringify(body) });
+	for (const [body, status, code] of [
+		[{ conversationId: "demo-thread", path: "report.pdf", extra: true }, 400, "invalid_request"],
+		[{ conversationId: "demo-thread", path: "../report.pdf" }, 400, "invalid_path"],
+		[{ conversationId: "missing-demo", path: "report.pdf" }, 404, "conversation_not_found"],
+		[{ conversationId: "demo-thread", path: "absent.xlsx" }, 404, "file_not_found"],
+		[{ conversationId: "demo-thread", path: "link.xlsx" }, 403, "blocked_by_policy"],
+		[{ conversationId: "demo-thread", path: "old.doc" }, 415, "unsupported_file_type"],
+	] as const) {
+		const refused = await openRequest(body);
+		assert(refused.status === status && refused.body.code === code && refused.body.error === "This file could not be opened in another program.", `local open rejects ${code} safely`);
+	}
 	for (const file of ["../secret.xlsx", "/absolute.xlsx", "C:drive.xlsx", ".hidden.xlsx", "folder//book.xlsx"]) {
 		const query = new URLSearchParams({ conversationId: "demo-thread", path: file });
 		const invalid = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?${query}`);
