@@ -126,6 +126,7 @@ function fixtureTree(overrides = {}) {
 			"export async function adminConfig(): Promise<string> { return (await import(ADAPTER_CONFIG)).marker; }",
 		].join("\n"),
 		"apps/web-server/src/shelf-parse-worker.mjs": "process.exit(0);\n",
+		"apps/web-server/src/workspace-open-worker.mjs": "process.exit(0);\n",
 		"pi-package/extensions/mcp/index.ts": [
 			'const CONNECTORS_PANEL_SPECIFIER = "./connectors-panel.ts" as string;',
 			"export async function panel(): Promise<string> { return (await import(CONNECTORS_PANEL_SPECIFIER)).marker; }",
@@ -176,7 +177,7 @@ test("the bundle copies the files its code reads beside itself, writes the licen
 	const mapFile = path.join(makeTree({}), "maps", "server.mjs.map");
 	await bundleServer({ root: dir, mapFile, log: () => {} });
 	const outDir = path.join(dir, "apps", "web-server", "dist");
-	assert.deepEqual(fs.readdirSync(outDir).sort(), ["app-bridge.bundle.js", "photon_rs_bg.wasm", "server.mjs", "server.mjs.licenses.txt", "shelf-parse-worker.mjs"]);
+	assert.deepEqual(fs.readdirSync(outDir).sort(), ["app-bridge.bundle.js", "photon_rs_bg.wasm", "server.mjs", "server.mjs.licenses.txt", "shelf-parse-worker.mjs", "workspace-open-worker.mjs"]);
 	assert.ok(fs.statSync(mapFile).size > 0);
 	const licences = fs.readFileSync(path.join(outDir, "server.mjs.licenses.txt"), "utf8");
 	assert.match(licences, /pi-mcp-adapter 2\.10\.0 \(MIT\)[\s\S]*MIT licence text of the adapter/);
@@ -333,6 +334,14 @@ test("a child import of Koffi retains the package", async () => {
 	assert.deepEqual(checkServerFiles(dir), []);
 	fs.rmSync(path.join(dir, "node_modules/koffi"), { recursive: true });
 	assert.match(checkServerFiles(dir).join("\n"), /koffi/);
+});
+
+test("the Windows opener is a packaged child whose imports must ship", async () => {
+	const good = fixtureTree({ "apps/web-server/src/workspace-open-worker.mjs": 'await import("koffi");\n' });
+	await bundleServer({ root: good, log: () => {} });
+	assert.ok(fs.existsSync(path.join(good, "apps/web-server/dist/workspace-open-worker.mjs")));
+	const bad = fixtureTree({ "apps/web-server/src/workspace-open-worker.mjs": 'await import("tsx");\n' });
+	await assert.rejects(bundleServer({ root: bad, log: () => {} }), /tsx.*does not ship|tsx.*not ship/);
 });
 
 test("a child import of ExcelJS retains the package", async () => {
