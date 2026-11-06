@@ -71,6 +71,9 @@ try {
 	assert(response.headers.get("x-content-type-options") === "nosniff", "errors cannot be sniffed");
 	assert(response.headers.get("content-security-policy") === "sandbox; default-src 'none'", "direct navigation remains inert");
 	assert(JSON.stringify(await response.json()) === JSON.stringify({ code: "invalid_request", error: "Choose a valid workspace file to preview." }), "error uses the approved safe response");
+	const missingConversation = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=missing-demo&path=book.xlsx`);
+	assert(missingConversation.status === 404, "a nonexistent conversation cannot fall back to the room workspace");
+	assert((await missingConversation.json()).code === "conversation_not_found", "missing conversation has the approved error code");
 
 	console.log("workspace-file-preview smoke: ok");
 } catch (error) {

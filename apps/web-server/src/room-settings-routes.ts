@@ -1,7 +1,7 @@
 import type { FastifyRequest } from "fastify";
 import { ARTIFACT_SECURITY_HEADERS } from "./request-checks.js";
 import { MAINTENANCE_DIAGNOSTICS_KEEP, MAINTENANCE_DIAGNOSTICS_DEFAULT_LIMIT, listMaintenanceDiagnostics, exportMaintenanceDiagnostics } from "./maintenance-diagnostics.js";
-import { createPersistentAgentInstance, saveWithOpenConversationCheck, getPersistentRoomInstructionsView, savePersistentRoomGlobalInstructionsEnabled, savePersistentRoomInstructions } from "./persistent-agents.js";
+import { createPersistentAgentInstance, getPersistentAgentThread, saveWithOpenConversationCheck, getPersistentRoomInstructionsView, savePersistentRoomGlobalInstructionsEnabled, savePersistentRoomInstructions } from "./persistent-agents.js";
 import { normalizePersistentRoomWorkspaceToolSelectionInput } from "./persistent-room-tool-policy.js";
 import { PersistentRoomWorkspacePolicyError, resolvePersistentRoomEffectiveWorkspacePolicy, assertPersistentRoomWorkspaceDefaultMutable, releasePersistentRoomThreadWorkspaceMirror, type PersistentRoomCapabilityPolicy, persistentRoomCapabilityPolicyView, readPersistentRoomCapabilityPolicy, PERSISTENT_ROOM_WORKSPACE_POLICY_STORAGE_SOURCE, deletePersistentRoomCapabilityPolicy, readPersistentRoomDefaultCapabilityPolicy, PERSISTENT_ROOM_WORKSPACE_DEFAULT_STORAGE_SOURCE, missingPersistentRoomWorkspaceRootWarnings, normalizePersistentRoomWorkspaceAccessModeInput, createPersistentRoomDefaultCapabilityPolicy, updatePersistentRoomCapabilityPolicyWorkspaceSettings, writePersistentRoomDefaultCapabilityPolicy, deletePersistentRoomDefaultCapabilityPolicy, createPersistentRoomCapabilityPolicy, writePersistentRoomCapabilityPolicy } from "./persistent-room-workspace-policy.js";
 import { listPersistentRoomWorkspaceFiles } from "./persistent-room-workspace-files.js";
@@ -147,8 +147,9 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 		"Referrer-Policy": "no-referrer",
 		"Content-Security-Policy": "sandbox; default-src 'none'",
 	});
+	let agentId: string;
 	try {
-		getUsablePersistentAgentStatusForNormalUse(String((req.params as any).id ?? "").trim());
+		agentId = getUsablePersistentAgentStatusForNormalUse(String((req.params as any).id ?? "").trim()).id;
 	} catch (error) {
 		if ((error as { statusCode?: number }).statusCode !== 404) return persistentAgentNormalUseErrorReply(reply, error);
 		return reply.code(404).send({ code: "room_not_found", error: "This file is no longer available in this workspace." });
@@ -157,6 +158,9 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 	if (typeof query.conversationId !== "string" || !query.conversationId || typeof query.path !== "string" || !query.path) {
 		return reply.code(400).send({ code: "invalid_request", error: "Choose a valid workspace file to preview." });
 	}
+	let conversationExists = false;
+	try { conversationExists = getPersistentAgentThread(agentId, query.conversationId) !== null; } catch { /* Invalid thread identifiers are not conversations. */ }
+	if (!conversationExists) return reply.code(404).send({ code: "conversation_not_found", error: "This file is no longer available in this workspace." });
 	return reply.code(503).send({ code: "renderer_unavailable", error: "Preview rendering is unavailable on this system." });
 });
 
