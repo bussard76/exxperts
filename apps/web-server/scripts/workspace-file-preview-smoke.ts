@@ -30,7 +30,8 @@ const revokeChild = process.argv.includes("--revoke-child");
 const replaceChild = process.argv.includes("--replace-child");
 const badWordChild = process.argv.includes("--bad-word-child");
 const networkChild = process.argv.includes("--network-child");
-const fakeChild = malformedChild || admissionChild || timeoutChild || extraChild || crashChild || exitRaceChild || revokeChild || replaceChild || badWordChild || networkChild;
+const openChild = process.argv.includes("--open-child");
+const fakeChild = malformedChild || admissionChild || timeoutChild || extraChild || crashChild || exitRaceChild || revokeChild || replaceChild || badWordChild || networkChild || openChild;
 const spawnMarker = path.join(tempRoot, "preview-spawns");
 const releaseMarker = path.join(tempRoot, "preview-release");
 const networkMarker = path.join(tempRoot, "network-probes");
@@ -46,9 +47,26 @@ const { EventEmitter } = require("node:events");
 const { syncBuiltinESMExports } = require("node:module");
 const original = childProcess.fork;
 const fs = require("node:fs");
+const realSpawn = childProcess.spawn;
+childProcess.spawn = function(file, args, options) {
+  if (!${openChild} || (file !== "/usr/bin/xdg-open" && file !== "/usr/bin/open")) return realSpawn.apply(this, arguments);
+  fs.appendFileSync(${JSON.stringify(spawnMarker)}, JSON.stringify({ file, args, options }) + "\\n");
+  const child = new EventEmitter();
+  child.kill = () => { setImmediate(() => child.emit("close", null, "SIGTERM")); return true; };
+  setImmediate(() => {
+    const name = require("node:path").basename(args[0]);
+    if (name === "missing-opener.pdf") { const error = Object.assign(new Error("fake"), { code: "ENOENT" }); child.emit("error", error); child.emit("close", -1, null); }
+    else if (name === "denied-opener.pdf") { const error = Object.assign(new Error("fake"), { code: "EACCES" }); child.emit("error", error); child.emit("close", -1, null); }
+    else if (name === "signal.pdf") child.emit("close", null, "SIGTERM");
+    else if (name === "exit2.pdf") child.emit("close", 2, null);
+    else if (name === "exit3.pdf") child.emit("close", 3, null);
+    else child.emit("close", 0, null);
+  });
+  return child;
+};
 let count = 0;
 childProcess.fork = function(file, args, options) {
-  if (${networkChild} || !String(file).endsWith("shelf-parse-worker.mjs") || !String(args[0]).includes("workspace-preview-v1")) return original.apply(this, arguments);
+  if (${networkChild || openChild} || !String(file).endsWith("shelf-parse-worker.mjs") || !String(args[0]).includes("workspace-preview-v1")) return original.apply(this, arguments);
   if (${badWordChild} && JSON.parse(args[0]).kind !== "word") return original.apply(this, arguments);
   const child = new EventEmitter();
   child.stderr = new EventEmitter();
@@ -209,6 +227,7 @@ fs.writeFileSync(path.join(folder, "expansion.docx"), await oversizedExpansionDo
 fs.writeFileSync(path.join(folder, "elements.docx"), await tooManyElementsDocx());
 if (!fakeChild) fs.writeFileSync(path.join(folder, "oversized-text.docx"), await oversizedTextDocx());
 fs.writeFileSync(path.join(folder, "report.pdf"), onePagePdf());
+if (openChild) for (const name of ["missing-opener.pdf", "denied-opener.pdf", "signal.pdf", "exit2.pdf", "exit3.pdf"]) fs.writeFileSync(path.join(folder, name), "invented");
 fs.writeFileSync(path.join(folder, "pages.pdf"), multiplePagePdf(9));
 fs.writeFileSync(path.join(folder, "too-many.pdf"), multiplePagePdf(201));
 fs.writeFileSync(path.join(folder, "broken.pdf"), "invented broken data");
@@ -244,7 +263,7 @@ try {
 		shell: process.platform === "win32",
 		...SMOKE_SERVER_SPAWN_TREE_OPTIONS,
 		cwd: webServerDir,
-		env: smokeHomeEnv(tempHome, { PORT: String(port), ...SMOKE_SERVER_AUTH_ENV, EXXETA_HOME: repoRoot, EXXPERTS_CODING_AGENT_DIR: agentDir, EXXETA_PERSISTENT_AGENTS_ROOT: agentsRoot, ...(fakeChild ? { NODE_OPTIONS: `--require=${preload}` } : {}) }) as NodeJS.ProcessEnv,
+		env: smokeHomeEnv(tempHome, { PORT: String(port), ...SMOKE_SERVER_AUTH_ENV, EXXETA_HOME: repoRoot, EXXPERTS_CODING_AGENT_DIR: agentDir, EXXETA_PERSISTENT_AGENTS_ROOT: agentsRoot, ...(openChild ? { DISPLAY: ":987" } : {}), ...(fakeChild ? { NODE_OPTIONS: `--require=${preload}` } : {}) }) as NodeJS.ProcessEnv,
 	});
 	server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
 	server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
@@ -255,6 +274,18 @@ try {
 	const agentId = String(created.body?.agent?.id ?? "");
 	const saved = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: folder, workspaceAccessMode: "localFiles" }) });
 	assert(saved.status === 200, `the folder is saved, got ${saved.status} ${JSON.stringify(saved.body)}`);
+	const invalidOpen = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-open`, { method: "POST", headers: { origin: baseUrl, "x-exxperts-local-action": "open-workspace-file" }, body: JSON.stringify({}) });
+	assert(invalidOpen.status === 400 && invalidOpen.body.code === "invalid_request" && invalidOpen.body.error === "This file could not be opened in another program.", "local open rejects an invalid request with the approved safe response");
+	for (const headers of [
+		{ "x-exxperts-local-action": "open-workspace-file" },
+		{ origin: "null", "x-exxperts-local-action": "open-workspace-file" },
+		{ origin: "http://localhost:9123", "x-exxperts-local-action": "open-workspace-file" },
+		{ origin: baseUrl },
+		{ origin: baseUrl, "x-exxperts-local-action": "incorrect" },
+	] as Record<string, string>[]) {
+		const refused = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-open`, { method: "POST", headers, body: JSON.stringify({ conversationId: "demo-thread", path: "report.pdf" }) });
+		assert(refused.status === 403, "local open requires its exact local origin and intent");
+	}
 
 	const response = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview`);
 	assert(response.status === 400, `missing query is rejected, got ${response.status}`);
@@ -273,6 +304,29 @@ try {
 	assert(forbidden.status === 403 && (await forbidden.json()).code === "workspace_read_forbidden", "preview respects current workspace read permission");
 	const restored = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "standard" } }) });
 	assert(restored.status === 200, "workspace read restored");
+	const openRequest = (body: unknown) => api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-open`, { method: "POST", headers: { origin: baseUrl, "x-exxperts-local-action": "open-workspace-file" }, body: JSON.stringify(body) });
+	for (const [body, status, code] of [
+		[{ conversationId: "demo-thread", path: "report.pdf", extra: true }, 400, "invalid_request"],
+		[{ conversationId: "demo-thread", path: "../report.pdf" }, 400, "invalid_path"],
+		[{ conversationId: "missing-demo", path: "report.pdf" }, 404, "conversation_not_found"],
+		[{ conversationId: "demo-thread", path: "absent.xlsx" }, 404, "file_not_found"],
+		[{ conversationId: "demo-thread", path: "link.xlsx" }, 403, "blocked_by_policy"],
+		[{ conversationId: "demo-thread", path: "directory.xlsx" }, 400, "not_file"],
+		[{ conversationId: "demo-thread", path: "old.doc" }, 415, "unsupported_file_type"],
+	] as const) {
+		const refused = await openRequest(body);
+		assert(refused.status === status && refused.body.code === code && refused.body.error === "This file could not be opened in another program.", `local open rejects ${code} safely`);
+	}
+	if (openChild && process.platform === "linux") {
+		const opened = await openRequest({ conversationId: "demo-thread", path: "report.pdf" });
+		assert(opened.status === 202 && opened.body.accepted === true, `guarded local open waits for a successful dispatcher: ${JSON.stringify(opened)}`);
+		const calls = fs.readFileSync(spawnMarker, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+		assert(calls.length === 1 && calls[0].file === "/usr/bin/xdg-open" && JSON.stringify(calls[0].args) === JSON.stringify([path.join(folder, "report.pdf")]) && calls[0].options.shell === false && calls[0].options.detached === false, "the production adapter receives one inert absolute argument");
+		for (const [name, status, code] of [["missing-opener.pdf", 503, "opener_unavailable"], ["denied-opener.pdf", 500, "open_failed"], ["signal.pdf", 500, "open_failed"], ["exit2.pdf", 500, "open_failed"], ["exit3.pdf", 503, "opener_unavailable"]] as const) {
+			const failure = await openRequest({ conversationId: "demo-thread", path: name });
+			assert(failure.status === status && failure.body.code === code, `dispatcher failure ${name} maps safely`);
+		}
+	}
 	for (const file of ["../secret.xlsx", "/absolute.xlsx", "C:drive.xlsx", ".hidden.xlsx", "folder//book.xlsx"]) {
 		const query = new URLSearchParams({ conversationId: "demo-thread", path: file });
 		const invalid = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?${query}`);
