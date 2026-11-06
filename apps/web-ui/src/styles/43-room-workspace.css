@@ -297,6 +297,11 @@ html.desktop-app-mac .markdown-editor-header input {
 .workspace-pane[hidden], .workspace-pane [hidden] { display: none; }
 .workspace-open-action { flex: none; padding: 0.4rem 0.6rem; }
 .workspace-open-action p { margin: 0.3rem 0 0; }
+.workspace-spreadsheet { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.workspace-spreadsheet-scroll { flex: 1; min-height: 0; overflow: auto; background: #fff; }
+.workspace-spreadsheet table { table-layout: fixed; border-collapse: collapse; width: max-content; background: #fff; }
+.workspace-spreadsheet td { overflow: hidden; padding: 0 4px; }
+.workspace-spreadsheet-sheets { display: flex; flex: none; overflow-x: auto; }
 .workspace-tabs { display: flex; overflow-x: auto; flex: none; border-bottom: 1px solid var(--exx-border); }
 .workspace-tab { display: flex; align-items: center; border-bottom: 2px solid transparent; }
 .workspace-tab[data-active="true"] { border-bottom-color: var(--exx-focus); }
