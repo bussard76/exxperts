@@ -53,7 +53,7 @@ childProcess.spawn = function(file, args, options) {
   if (!${openChild} || (file !== "/usr/bin/xdg-open" && file !== "/usr/bin/open")) return realSpawn.apply(this, arguments);
   fs.appendFileSync(${JSON.stringify(spawnMarker)}, JSON.stringify({ file, args, options }) + "\\n");
   const child = new EventEmitter();
-  child.kill = () => { setImmediate(() => child.emit("close", null, "SIGTERM")); return true; };
+  child.kill = () => { if (require("node:path").basename(args[0]) !== "timeout.pdf") setImmediate(() => child.emit("close", null, "SIGTERM")); return true; };
   setImmediate(() => {
     const name = require("node:path").basename(args[0]);
     if (name === "missing-opener.pdf") { const error = Object.assign(new Error("fake"), { code: "ENOENT" }); child.emit("error", error); child.emit("close", -1, null); }
@@ -61,6 +61,7 @@ childProcess.spawn = function(file, args, options) {
     else if (name === "signal.pdf") child.emit("close", null, "SIGTERM");
     else if (name === "exit2.pdf") child.emit("close", 2, null);
     else if (name === "exit3.pdf") child.emit("close", 3, null);
+    else if (name === "timeout.pdf") return;
     else child.emit("close", 0, null);
   });
   return child;
@@ -241,7 +242,7 @@ fs.writeFileSync(path.join(folder, "expansion.docx"), await oversizedExpansionDo
 fs.writeFileSync(path.join(folder, "elements.docx"), await tooManyElementsDocx());
 if (!fakeChild) fs.writeFileSync(path.join(folder, "oversized-text.docx"), await oversizedTextDocx());
 fs.writeFileSync(path.join(folder, "report.pdf"), onePagePdf());
-if (openChild) for (const name of ["missing-opener.pdf", "denied-opener.pdf", "signal.pdf", "exit2.pdf", "exit3.pdf", "- invented $ ` ; & % ' ü.pdf"]) fs.writeFileSync(path.join(folder, name), "invented");
+if (openChild) for (const name of ["missing-opener.pdf", "denied-opener.pdf", "signal.pdf", "exit2.pdf", "exit3.pdf", "timeout.pdf", "- invented $ ` ; & % ' ü.pdf"]) fs.writeFileSync(path.join(folder, name), "invented");
 fs.writeFileSync(path.join(folder, "pages.pdf"), multiplePagePdf(9));
 fs.writeFileSync(path.join(folder, "too-many.pdf"), multiplePagePdf(201));
 fs.writeFileSync(path.join(folder, "broken.pdf"), "invented broken data");
@@ -363,6 +364,8 @@ try {
 		const oddOpen = await openRequest({ conversationId: "demo-thread", path: oddName });
 		const oddCall = JSON.parse(fs.readFileSync(spawnMarker, "utf8").trim().split("\n").at(-1)!);
 		assert(oddOpen.status === 202 && JSON.stringify(oddCall.args) === JSON.stringify([path.join(folder, oddName)]), "special characters remain one unchanged absolute argument");
+		const timeout = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-open`, { method: "POST", headers: { origin: baseUrl, "content-type": "application/json", "x-exxperts-local-action": "open-workspace-file" }, body: JSON.stringify({ conversationId: "demo-thread", path: "timeout.pdf" }), signal: AbortSignal.timeout(12_000) });
+		assert(timeout.status === 504 && (await timeout.json()).code === "open_timeout", "the deadline settles even when a killed dispatcher never closes");
 	}
 	for (const file of ["../secret.xlsx", "/absolute.xlsx", "C:drive.xlsx", ".hidden.xlsx", "folder//book.xlsx"]) {
 		const query = new URLSearchParams({ conversationId: "demo-thread", path: file });

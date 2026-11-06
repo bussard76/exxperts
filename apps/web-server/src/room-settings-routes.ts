@@ -100,7 +100,11 @@ async function openWorkspacePreviewFile(absolutePath: string): Promise<"accepted
 			resolve(["ENOENT", "ENOSYS"].includes((error as NodeJS.ErrnoException).code ?? "") ? "opener_unavailable" : "open_failed");
 			return;
 		}
-		const timer = setTimeout(() => { failure = "open_timeout"; child.kill(); }, 10_000);
+		const timer = setTimeout(() => {
+			failure = "open_timeout";
+			try { child.kill(); } catch { /* A failed kill cannot hold the HTTP response open. */ }
+			resolve("open_timeout");
+		}, 10_000);
 		child.once("error", (error: NodeJS.ErrnoException) => { failure ??= ["ENOENT", "ENOSYS"].includes(error.code ?? "") ? "opener_unavailable" : "open_failed"; });
 		child.once("close", (code, signal) => {
 			clearTimeout(timer);
