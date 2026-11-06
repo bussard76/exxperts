@@ -60,6 +60,7 @@ fs.mkdirSync(folder, { recursive: true });
 fs.writeFileSync(path.join(folder, "photo.png"), ONE_PIXEL_PNG);
 fs.writeFileSync(path.join(folder, "report.pdf"), ninePagePdf());
 fs.writeFileSync(path.join(folder, "report.docx"), await smallDocx());
+fs.writeFileSync(path.join(folder, "sample.xlsx"), "invented placeholder");
 fs.writeFileSync(path.join(folder, "large.svg"), '<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="2000"><rect width="2000" height="2000" fill="red"/></svg>');
 fs.writeFileSync(path.join(folder, "notes.md"), "# Notes\n\nSome text\n");
 fs.writeFileSync(path.join(folder, "old.doc"), "legacy");
@@ -207,6 +208,31 @@ try {
 		await treeFile("report.pdf").click();
 		assert(previewRequests === 1, "switching back does not refetch the PDF");
 		await tab("report.pdf").locator(".workspace-tab-close").click();
+		await page.route("**/workspace-preview?*", async (route) => {
+			const url = new URL(route.request().url());
+			if (url.searchParams.get("path") !== "sample.xlsx") return route.continue();
+			const font = { family: "Arial", sizePt: 11, color: "#CC2200", bold: true, italic: false, underline: "none", strike: false };
+			const style = { fill: "#FFFF00", font, borders: { top: null, right: null, bottom: null, left: null }, align: { horizontal: "left", vertical: "bottom", wrap: false } };
+			const sheet = (id: string, name: string, text: string, wide = false) => ({ id, name, visibility: "visible", rowCount: wide ? 80 : 1, columnCount: wide ? 12 : 1, defaultRowHeightPx: 20, defaultColumnWidthPx: 64, rows: [], columns: [{ index: 1, widthPx: 173 }], cells: [{ row: 1, column: 1, text, style: 0, runs: null, valueKind: "text" }, ...(wide ? [{ row: 2, column: 2, text: "—", style: 0, runs: null, valueKind: "formula-result-unavailable" }, { row: 80, column: 12, text: "Last cell", style: 0, runs: null, valueKind: "text" }] : [])], merges: [] });
+			await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ schemaVersion: 1, agentId, conversationId: url.searchParams.get("conversationId"), path: "sample.xlsx", notices: [], kind: "spreadsheet", workbook: { dateSystem: "1900", styles: [style], sheets: [sheet("1", "Summary", "Invented total", true), sheet("2", "Detail", "Second sheet")] } }) });
+		});
+		await treeFile("sample.xlsx").click();
+		const sheetCell = page.getByText("Invented total", { exact: true });
+		await sheetCell.waitFor({ timeout: 5_000 });
+		const appearance = await sheetCell.evaluate((node) => ({ color: getComputedStyle(node).color, weight: getComputedStyle(node).fontWeight, fill: getComputedStyle(node).backgroundColor }));
+		assert(appearance.color === "rgb(204, 34, 0)" && Number(appearance.weight) >= 700 && appearance.fill === "rgb(255, 255, 0)", "spreadsheet text, font and fill are displayed");
+		assert(Math.abs((await sheetCell.boundingBox())!.width - 173) < 1, "the workbook column width is retained");
+		assert(await page.getByLabel("— No calculated value is stored in this file.").count() === 1, "a missing cached result has an accessible explanation");
+		const gridScroll = await page.locator(".workspace-spreadsheet-scroll").evaluate((node) => { node.scrollLeft = node.scrollWidth; node.scrollTop = node.scrollHeight; return { left: node.scrollLeft, top: node.scrollTop }; });
+		assert(gridScroll.left > 0 && gridScroll.top > 0, "a wide and tall spreadsheet scrolls on both axes");
+		await page.getByRole("button", { name: "Detail", exact: true }).click();
+		await page.getByText("Second sheet", { exact: true }).waitFor();
+		assert(await page.getByRole("button", { name: "Open in Excel" }).count() === 1, "spreadsheet uses its fixed open label");
+		const requestsAfterSheet = previewRequests;
+		await treeFile("notes.md").click();
+		await treeFile("sample.xlsx").click();
+		assert(await page.getByText("Second sheet", { exact: true }).count() === 1 && previewRequests === requestsAfterSheet, "the selected sheet survives tab switches without refetch");
+		await tab("sample.xlsx").locator(".workspace-tab-close").click();
 		let externalRequests = 0;
 		await page.route("**/*", async (route) => {
 			if (route.request().url().includes("example.invalid")) { externalRequests++; await route.abort(); }
