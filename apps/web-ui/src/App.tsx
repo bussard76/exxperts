@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { Sidebar } from "./components/Sidebar";
 import { AttachmentsBrowser, AttachmentsEntry, type AttachmentsView } from "./components/attachments-panel";
 import { WorkspaceFileBrowser } from "./components/WorkspaceFileBrowser";
+import { WorkspaceFileTabs } from "./components/WorkspaceFileTabs";
+import { WorkspaceImagePreview } from "./components/WorkspaceImagePreview";
 import { AssetViewerFooter } from "./components/asset-viewer-footer";
 import { ToastStack, type ToastView } from "./components/toast-stack";
 import { usePausedSkillsNotice } from "./paused-skills-notice";
@@ -446,11 +448,13 @@ export function App() {
 		// opened from them carries the view it goes back to (backTo).
 		| { kind: "attachments"; view: AttachmentsView }
 		| { kind: "markdownEditor"; path: string }
+		| { kind: "workspaceImage"; path: string }
 		// The run view: the live task's stream in the
 		// same pane slot; renders from taskState and swaps to the artifact viewer
 		// in place when the run ends.
 		| { kind: "taskRun"; taskId: string };
 	const [rightPane, setRightPane] = useState<RightPaneOccupant | null>(null);
+	const [workspaceTabs, setWorkspaceTabs] = useState<{ agentId: string; conversationId: string; paths: string[] } | null>(null);
 	// Synchronous mirror for the WS handlers (toast suppression / run-view swap
 	// read the pane at event time, not at closure-capture time).
 	const rightPaneRef = useRef<RightPaneOccupant | null>(null);
@@ -536,7 +540,7 @@ export function App() {
 	// lose them, and leaving the room closes them itself.
 	const setPreview = (data: ApprovalPreviewData | null) => {
 		if (data && rightPaneRef.current?.kind === "markdownEditor" && !guardMarkdownEditorAction(() => setPreview(data), "switch")) return;
-		setRightPane((pane) => (data ? { kind: "preview", data } : pane?.kind === "attachments" || (pane?.kind === "artifactViewer" && pane.backTo) ? pane : null));
+		setRightPane((pane) => (data ? { kind: "preview", data } : pane?.kind === "attachments" || pane?.kind === "workspaceImage" || (pane?.kind === "artifactViewer" && pane.backTo) ? pane : null));
 	};
 	const onMarkdownEditorDirtyChange = useCallback((dirty: boolean) => {
 		markdownEditorDirtyRef.current = dirty;
@@ -582,26 +586,46 @@ export function App() {
 		setMarkdownEditorPromptBusy(false);
 	}
 
-	function requestCloseMarkdownEditor(): void {
-		if (!guardMarkdownEditorAction(() => {
+	function workspacePaneFor(path: string): RightPaneOccupant {
+		return /\.md$/i.test(path) ? { kind: "markdownEditor", path } : { kind: "workspaceImage", path };
+	}
+
+	function activeWorkspacePath(pane: RightPaneOccupant | null): string | null {
+		return pane?.kind === "markdownEditor" || pane?.kind === "workspaceImage" ? pane.path : null;
+	}
+
+	function requestCloseWorkspaceTab(path: string): void {
+		const active = activeWorkspacePath(rightPaneRef.current);
+		if (active === path && rightPaneRef.current?.kind === "markdownEditor" && !guardMarkdownEditorAction(() => requestCloseWorkspaceTab(path), "close")) return;
+		const paths = workspaceTabs?.paths ?? [];
+		const index = paths.indexOf(path);
+		if (index < 0) return;
+		const remaining = paths.filter((item) => item !== path);
+		setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths: remaining } : tabs);
+		if (active === path) {
+			const next = remaining[index] ?? remaining[index - 1];
 			setArtifactMaximized(false);
-			setRightPane(null);
-		}, "close")) return;
-		setArtifactMaximized(false);
-		setRightPane(null);
+			setRightPane(next ? workspacePaneFor(next) : null);
+		}
+	}
+
+	function requestCloseMarkdownEditor(): void {
+		const path = activeWorkspacePath(rightPaneRef.current);
+		if (path) requestCloseWorkspaceTab(path);
 	}
 
 	function openWorkspaceMarkdown(entry: { relativePath: string; extension: string }): void {
-		const extension = entry.extension || (entry.relativePath.includes(".") ? entry.relativePath.slice(entry.relativePath.lastIndexOf(".")).toLowerCase() : "");
-		if (extension.toLowerCase() !== ".md") return;
 		const path = entry.relativePath;
-		if (rightPaneRef.current?.kind === "markdownEditor" && rightPaneRef.current.path === path) return;
-		if (!guardMarkdownEditorAction(() => {
-			setArtifactMaximized(false);
-			setRightPane({ kind: "markdownEditor", path });
-		}, "switch")) return;
+		if (!/\.(md|png|jpe?g|gif|webp|svg)$/i.test(path) || !persistentChat) return;
+		if (activeWorkspacePath(rightPaneRef.current) === path && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId) return;
+		if (rightPaneRef.current?.kind === "markdownEditor" && !guardMarkdownEditorAction(() => openWorkspaceMarkdown(entry), "switch")) return;
 		setArtifactMaximized(false);
-		setRightPane({ kind: "markdownEditor", path });
+		setWorkspaceTabs((tabs) => {
+			const same = tabs?.agentId === persistentChat.agentId && tabs.conversationId === persistentChat.conversationId;
+			const paths = same ? tabs.paths : [];
+			return { agentId: persistentChat.agentId, conversationId: persistentChat.conversationId, paths: paths.includes(path) ? paths : [...paths, path] };
+		});
+		setRightPane(workspacePaneFor(path));
 	}
 
 	useEffect(() => {
@@ -634,13 +658,13 @@ export function App() {
 	// until dismissed — one Escape, one layer.
 	// As an Escape layer it keeps that Escape from the room's own keys too: the
 	// composer's Stop and a waiting question's deny.
-	const paneTakesEscape = rightPane?.kind === "artifactViewer" || rightPane?.kind === "taskRun" || rightPane?.kind === "attachments" || rightPane?.kind === "markdownEditor";
+	const paneTakesEscape = rightPane?.kind === "artifactViewer" || rightPane?.kind === "taskRun" || rightPane?.kind === "attachments" || rightPane?.kind === "markdownEditor" || rightPane?.kind === "workspaceImage";
 	useEscapeKey(() => {
 		// A dialog that is not in this component's state (the expanded
 		// diagram viewer) owns Escape the same way: one Escape, one layer.
 		if (document.querySelector('[aria-modal="true"]')) return;
 		if (artifactMaximized) setArtifactMaximized(false);
-		else if (rightPane?.kind === "markdownEditor") requestCloseMarkdownEditor();
+		else if (rightPane?.kind === "markdownEditor" || rightPane?.kind === "workspaceImage") requestCloseMarkdownEditor();
 		else if (rightPane?.kind === "attachments" && rightPane.view === "gallery") setRightPane({ kind: "attachments", view: "panel" });
 		else closePaneFile();
 	}, paneTakesEscape && !assetDeleteConfirm && !exportCollision && !fileDeleteConfirm && !saveAsPrompt && !roomSettingsOpen && !markdownEditorPrompt);
@@ -698,6 +722,10 @@ export function App() {
 	const [backgroundDoneToast, setBackgroundDoneToast] = useState<{ agentId: PersistentAgentId; displayName: string } | null>(null);
 	const [persistentThread, setPersistentThread] = useState<PersistentAgentThread | null>(null);
 	const [persistentChat, setPersistentChat] = useState<PersistentChatConfig>(null);
+	useEffect(() => {
+		setWorkspaceTabs(null);
+		setRightPane((pane) => pane?.kind === "markdownEditor" || pane?.kind === "workspaceImage" ? null : pane);
+	}, [persistentChat?.agentId, persistentChat?.conversationId, personChanged]);
 	// Another conversation holds none of this one's edit.
 	useEffect(() => {
 		setLastEdit(null);
@@ -8602,16 +8630,22 @@ export function App() {
 			)}
 			{rightPane?.kind === "attachments" && !galleryShown && attachmentsBrowser("panel")}
 			{preview && <Preview content={preview.content} title={preview.title} type={preview.type} onClose={() => setPreview(null)} />}
-			{rightPane?.kind === "markdownEditor" && persistentChat && (
-				<MarkdownEditorPane
-					ref={markdownEditorRef}
-					agentId={persistentChat.agentId}
-					conversationId={persistentChat.conversationId}
-					path={rightPane.path}
-					onClose={requestCloseMarkdownEditor}
-					onDirtyChange={onMarkdownEditorDirtyChange}
-					onOpenMarkdown={(path) => openWorkspaceMarkdown({ relativePath: path, extension: ".md" })}
-				/>
+			{persistentChat && !personChanged && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId && (
+				<div className="workspace-pane" hidden={activeWorkspacePath(rightPane) === null}>
+					<WorkspaceFileTabs tabs={workspaceTabs.paths} active={activeWorkspacePath(rightPane)} onSelect={(path) => openWorkspaceMarkdown({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} />
+					{rightPane?.kind === "markdownEditor" && <MarkdownEditorPane
+						ref={markdownEditorRef}
+						agentId={persistentChat.agentId}
+						conversationId={persistentChat.conversationId}
+						path={rightPane.path}
+						onClose={requestCloseMarkdownEditor}
+						onDirtyChange={onMarkdownEditorDirtyChange}
+						onOpenMarkdown={(path) => openWorkspaceMarkdown({ relativePath: path, extension: ".md" })}
+					/>}
+					{workspaceTabs.paths.filter((path) => !/\.md$/i.test(path)).map((path) => <div key={path} hidden={rightPane?.kind !== "workspaceImage" || rightPane.path !== path}>
+						<WorkspaceImagePreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />
+					</div>)}
+				</div>
 			)}
 			{rightPane?.kind === "taskRun" && taskState.phase !== "none" && taskState.taskId === rightPane.taskId && (
 				<TaskRunView
@@ -8696,7 +8730,7 @@ export function App() {
 					appearance={appearance}
 					onSetAppearance={setAppearance}
 					onSettings={openSettings}
-					workspaceSlot={persistentChat ? <WorkspaceFileBrowser agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} selectedPath={rightPane?.kind === "markdownEditor" ? rightPane.path : null} onFileSelect={openWorkspaceMarkdown} /> : undefined}
+					workspaceSlot={persistentChat ? <WorkspaceFileBrowser agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} selectedPath={activeWorkspacePath(rightPane)} onFileSelect={openWorkspaceMarkdown} /> : undefined}
 					assetsSlot={persistentChat ? <AttachmentsEntry count={attachmentRows.length} open={attachmentsView !== null} onClick={toggleAttachments} /> : undefined}
 				/>
 			}
