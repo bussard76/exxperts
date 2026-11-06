@@ -37,7 +37,10 @@ New features go from the outside in. Nothing is built until Sascha has signed of
 - Tester and wave: full `npm run build && npm run smokes` and `the browser suite` on current `main` plus the branch.
 - Release only: `the release gates`. Never per task or per wave.
 - UI checks run in the web UI on the server; the Electron client need not be tested there, and Sascha sees it at acceptance (decided by Sascha, 2026-11-05: "Teste die Webübersicht und du musst nicht zwangsläufig in dem Fatclient testen").
-- Full gates run on workhorse2, one after the other (`npm run smokes -- --jobs 1`). Sascha accepts the suite's known side effects on that shared host; no separate VM is required (decided by Sascha, 2026-11-06, answering "Wo soll der Controller die volle Testsuite laufen lassen?": "Weiter auf workhorse2"). A single failing smoke is rerun alone on the same commit and both results are reported; other work does not stop for it.
+- Full gates run on workhorse2. Sascha accepts the suite's known side effects on that shared host; no separate VM is required (decided by Sascha, 2026-11-06, answering "Wo soll der Controller die volle Testsuite laufen lassen?": "Weiter auf workhorse2").
+- One full gate at a time on the host, and inside it the smokes run in parallel with the runner's default (`npm run smokes`, 6 at a time there). Sascha, 2026-11-06: "inwieweit es möglich ist, die Tests zu parallelisieren und nicht seriell hintereinander auszuführen ... Wenn die Testausführung so lange dauert, ist das negativ". Measured on workhorse2: 374 smokes take about 56 minutes one after the other and about 10 minutes at 6 at a time. Two gates at once are what must not happen: sign-in smokes bind fixed callback ports (53692, 1455) and some smokes use fixed temp paths. Run the full gate as `GATE_SLOTS=1 gate bash -c 'npm run build && npm run smokes'`.
+- A smoke that fails in the parallel run is rerun alone on the same commit and both results are reported; other work does not stop for it.
+- Documentation-only changes get no full gate.
 - Every full gate runs through `gate` (fair slots, pooled by unit and browser), as `gate bash -c '<command>'` because `gate` starts a program without a shell.
 
 ## Capacity by measurement (decided by Sascha, 2026-11-04)
