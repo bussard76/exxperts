@@ -32,3 +32,4 @@ Scope assumption: `.xls` and `.xlsm` retain the no-preview sentence and Open but
 - PDF scrolling assertion in the gated browser smoke failed before the layout correction and passed afterward.
 - The invented Word route test failed with 503 before rendering and passed with the sandboxed renderer. `workspace-file-tabs-ui-smoke.ts` passed through `gate` with the Word fixture; deeper reference coverage and the final review remain open. One initial `npm ci` failed while the lock transition was incomplete; the corrected approved install passed.
 - The Open route's invalid request and local-origin/path/permission tests failed before each corresponding route slice and passed afterward; a fake POSIX opener test also passed. UI, Windows and remaining Open controls remain open.
+- The gated Open-button browser test timed out before the button existed and passed after the transferred local-context UI change. Dispatch in the browser test is mocked.

@@ -126,6 +126,13 @@ try {
 
 		let imageRequests = 0;
 		let previewRequests = 0;
+		let openStatus = 202;
+		const openRequests: { method: string; body: unknown; intent: string | undefined }[] = [];
+		await page.route("**/workspace-open", async (route) => {
+			const request = route.request();
+			openRequests.push({ method: request.method(), body: request.postDataJSON(), intent: request.headers()["x-exxperts-local-action"] });
+			await route.fulfill({ status: openStatus, contentType: "application/json", body: JSON.stringify(openStatus === 202 ? { accepted: true } : { error: "invented private detail" }) });
+		});
 		page.on("request", (request) => {
 			if (request.url().includes("/workspace-image?")) imageRequests += 1;
 			if (request.url().includes("/workspace-preview?")) previewRequests += 1;
@@ -135,8 +142,19 @@ try {
 		await treeFile("photo.png").click();
 		const image = page.locator(".workspace-preview-image img");
 		await waitUntil(() => image.evaluate((img) => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth > 0).catch(() => false), "the image has loaded");
+		const externalOpen = page.getByRole("button", { name: "Open in default app" });
+		await externalOpen.waitFor({ timeout: 5_000 });
+		await externalOpen.click();
+		const openBody = openRequests[0]?.body as { path?: string; conversationId?: string };
+		assert(openRequests.length === 1 && openRequests[0].method === "POST" && openRequests[0].intent === "open-workspace-file" && openBody.path === "photo.png" && typeof openBody.conversationId === "string" && openBody.conversationId.length > 0 && Object.keys(openBody).sort().join(",") === "conversationId,path", "the local open button sends one explicit intent for the active file");
+		openStatus = 500;
+		await externalOpen.click();
+		await page.getByText("This file could not be opened in another program.", { exact: true }).waitFor();
+		assert(await page.getByText("invented private detail").count() === 0, "open failures do not expose server details");
+		openStatus = 202;
 		assert(JSON.stringify(await tabNames()) === JSON.stringify(["notes.md", "photo.png"]), "Markdown and image each have a tab");
 		await treeFile("notes.md").click();
+		assert(await page.getByRole("button", { name: /Open in default app|Open PDF|Open in Word/ }).count() === 0, "Markdown has no external-open button");
 		const editor = page.locator(".markdown-editor-tiptap .ProseMirror");
 		await editor.click();
 		await page.keyboard.type(" new draft");
@@ -169,6 +187,7 @@ try {
 		const pdfPage = page.locator(".workspace-preview-pdf img");
 		await waitUntil(async () => (await pdfPage.count()) === 9 && await pdfPage.first().evaluate((img) => (img as HTMLImageElement).naturalWidth > 0).catch(() => false), "all nine rendered PDF pages appear");
 		assert((await activeName()) === "report.pdf", "PDF opens in its own tab");
+		assert(await page.getByRole("button", { name: "Open PDF" }).count() === 1, "PDF uses its fixed open label");
 		assert(await pdfPage.nth(8).getAttribute("alt") === "Page 9", "each PDF page has an accessible name");
 		const painted = await pdfPage.first().evaluate((img) => {
 			const image = img as HTMLImageElement;
@@ -196,6 +215,7 @@ try {
 		await treeFile("report.docx").click();
 		const wordFrame = page.locator(".workspace-preview-word iframe");
 		await wordFrame.waitFor({ timeout: 20_000 });
+		assert(await page.getByRole("button", { name: "Open in Word" }).count() === 1, "Word uses its fixed open label");
 		assert(await wordFrame.getAttribute("sandbox") === "", "Word uses an empty sandbox");
 		const word = page.frameLocator(".workspace-preview-word iframe");
 		const heading = word.getByText("Invented heading", { exact: true });
@@ -235,6 +255,40 @@ try {
 
 		assert(pageErrors.length === 0, `the page had no errors, got ${pageErrors.join("; ")}`);
 		await context.close();
+		const restored = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "standard" } }) });
+		assert(restored.status === 200, "the invented workspace read permission is restored for context checks");
+		for (const [name, body, status] of [
+			["failed", {}, 503],
+			["missing fields", {}, 200],
+			["missing shared field", { remote: false }, 200],
+			["wrong field type", { remote: "false", sharedServer: false }, 200],
+			["remote full", { remote: true, capability: "full", sharedServer: false }, 200],
+			["remote read only", { remote: true, capability: "read-only", sharedServer: false }, 200],
+			["shared", { remote: false, capability: "full", sharedServer: true }, 200],
+		] as const) {
+			const checkContext = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+			try {
+				const checkPage = await checkContext.newPage();
+				let contextStatus: number = status;
+				let contextBody: unknown = body;
+				await checkPage.route("**/api/remote/client-context", (route) => route.fulfill({ status: contextStatus, contentType: "application/json", body: JSON.stringify(contextBody) }));
+				await checkPage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+				await checkPage.waitForLoadState("networkidle");
+				const close = checkPage.locator(".whats-new-close");
+				if (await close.count()) await close.click();
+				const room = checkPage.locator(".persistent-agent-card").filter({ hasText: "Archive" });
+				await room.getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+				await checkPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "photo.png" }).click();
+				await checkPage.locator(".workspace-preview-image img").waitFor({ timeout: 6_000 }).catch(() => { throw new Error(`${name} context did not load the image`); });
+				assert(await checkPage.getByRole("button", { name: "Open in default app" }).count() === 0, `${name} context cannot show local open`);
+				if (name === "failed") {
+					contextStatus = 200;
+					contextBody = { remote: false, sharedServer: false, capability: "full" };
+					await checkPage.evaluate(() => window.dispatchEvent(new Event("focus")));
+					await checkPage.getByRole("button", { name: "Open in default app" }).waitFor({ timeout: 6_000 });
+				}
+			} finally { await checkContext.close(); }
+		}
 	} finally {
 		await browser.close();
 	}
