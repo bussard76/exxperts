@@ -39,9 +39,10 @@ New features go from the outside in. Nothing is built until Sascha has signed of
 - UI checks run in the web UI on the server; the Electron client need not be tested there, and Sascha sees it at acceptance (decided by Sascha, 2026-11-05: "Teste die Webübersicht und du musst nicht zwangsläufig in dem Fatclient testen").
 - Full gates run on workhorse2. Sascha accepts the suite's known side effects on that shared host; no separate VM is required (decided by Sascha, 2026-11-06, answering "Wo soll der Controller die volle Testsuite laufen lassen?": "Weiter auf workhorse2").
 - One full gate at a time on the host, and inside it the smokes run in parallel with the runner's default (`npm run smokes`, 6 at a time there). Sascha, 2026-11-06: "inwieweit es möglich ist, die Tests zu parallelisieren und nicht seriell hintereinander auszuführen ... Wenn die Testausführung so lange dauert, ist das negativ". Measured on workhorse2: 374 smokes take about 56 minutes one after the other and about 10 minutes at 6 at a time. Two gates at once are what must not happen: sign-in smokes bind fixed callback ports (53692, 1455) and some smokes use fixed temp paths. Run the full gate as `GATE_SLOTS=1 gate bash -c 'npm run build && npm run smokes'`.
-- A smoke that fails in the parallel run is rerun alone on the same commit and both results are reported; other work does not stop for it.
+- The Controller enforces `GATE_SLOTS=1` on every full-gate caller, including browser gates, and also sets `GATE_E2E_SLOTS=1` for browser gates because the browser pool reads that variable. The Controller coordinates full gates globally on the host: callers using higher slot values can overlap, and unit and browser pools are separate, so these settings alone do not enforce the host-wide limit.
+- Each smoke that fails in the parallel run is rerun alone on the same commit and both results are reported; other work does not stop for it.
 - Documentation-only changes get no full gate.
-- Every full gate runs through `gate` (fair slots, pooled by unit and browser), as `gate bash -c '<command>'` because `gate` starts a program without a shell.
+- Every full gate runs through `gate` (fair slots, pooled by unit and browser), as `GATE_SLOTS=1 GATE_E2E_SLOTS=1 gate bash -c '<command>'` because `gate` starts a program without a shell.
 
 ## Capacity by measurement (decided by Sascha, 2026-11-04)
 
@@ -61,7 +62,7 @@ The Controller runs `node capacity.mjs` before every start and follows its verdi
 2. Tester failed → rework in the same worktree with the findings unchanged; after two failures one tier higher.
 3. Tester passed → conformance review for level 2/3, else into the next wave.
 4. A wave starts when 2 passed tasks wait, one has waited 60 minutes, or a task is on the critical path. The wave merges, runs the full gates once, and pushes to `main`.
-5. A red wave: a known load flake gets one isolated rerun; three green isolated runs are the evidence. A real failure goes back to the task.
+5. A red wave: rerun each failed parallel smoke alone on the same commit and report both results as above. For other known load flakes, one isolated rerun is allowed; three green isolated runs are the evidence. A real failure goes back to the task.
 6. Merge conflicts are resolved by the task's Developer on its branch and checked by a Tester.
 
 ## Cleanup after every cycle (decided by Sascha, 2026-11-04)
