@@ -33,10 +33,12 @@ const networkChild = process.argv.includes("--network-child");
 const openChild = process.argv.includes("--open-child");
 const excelChild = process.argv.includes("--excel-child");
 const windowsParentChild = process.argv.includes("--windows-parent-child");
-const fakeChild = malformedChild || admissionChild || timeoutChild || extraChild || crashChild || exitRaceChild || revokeChild || replaceChild || badWordChild || networkChild || openChild || excelChild || windowsParentChild;
+const windowsNativeChild = process.argv.includes("--windows-native-child");
+const fakeChild = malformedChild || admissionChild || timeoutChild || extraChild || crashChild || exitRaceChild || revokeChild || replaceChild || badWordChild || networkChild || openChild || excelChild || windowsParentChild || windowsNativeChild;
 const spawnMarker = path.join(tempRoot, "preview-spawns");
 const releaseMarker = path.join(tempRoot, "preview-release");
 const killMarker = path.join(tempRoot, "dispatcher-killed");
+const nativeMarker = path.join(tempRoot, "native-calls");
 const networkMarker = path.join(tempRoot, "network-probes");
 let validJpeg = "";
 if (revokeChild || replaceChild) {
@@ -51,7 +53,31 @@ const { syncBuiltinESMExports } = require("node:module");
 const original = childProcess.fork;
 const fs = require("node:fs");
 const realPlatform = process.platform;
-if (${windowsParentChild}) Object.defineProperty(process, "platform", { configurable: true, get() { return new Error().stack.includes("openWorkspacePreviewFile") ? "win32" : realPlatform; } });
+if (${windowsParentChild || windowsNativeChild}) Object.defineProperty(process, "platform", { configurable: true, get() { return new Error().stack.includes("openWorkspacePreviewFile") ? "win32" : realPlatform; } });
+if (${windowsNativeChild} && String(process.argv[1]).endsWith("workspace-open-worker.mjs")) {
+  const koffi = require(${JSON.stringify(path.join(repoRoot, "node_modules", "koffi"))});
+  Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
+  const record = (event, value) => fs.appendFileSync(${JSON.stringify(nativeMarker)}, JSON.stringify({ event, value }) + "\\n");
+  let testCase = "", lastError = 0;
+  process.prependListener("message", (message) => {
+    testCase = String(message.path);
+    if (testCase.endsWith("win-bad-version.pdf")) koffi.version = "0.0.0";
+    if (testCase.endsWith("win-bad-layout.pdf")) koffi.sizeof = () => 111;
+  });
+  koffi.load = (name) => { record("load", name); return { func: (declaration) => {
+    record("bind", declaration);
+    const match = declaration.match(/(GetSystemDirectoryW|CoInitializeEx|CoUninitialize|ShellExecuteExW|GetLastError|SetLastError)/);
+    if (!match) throw new Error("unexpected fake native declaration");
+    const fn = match[1];
+    return (...args) => {
+      if (fn === "GetSystemDirectoryW") { const value = "C:\\\\Windows\\\\System32"; args[0].write(value, "utf16le"); record(fn, null); return value.length; }
+      if (fn === "ShellExecuteExW") { record(fn, args[0]); const code = testCase.match(/win-native-error-(\\d+)\\.pdf$/); if (code) { lastError = Number(code[1]); return 0; } return 1; }
+      if (fn === "GetLastError") { record(fn, null); return lastError; }
+      if (fn === "CoInitializeEx") { record(fn, args[1]); return testCase.endsWith("win-com-fail.pdf") ? -1 : testCase.endsWith("win-com-sfalse.pdf") ? 1 : 0; }
+      record(fn, args[0] ?? null); return 0;
+    };
+  } }; };
+}
 const realSpawn = childProcess.spawn;
 childProcess.spawn = function(file, args, options) {
   if (!${openChild} || (file !== "/usr/bin/xdg-open" && file !== "/usr/bin/open")) return realSpawn.apply(this, arguments);
@@ -72,6 +98,12 @@ childProcess.spawn = function(file, args, options) {
 };
 let count = 0;
 childProcess.fork = function(file, args, options) {
+  if (${windowsNativeChild} && String(file).endsWith("workspace-open-worker.mjs")) {
+    const child = original.call(this, file, args, { ...options, execArgv: ["--require=${preload}"] });
+    const send = child.send.bind(child);
+    child.send = (message, callback) => send({ path: "C:\\\\Demo\\\\" + require("node:path").basename(message.path) }, callback);
+    return child;
+  }
   if (${windowsParentChild} && String(file).endsWith("workspace-open-worker.mjs")) {
     const child = new EventEmitter();
     child.kill = () => { fs.appendFileSync(${JSON.stringify(killMarker)}, "x"); setImmediate(() => child.emit("close", null, "SIGTERM")); return true; };
@@ -96,7 +128,7 @@ childProcess.fork = function(file, args, options) {
     };
     return child;
   }
-  if (${networkChild || openChild || excelChild || windowsParentChild} || !String(file).endsWith("shelf-parse-worker.mjs") || !String(args[0]).includes("workspace-preview-v1")) return original.apply(this, arguments);
+  if (${networkChild || openChild || excelChild || windowsParentChild || windowsNativeChild} || !String(file).endsWith("shelf-parse-worker.mjs") || !String(args[0]).includes("workspace-preview-v1")) return original.apply(this, arguments);
   if (${badWordChild} && JSON.parse(args[0]).kind !== "word") return original.apply(this, arguments);
   const child = new EventEmitter();
   child.stderr = new EventEmitter();
@@ -272,6 +304,7 @@ if (!fakeChild) fs.writeFileSync(path.join(folder, "oversized-text.docx"), await
 fs.writeFileSync(path.join(folder, "report.pdf"), onePagePdf());
 if (openChild) for (const name of ["missing-opener.pdf", "denied-opener.pdf", "signal.pdf", "exit2.pdf", "exit3.pdf", "timeout.pdf", "- invented $ ` ; & % ' ü.pdf"]) fs.writeFileSync(path.join(folder, name), "invented");
 if (windowsParentChild) for (const name of ["win-empty.pdf", "win-unavailable.pdf", "win-extra.pdf", "win-race.pdf", "win-double.pdf", "win-crash.pdf", "win-abort.pdf", "win-timeout.pdf"]) fs.writeFileSync(path.join(folder, name), "invented");
+if (windowsNativeChild) for (const name of ["win-com-fail.pdf", "win-com-sfalse.pdf", "win-bad-version.pdf", "win-bad-layout.pdf", "win?invalid.pdf", "win ü 🚀.pdf", ...[0, 2, 3, 5, 32, 126, 193, 1155, 1156, 1157, 1223, 1459, 1460, 9999].map((code) => `win-native-error-${code}.pdf`)]) fs.writeFileSync(path.join(folder, name), "invented");
 fs.writeFileSync(path.join(folder, "pages.pdf"), multiplePagePdf(9));
 fs.writeFileSync(path.join(folder, "too-many.pdf"), multiplePagePdf(201));
 fs.writeFileSync(path.join(folder, "broken.pdf"), "invented broken data");
@@ -413,6 +446,42 @@ try {
 		await waitUntil(() => fs.existsSync(killMarker), "aborting the request stops the private dispatcher", 3_000);
 		const timedOut = await openRequest({ conversationId: "demo-thread", path: "win-timeout.pdf" });
 		assert(timedOut.status === 504 && timedOut.body.code === "open_timeout", "Windows dispatcher deadline does not accept a late reply");
+	}
+	if (windowsNativeChild) {
+		const opened = await openRequest({ conversationId: "demo-thread", path: "report.pdf" });
+		assert(opened.status === 202 && opened.body.accepted === true, `the production Windows child accepts the fake native success through the route: ${JSON.stringify(opened)}; calls ${fs.existsSync(nativeMarker) ? fs.readFileSync(nativeMarker, "utf8") : "none"}`);
+		const calls = fs.readFileSync(nativeMarker, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+		assert(calls.filter((call) => call.event !== "bind" && call.event !== "load").map((call) => call.event).join(",") === "GetSystemDirectoryW,CoInitializeEx,SetLastError,ShellExecuteExW,CoUninitialize", "native calls use the required initialization and cleanup order");
+		assert(JSON.stringify(calls.filter((call) => call.event === "load").map((call) => call.value)) === JSON.stringify(["kernel32.dll", "C:\\Windows\\System32\\ole32.dll", "C:\\Windows\\System32\\shell32.dll"]), "native libraries use the fixed system directory");
+		const shell = calls.find((call) => call.event === "ShellExecuteExW").value;
+		assert(shell.cbSize === 112 && shell.fMask === 0x500 && shell.lpVerb === "open" && shell.lpFile === "C:\\Demo\\report.pdf" && shell.nShow === 1, "the native request carries the exact fixed fields and invented UTF-16 path");
+		assert(calls.find((call) => call.event === "CoInitializeEx").value === 6 && calls.find((call) => call.event === "SetLastError").value === 0 && ["hwnd", "lpParameters", "lpDirectory", "hInstApp", "lpIDList", "lpClass", "hkeyClass", "hIcon", "hProcess"].every((field) => shell[field] === null) && shell.dwHotKey === 0, "the COM flags and unused native fields are fixed");
+		fs.writeFileSync(nativeMarker, "");
+		const invalid = await openRequest({ conversationId: "demo-thread", path: "win?invalid.pdf" });
+		assert(invalid.status === 500 && fs.readFileSync(nativeMarker, "utf8") === "", "a Windows-illegal path never reaches native dispatch");
+		const unicode = await openRequest({ conversationId: "demo-thread", path: "win ü 🚀.pdf" });
+		const unicodeCalls = fs.readFileSync(nativeMarker, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+		assert(unicode.status === 202 && unicodeCalls.find((call) => call.event === "ShellExecuteExW").value.lpFile === "C:\\Demo\\win ü 🚀.pdf", "the native child keeps Unicode and surrogate pairs intact");
+		for (const name of ["win-bad-version.pdf", "win-bad-layout.pdf"]) {
+			fs.writeFileSync(nativeMarker, "");
+			const refused = await openRequest({ conversationId: "demo-thread", path: name });
+			assert(refused.status === 503 && fs.readFileSync(nativeMarker, "utf8") === "", `${name} fails before binding or dispatch`);
+		}
+		for (const code of [0, 2, 3, 5, 32, 126, 193, 1155, 1156, 1157, 1223, 1459, 1460, 9999]) {
+			fs.writeFileSync(nativeMarker, "");
+			const reply = await openRequest({ conversationId: "demo-thread", path: `win-native-error-${code}.pdf` });
+			const expected = [126, 1155, 1157, 1459].includes(code) ? [503, "opener_unavailable"] : code === 1460 ? [504, "open_timeout"] : [500, "open_failed"];
+			assert(reply.status === expected[0] && reply.body.code === expected[1], `Win32 error ${code} maps safely`);
+			const events = fs.readFileSync(nativeMarker, "utf8").trim().split("\n").map((line) => JSON.parse(line).event).filter((event) => event !== "bind" && event !== "load");
+			assert(events.slice(-3).join(",") === "ShellExecuteExW,GetLastError,CoUninitialize", "the last error is captured immediately before COM cleanup");
+		}
+		fs.writeFileSync(nativeMarker, "");
+		const comFailure = await openRequest({ conversationId: "demo-thread", path: "win-com-fail.pdf" });
+		const failureEvents = fs.readFileSync(nativeMarker, "utf8").trim().split("\n").map((line) => JSON.parse(line).event);
+		assert(comFailure.status === 503 && !failureEvents.includes("ShellExecuteExW") && !failureEvents.includes("CoUninitialize"), "failed COM initialization never opens the file or uninitializes");
+		fs.writeFileSync(nativeMarker, "");
+		const comAlready = await openRequest({ conversationId: "demo-thread", path: "win-com-sfalse.pdf" });
+		assert(comAlready.status === 202 && fs.readFileSync(nativeMarker, "utf8").includes("CoUninitialize"), "S_FALSE still balances COM initialization");
 	}
 	for (const file of ["../secret.xlsx", "/absolute.xlsx", "C:drive.xlsx", ".hidden.xlsx", "folder//book.xlsx"]) {
 		const query = new URLSearchParams({ conversationId: "demo-thread", path: file });
