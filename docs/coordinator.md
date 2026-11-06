@@ -37,6 +37,7 @@ New features go from the outside in. Nothing is built until Sascha has signed of
 - Tester and wave: full `npm run build && npm run smokes` and `the browser suite` on current `main` plus the branch.
 - Release only: `the release gates`. Never per task or per wave.
 - UI checks run in the web UI on the server; the Electron client need not be tested there, and Sascha sees it at acceptance (decided by Sascha, 2026-11-05: "Teste die Webübersicht und du musst nicht zwangsläufig in dem Fatclient testen").
+- Full gates run on workhorse2, one after the other (`npm run smokes -- --jobs 1`). Sascha accepts the suite's known side effects on that shared host; no separate VM is required (decided by Sascha, 2026-11-06, answering "Wo soll der Controller die volle Testsuite laufen lassen?": "Weiter auf workhorse2"). A single failing smoke is rerun alone on the same commit and both results are reported; other work does not stop for it.
 - Every full gate runs through `gate` (fair slots, pooled by unit and browser), as `gate bash -c '<command>'` because `gate` starts a program without a shell.
 
 ## Capacity by measurement (decided by Sascha, 2026-11-04)
