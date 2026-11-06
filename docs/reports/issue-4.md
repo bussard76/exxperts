@@ -19,3 +19,8 @@ Level 2: the approved workspace preview route, parsing, dependencies and preview
 - [ ] Approved preview Open button opens the original locally and follows the access and remote-device rules.
 
 Scope assumption: `.xls` and `.xlsm` retain the no-preview sentence and Open button. The 52 old-format tests ended with the scope decision and never existed on main. No binaries or screenshots will be committed; captures, if any, remain untracked under `.build/screenshots/`.
+
+## Progress
+
+- `workspace-markdown-images-smoke.ts` failed on the missing preview route classification, then passed after classifying preview GET as read and Open POST as local. Routes and acceptance items remain incomplete.
+- `EXXETA_SKIP_BROWSER_INSTALL=1 npm ci` and the runtime build passed; the first smoke attempt could not find the unbuilt runtime. No screenshots captured.

@@ -75,6 +75,8 @@ assert.ok(url("guide.md", "a.png")?.startsWith("/api/persistent-agents/room%201/
 assert.ok(url("guide.md", "a.png")?.includes("conversationId=conv"));
 
 assert.equal(classifyRemoteRoute("GET", "/api/persistent-agents/:id/workspace-image"), "read");
+assert.equal(classifyRemoteRoute("GET", "/api/persistent-agents/:id/workspace-preview"), "read");
+assert.equal(classifyRemoteRoute("POST", "/api/persistent-agents/:id/workspace-open"), "local");
 
 // The server hands out images only, inside the workspace, and honours the room's policy.
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "workspace-markdown-images-"));
