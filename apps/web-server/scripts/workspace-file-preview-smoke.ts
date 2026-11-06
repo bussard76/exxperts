@@ -241,7 +241,7 @@ fs.writeFileSync(path.join(folder, "expansion.docx"), await oversizedExpansionDo
 fs.writeFileSync(path.join(folder, "elements.docx"), await tooManyElementsDocx());
 if (!fakeChild) fs.writeFileSync(path.join(folder, "oversized-text.docx"), await oversizedTextDocx());
 fs.writeFileSync(path.join(folder, "report.pdf"), onePagePdf());
-if (openChild) for (const name of ["missing-opener.pdf", "denied-opener.pdf", "signal.pdf", "exit2.pdf", "exit3.pdf"]) fs.writeFileSync(path.join(folder, name), "invented");
+if (openChild) for (const name of ["missing-opener.pdf", "denied-opener.pdf", "signal.pdf", "exit2.pdf", "exit3.pdf", "- invented $ ` ; & % ' ü.pdf"]) fs.writeFileSync(path.join(folder, name), "invented");
 fs.writeFileSync(path.join(folder, "pages.pdf"), multiplePagePdf(9));
 fs.writeFileSync(path.join(folder, "too-many.pdf"), multiplePagePdf(201));
 fs.writeFileSync(path.join(folder, "broken.pdf"), "invented broken data");
@@ -316,6 +316,10 @@ try {
 	assert(configured.status === 200, "workspace read can be disabled");
 	const forbidden = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=book.xlsx`);
 	assert(forbidden.status === 403 && (await forbidden.json()).code === "workspace_read_forbidden", "preview respects current workspace read permission");
+	if (openChild) {
+		const refused = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-open`, { method: "POST", headers: { origin: baseUrl, "x-exxperts-local-action": "open-workspace-file" }, body: JSON.stringify({ conversationId: "demo-thread", path: "report.pdf" }) });
+		assert(refused.status === 403 && refused.body.code === "workspace_read_forbidden" && !fs.existsSync(spawnMarker), "revoked read permission never dispatches an opener");
+	}
 	const restored = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "standard" } }) });
 	assert(restored.status === 200, "workspace read restored");
 	if (excelChild) {
@@ -349,8 +353,12 @@ try {
 		assert(calls.length === 1 && calls[0].file === "/usr/bin/xdg-open" && JSON.stringify(calls[0].args) === JSON.stringify([path.join(folder, "report.pdf")]) && calls[0].options.shell === false && calls[0].options.detached === false, "the production adapter receives one inert absolute argument");
 		for (const [name, status, code] of [["missing-opener.pdf", 503, "opener_unavailable"], ["denied-opener.pdf", 500, "open_failed"], ["signal.pdf", 500, "open_failed"], ["exit2.pdf", 500, "open_failed"], ["exit3.pdf", 503, "opener_unavailable"]] as const) {
 			const failure = await openRequest({ conversationId: "demo-thread", path: name });
-			assert(failure.status === status && failure.body.code === code, `dispatcher failure ${name} maps safely`);
+			assert(failure.status === status && failure.body.code === code, `dispatcher failure ${name} maps safely: ${JSON.stringify(failure)}`);
 		}
+		const oddName = "- invented $ ` ; & % ' ü.pdf";
+		const oddOpen = await openRequest({ conversationId: "demo-thread", path: oddName });
+		const oddCall = JSON.parse(fs.readFileSync(spawnMarker, "utf8").trim().split("\n").at(-1)!);
+		assert(oddOpen.status === 202 && JSON.stringify(oddCall.args) === JSON.stringify([path.join(folder, oddName)]), "special characters remain one unchanged absolute argument");
 	}
 	for (const file of ["../secret.xlsx", "/absolute.xlsx", "C:drive.xlsx", ".hidden.xlsx", "folder//book.xlsx"]) {
 		const query = new URLSearchParams({ conversationId: "demo-thread", path: file });
