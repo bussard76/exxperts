@@ -27,6 +27,9 @@ for (const dir of [agentsRoot, agentDir]) fs.mkdirSync(dir, { recursive: true, m
 
 const folder = path.join(tempHome, "Projects", "archive");
 fs.mkdirSync(folder, { recursive: true });
+fs.writeFileSync(path.join(folder, "book.xlsx"), "invented");
+fs.symlinkSync(path.join(folder, "book.xlsx"), path.join(folder, "link.xlsx"));
+fs.mkdirSync(path.join(folder, "directory.xlsx"));
 
 // A provider at an address nobody answers: the room only has to open, never answer.
 fs.writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({
@@ -90,6 +93,10 @@ try {
 
 	const absent = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=absent.xlsx`);
 	assert(absent.status === 404 && (await absent.json()).code === "file_not_found", "preview requires an existing guarded file");
+	const link = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=link.xlsx`);
+	assert(link.status === 403, "preview refuses a symlink as a policy restriction");
+	const directory = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=directory.xlsx`);
+	assert(directory.status === 400 && (await directory.json()).code === "not_file", "preview refuses a directory");
 	console.log("workspace-file-preview smoke: ok");
 } catch (error) {
 	console.error(serverOutput.join("").slice(-4000));
