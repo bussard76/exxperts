@@ -4,6 +4,22 @@ import { apiFetch } from "../api";
 type Page = { page: number; mimeType: "image/jpeg"; imageBase64: string; widthPx: number; heightPx: number };
 
 const errorText: Record<string, string> = {
+	invalid_request: "Choose a valid workspace file to preview.",
+	invalid_path: "Choose a valid workspace file to preview.",
+	not_file: "Choose a valid workspace file to preview.",
+	workspace_read_forbidden: "This file is not available under the current workspace permissions.",
+	blocked_by_policy: "This file is not available under the current workspace permissions.",
+	outside_workspace: "This file is not available under the current workspace permissions.",
+	grant_changed: "This file is not available under the current workspace permissions.",
+	room_not_found: "This file is no longer available in this workspace.",
+	conversation_not_found: "This file is no longer available in this workspace.",
+	workspace_not_found: "This file is no longer available in this workspace.",
+	file_not_found: "This file is no longer available in this workspace.",
+	workspace_unavailable: "The workspace folder is not readable right now.",
+	unsupported_file_type: "This file type cannot be previewed here.",
+	expanded_content_too_large: "This file is too large or complex to preview here.",
+	decoded_image_too_large: "This file is too large or complex to preview here.",
+	unsupported_document_feature: "This document uses a feature that cannot be previewed here.",
 	file_changed: "This file changed while the preview was loading; close the tab and open it again.",
 	file_too_large: "This file is too large or complex to preview here.",
 	preview_too_complex: "This file is too large or complex to preview here.",

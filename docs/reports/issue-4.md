@@ -30,3 +30,4 @@ Scope assumption: `.xls` and `.xlsm` retain the no-preview sentence and Open but
 - The gated browser smoke now checks the dirty Markdown guard when switching to an image; its wording assertion failed before the change and passed after it.
 - The invented PDF route test failed with 503 before the renderer; `workspace-file-preview-smoke.ts` and the gated `workspace-file-tabs-ui-smoke.ts` passed after transfer. PDF scroll and broader fidelity tests remain to be transferred.
 - PDF scrolling assertion in the gated browser smoke failed before the layout correction and passed afterward.
+- The invented Word route test failed with 503 before rendering and passed with the sandboxed renderer. `workspace-file-tabs-ui-smoke.ts` passed through `gate` with the Word fixture; deeper reference coverage and the final review remain open. One initial `npm ci` failed while the lock transition was incomplete; the corrected approved install passed.

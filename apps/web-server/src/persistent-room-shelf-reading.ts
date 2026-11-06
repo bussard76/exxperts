@@ -267,6 +267,8 @@ function runShelfWorker(request: Record<string, unknown>, timeoutMs: number, sig
 	});
 }
 
+const WORD_PREVIEW_PREFIX = `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">`;
+
 type WorkspacePreviewJob = {
 	mode: "workspace-preview-v1";
 	kind: "pdf" | "word" | "spreadsheet";
@@ -317,7 +319,16 @@ export async function runWorkspacePreviewWorker(job: WorkspacePreviewJob, signal
 			const codes = ["file_changed", "file_too_large", "expanded_content_too_large", "preview_too_complex", "decoded_image_too_large", "damaged_file", "encrypted_file", "unsupported_document_feature", "renderer_unavailable", "preview_failed"];
 			return codes.includes(result.code ?? "") ? { ok: false, schemaVersion: 1, code: result.code } : { ok: false, schemaVersion: 1, code: "preview_failed" };
 		}
-		if (!hasExactKeys(result, ["ok", "schemaVersion", "notices", "result"]) || job.kind !== "pdf" || !Array.isArray(result.notices) || result.notices.length !== 0 || !result.result || typeof result.result !== "object") {
+		if (!hasExactKeys(result, ["ok", "schemaVersion", "notices", "result"]) || !Array.isArray(result.notices) || !result.result || typeof result.result !== "object") {
+			return { ok: false, schemaVersion: 1, code: "preview_failed" };
+		}
+		if (job.kind === "word") {
+			const word = result.result as { kind?: unknown; html?: unknown };
+			const validNotice = (notice: any) => notice && hasExactKeys(notice, ["code", "text"]) && notice.code === "external_resources_blocked" && notice.text === "External document resources are blocked.";
+			if (!hasExactKeys(word, ["kind", "html"]) || word.kind !== "word" || typeof word.html !== "string" || Buffer.byteLength(word.html) > 16_777_216 || !word.html.startsWith(WORD_PREVIEW_PREFIX) || result.notices.length > 1 || !result.notices.every(validNotice)) return { ok: false, schemaVersion: 1, code: "preview_failed" };
+			return result;
+		}
+		if (job.kind !== "pdf" || result.notices.length !== 0) {
 			return { ok: false, schemaVersion: 1, code: "preview_failed" };
 		}
 		const pdf = result.result as { kind?: unknown; totalPages?: unknown; pages?: unknown };

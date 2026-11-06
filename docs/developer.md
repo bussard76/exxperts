@@ -72,6 +72,10 @@ After code changes, rebuild/repack/reinstall only when you need to test installe
 
 The app (`exxperts`, `./scripts/exxperts-web`, or the desktop app) is the one product surface: persistent rooms and the memory lifecycle. Everything a person sets up, from provider sign-in to connectors, web search and remote access, is in the app's Settings.
 
+## Workspace file previews
+
+Within a room's granted workspace, select a PDF, image, or `.docx` file in the file tree to open a read-only tab beside Markdown files. PDF pages and Word documents are rendered in an isolated child; Word content is displayed in a sandboxed frame, and external document resources are blocked. Preview tabs keep their loaded content when reselected; close and reopen a tab to load the file again. Legacy `.doc` files show guidance to save as `.docx`.
+
 ## How prompts are assembled
 
 **Persistent rooms (web)** boot from four code-assembled layers (L0

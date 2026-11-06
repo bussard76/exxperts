@@ -198,7 +198,8 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 	if (![".xlsx", ".xlsm", ".xls", ".docx", ".pdf"].includes(extension)) {
 		return reply.code(415).send({ code: "unsupported_file_type", error: "This file type cannot be previewed here." });
 	}
-	if (extension !== ".pdf") return reply.code(503).send({ code: "renderer_unavailable", error: "Preview rendering is unavailable on this system." });
+	if (extension !== ".pdf" && extension !== ".docx") return reply.code(503).send({ code: "renderer_unavailable", error: "Preview rendering is unavailable on this system." });
+	const kind = extension === ".pdf" ? "pdf" : "word";
 	const controller = new AbortController();
 	const abort = () => { if (!reply.raw.writableEnded) controller.abort(); };
 	req.raw.once("aborted", abort);
@@ -207,9 +208,9 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 	let result: Awaited<ReturnType<typeof runWorkspacePreviewWorker>>;
 	try {
 		result = await runWorkspacePreviewWorker({
-			mode: "workspace-preview-v1", kind: "pdf", absolutePath: guarded.absolutePath,
+			mode: "workspace-preview-v1", kind, absolutePath: guarded.absolutePath,
 			expected: { dev: String(stat.dev), ino: String(stat.ino), size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs },
-			limits: { inputBytes: 26214400, timeoutMs: 60000, zipEntries: 10000, zipTotalBytes: 134217728, zipEntryBytes: 33554432, zipExpansionRatio: 200,
+			limits: { inputBytes: 26214400, timeoutMs: kind === "pdf" ? 60000 : 30000, zipEntries: 10000, zipTotalBytes: 134217728, zipEntryBytes: 33554432, zipExpansionRatio: 200,
 				gridSlots: 200000, cells: 100000, maxRow: 100000, maxColumn: 16384, cellTextChars: 32767, gridDimensionPx: 10000,
 				cfbSectors: 51200, cfbChainLinks: 200000, cfbDirectoryEntries: 16384, cfbDirectoryVisits: 65536, cfbDirectoryDepth: 128,
 				cfbWorkbookBytes: 26214400, cfbExtractedBytes: 52428800, biffRecords: 200000, biffPayloadBytes: 33554432, biffRecordBytes: 8224,
@@ -227,6 +228,9 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 			file_changed: [409, "This file changed while the preview was loading; close the tab and open it again."],
 			file_too_large: [413, "This file is too large or complex to preview here."],
 			preview_too_complex: [413, "This file is too large or complex to preview here."],
+			expanded_content_too_large: [413, "This file is too large or complex to preview here."],
+			decoded_image_too_large: [413, "This file is too large or complex to preview here."],
+			unsupported_document_feature: [422, "This document uses a feature that cannot be previewed here."],
 			damaged_file: [422, "This file is damaged or cannot be read."],
 			encrypted_file: [422, "Password-protected files cannot be previewed here."],
 			renderer_unavailable: [503, "Preview rendering is unavailable on this system."],

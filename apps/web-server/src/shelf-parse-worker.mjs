@@ -13,6 +13,15 @@
 // network, no state access: the worker receives one absolute path plus caps
 // as its single JSON argv, extracts text, and posts the result over IPC.
 import fs from "node:fs";
+import { inflateRawSync } from "node:zlib";
+import http from "node:http";
+import https from "node:https";
+import net from "node:net";
+import tls from "node:tls";
+import dns from "node:dns";
+import dgram from "node:dgram";
+import http2 from "node:http2";
+import { syncBuiltinESMExports } from "node:module";
 
 const post = (message) => {
 	if (typeof process.send !== "function") {
@@ -276,6 +285,421 @@ function readPreviewSnapshot(request) {
 	}
 }
 
+const crcTable = Uint32Array.from({ length: 256 }, (_, index) => {
+	let value = index;
+	for (let bit = 0; bit < 8; bit++) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+	return value >>> 0;
+});
+
+function crc32(buffer) {
+	let value = 0xffffffff;
+	for (const byte of buffer) value = crcTable[(value ^ byte) & 255] ^ (value >>> 8);
+	return (value ^ 0xffffffff) >>> 0;
+}
+
+function previewZipEntries(buffer) {
+	const fits = (offset, length) => Number.isSafeInteger(offset) && Number.isSafeInteger(length) && offset >= 0 && length >= 0 && offset <= buffer.length && length <= buffer.length - offset;
+	let end = -1;
+	for (let offset = buffer.length - 22, lower = Math.max(0, buffer.length - 65_557); offset >= lower; offset--) {
+		if (buffer.readUInt32LE(offset) === 0x06054b50 && fits(offset, 22) && offset + 22 + buffer.readUInt16LE(offset + 20) === buffer.length) { end = offset; break; }
+	}
+	if (end < 0) throw previewError("damaged_file");
+	let disk = buffer.readUInt16LE(end + 4), centralDisk = buffer.readUInt16LE(end + 6);
+	let count = buffer.readUInt16LE(end + 10), countOnDisk = buffer.readUInt16LE(end + 8);
+	let size = buffer.readUInt32LE(end + 12), start = buffer.readUInt32LE(end + 16);
+	if (disk || centralDisk || count !== countOnDisk) throw previewError("unsupported_document_feature");
+	if (count === 0xffff || size === 0xffffffff || start === 0xffffffff) {
+		const locator = end - 20;
+		if (!fits(locator, 20) || buffer.readUInt32LE(locator) !== 0x07064b50 || buffer.readUInt32LE(locator + 4) !== 0 || buffer.readUInt32LE(locator + 16) !== 1) throw previewError("damaged_file");
+		const offsetBig = buffer.readBigUInt64LE(locator + 8);
+		if (offsetBig > BigInt(buffer.length)) throw previewError("damaged_file");
+		const offset = Number(offsetBig);
+		if (!fits(offset, 56) || buffer.readUInt32LE(offset) !== 0x06064b50 || buffer.readUInt32LE(offset + 16) || buffer.readUInt32LE(offset + 20)) throw previewError("damaged_file");
+		const diskCount = buffer.readBigUInt64LE(offset + 24), total = buffer.readBigUInt64LE(offset + 32);
+		const sizeBig = buffer.readBigUInt64LE(offset + 40), startBig = buffer.readBigUInt64LE(offset + 48);
+		if (diskCount !== total || total > 10_000n) throw previewError(total > 10_000n ? "preview_too_complex" : "damaged_file");
+		if (sizeBig > BigInt(buffer.length) || startBig > BigInt(buffer.length)) throw previewError("damaged_file");
+		count = Number(total); size = Number(sizeBig); start = Number(startBig);
+	}
+	if (count > 10_000) throw previewError("preview_too_complex");
+	if (!fits(start, size) || start + size > end) throw previewError("damaged_file");
+	const names = new Set(), entries = [], spans = [];
+	let offset = start, totalInflated = 0;
+	for (let index = 0; index < count; index++) {
+		if (!fits(offset, 46) || buffer.readUInt32LE(offset) !== 0x02014b50) throw previewError("damaged_file");
+		const flags = buffer.readUInt16LE(offset + 8), method = buffer.readUInt16LE(offset + 10), checksum = buffer.readUInt32LE(offset + 16);
+		let compressed = buffer.readUInt32LE(offset + 20), expanded = buffer.readUInt32LE(offset + 24), local = buffer.readUInt32LE(offset + 42);
+		const zip64Sizes = compressed === 0xffffffff || expanded === 0xffffffff;
+		const nameLength = buffer.readUInt16LE(offset + 28), extraLength = buffer.readUInt16LE(offset + 30), commentLength = buffer.readUInt16LE(offset + 32);
+		const entryLength = 46 + nameLength + extraLength + commentLength;
+		if (!fits(offset, entryLength) || offset + entryLength > start + size || buffer.readUInt16LE(offset + 34)) throw previewError("damaged_file");
+		if (flags & (1 | 0x40 | 0x2000)) throw previewError("encrypted_file");
+		if (method !== 0 && method !== 8) throw previewError("unsupported_document_feature");
+		const nameBytes = buffer.subarray(offset + 46, offset + 46 + nameLength);
+		const name = nameBytes.toString("utf8");
+		if (Buffer.from(name, "utf8").compare(nameBytes) !== 0 || !name || name.includes("\\") || name.startsWith("/") || name.includes("\0") || name.split("/").some((part, i, all) => part === "." || part === ".." || (!part && i !== all.length - 1)) || names.has(name)) throw previewError("damaged_file");
+		names.add(name);
+		if (compressed === 0xffffffff || expanded === 0xffffffff || local === 0xffffffff) {
+			let at = offset + 46 + nameLength, zip64 = null, endExtra = at + extraLength;
+			while (at + 4 <= endExtra) {
+				const tag = buffer.readUInt16LE(at), length = buffer.readUInt16LE(at + 2); at += 4;
+				if (length > endExtra - at) throw previewError("damaged_file");
+				if (tag === 1) zip64 = { at, end: at + length };
+				at += length;
+			}
+			if (!zip64) throw previewError("damaged_file");
+			const next = () => { if (zip64.at + 8 > zip64.end) throw previewError("damaged_file"); const value = buffer.readBigUInt64LE(zip64.at); zip64.at += 8; if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw previewError("preview_too_complex"); return Number(value); };
+			if (expanded === 0xffffffff) expanded = next();
+			if (compressed === 0xffffffff) compressed = next();
+			if (local === 0xffffffff) local = next();
+		}
+		if (expanded > 33_554_432 || (expanded > 0 && (compressed === 0 || expanded > compressed * 200))) throw previewError("expanded_content_too_large");
+		totalInflated += expanded;
+		if (totalInflated > 134_217_728) throw previewError("expanded_content_too_large");
+		if (!fits(local, 30) || buffer.readUInt32LE(local) !== 0x04034b50 || buffer.readUInt16LE(local + 6) !== flags || buffer.readUInt16LE(local + 8) !== method) throw previewError("damaged_file");
+		const localNameLength = buffer.readUInt16LE(local + 26), localExtraLength = buffer.readUInt16LE(local + 28);
+		const dataOffset = local + 30 + localNameLength + localExtraLength;
+		if (!fits(local + 30, localNameLength + localExtraLength) || !buffer.subarray(local + 30, local + 30 + localNameLength).equals(nameBytes) || !fits(dataOffset, compressed) || dataOffset + compressed > start) throw previewError("damaged_file");
+		let localCompressed = buffer.readUInt32LE(local + 18), localExpanded = buffer.readUInt32LE(local + 22);
+		const localChecksum = buffer.readUInt32LE(local + 14);
+		if (!(flags & 8) && (localCompressed === 0xffffffff || localExpanded === 0xffffffff)) {
+			let at = local + 30 + localNameLength, zip64 = null, endExtra = at + localExtraLength;
+			while (at + 4 <= endExtra) {
+				const tag = buffer.readUInt16LE(at), length = buffer.readUInt16LE(at + 2); at += 4;
+				if (length > endExtra - at) throw previewError("damaged_file");
+				if (tag === 1) zip64 = { at, end: at + length };
+				at += length;
+			}
+			if (!zip64) throw previewError("damaged_file");
+			const next = () => { if (zip64.at + 8 > zip64.end) throw previewError("damaged_file"); const value = buffer.readBigUInt64LE(zip64.at); zip64.at += 8; if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw previewError("preview_too_complex"); return Number(value); };
+			if (localExpanded === 0xffffffff) localExpanded = next();
+			if (localCompressed === 0xffffffff) localCompressed = next();
+		}
+		let recordEnd = dataOffset + compressed;
+		if (!(flags & 8)) {
+			if (localChecksum !== checksum || localCompressed !== compressed || localExpanded !== expanded) throw previewError("damaged_file");
+		} else {
+			if ((localChecksum !== 0 && localChecksum !== checksum) || (localCompressed !== 0 && localCompressed !== 0xffffffff && localCompressed !== compressed) || (localExpanded !== 0 && localExpanded !== 0xffffffff && localExpanded !== expanded)) throw previewError("damaged_file");
+			const positions = fits(recordEnd, 4) && buffer.readUInt32LE(recordEnd) === 0x08074b50 ? [recordEnd + 4, recordEnd] : [recordEnd];
+			const widths = zip64Sizes || localCompressed === 0xffffffff || localExpanded === 0xffffffff ? [20, 12] : [12, 20];
+			let matchedEnd = -1;
+			for (const position of positions) {
+				for (const descriptorBytes of widths) {
+					if (!fits(position, descriptorBytes) || position + descriptorBytes > start || buffer.readUInt32LE(position) !== checksum) continue;
+					const descriptorCompressed = descriptorBytes === 20 ? buffer.readBigUInt64LE(position + 4) : BigInt(buffer.readUInt32LE(position + 4));
+					const descriptorExpanded = descriptorBytes === 20 ? buffer.readBigUInt64LE(position + 12) : BigInt(buffer.readUInt32LE(position + 8));
+					if (descriptorCompressed === BigInt(compressed) && descriptorExpanded === BigInt(expanded)) { matchedEnd = position + descriptorBytes; break; }
+				}
+				if (matchedEnd >= 0) break;
+			}
+			if (matchedEnd < 0) throw previewError("damaged_file");
+			recordEnd = matchedEnd;
+		}
+		spans.push({ start: local, end: recordEnd });
+		entries.push({ name, method, checksum, compressed, expanded, dataOffset });
+		offset += entryLength;
+	}
+	if (offset !== start + size) throw previewError("damaged_file");
+	spans.sort((a, b) => a.start - b.start);
+	for (let i = 1; i < spans.length; i++) if (spans[i].start < spans[i - 1].end) throw previewError("damaged_file");
+	return entries;
+}
+
+function rasterMime(buffer) {
+	if (buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+	if (buffer[0] === 0xff && buffer[1] === 0xd8) return "image/jpeg";
+	if (/^GIF8[79]a$/.test(buffer.subarray(0, 6).toString("ascii"))) return "image/gif";
+	if (buffer.subarray(0, 4).toString("ascii") === "RIFF" && buffer.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
+	return null;
+}
+
+function countXmlElements(text, current) {
+	let offset = 0;
+	while ((offset = text.indexOf("<", offset)) !== -1) {
+		if (text.startsWith("<!--", offset) || text.startsWith("<![CDATA[", offset) || text.startsWith("<?", offset)) {
+			const close = text.startsWith("<!--", offset) ? "-->" : text.startsWith("<![CDATA[", offset) ? "]]>" : "?>";
+			const end = text.indexOf(close, offset + 2);
+			if (end < 0) throw previewError("damaged_file");
+			offset = end + close.length;
+			continue;
+		}
+		const next = text[offset + 1];
+		if (!next || next === "!") throw previewError("unsupported_document_feature");
+		if (next !== "/" && ++current > 200_000) throw previewError("preview_too_complex");
+		let quote = "";
+		let end = offset + 1;
+		for (; end < text.length; end++) {
+			const char = text[end];
+			if (quote) { if (char === quote) quote = ""; }
+			else if (char === "\"" || char === "'") quote = char;
+			else if (char === ">") break;
+		}
+		if (end === text.length) throw previewError("damaged_file");
+		offset = end + 1;
+	}
+	return current;
+}
+
+async function preflightPreviewZip(buffer) {
+	const entries = previewZipEntries(buffer);
+	const relationships = new Map();
+	let imagePixels = 0;
+	let xmlElements = 0;
+	for (const entry of entries) {
+		let output;
+		try {
+			const compressed = buffer.subarray(entry.dataOffset, entry.dataOffset + entry.compressed);
+			output = entry.method === 0 ? compressed : inflateRawSync(compressed, { maxOutputLength: Math.max(1, entry.expanded) });
+		} catch { throw previewError("damaged_file"); }
+		if (output.length !== entry.expanded || crc32(output) !== entry.checksum) throw previewError("damaged_file");
+		if (/\.(?:xml|rels)$/i.test(entry.name)) {
+			let encoding = "utf-8";
+			if (output[0] === 0xff && output[1] === 0xfe || output[0] === 0x3c && output[1] === 0) encoding = "utf-16le";
+			if (output[0] === 0xfe && output[1] === 0xff || output[0] === 0 && output[1] === 0x3c) encoding = "utf-16be";
+			let text;
+			try { text = new TextDecoder(encoding, { fatal: true }).decode(output); } catch { throw previewError("damaged_file"); }
+			xmlElements = countXmlElements(text, xmlElements);
+			if (entry.name.endsWith(".rels")) relationships.set(entry.name, text);
+		}
+		if (!entry.name.endsWith("/") && (entry.name.startsWith("word/media/") || /\.(?:png|jpe?g|gif|webp)$/i.test(entry.name))) {
+			const mime = rasterMime(output);
+			if (!mime) throw previewError("unsupported_document_feature");
+			const extension = entry.name.slice(entry.name.lastIndexOf(".")).toLowerCase();
+			const expectedMime = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp" }[extension];
+			if (mime !== expectedMime) throw previewError("damaged_file");
+			const dimensions = sniffImageDimensions(output);
+			if (!dimensions || dimensions.width < 1 || dimensions.height < 1) throw previewError("unsupported_document_feature");
+			const pixels = dimensions.width * dimensions.height;
+			imagePixels += pixels;
+			if (pixels > 40_000_000 || imagePixels > 80_000_000) throw previewError("decoded_image_too_large");
+			let canvas;
+			try { canvas = await loadNapiCanvas(); } catch { throw previewError("renderer_unavailable"); }
+			try {
+				const image = await canvas.loadImage(output);
+				if (image.width !== dimensions.width || image.height !== dimensions.height) throw previewError("damaged_file");
+			} catch { throw previewError("damaged_file"); }
+		}
+	}
+	return relationships;
+}
+
+function denyPreviewNetwork() {
+	const deny = () => { throw previewError("unsupported_document_feature"); };
+	globalThis.fetch = deny;
+	globalThis.WebSocket = deny;
+	globalThis.EventSource = deny;
+	http.request = http.get = https.request = https.get = deny;
+	net.connect = net.createConnection = tls.connect = dgram.createSocket = http2.connect = deny;
+	net.Socket.prototype.connect = deny;
+	for (const name of ["lookup", "lookupService", "resolve", "resolve4", "resolve6", "resolveAny", "resolveCaa", "resolveCname", "resolveMx", "resolveNaptr", "resolveNs", "resolvePtr", "resolveSoa", "resolveSrv", "resolveTxt", "reverse"]) {
+		if (name in dns) dns[name] = deny;
+		if (name in dns.promises) dns.promises[name] = deny;
+		if (name in dns.Resolver.prototype) dns.Resolver.prototype[name] = deny;
+		if (name in dns.promises.Resolver.prototype) dns.promises.Resolver.prototype[name] = deny;
+	}
+	syncBuiltinESMExports();
+}
+
+const WORD_CSP = "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
+const WORD_CSS_PROPERTIES = new Set(("background background-color border border-top border-right border-bottom border-left border-color border-style border-width border-collapse border-spacing border-radius box-sizing color display direction font font-family font-size font-style font-weight font-variant height line-height margin margin-top margin-right margin-bottom margin-left max-height max-width min-height min-width overflow overflow-wrap padding padding-top padding-right padding-bottom padding-left page-break-after page-break-before page-break-inside position text-align text-decoration text-indent text-transform vertical-align white-space width word-break word-spacing letter-spacing list-style-type table-layout").split(" "));
+
+function safeWordStyle(style, markBlocked) {
+	const declarations = [];
+	let declarationBytes = 0;
+	for (let index = 0; index < style.length; index++) {
+		const property = style[index].toLowerCase();
+		const value = style.getPropertyValue(property);
+		if (Buffer.byteLength(value) > 16_777_216) throw previewError("preview_too_complex");
+		const decoded = value.replace(/\\([0-9a-fA-F]{1,6}\s?|.)/g, (_, escape) => /^[0-9a-fA-F]/.test(escape) ? String.fromCodePoint(Number.parseInt(escape.trim(), 16) || 0xfffd) : escape);
+		if (/url\s*\(|(?:-webkit-)?image-set\s*\(|cross-fade\s*\(|src\s*\(/i.test(decoded)) markBlocked();
+		if (!WORD_CSS_PROPERTIES.has(property) || /url\s*\(|(?:-webkit-)?image-set\s*\(|cross-fade\s*\(|src\s*\(|expression\s*\(|behavior|binding|@|[<>\x00-\x1f]/i.test(decoded)) continue;
+		declarationBytes += Buffer.byteLength(property) + Buffer.byteLength(value) + 16;
+		if (declarationBytes > 16_777_216) throw previewError("preview_too_complex");
+		declarations.push(`${property}: ${value}${style.getPropertyPriority(property) ? " !important" : ""}`);
+	}
+	return declarations.join("; ");
+}
+
+function serializeWordBody(document, head) {
+	const chunks = [];
+	let bytes = 0;
+	const append = (value) => {
+		const size = Buffer.byteLength(value);
+		if (bytes + size > 16_777_216) throw previewError("preview_too_complex");
+		bytes += size;
+		chunks.push(value);
+	};
+	const escaped = (value, attribute) => {
+		let extra = 0;
+		for (const character of value) {
+			if (character === "&") extra += 4;
+			else if (character === "<" || character === ">") extra += 3;
+			else if (attribute && character === '"') extra += 5;
+		}
+		if (bytes + Buffer.byteLength(value) + extra > 16_777_216) throw previewError("preview_too_complex");
+		return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', attribute ? "&quot;" : '"');
+	};
+	append(head);
+	const voidTags = new Set(["BR", "HR", "IMG", "COL"]);
+	const stack = [{ node: document.body, closing: false }];
+	while (stack.length) {
+		const { node, closing } = stack.pop();
+		if (node.nodeType === 3) { append(escaped(node.nodeValue ?? "", false)); continue; }
+		if (node.nodeType !== 1) continue;
+		const tag = node.tagName.toLowerCase();
+		if (closing) { append(`</${tag}>`); continue; }
+		append(`<${tag}`);
+		for (const attribute of node.attributes) {
+			append(` ${attribute.name}="`);
+			append(escaped(attribute.value, true));
+			append('"');
+		}
+		append(">");
+		if (voidTags.has(node.tagName)) continue;
+		stack.push({ node, closing: true });
+		for (let child = node.lastChild; child; child = child.previousSibling) stack.push({ node: child, closing: false });
+	}
+	append("</html>");
+	return chunks.join("");
+}
+
+function sanitizeWordDocument(document, notices) {
+	const markBlocked = () => {
+		if (!notices.some((notice) => notice.code === "external_resources_blocked")) notices.push({ code: "external_resources_blocked", text: "External document resources are blocked." });
+	};
+	const styles = [];
+	let styleBytes = 0;
+	for (const element of document.querySelectorAll("style")) {
+		try {
+			for (const rule of element.sheet?.cssRules ?? []) {
+				if (!rule.selectorText || !rule.style || /[@\\{}<>]/.test(rule.selectorText)) continue;
+				const body = safeWordStyle(rule.style, markBlocked);
+				if (body) {
+					styleBytes += Buffer.byteLength(rule.selectorText) + Buffer.byteLength(body) + 6;
+					if (styleBytes > 16_777_216) throw previewError("preview_too_complex");
+					styles.push(`${rule.selectorText} { ${body} }`);
+				}
+			}
+		} catch (error) { if (error?.previewCode) throw error; throw previewError("damaged_file"); }
+	}
+	for (const element of document.querySelectorAll("script, style, link, iframe, frame, object, embed, svg, math, form, input, button, textarea, select, meta, base, video, audio, source")) element.remove();
+	const allowedTags = new Set("DIV SECTION ARTICLE P SPAN B STRONG I EM U S STRIKE TABLE TBODY THEAD TFOOT TR TD TH COLGROUP COL BR HR IMG H1 H2 H3 H4 H5 H6 OL UL LI SUP SUB BLOCKQUOTE PRE CODE A".split(" "));
+	const elements = [...document.body.querySelectorAll("*")];
+	let renderedPixels = 0;
+	if (elements.length > 200_000) throw previewError("preview_too_complex");
+	for (const element of elements) {
+		if (!allowedTags.has(element.tagName)) { element.replaceWith(...element.childNodes); continue; }
+		for (const attr of [...element.attributes]) {
+			const name = attr.name.toLowerCase();
+			if (name === "style") {
+				const value = safeWordStyle(element.style, markBlocked);
+				if (value) element.setAttribute("style", value); else element.removeAttribute("style");
+			} else if (name === "class" || name === "colspan" || name === "rowspan" || name === "width" || name === "height" || name === "alt") {
+				continue;
+			} else if (element.tagName === "IMG" && name === "src" && /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+=*$/i.test(attr.value)) {
+				continue;
+			} else element.removeAttribute(attr.name);
+		}
+		if (element.tagName === "IMG") {
+			const src = element.getAttribute("src");
+			if (!src) throw previewError("unsupported_document_feature");
+			const base64 = src.slice(src.indexOf(",") + 1);
+			if (base64.length > 22_369_624 || base64.length % 4 !== 0) throw previewError("preview_too_complex");
+			const bytes = Buffer.from(base64, "base64");
+			if (rasterMime(bytes) !== src.slice(5, src.indexOf(";")).toLowerCase()) throw previewError("damaged_file");
+			const dimensions = sniffImageDimensions(bytes);
+			if (!dimensions || dimensions.width < 1 || dimensions.height < 1) throw previewError("damaged_file");
+			const pixels = dimensions.width * dimensions.height;
+			renderedPixels += pixels;
+			if (pixels > 40_000_000 || renderedPixels > 80_000_000) throw previewError("decoded_image_too_large");
+		}
+	}
+	const escapedCsp = WORD_CSP.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
+	const css = styles.join("\n").replaceAll("<", "\\3c ");
+	const html = serializeWordBody(document, `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${escapedCsp}"><style>${css}</style></head>`);
+	return { ok: true, schemaVersion: 1, notices, result: { kind: "word", html } };
+}
+
+async function previewWord(buffer) {
+	const relationships = await preflightPreviewZip(buffer);
+	denyPreviewNetwork();
+	let JSDOM, JSZip, renderAsync;
+	try {
+		({ JSDOM } = await import("jsdom"));
+		({ default: JSZip } = await import("jszip"));
+		({ renderAsync } = await import("docx-preview"));
+	} catch { throw previewError("renderer_unavailable"); }
+	const dom = new JSDOM("<!doctype html><html><head></head><body><div id=styles></div><div id=content></div></body></html>", { pretendToBeVisual: true });
+	const { window } = dom;
+	try {
+		for (const name of ["window", "document", "HTMLElement", "Element", "Node", "DOMParser", "XMLSerializer", "FileReader", "Blob"]) globalThis[name] = name === "window" ? window : window[name];
+		globalThis.getComputedStyle = window.getComputedStyle.bind(window);
+		let createdElements = 0;
+		let createdTextBytes = 0;
+		let encodedImageBytes = 0;
+		const readDataUrl = window.FileReader.prototype.readAsDataURL;
+		window.FileReader.prototype.readAsDataURL = function(blob) {
+			encodedImageBytes += Math.ceil(blob.size / 3) * 4 + 100;
+			if (encodedImageBytes > 16_777_216) throw previewError("preview_too_complex");
+			return readDataUrl.call(this, blob);
+		};
+		const createText = window.document.createTextNode.bind(window.document);
+		window.document.createTextNode = (value) => {
+			createdTextBytes += Buffer.byteLength(String(value));
+			if (createdTextBytes > 16_777_216) throw previewError("preview_too_complex");
+			return createText(value);
+		};
+		for (const name of ["createElement", "createElementNS"]) {
+			const create = window.document[name].bind(window.document);
+			window.document[name] = (...args) => {
+				if (++createdElements > 200_000) throw previewError("preview_too_complex");
+				return create(...args);
+			};
+		}
+		window.fetch = () => { throw previewError("unsupported_document_feature"); };
+		window.WebSocket = window.EventSource = window.XMLHttpRequest = function() { throw previewError("unsupported_document_feature"); };
+		const zip = await JSZip.loadAsync(buffer);
+		let blocked = false;
+		for (const [name, text] of relationships) {
+			const xml = new window.DOMParser().parseFromString(text, "application/xml");
+			if (xml.querySelector("parsererror, doctype")) throw previewError("damaged_file");
+			const externalImages = new Set();
+			for (const relation of [...xml.getElementsByTagNameNS("*", "Relationship")]) {
+				if (relation.getAttribute("TargetMode")?.toLowerCase() === "external") {
+					if (relation.getAttribute("Type")?.endsWith("/image")) externalImages.add(relation.getAttribute("Id"));
+					relation.remove(); blocked = true;
+				}
+			}
+			zip.file(name, new window.XMLSerializer().serializeToString(xml));
+			if (externalImages.size) {
+				const partName = name.replace(/(^|\/)_rels\/([^/]+)\.rels$/, "$1$2");
+				const part = zip.file(partName);
+				if (!part) throw previewError("damaged_file");
+				const partXml = new window.DOMParser().parseFromString(await part.async("string"), "application/xml");
+				if (partXml.querySelector("parsererror")) throw previewError("damaged_file");
+				for (const blip of [...partXml.getElementsByTagNameNS("*", "blip")]) {
+					const link = blip.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "link");
+					if (!externalImages.has(link)) continue;
+					let drawing = blip.parentNode;
+					while (drawing && drawing.localName !== "drawing") drawing = drawing.parentNode;
+					if (!drawing?.parentNode) throw previewError("unsupported_document_feature");
+					const text = partXml.createElementNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w:t");
+					text.textContent = "External image blocked.";
+					drawing.parentNode.replaceChild(text, drawing);
+				}
+				zip.file(partName, new window.XMLSerializer().serializeToString(partXml));
+			}
+		}
+		const sanitized = await zip.generateAsync({ type: "nodebuffer", compression: "STORE" });
+		await renderAsync(sanitized, window.document.getElementById("content"), window.document.getElementById("styles"), { inWrapper: true, ignoreWidth: false, ignoreHeight: false, useBase64URL: true });
+		const notices = blocked ? [{ code: "external_resources_blocked", text: "External document resources are blocked." }] : [];
+		return sanitizeWordDocument(window.document, notices);
+	} catch (error) {
+		if (error?.previewCode) throw error;
+		throw previewError("damaged_file");
+	} finally { window.close(); }
+}
+
 async function previewPdf(buffer) {
 	if (buffer.subarray(0, 5).toString("ascii") !== "%PDF-") throw previewError("damaged_file");
 	let canvasModule;
@@ -349,8 +773,9 @@ async function parseDocx(buffer) {
 		const { absolutePath, kind, maxPages, maxChars } = request;
 		if (request.mode === "workspace-preview-v1") {
 			const buffer = readPreviewSnapshot(request);
-			if (kind !== "pdf") throw previewError("renderer_unavailable");
-			post(await previewPdf(buffer));
+			if (kind === "pdf") post(await previewPdf(buffer));
+			else if (kind === "word") post(await previewWord(buffer));
+			else throw previewError("renderer_unavailable");
 			return;
 		}
 		const buffer = fs.readFileSync(absolutePath);
