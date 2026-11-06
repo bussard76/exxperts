@@ -1,6 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
-import { spawn } from "node:child_process";
+import { fork, spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import type { FastifyRequest } from "fastify";
 import { ARTIFACT_SECURITY_HEADERS, remoteMode } from "./request-checks.js";
 import { MAINTENANCE_DIAGNOSTICS_KEEP, MAINTENANCE_DIAGNOSTICS_DEFAULT_LIMIT, listMaintenanceDiagnostics, exportMaintenanceDiagnostics } from "./maintenance-diagnostics.js";
@@ -88,7 +89,43 @@ function workspacePolicyViewFor(req: FastifyRequest, policy: PersistentRoomCapab
 	return persistentRoomCapabilityPolicyView(policy, { withPaths: requestGetsLocalPaths(req) });
 }
 
-async function openWorkspacePreviewFile(absolutePath: string): Promise<"accepted" | "opener_unavailable" | "open_failed" | "open_timeout"> {
+async function openWorkspacePreviewFile(absolutePath: string, signal: AbortSignal): Promise<"accepted" | "opener_unavailable" | "open_failed" | "open_timeout"> {
+	if (process.platform === "win32") {
+		return new Promise((resolve) => {
+			let settled = false;
+			let messages = 0;
+			let processError = false;
+			let result: "accepted" | "opener_unavailable" | "open_failed" | "open_timeout" = "open_failed";
+			const finish = (value: typeof result) => { if (!settled) { settled = true; clearTimeout(timer); signal.removeEventListener("abort", abort); resolve(value); } };
+			let child: ReturnType<typeof fork> | undefined;
+			const timer = setTimeout(() => { finish("open_timeout"); try { child?.kill(); } catch { /* The response deadline still applies. */ } }, 10_000);
+			const abort = () => { finish("open_failed"); try { child?.kill(); } catch { /* Client has gone; do not retry. */ } };
+			signal.addEventListener("abort", abort, { once: true });
+			if (signal.aborted) { abort(); return; }
+			try {
+				const directory = path.dirname(fileURLToPath(import.meta.url));
+				const env = { ...process.env };
+				delete env.NODE_OPTIONS;
+				delete env.NODE_PATH;
+				child = fork(path.join(directory, "workspace-open-worker.mjs"), [], { execPath: process.execPath, execArgv: [], cwd: directory, env, shell: false, detached: false, windowsHide: true, stdio: ["ignore", "ignore", "ignore", "ipc"] } as import("node:child_process").ForkOptions);
+				child.on("message", (message: unknown) => {
+					messages++;
+					if (processError || messages !== 1 || !message || typeof message !== "object" || Array.isArray(message) || Buffer.byteLength(JSON.stringify(message)) > 256) { result = "open_failed"; return; }
+					const reply = message as Record<string, unknown>;
+					const keys = Object.keys(reply).sort().join(",");
+					if (keys === "accepted" && reply.accepted === true) result = "accepted";
+					else if (keys === "accepted,code" && reply.accepted === false && ["opener_unavailable", "open_failed", "open_timeout"].includes(String(reply.code))) result = reply.code as typeof result;
+					else result = "open_failed";
+				});
+				child.once("error", (error: NodeJS.ErrnoException) => { processError = true; result = ["ENOENT", "ENOSYS"].includes(error.code ?? "") ? "opener_unavailable" : "open_failed"; });
+				child.once("close", (code, signal) => finish(!processError && (code !== 0 || signal) ? "open_failed" : result));
+				child.send({ path: absolutePath }, (error) => { if (error) { processError = true; result = "open_failed"; } });
+			} catch (error) {
+				finish(["ENOENT", "ENOSYS"].includes((error as NodeJS.ErrnoException).code ?? "") ? "opener_unavailable" : "open_failed");
+				try { child?.kill(); } catch { /* A failed child cannot be retried. */ }
+			}
+		});
+	}
 	if (process.platform !== "linux" && process.platform !== "darwin") return "opener_unavailable";
 	if (process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) return "opener_unavailable";
 	return new Promise((resolve) => {
@@ -223,7 +260,13 @@ app.post("/api/persistent-agents/:id/workspace-open", async (req, reply) => {
 		const again = resolvePersistentRoomWorkspaceExistingFile(current.policy, relativePath);
 		const stat = fs.statSync(again.absolutePath, { bigint: true });
 		if (again.absolutePath !== guarded.absolutePath || again.rootRealpath !== guarded.rootRealpath || again.relativePath !== guarded.relativePath || stat.dev !== initial.dev || stat.ino !== initial.ino || stat.size !== initial.size || stat.mtimeNs !== initial.mtimeNs || stat.ctimeNs !== initial.ctimeNs) return refuse(409, "file_changed");
-		const outcome = await openWorkspacePreviewFile(again.absolutePath);
+		const controller = new AbortController();
+		const abort = () => { if (!reply.raw.writableEnded) controller.abort(); };
+		req.raw.once("aborted", abort);
+		reply.raw.once("close", abort);
+		let outcome: Awaited<ReturnType<typeof openWorkspacePreviewFile>>;
+		try { outcome = await openWorkspacePreviewFile(again.absolutePath, controller.signal); }
+		finally { req.raw.removeListener("aborted", abort); reply.raw.removeListener("close", abort); }
 		if (outcome === "accepted") return reply.code(202).send({ accepted: true });
 		return refuse(outcome === "opener_unavailable" ? 503 : outcome === "open_timeout" ? 504 : 500, outcome);
 	} catch { return refuse(403, "workspace_read_forbidden"); }

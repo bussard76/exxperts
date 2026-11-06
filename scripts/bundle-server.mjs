@@ -101,6 +101,7 @@ export const REVIEWED_OWN_LOCATION_READS = [
 	{ file: /(^|\/)apps\/web-server\/src\/scheduled-prompt-background-execution\.ts$/, sites: 2, reason: `${installRootReason}; loads room-lock.cjs from there` },
 	{ file: /(^|\/)apps\/web-server\/src\/whats-new\.ts$/, sites: 1, reason: installRootReason },
 	{ file: /(^|\/)apps\/web-server\/src\/persistent-room-shelf-reading\.ts$/, sites: 1, reason: "forks shelf-parse-worker.mjs, copied beside the bundle (BUNDLE_ASSETS)" },
+	{ file: /(^|\/)apps\/web-server\/src\/room-settings-routes\.ts$/, sites: 1, reason: "forks workspace-open-worker.mjs, copied beside the bundle (BUNDLE_ASSETS)" },
 	{ file: /(^|\/)apps\/web-server\/src\/remote-qr\.ts$/, sites: 1, reason: "loads qrcode-terminal through createRequire; it ships as files (FILE_PACKAGES)" },
 	{ file: /(^|\/)pi-package\/extensions\/fetch_url\/index\.ts$/, sites: 1, reason: "loads jsdom through createRequire on the first page it parses; jsdom ships as files (EXTERNAL_PACKAGES)" },
 	{ file: runtimeFile("coding-agent", "dist/config\\.js"), sites: 4, reason: "finds its package folder through the build-time define" },

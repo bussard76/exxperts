@@ -32,9 +32,11 @@ const badWordChild = process.argv.includes("--bad-word-child");
 const networkChild = process.argv.includes("--network-child");
 const openChild = process.argv.includes("--open-child");
 const excelChild = process.argv.includes("--excel-child");
-const fakeChild = malformedChild || admissionChild || timeoutChild || extraChild || crashChild || exitRaceChild || revokeChild || replaceChild || badWordChild || networkChild || openChild || excelChild;
+const windowsParentChild = process.argv.includes("--windows-parent-child");
+const fakeChild = malformedChild || admissionChild || timeoutChild || extraChild || crashChild || exitRaceChild || revokeChild || replaceChild || badWordChild || networkChild || openChild || excelChild || windowsParentChild;
 const spawnMarker = path.join(tempRoot, "preview-spawns");
 const releaseMarker = path.join(tempRoot, "preview-release");
+const killMarker = path.join(tempRoot, "dispatcher-killed");
 const networkMarker = path.join(tempRoot, "network-probes");
 let validJpeg = "";
 if (revokeChild || replaceChild) {
@@ -48,6 +50,8 @@ const { EventEmitter } = require("node:events");
 const { syncBuiltinESMExports } = require("node:module");
 const original = childProcess.fork;
 const fs = require("node:fs");
+const realPlatform = process.platform;
+if (${windowsParentChild}) Object.defineProperty(process, "platform", { configurable: true, get() { return new Error().stack.includes("openWorkspacePreviewFile") ? "win32" : realPlatform; } });
 const realSpawn = childProcess.spawn;
 childProcess.spawn = function(file, args, options) {
   if (!${openChild} || (file !== "/usr/bin/xdg-open" && file !== "/usr/bin/open")) return realSpawn.apply(this, arguments);
@@ -68,7 +72,31 @@ childProcess.spawn = function(file, args, options) {
 };
 let count = 0;
 childProcess.fork = function(file, args, options) {
-  if (${networkChild || openChild || excelChild} || !String(file).endsWith("shelf-parse-worker.mjs") || !String(args[0]).includes("workspace-preview-v1")) return original.apply(this, arguments);
+  if (${windowsParentChild} && String(file).endsWith("workspace-open-worker.mjs")) {
+    const child = new EventEmitter();
+    child.kill = () => { fs.appendFileSync(${JSON.stringify(killMarker)}, "x"); setImmediate(() => child.emit("close", null, "SIGTERM")); return true; };
+    child.send = (message, callback) => {
+      fs.appendFileSync(${JSON.stringify(spawnMarker)}, JSON.stringify({ file, args, options: { shell: options.shell, execArgv: options.execArgv, hasNodeOptions: Object.hasOwn(options.env, "NODE_OPTIONS"), hasNodePath: Object.hasOwn(options.env, "NODE_PATH") }, message }) + "\\n");
+      setImmediate(() => {
+        if (callback) callback(null);
+        const name = require("node:path").basename(message.path);
+	        if (name === "win-abort.pdf") return;
+	        if (name === "win-timeout.pdf") { setTimeout(() => child.emit("message", { accepted: true }), 10_500); return; }
+        if (name === "win-empty.pdf") { child.emit("close", 0, null); return; }
+        if (name === "win-unavailable.pdf") child.emit("message", { accepted: false, code: "opener_unavailable" });
+        else if (name === "win-extra.pdf") child.emit("message", { accepted: true, extra: true });
+        else {
+          if (name === "win-race.pdf") child.emit("exit", 0, null);
+          child.emit("message", { accepted: true });
+          if (name === "win-double.pdf") child.emit("message", { accepted: true });
+        }
+        child.emit("close", name === "win-crash.pdf" ? 1 : 0, null);
+      });
+      return true;
+    };
+    return child;
+  }
+  if (${networkChild || openChild || excelChild || windowsParentChild} || !String(file).endsWith("shelf-parse-worker.mjs") || !String(args[0]).includes("workspace-preview-v1")) return original.apply(this, arguments);
   if (${badWordChild} && JSON.parse(args[0]).kind !== "word") return original.apply(this, arguments);
   const child = new EventEmitter();
   child.stderr = new EventEmitter();
@@ -243,6 +271,7 @@ fs.writeFileSync(path.join(folder, "elements.docx"), await tooManyElementsDocx()
 if (!fakeChild) fs.writeFileSync(path.join(folder, "oversized-text.docx"), await oversizedTextDocx());
 fs.writeFileSync(path.join(folder, "report.pdf"), onePagePdf());
 if (openChild) for (const name of ["missing-opener.pdf", "denied-opener.pdf", "signal.pdf", "exit2.pdf", "exit3.pdf", "timeout.pdf", "- invented $ ` ; & % ' ü.pdf"]) fs.writeFileSync(path.join(folder, name), "invented");
+if (windowsParentChild) for (const name of ["win-empty.pdf", "win-unavailable.pdf", "win-extra.pdf", "win-race.pdf", "win-double.pdf", "win-crash.pdf", "win-abort.pdf", "win-timeout.pdf"]) fs.writeFileSync(path.join(folder, name), "invented");
 fs.writeFileSync(path.join(folder, "pages.pdf"), multiplePagePdf(9));
 fs.writeFileSync(path.join(folder, "too-many.pdf"), multiplePagePdf(201));
 fs.writeFileSync(path.join(folder, "broken.pdf"), "invented broken data");
@@ -366,6 +395,24 @@ try {
 		assert(oddOpen.status === 202 && JSON.stringify(oddCall.args) === JSON.stringify([path.join(folder, oddName)]), "special characters remain one unchanged absolute argument");
 		const timeout = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-open`, { method: "POST", headers: { origin: baseUrl, "content-type": "application/json", "x-exxperts-local-action": "open-workspace-file" }, body: JSON.stringify({ conversationId: "demo-thread", path: "timeout.pdf" }), signal: AbortSignal.timeout(12_000) });
 		assert(timeout.status === 504 && (await timeout.json()).code === "open_timeout", "the deadline settles even when a killed dispatcher never closes");
+	}
+	if (windowsParentChild) {
+		const opened = await openRequest({ conversationId: "demo-thread", path: "report.pdf" });
+		assert(opened.status === 202 && opened.body.accepted === true, "Windows parent accepts only a valid child acknowledgement");
+		const calls = fs.readFileSync(spawnMarker, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+		assert(calls.length === 1 && calls[0].file.endsWith("workspace-open-worker.mjs") && calls[0].args.length === 0 && JSON.stringify(calls[0].message) === JSON.stringify({ path: path.join(folder, "report.pdf") }) && calls[0].options.shell === false && calls[0].options.execArgv.length === 0 && !calls[0].options.hasNodeOptions && !calls[0].options.hasNodePath, "Windows parent passes the guarded path only in one IPC message without inherited loaders");
+		for (const [name, status, code] of [["win-empty.pdf", 500, "open_failed"], ["win-unavailable.pdf", 503, "opener_unavailable"], ["win-extra.pdf", 500, "open_failed"], ["win-double.pdf", 500, "open_failed"], ["win-crash.pdf", 500, "open_failed"], ["win-race.pdf", 202, null]] as const) {
+			const reply = await openRequest({ conversationId: "demo-thread", path: name });
+			assert(reply.status === status && (code === null ? reply.body.accepted === true : reply.body.code === code), `Windows IPC ${name} settles safely`);
+		}
+		const controller = new AbortController();
+		const pending = authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-open`, { method: "POST", headers: { origin: baseUrl, "content-type": "application/json", "x-exxperts-local-action": "open-workspace-file" }, body: JSON.stringify({ conversationId: "demo-thread", path: "win-abort.pdf" }), signal: controller.signal }).catch(() => null);
+		await waitUntil(() => fs.existsSync(spawnMarker) && fs.readFileSync(spawnMarker, "utf8").includes("win-abort.pdf"), "Windows dispatcher is running");
+		controller.abort();
+		await pending;
+		await waitUntil(() => fs.existsSync(killMarker), "aborting the request stops the private dispatcher", 3_000);
+		const timedOut = await openRequest({ conversationId: "demo-thread", path: "win-timeout.pdf" });
+		assert(timedOut.status === 504 && timedOut.body.code === "open_timeout", "Windows dispatcher deadline does not accept a late reply");
 	}
 	for (const file of ["../secret.xlsx", "/absolute.xlsx", "C:drive.xlsx", ".hidden.xlsx", "folder//book.xlsx"]) {
 		const query = new URLSearchParams({ conversationId: "demo-thread", path: file });
