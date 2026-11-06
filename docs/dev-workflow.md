@@ -171,7 +171,7 @@ Der Controller setzt für jeden vollen Gate-Aufruf `GATE_SLOTS=1`, auch für Bro
 | klein | Mechanisches nach Checkliste |
 | groß | ADRs und Architektur auf Stufe 3 |
 
-**Eskalationsleiter:** Scheitert ein Worker zweimal an derselben Aufgabe, läuft der nächste Versuch eine Stufe höher. **Kontingent-Fallback:** Sinkt das Wochenlimit des Standard-Agenten unter 10 %, starten neue Worker mit dem Ersatz-Agenten auf der entsprechenden Stufe. Laufende Worker arbeiten zu Ende. Nach dem Reset geht es zurück. **Kalibrierung:** Die Stufe pro Rolle ist ein Startwert. Bestehensquote und Runden aus dem Journal setzen eine Rolle herab, wenn sie leicht besteht, und herauf, wenn sich Fehlschläge häufen.
+**Eskalationsleiter:** Scheitert ein Worker zweimal an derselben Aufgabe, läuft der nächste Versuch eine Stufe höher. **Kontingent:** Worker bleiben unabhängig vom Wochenlimit bei den OpenAI-Modellen; kein Claude-Fallback. Bei knappem oder erreichtem Limit pusht der Controller den aktuellen Stand und bittet Sascha in `status.md` um den Reset mit Credits. Der Controller spart kein Kontingent durch serielle Arbeit und wartet nicht auf einen Kalendertag. **Kalibrierung:** Die Stufe pro Rolle ist ein Startwert. Bestehensquote und Runden aus dem Journal setzen eine Rolle herab, wenn sie leicht besteht, und herauf, wenn sich Fehlschläge häufen. (Entschieden von Sascha am 06.11.2026.)
 
 Aufträge folgen festen **Vorlagen pro Rolle**: nummerierte Schritte, „fertig wenn“, Abbruchkriterien, Antwortformat. Jede Spec wird aus der Vorlage mit Parametern erzeugt, nie durch Abwandeln der Spec einer anderen Aufgabe.
 

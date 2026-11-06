@@ -56,7 +56,7 @@ The Controller runs `node capacity.mjs` before every start and follows its verdi
 - `gpt-6-luna` for mechanical checklist work.
 - `gpt-6.1-sol` only for ADRs and level-3 work, and at the top of the escalation ladder.
 - **Escalation ladder:** after two failures on the same task the next attempt runs one tier higher.
-- **Quota fallback:** below 10 % of codex's weekly quota, new workers start with claude (gpt-6-luna → haiku, gpt-6.1-terra → sonnet, gpt-6.1-sol → opus). Running workers finish. Switch back after the reset. Record every reading in `status.md`.
+- **Quota:** keep workers on the OpenAI models at every quota level; do not use the Claude fallback. Work normally under the measured capacity rules. When the weekly limit is near or reached, push current work and put the credit-reset request under "Needs Sascha" in `status.md`. Do not serialize work to save quota or wait for a calendar reset. Record quota readings there (decided by Sascha, 2026-11-06).
 
 ## Review loop
 
