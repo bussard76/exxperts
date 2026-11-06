@@ -27,6 +27,11 @@ for (const dir of [agentsRoot, agentDir]) fs.mkdirSync(dir, { recursive: true, m
 
 const folder = path.join(tempHome, "Projects", "archive");
 fs.mkdirSync(folder, { recursive: true });
+fs.writeFileSync(path.join(folder, "book.xlsx"), "invented");
+fs.writeFileSync(path.join(folder, "old.doc"), "invented");
+fs.writeFileSync(path.join(folder, "notes.txt"), "invented");
+fs.symlinkSync(path.join(folder, "book.xlsx"), path.join(folder, "link.xlsx"));
+fs.mkdirSync(path.join(folder, "directory.xlsx"));
 
 // A provider at an address nobody answers: the room only has to open, never answer.
 fs.writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({
@@ -71,7 +76,33 @@ try {
 	assert(response.headers.get("x-content-type-options") === "nosniff", "errors cannot be sniffed");
 	assert(response.headers.get("content-security-policy") === "sandbox; default-src 'none'", "direct navigation remains inert");
 	assert(JSON.stringify(await response.json()) === JSON.stringify({ code: "invalid_request", error: "Choose a valid workspace file to preview." }), "error uses the approved safe response");
+	const missingConversation = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=missing-demo&path=book.xlsx`);
+	assert(missingConversation.status === 404, "a nonexistent conversation cannot fall back to the room workspace");
+	assert((await missingConversation.json()).code === "conversation_not_found", "missing conversation has the approved error code");
+	const seeded = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/threads/demo-thread`, { method: "PUT", body: JSON.stringify({ state: "active", origin: "launcher", model: { provider: "fake-claude", model: "claude-fake" }, items: [] }) });
+	assert(seeded.status === 200, `demo conversation exists, got ${seeded.status}`);
+	const configured = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "custom", allowedToolNames: [] }, bashEnabled: false }) });
+	assert(configured.status === 200, "workspace read can be disabled");
+	const forbidden = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=book.xlsx`);
+	assert(forbidden.status === 403 && (await forbidden.json()).code === "workspace_read_forbidden", "preview respects current workspace read permission");
+	const restored = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "standard" } }) });
+	assert(restored.status === 200, "workspace read restored");
+	for (const file of ["../secret.xlsx", "/absolute.xlsx", "C:drive.xlsx", ".hidden.xlsx", "folder//book.xlsx"]) {
+		const query = new URLSearchParams({ conversationId: "demo-thread", path: file });
+		const invalid = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?${query}`);
+		assert(invalid.status === 400 && (await invalid.json()).code === "invalid_path", `invalid path rejected: ${file}`);
+	}
 
+	const absent = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=absent.xlsx`);
+	assert(absent.status === 404 && (await absent.json()).code === "file_not_found", "preview requires an existing guarded file");
+	const link = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=link.xlsx`);
+	assert(link.status === 403, "preview refuses a symlink as a policy restriction");
+	const directory = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=directory.xlsx`);
+	assert(directory.status === 400 && (await directory.json()).code === "not_file", "preview refuses a directory");
+	const oldWord = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=old.doc`);
+	assert(oldWord.status === 415 && (await oldWord.json()).code === "legacy_doc", "old Word files receive the approved error");
+	const unsupported = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=notes.txt`);
+	assert(unsupported.status === 415 && (await unsupported.json()).code === "unsupported_file_type", "unapproved types receive a controlled refusal");
 	console.log("workspace-file-preview smoke: ok");
 } catch (error) {
 	console.error(serverOutput.join("").slice(-4000));

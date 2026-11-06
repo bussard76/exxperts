@@ -25,3 +25,4 @@ Scope assumption: `.xls` and `.xlsm` retain the no-preview sentence and Open but
 - `workspace-markdown-images-smoke.ts` failed on the missing preview route classification, then passed after classifying preview GET as read and Open POST as local. Routes and acceptance items remain incomplete.
 - `EXXETA_SKIP_BROWSER_INSTALL=1 npm ci` and the runtime build passed; the first smoke attempt could not find the unbuilt runtime. No screenshots captured.
 - `workspace-file-preview-smoke.ts` first received 404 for the preview route; the transferred initial route now returns the tested safe error response. Rendering and access guards remain to be implemented.
+- `workspace-file-preview-smoke.ts` now covers existing conversation, read permission, invalid paths, the workspace resolver, symlink refusal and unsupported formats; each transferred assertion failed before its corresponding implementation and passed after it. Successful previews and post-render rechecks remain open.
