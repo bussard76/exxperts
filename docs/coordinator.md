@@ -66,6 +66,10 @@ The Controller runs `node capacity.mjs` before every start and follows its verdi
 5. A red wave: rerun each failed parallel smoke alone on the same commit and report both results as above. For other known load flakes, one isolated rerun is allowed; three green isolated runs are the evidence. A real failure goes back to the task.
 6. Merge conflicts are resolved by the task's Developer on its branch and checked by a Tester.
 
+## Worker prompt state on every heartbeat (decided by Sascha, 2026-11-06)
+
+On every heartbeat, the Controller checks the rendered prompt screen of each active worker terminal in addition to its Orca dispatch state. A live dispatch does not prove that an agent is working. If the screen shows an idle prompt, the Controller reads the recent output, sends a precise continuation through Orca and into the terminal, and confirms that the prompt started a new turn. The Controller records the observed prompt state and wake result in `status.md` and repeats this check on every heartbeat.
+
 ## Cleanup after every cycle (decided by Sascha, 2026-11-04)
 
 Close finished workers' terminals, release or abandon their dispatches, remove worktrees whose branch is merged or safely pushed (push a WIP branch first if anything is uncommitted), delete merged branches, keep active and paused tasks. Run `node cleanup.mjs` at the end of every cycle and report the counts in `status.md`.

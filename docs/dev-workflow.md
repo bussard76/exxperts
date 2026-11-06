@@ -190,9 +190,9 @@ Der Rhythmus ist eine Einstellung (`rhythm.mode`), keine Regel:
 
 Bei jedem Ereignis eines Workers, sonst alle 10 Minuten:
 
-1. **Ereignisse lesen:** Fertigmeldungen, Fragen und Eskalationen, neue Einträge in `inbox.md`, aktueller `main`.
+1. **Ereignisse und Promptzustand lesen:** Fertigmeldungen, Fragen und Eskalationen, neue Einträge in `inbox.md`, aktueller `main`. Bei jedem Heartbeat prüft der Controller zusätzlich den angezeigten Prompt jedes aktiven Worker-Terminals. Ein lebender Orca-Dispatch beweist nicht, dass der Agent arbeitet. Steht er am Eingabeprompt, liest der Controller die letzte Ausgabe, sendet einen konkreten Fortsetzungsauftrag über Orca und ins Terminal und bestätigt den gestarteten Turn.
 2. **Reagieren:** Developer fertig → Tester. Tester gescheitert → Nacharbeit im selben Worktree, nach zwei Fehlschlägen eine Modellstufe höher, nach der Rundengrenze Frage an den Menschen. Tester bestanden → bei Stufe 2/3 Konformität, sonst nächste Wave. Frage eines Workers → selbst entscheiden, wenn durch Regeln gedeckt, und schriftlich festhalten; sonst Frage an den Menschen.
-3. **Hänger erkennen:** Eine Stall-Watch prüft alle Worker-Terminals. Ein Worker, der still am Prompt steht, „Modell überlastet“ meldet oder vorzeitig aufhört, bekommt einen Anstoß direkt ins Terminal.
+3. **Hänger erkennen:** Eine Stall-Watch prüft alle Worker-Terminals. Ein Worker, der still am Prompt steht, „Modell überlastet“ meldet oder vorzeitig aufhört, bekommt einen Anstoß direkt ins Terminal. Beobachteten Promptzustand und bestätigtes Aufwecken dokumentiert der Controller in `status.md`.
 4. **Freie Plätze füllen:** nach dem Kapazitäts-Urteil und der Reihenfolge bei Engpass.
 5. **Aufräumen, in jedem Zyklus:** Terminals fertiger Worker schließen, Worker freigeben, Worktrees mit gemergtem oder sicher gepushtem Branch entfernen (ungesicherte Änderungen vorher als WIP-Branch pushen), gemergte Branches löschen. Worktrees aktiver oder pausierter Aufgaben bleiben.
 6. **Status schreiben:** `status.md` mit Zeitstempel.
