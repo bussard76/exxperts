@@ -213,12 +213,13 @@ try {
 			const url = new URL(route.request().url());
 			if (url.searchParams.get("path") !== "sample.xlsx") return route.continue();
 			const font = { family: "Arial", sizePt: 11, color: "#CC2200", bold: true, italic: false, underline: "none", strike: false };
-			const style = { fill: "#FFFF00", font, borders: { top: null, right: null, bottom: null, left: null }, align: { horizontal: "left", vertical: "bottom", wrap: false } };
-			const sheet = (id: string, name: string, text: string, wide = false) => ({ id, name, visibility: "visible", rowCount: wide ? 80 : 1, columnCount: wide ? 12 : 1, defaultRowHeightPx: 20, defaultColumnWidthPx: 64, rows: [], columns: [{ index: 1, widthPx: 173 }], cells: [{ row: 1, column: 1, text, style: 0, runs: null, valueKind: "text" }, ...(wide ? [{ row: 2, column: 2, text: "—", style: 0, runs: null, valueKind: "formula-result-unavailable" }, { row: 80, column: 12, text: "Last cell", style: 0, runs: null, valueKind: "text" }] : [])], merges: [] });
+			const style = { fill: "#FFFF00", font, borders: { top: { style: "thin", color: "#000000" }, right: null, bottom: null, left: null }, align: { horizontal: "left", vertical: "bottom", wrap: false } };
+			const otherStyle = { ...style, font: { ...font, color: "#0044CC", italic: true } };
+			const sheet = (id: string, name: string, text: string, wide = false) => ({ id, name, visibility: "visible", rowCount: wide ? 80 : 1, columnCount: wide ? 12 : 1, defaultRowHeightPx: 20, defaultColumnWidthPx: 64, rows: [], columns: [{ index: 1, widthPx: 173 }], cells: [{ row: 1, column: 1, text, style: 0, runs: wide ? [{ text: "Invented ", style: 0 }, { text: "total", style: 1 }] : null, valueKind: "text" }, ...(wide ? [{ row: 2, column: 2, text: "—", style: 0, runs: null, valueKind: "formula-result-unavailable" }, { row: 3, column: 3, text: "Merged cell", style: 0, runs: null, valueKind: "text" }, { row: 80, column: 12, text: "Last cell", style: 0, runs: null, valueKind: "text" }] : [])], merges: wide ? [{ top: 3, left: 3, bottom: 4, right: 4 }] : [] });
 			const summary = sheet("1", "Summary", "Invented total", true);
 			if (corruptWorkbook) summary.cells[0].style = 77;
 			const empty = { ...sheet("3", "Empty", ""), visibility: "hidden", rowCount: 0, columnCount: 0, columns: [], cells: [] };
-			await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ schemaVersion: 1, agentId, conversationId: url.searchParams.get("conversationId"), path: "sample.xlsx", notices: [], kind: "spreadsheet", workbook: { dateSystem: "1900", styles: [style], sheets: [summary, sheet("2", "Detail", "Second sheet"), empty] } }) });
+			await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ schemaVersion: 1, agentId, conversationId: url.searchParams.get("conversationId"), path: "sample.xlsx", notices: [], kind: "spreadsheet", workbook: { dateSystem: "1900", styles: [style, otherStyle], sheets: [summary, sheet("2", "Detail", "Second sheet"), empty] } }) });
 		});
 		await treeFile("sample.xlsx").click();
 		const sheetCell = page.getByText("Invented total", { exact: true });
@@ -226,6 +227,10 @@ try {
 		const appearance = await sheetCell.evaluate((node) => ({ color: getComputedStyle(node).color, weight: getComputedStyle(node).fontWeight, fill: getComputedStyle(node).backgroundColor }));
 		assert(appearance.color === "rgb(204, 34, 0)" && Number(appearance.weight) >= 700 && appearance.fill === "rgb(255, 255, 0)", "spreadsheet text, font and fill are displayed");
 		assert(Math.abs((await sheetCell.boundingBox())!.width - 173) < 1, "the workbook column width is retained");
+		assert(await sheetCell.evaluate((node) => getComputedStyle(node).borderTopStyle) === "solid", "the workbook border is retained");
+		assert(await sheetCell.getByText("total", { exact: true }).evaluate((node) => getComputedStyle(node).color) === "rgb(0, 68, 204)", "rich text retains its own font color");
+		const mergedCell = page.getByText("Merged cell", { exact: true });
+		assert(await mergedCell.getAttribute("rowspan") === "2" && await mergedCell.getAttribute("colspan") === "2", "merged cells occupy the declared rectangle");
 		assert(await page.getByLabel("— No calculated value is stored in this file.").count() === 1, "a missing cached result has an accessible explanation");
 		const gridScroll = await page.locator(".workspace-spreadsheet-scroll").evaluate((node) => { node.scrollLeft = node.scrollWidth; node.scrollTop = node.scrollHeight; return { left: node.scrollLeft, top: node.scrollTop }; });
 		assert(gridScroll.left > 0 && gridScroll.top > 0, "a wide and tall spreadsheet scrolls on both axes");
