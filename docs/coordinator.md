@@ -39,10 +39,10 @@ New features go from the outside in. Nothing is built until Sascha has signed of
 - UI checks run in the web UI on the server; the Electron client need not be tested there, and Sascha sees it at acceptance (decided by Sascha, 2026-11-05: "Teste die Webübersicht und du musst nicht zwangsläufig in dem Fatclient testen").
 - Full gates run on workhorse2. Sascha accepts the suite's known side effects on that shared host; no separate VM is required (decided by Sascha, 2026-11-06, answering "Wo soll der Controller die volle Testsuite laufen lassen?": "Weiter auf workhorse2").
 - One full gate at a time on the host, and inside it the smokes run in parallel with the runner's default (`npm run smokes`, 6 at a time there). Sascha, 2026-11-06: "inwieweit es möglich ist, die Tests zu parallelisieren und nicht seriell hintereinander auszuführen ... Wenn die Testausführung so lange dauert, ist das negativ". Measured on workhorse2: 374 smokes take about 56 minutes one after the other and about 10 minutes at 6 at a time. Two gates at once are what must not happen: sign-in smokes bind fixed callback ports (53692, 1455) and some smokes use fixed temp paths. Run the full gate as `GATE_SLOTS=1 gate bash -c 'npm run build && npm run smokes'`.
-- The Controller coordinates full gates globally on the host. Two calls using `GATE_SLOTS=1` serialize, but a caller using a higher value can overlap, and unit and browser pools are separate; the slot setting alone does not enforce the host-wide limit.
+- The Controller enforces `GATE_SLOTS=1` on every full-gate caller, including browser gates, and also sets `GATE_E2E_SLOTS=1` for browser gates because the browser pool reads that variable. The Controller coordinates full gates globally on the host: callers using higher slot values can overlap, and unit and browser pools are separate, so these settings alone do not enforce the host-wide limit.
 - Each smoke that fails in the parallel run is rerun alone on the same commit and both results are reported; other work does not stop for it.
 - Documentation-only changes get no full gate.
-- Every full gate runs through `gate` (fair slots, pooled by unit and browser), as `gate bash -c '<command>'` because `gate` starts a program without a shell.
+- Every full gate runs through `gate` (fair slots, pooled by unit and browser), as `GATE_SLOTS=1 GATE_E2E_SLOTS=1 gate bash -c '<command>'` because `gate` starts a program without a shell.
 
 ## Capacity by measurement (decided by Sascha, 2026-11-04)
 
