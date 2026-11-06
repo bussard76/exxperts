@@ -8985,7 +8985,7 @@ export function App() {
 						<div className="checkpoint-preview-backdrop maintain-confirm-backdrop" role="dialog" aria-modal="true" aria-label="Unsaved Markdown changes">
 							<section className="checkpoint-input-card maintain-confirm-card markdown-editor-confirm">
 								<h2>Unsaved Markdown changes</h2>
-								<p>{markdownEditorPrompt === "switch" ? "Save this file before opening another Markdown file?" : "Save this file before leaving the editor?"}</p>
+								<p>{markdownEditorPrompt === "switch" ? "Save this file before opening another file?" : "Save this file before leaving the editor?"}</p>
 								<div className="checkpoint-preview-actions">
 									<button type="button" className="landing-action secondary" autoFocus onClick={cancelMarkdownEditorPrompt}>Cancel</button>
 									<button type="button" className="landing-action secondary" onClick={discardMarkdownEditorAndContinue} disabled={markdownEditorPromptBusy}>Discard changes</button>
