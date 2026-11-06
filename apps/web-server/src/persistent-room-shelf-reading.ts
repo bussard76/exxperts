@@ -190,12 +190,16 @@ interface ShelfWorkerMessage {
 	image?: { imageBase64: string; mimeType: string; width: number; height: number; downscaled: boolean };
 	raster?: { pages: Array<{ page: number; imageBase64: string; mimeType: string }>; totalPages: number };
 	error?: string;
+	schemaVersion?: number;
+	code?: string;
+	notices?: unknown;
+	result?: unknown;
 }
 
 const SHELF_PARSE_WORKER_MAX_HEAP_MB = 512;
 const TOO_COMPLEX_MESSAGE = "This document is too complex to process — it was given up on rather than allowed to exhaust memory. If it is a scanned document, exporting a smaller page range usually works.";
 
-function runShelfWorker(request: Record<string, unknown>, timeoutMs: number): Promise<ShelfWorkerMessage> {
+function runShelfWorker(request: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<ShelfWorkerMessage> {
 	return new Promise((resolve, reject) => {
 		const child = fork(fileURLToPath(new URL("./shelf-parse-worker.mjs", import.meta.url)), [JSON.stringify(request)], {
 			// Bare node, no inherited loaders: the worker is plain .mjs and must
@@ -210,23 +214,30 @@ function runShelfWorker(request: Record<string, unknown>, timeoutMs: number): Pr
 			stderrTail = (stderrTail + chunk.toString()).slice(-8192);
 		});
 		let settled = false;
+		let closed = false;
+		child.once("close", () => { closed = true; });
 		const settle = (fn: () => void) => {
 			if (settled) return;
 			settled = true;
 			clearTimeout(timer);
+			signal?.removeEventListener("abort", abort);
 			try {
 				child.kill("SIGKILL");
 			} catch {
 				// Already gone.
 			}
-			fn();
+			if (request.mode === "workspace-preview-v1" && !closed) child.once("close", fn);
+			else fn();
 		};
+		const abort = () => settle(() => reject(new PersistentRoomShelfError("preview_aborted", "Preview cancelled.")));
 		const timer = setTimeout(() => {
 			settle(() => reject(new PersistentRoomShelfError("parse_timeout", `The document could not be processed within ${timeoutMs / 1000}s and was given up on.`)));
 		}, timeoutMs);
+		signal?.addEventListener("abort", abort, { once: true });
+		if (signal?.aborted) abort();
 		child.once("message", (message: ShelfWorkerMessage) => {
 			settle(() => {
-				if (message?.ok) resolve(message);
+				if (request.mode === "workspace-preview-v1" || message?.ok) resolve(message);
 				else reject(new PersistentRoomShelfError("parse_failed", `The document could not be processed: ${String(message?.error ?? "unknown parser error")}`));
 			});
 		});
@@ -254,6 +265,88 @@ function runShelfWorker(request: Record<string, unknown>, timeoutMs: number): Pr
 			}, 250);
 		});
 	});
+}
+
+type WorkspacePreviewJob = {
+	mode: "workspace-preview-v1";
+	kind: "pdf" | "word" | "spreadsheet";
+	absolutePath: string;
+	expected: { dev: string; ino: string; size: number; mtimeMs: number; ctimeMs: number };
+	limits: Record<string, number>;
+};
+
+function hasExactKeys(value: object, keys: string[]): boolean {
+	const actual = Object.keys(value).sort();
+	return actual.length === keys.length && keys.slice().sort().every((key, index) => actual[index] === key);
+}
+
+function previewJpegDimensions(bytes: Buffer): { width: number; height: number } | null {
+	if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[bytes.length - 2] !== 0xff || bytes[bytes.length - 1] !== 0xd9) return null;
+	let offset = 2;
+	while (offset + 4 <= bytes.length) {
+		if (bytes[offset] !== 0xff) return null;
+		while (offset < bytes.length && bytes[offset] === 0xff) offset++;
+		if (offset >= bytes.length) return null;
+		const marker = bytes[offset++];
+		if (marker === 0xda || marker === 0xd9) return null;
+		if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+		if (offset + 2 > bytes.length) return null;
+		const length = bytes.readUInt16BE(offset);
+		if (length < 2 || length > bytes.length - offset) return null;
+		if (marker === 0xc0 || marker === 0xc1 || marker === 0xc2) {
+			if (length < 8) return null;
+			return { height: bytes.readUInt16BE(offset + 3), width: bytes.readUInt16BE(offset + 5) };
+		}
+		offset += length;
+	}
+	return null;
+}
+
+let activeWorkspacePreviews = 0;
+
+export async function runWorkspacePreviewWorker(job: WorkspacePreviewJob, signal: AbortSignal): Promise<ShelfWorkerMessage> {
+	if (activeWorkspacePreviews >= 2) return { ok: false, schemaVersion: 1, code: "preview_busy" };
+	activeWorkspacePreviews += 1;
+	try {
+		const result = await runShelfWorker(job, job.kind === "pdf" ? 60_000 : 30_000, signal);
+		if (!result || result.schemaVersion !== 1 || typeof result.ok !== "boolean") {
+			return { ok: false, schemaVersion: 1, code: "preview_failed" };
+		}
+		if (!result.ok) {
+			if (!hasExactKeys(result, ["ok", "schemaVersion", "code"])) return { ok: false, schemaVersion: 1, code: "preview_failed" };
+			const codes = ["file_changed", "file_too_large", "expanded_content_too_large", "preview_too_complex", "decoded_image_too_large", "damaged_file", "encrypted_file", "unsupported_document_feature", "renderer_unavailable", "preview_failed"];
+			return codes.includes(result.code ?? "") ? { ok: false, schemaVersion: 1, code: result.code } : { ok: false, schemaVersion: 1, code: "preview_failed" };
+		}
+		if (!hasExactKeys(result, ["ok", "schemaVersion", "notices", "result"]) || job.kind !== "pdf" || !Array.isArray(result.notices) || result.notices.length !== 0 || !result.result || typeof result.result !== "object") {
+			return { ok: false, schemaVersion: 1, code: "preview_failed" };
+		}
+		const pdf = result.result as { kind?: unknown; totalPages?: unknown; pages?: unknown };
+		if (!hasExactKeys(pdf, ["kind", "totalPages", "pages"]) || pdf.kind !== "pdf" || !Number.isInteger(pdf.totalPages) || (pdf.totalPages as number) < 1 || (pdf.totalPages as number) > 200 || !Array.isArray(pdf.pages) || pdf.pages.length !== pdf.totalPages) {
+			return { ok: false, schemaVersion: 1, code: "preview_failed" };
+		}
+		let totalPixels = 0;
+		let totalBytes = 0;
+		for (const [index, page] of pdf.pages.entries()) {
+			if (!page || typeof page !== "object" || !hasExactKeys(page, ["page", "mimeType", "imageBase64", "widthPx", "heightPx"]) || page.page !== index + 1 || page.mimeType !== "image/jpeg" || !Number.isInteger(page.widthPx) || page.widthPx < 1 || !Number.isInteger(page.heightPx) || page.heightPx < 1 || page.widthPx * page.heightPx > 4_000_000 || typeof page.imageBase64 !== "string" || page.imageBase64.length === 0 || page.imageBase64.length > 44_739_244 || page.imageBase64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(page.imageBase64)) {
+				return { ok: false, schemaVersion: 1, code: "preview_failed" };
+			}
+			totalPixels += page.widthPx * page.heightPx;
+			const byteLength = page.imageBase64.length / 4 * 3 - (page.imageBase64.endsWith("==") ? 2 : page.imageBase64.endsWith("=") ? 1 : 0);
+			totalBytes += byteLength;
+			if (totalPixels > 80_000_000 || totalBytes > 33_554_432) return { ok: false, schemaVersion: 1, code: "preview_failed" };
+			const bytes = Buffer.from(page.imageBase64, "base64");
+			const dimensions = previewJpegDimensions(bytes);
+			if (bytes.length !== byteLength || !dimensions || dimensions.width !== page.widthPx || dimensions.height !== page.heightPx) {
+				return { ok: false, schemaVersion: 1, code: "preview_failed" };
+			}
+		}
+		if (Buffer.byteLength(JSON.stringify(result)) > 50_331_648) return { ok: false, schemaVersion: 1, code: "preview_failed" };
+		return result;
+	} catch (error) {
+		return { ok: false, schemaVersion: 1, code: (error as { code?: string }).code === "parse_timeout" ? "preview_timeout" : "preview_failed" };
+	} finally {
+		activeWorkspacePreviews -= 1;
+	}
 }
 
 export async function runShelfParseWorker(absolutePath: string, kind: "pdf" | "docx"): Promise<{ text: string; pages: number | null; truncated: boolean }> {

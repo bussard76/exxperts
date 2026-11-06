@@ -4,6 +4,7 @@ import { AttachmentsBrowser, AttachmentsEntry, type AttachmentsView } from "./co
 import { WorkspaceFileBrowser } from "./components/WorkspaceFileBrowser";
 import { WorkspaceFileTabs } from "./components/WorkspaceFileTabs";
 import { WorkspaceImagePreview } from "./components/WorkspaceImagePreview";
+import { WorkspacePdfPreview } from "./components/WorkspacePdfPreview";
 import { AssetViewerFooter } from "./components/asset-viewer-footer";
 import { ToastStack, type ToastView } from "./components/toast-stack";
 import { usePausedSkillsNotice } from "./paused-skills-notice";
@@ -450,6 +451,7 @@ export function App() {
 		| { kind: "markdownEditor"; path: string }
 		| { kind: "workspaceImage"; path: string }
 		| { kind: "workspaceLegacyDoc"; path: string }
+		| { kind: "workspacePdf"; path: string }
 		// The run view: the live task's stream in the
 		// same pane slot; renders from taskState and swaps to the artifact viewer
 		// in place when the run ends.
@@ -541,7 +543,7 @@ export function App() {
 	// lose them, and leaving the room closes them itself.
 	const setPreview = (data: ApprovalPreviewData | null) => {
 		if (data && rightPaneRef.current?.kind === "markdownEditor" && !guardMarkdownEditorAction(() => setPreview(data), "switch")) return;
-		setRightPane((pane) => (data ? { kind: "preview", data } : pane?.kind === "attachments" || pane?.kind === "workspaceImage" || pane?.kind === "workspaceLegacyDoc" || (pane?.kind === "artifactViewer" && pane.backTo) ? pane : null));
+		setRightPane((pane) => (data ? { kind: "preview", data } : pane?.kind === "attachments" || pane?.kind === "workspaceImage" || pane?.kind === "workspaceLegacyDoc" || pane?.kind === "workspacePdf" || (pane?.kind === "artifactViewer" && pane.backTo) ? pane : null));
 	};
 	const onMarkdownEditorDirtyChange = useCallback((dirty: boolean) => {
 		markdownEditorDirtyRef.current = dirty;
@@ -588,11 +590,11 @@ export function App() {
 	}
 
 	function workspacePaneFor(path: string): RightPaneOccupant {
-		return /\.md$/i.test(path) ? { kind: "markdownEditor", path } : /\.doc$/i.test(path) ? { kind: "workspaceLegacyDoc", path } : { kind: "workspaceImage", path };
+		return /\.md$/i.test(path) ? { kind: "markdownEditor", path } : /\.doc$/i.test(path) ? { kind: "workspaceLegacyDoc", path } : /\.pdf$/i.test(path) ? { kind: "workspacePdf", path } : { kind: "workspaceImage", path };
 	}
 
 	function activeWorkspacePath(pane: RightPaneOccupant | null): string | null {
-		return pane?.kind === "markdownEditor" || pane?.kind === "workspaceImage" || pane?.kind === "workspaceLegacyDoc" ? pane.path : null;
+		return pane?.kind === "markdownEditor" || pane?.kind === "workspaceImage" || pane?.kind === "workspaceLegacyDoc" || pane?.kind === "workspacePdf" ? pane.path : null;
 	}
 
 	function requestCloseWorkspaceTab(path: string): void {
@@ -617,7 +619,7 @@ export function App() {
 
 	function openWorkspaceMarkdown(entry: { relativePath: string; extension: string }): void {
 		const path = entry.relativePath;
-		if (!/\.(md|doc|png|jpe?g|gif|webp|svg)$/i.test(path) || !persistentChat) return;
+		if (!/\.(md|doc|pdf|png|jpe?g|gif|webp|svg)$/i.test(path) || !persistentChat) return;
 		if (activeWorkspacePath(rightPaneRef.current) === path && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId) return;
 		if (rightPaneRef.current?.kind === "markdownEditor" && !guardMarkdownEditorAction(() => openWorkspaceMarkdown(entry), "switch")) return;
 		setArtifactMaximized(false);
@@ -659,13 +661,13 @@ export function App() {
 	// until dismissed — one Escape, one layer.
 	// As an Escape layer it keeps that Escape from the room's own keys too: the
 	// composer's Stop and a waiting question's deny.
-	const paneTakesEscape = rightPane?.kind === "artifactViewer" || rightPane?.kind === "taskRun" || rightPane?.kind === "attachments" || rightPane?.kind === "markdownEditor" || rightPane?.kind === "workspaceImage" || rightPane?.kind === "workspaceLegacyDoc";
+	const paneTakesEscape = rightPane?.kind === "artifactViewer" || rightPane?.kind === "taskRun" || rightPane?.kind === "attachments" || rightPane?.kind === "markdownEditor" || rightPane?.kind === "workspaceImage" || rightPane?.kind === "workspaceLegacyDoc" || rightPane?.kind === "workspacePdf";
 	useEscapeKey(() => {
 		// A dialog that is not in this component's state (the expanded
 		// diagram viewer) owns Escape the same way: one Escape, one layer.
 		if (document.querySelector('[aria-modal="true"]')) return;
 		if (artifactMaximized) setArtifactMaximized(false);
-		else if (rightPane?.kind === "markdownEditor" || rightPane?.kind === "workspaceImage" || rightPane?.kind === "workspaceLegacyDoc") requestCloseMarkdownEditor();
+		else if (rightPane?.kind === "markdownEditor" || rightPane?.kind === "workspaceImage" || rightPane?.kind === "workspaceLegacyDoc" || rightPane?.kind === "workspacePdf") requestCloseMarkdownEditor();
 		else if (rightPane?.kind === "attachments" && rightPane.view === "gallery") setRightPane({ kind: "attachments", view: "panel" });
 		else closePaneFile();
 	}, paneTakesEscape && !assetDeleteConfirm && !exportCollision && !fileDeleteConfirm && !saveAsPrompt && !roomSettingsOpen && !markdownEditorPrompt);
@@ -725,7 +727,7 @@ export function App() {
 	const [persistentChat, setPersistentChat] = useState<PersistentChatConfig>(null);
 	useEffect(() => {
 		setWorkspaceTabs(null);
-		setRightPane((pane) => pane?.kind === "markdownEditor" || pane?.kind === "workspaceImage" || pane?.kind === "workspaceLegacyDoc" ? null : pane);
+		setRightPane((pane) => pane?.kind === "markdownEditor" || pane?.kind === "workspaceImage" || pane?.kind === "workspaceLegacyDoc" || pane?.kind === "workspacePdf" ? null : pane);
 	}, [persistentChat?.agentId, persistentChat?.conversationId, personChanged]);
 	// Another conversation holds none of this one's edit.
 	useEffect(() => {
@@ -8644,7 +8646,10 @@ export function App() {
 						onOpenMarkdown={(path) => openWorkspaceMarkdown({ relativePath: path, extension: ".md" })}
 					/>}
 					{rightPane?.kind === "workspaceLegacyDoc" && <p className="workspace-preview-error">Save this old .doc file as .docx to preview it here.</p>}
-					{workspaceTabs.paths.filter((path) => /\.(png|jpe?g|gif|webp|svg)$/i.test(path)).map((path) => <div key={path} hidden={rightPane?.kind !== "workspaceImage" || rightPane.path !== path}>
+					{workspaceTabs.paths.filter((path) => /\.pdf$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspacePdf" || rightPane.path !== path}>
+						<WorkspacePdfPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />
+					</div>)}
+					{workspaceTabs.paths.filter((path) => /\.(png|jpe?g|gif|webp|svg)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceImage" || rightPane.path !== path}>
 						<WorkspaceImagePreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />
 					</div>)}
 				</div>

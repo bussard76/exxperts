@@ -248,6 +248,92 @@ async function rasterizePdf(buffer, { firstPage, pageCount, targetWidth, maxPixe
 	return { pages, totalPages };
 }
 
+function previewError(code) {
+	const error = new Error(code);
+	error.previewCode = code;
+	return error;
+}
+
+function readPreviewSnapshot(request) {
+	const fd = fs.openSync(request.absolutePath, "r");
+	try {
+		const matches = (stat) => stat.isFile() && String(stat.dev) === request.expected.dev && String(stat.ino) === request.expected.ino
+			&& stat.size === request.expected.size && stat.mtimeMs === request.expected.mtimeMs && stat.ctimeMs === request.expected.ctimeMs;
+		const before = fs.fstatSync(fd);
+		if (!matches(before)) throw previewError("file_changed");
+		if (before.size > 26_214_400) throw previewError("file_too_large");
+		const buffer = Buffer.alloc(before.size);
+		let offset = 0;
+		while (offset < buffer.length) {
+			const count = fs.readSync(fd, buffer, offset, buffer.length - offset, offset);
+			if (count === 0) throw previewError("file_changed");
+			offset += count;
+		}
+		if (!matches(fs.fstatSync(fd))) throw previewError("file_changed");
+		return buffer;
+	} finally {
+		fs.closeSync(fd);
+	}
+}
+
+async function previewPdf(buffer) {
+	if (buffer.subarray(0, 5).toString("ascii") !== "%PDF-") throw previewError("damaged_file");
+	let canvasModule;
+	try { canvasModule = await loadNapiCanvas(); } catch { throw previewError("renderer_unavailable"); }
+	for (const name of ["DOMMatrix", "ImageData", "Path2D"]) {
+		if (globalThis[name] === undefined) globalThis[name] = canvasModule[name];
+	}
+	let getDocument;
+	try { ({ getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs")); } catch { throw previewError("renderer_unavailable"); }
+	let doc;
+	try {
+		doc = await getDocument({ data: new Uint8Array(buffer), isEvalSupported: false, disableFontFace: true, useSystemFonts: false }).promise;
+	} catch (error) {
+		throw previewError(error?.name === "PasswordException" ? "encrypted_file" : "damaged_file");
+	}
+	try {
+		const totalPages = doc.numPages;
+		if (!Number.isInteger(totalPages) || totalPages < 1) throw previewError("damaged_file");
+		if (totalPages > 200) throw previewError("preview_too_complex");
+		const geometry = [];
+		let totalPixels = 0;
+		for (let pageNumber = 1; pageNumber <= totalPages; pageNumber++) {
+			const page = await doc.getPage(pageNumber);
+			const base = page.getViewport({ scale: 1 });
+			if (!Number.isFinite(base.width) || !Number.isFinite(base.height) || base.width < 1 || base.height < 1) throw previewError("damaged_file");
+			let scale = Math.min(1400 / base.width, 4);
+			if (base.width * scale * base.height * scale > 4_000_000) scale = Math.sqrt(4_000_000 / (base.width * base.height));
+			const widthPx = Math.max(1, Math.floor(base.width * scale));
+			const heightPx = Math.max(1, Math.floor(base.height * scale));
+			totalPixels += widthPx * heightPx;
+			if (totalPixels > 80_000_000) throw previewError("preview_too_complex");
+			geometry.push({ widthPx, heightPx, scale });
+			page.cleanup();
+		}
+		const pages = [];
+		let jpegBytes = 0;
+		for (let index = 0; index < totalPages; index++) {
+			const page = await doc.getPage(index + 1);
+			const { widthPx, heightPx, scale } = geometry[index];
+			const canvas = canvasModule.createCanvas(widthPx, heightPx);
+			const context = canvas.getContext("2d");
+			context.fillStyle = "#ffffff";
+			context.fillRect(0, 0, widthPx, heightPx);
+			await page.render({ canvasContext: context, viewport: page.getViewport({ scale }) }).promise;
+			const jpeg = canvas.toBuffer("image/jpeg", 82);
+			jpegBytes += jpeg.length;
+			if (jpegBytes > 33_554_432) throw previewError("preview_too_complex");
+			pages.push({ page: index + 1, mimeType: "image/jpeg", imageBase64: jpeg.toString("base64"), widthPx, heightPx });
+			page.cleanup();
+		}
+		const reply = { ok: true, schemaVersion: 1, notices: [], result: { kind: "pdf", totalPages, pages } };
+		if (Buffer.byteLength(JSON.stringify(reply)) > 50_331_648) throw previewError("preview_too_complex");
+		return reply;
+	} finally {
+		await doc.destroy();
+	}
+}
+
 async function parseDocx(buffer) {
 	const { default: JSZip } = await import("jszip");
 	const zip = await JSZip.loadAsync(buffer);
@@ -261,6 +347,12 @@ async function parseDocx(buffer) {
 	try {
 		const request = JSON.parse(process.argv[2] ?? "");
 		const { absolutePath, kind, maxPages, maxChars } = request;
+		if (request.mode === "workspace-preview-v1") {
+			const buffer = readPreviewSnapshot(request);
+			if (kind !== "pdf") throw previewError("renderer_unavailable");
+			post(await previewPdf(buffer));
+			return;
+		}
 		const buffer = fs.readFileSync(absolutePath);
 		if (kind === "image") {
 			const image = await prepareImage(buffer, request.image);
@@ -284,6 +376,9 @@ async function parseDocx(buffer) {
 		}
 		post({ ok: true, text, pages: parsed.pages, truncated });
 	} catch (error) {
-		post({ ok: false, error: error instanceof Error ? error.message : String(error) });
+		let workspaceMode = false;
+		try { workspaceMode = JSON.parse(process.argv[2] ?? "").mode === "workspace-preview-v1"; } catch {}
+		if (workspaceMode) post({ ok: false, schemaVersion: 1, code: error?.previewCode ?? "preview_failed" });
+		else post({ ok: false, error: error instanceof Error ? error.message : String(error) });
 	}
 })();
