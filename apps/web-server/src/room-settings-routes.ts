@@ -140,6 +140,26 @@ app.get("/api/persistent-agents/:id/workspace-markdown", async (req, reply) => {
 	}
 });
 
+app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
+	reply.headers({
+		"Cache-Control": "no-store",
+		"X-Content-Type-Options": "nosniff",
+		"Referrer-Policy": "no-referrer",
+		"Content-Security-Policy": "sandbox; default-src 'none'",
+	});
+	try {
+		getUsablePersistentAgentStatusForNormalUse(String((req.params as any).id ?? "").trim());
+	} catch (error) {
+		if ((error as { statusCode?: number }).statusCode !== 404) return persistentAgentNormalUseErrorReply(reply, error);
+		return reply.code(404).send({ code: "room_not_found", error: "This file is no longer available in this workspace." });
+	}
+	const query = (req.query ?? {}) as Record<string, unknown>;
+	if (typeof query.conversationId !== "string" || !query.conversationId || typeof query.path !== "string" || !query.path) {
+		return reply.code(400).send({ code: "invalid_request", error: "Choose a valid workspace file to preview." });
+	}
+	return reply.code(503).send({ code: "renderer_unavailable", error: "Preview rendering is unavailable on this system." });
+});
+
 app.get("/api/persistent-agents/:id/workspace-image", async (req, reply) => {
 	const idRaw = String((req.params as any).id ?? "").trim();
 	try {
