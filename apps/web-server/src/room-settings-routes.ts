@@ -4,6 +4,7 @@ import { MAINTENANCE_DIAGNOSTICS_KEEP, MAINTENANCE_DIAGNOSTICS_DEFAULT_LIMIT, li
 import { createPersistentAgentInstance, getPersistentAgentThread, saveWithOpenConversationCheck, getPersistentRoomInstructionsView, savePersistentRoomGlobalInstructionsEnabled, savePersistentRoomInstructions } from "./persistent-agents.js";
 import { normalizePersistentRoomWorkspaceToolSelectionInput, persistentRoomWorkspaceToolNamesForPolicy } from "./persistent-room-tool-policy.js";
 import { PersistentRoomWorkspacePolicyError, resolvePersistentRoomEffectiveWorkspacePolicy, assertPersistentRoomWorkspaceDefaultMutable, releasePersistentRoomThreadWorkspaceMirror, type PersistentRoomCapabilityPolicy, persistentRoomCapabilityPolicyView, readPersistentRoomCapabilityPolicy, PERSISTENT_ROOM_WORKSPACE_POLICY_STORAGE_SOURCE, deletePersistentRoomCapabilityPolicy, readPersistentRoomDefaultCapabilityPolicy, PERSISTENT_ROOM_WORKSPACE_DEFAULT_STORAGE_SOURCE, missingPersistentRoomWorkspaceRootWarnings, normalizePersistentRoomWorkspaceAccessModeInput, createPersistentRoomDefaultCapabilityPolicy, updatePersistentRoomCapabilityPolicyWorkspaceSettings, writePersistentRoomDefaultCapabilityPolicy, deletePersistentRoomDefaultCapabilityPolicy, createPersistentRoomCapabilityPolicy, writePersistentRoomCapabilityPolicy } from "./persistent-room-workspace-policy.js";
+import { PersistentRoomWorkspaceToolError, resolvePersistentRoomWorkspaceExistingFile } from "./persistent-room-workspace-tools.js";
 import { listPersistentRoomWorkspaceFiles } from "./persistent-room-workspace-files.js";
 import { PersistentRoomWorkspaceMarkdownError, readWorkspaceImageFile, readWorkspaceMarkdownFile, writeWorkspaceMarkdownFile } from "./persistent-room-workspace-markdown-files.js";
 import { readPersistentRoomMaintenanceSettings, writePersistentRoomMaintenanceSettings } from "./persistent-room-maintenance-settings.js";
@@ -171,6 +172,17 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 	if (!effective.policy) return reply.code(404).send({ code: "workspace_not_found", error: "This file is no longer available in this workspace." });
 	if (!effective.workspaceToolsEnabled || !effective.policy.modes.read || !persistentRoomWorkspaceToolNamesForPolicy(effective.policy).includes("read")) {
 		return reply.code(403).send({ code: "workspace_read_forbidden", error: "This file is not available under the current workspace permissions." });
+	}
+	try {
+		resolvePersistentRoomWorkspaceExistingFile(effective.policy, relativePath);
+	} catch (error) {
+		if (error instanceof PersistentRoomWorkspaceToolError) {
+			if (error.code === "file_not_found") return reply.code(404).send({ code: "file_not_found", error: "This file is no longer available in this workspace." });
+			if (error.code === "workspace_unavailable") return reply.code(503).send({ code: "workspace_unavailable", error: "The workspace folder is not readable right now." });
+			if (error.code === "not_file") return reply.code(400).send({ code: "not_file", error: "Choose a valid workspace file to preview." });
+			return reply.code(403).send({ code: "blocked_by_policy", error: "This file is not available under the current workspace permissions." });
+		}
+		return reply.code(500).send({ code: "preview_failed", error: "This file could not be previewed." });
 	}
 	return reply.code(503).send({ code: "renderer_unavailable", error: "Preview rendering is unavailable on this system." });
 });

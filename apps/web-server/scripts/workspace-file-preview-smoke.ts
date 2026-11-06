@@ -88,6 +88,8 @@ try {
 		assert(invalid.status === 400 && (await invalid.json()).code === "invalid_path", `invalid path rejected: ${file}`);
 	}
 
+	const absent = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=absent.xlsx`);
+	assert(absent.status === 404 && (await absent.json()).code === "file_not_found", "preview requires an existing guarded file");
 	console.log("workspace-file-preview smoke: ok");
 } catch (error) {
 	console.error(serverOutput.join("").slice(-4000));
