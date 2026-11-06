@@ -25,7 +25,7 @@ Missing or weak tests, coverage gaps, edge cases, security, load and style are *
 ## Reviewer rules
 
 - **Read-only.** Do not edit, stash or reset implementation files. The only file you write is your findings file.
-- **Trust nothing reported.** Rerun the gates yourself: `npm run build && npm run smokes` always, `the browser suite` when the change can affect user flows. Run them through `gate`, as `gate bash -c '<command>'` because `gate` starts a program without a shell. Docker gates run only at release.
+- **Trust nothing reported.** Rerun the gates yourself: `npm run build && npm run smokes -- --jobs 1` always, `the browser suite` when the change can affect user flows. Run them through `gate`, as `gate bash -c '<command>'` because `gate` starts a program without a shell. Docker gates run only at release.
 - **On current `main` plus the branch.** Use a clean worktree: merge current `main` into a temporary branch from the reviewed head (abort and note conflicts if any). Failures present only on the stale branch tip are not findings; failures on the merged tree are.
 - **Clean checkout.** No leftover ignored build output from earlier runs; a test that passes only because of leftovers is a finding.
 - **Full diff** against `origin/main`, not a sample. Run `ponytail-review` on it and merge its findings with the severities below.

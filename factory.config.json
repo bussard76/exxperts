@@ -126,7 +126,7 @@
     "typecheck": "npx tsc --noEmit -p apps/web-ui/tsconfig.json && npm run typecheck:scripts",
     "lint": "",
     "unit": "npm run test:scripts",
-    "verify": "npm run build && npm run smokes",
+    "verify": "npm run build && npm run smokes -- --jobs 1",
     "e2e": "",
     "release": []
   },
