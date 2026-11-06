@@ -87,6 +87,17 @@ function pruneNodeModules(nodeModulesDir, keep) {
 	}
 }
 
+// Type declarations are not executed by the bundled JavaScript server.
+function pruneDeclarations(dir) {
+	for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+		const full = path.join(dir, entry.name);
+		if (entry.isDirectory()) {
+			pruneDeclarations(full);
+			if (fs.readdirSync(full).length === 0) fs.rmdirSync(full);
+		} else if (entry.isFile() && entry.name.endsWith(".d.ts")) fs.unlinkSync(full);
+	}
+}
+
 // Trims appDir in place and checks the result; throws, naming what is
 // missing, when the trimmed payload lacks anything the desktop runs.
 export function pruneDesktopPayload(appDir, { log = console.log, maxFiles = DESKTOP_MAX_FILES } = {}) {
@@ -97,7 +108,10 @@ export function pruneDesktopPayload(appDir, { log = console.log, maxFiles = DESK
 	// release tree lacks shows up in the check below rather than as a crash.
 	const { dirs } = shippedPackageDirs(appDir, { exclude: DESKTOP_DROP.map((entry) => entry.name) });
 	pruneOutsideKeepList(appDir, "", DESKTOP_KEEP.map((entry) => entry.path));
-	if (fs.existsSync(nodeModulesDir)) pruneNodeModules(nodeModulesDir, dirs);
+	if (fs.existsSync(nodeModulesDir)) {
+		pruneNodeModules(nodeModulesDir, dirs);
+		pruneDeclarations(nodeModulesDir);
+	}
 
 	const problems = DESKTOP_KEEP.filter((entry) => !fs.existsSync(path.join(appDir, ...entry.path.split("/")))).map(
 		(entry) => `${entry.path} is missing (${entry.reason})`,
