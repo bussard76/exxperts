@@ -619,7 +619,7 @@ export function App() {
 	}
 
 	function workspacePaneFor(path: string): RightPaneOccupant {
-		return /\.md$/i.test(path) ? { kind: "markdownEditor", path } : /\.doc$/i.test(path) ? { kind: "workspaceLegacyDoc", path } : /\.pdf$/i.test(path) ? { kind: "workspacePdf", path } : /\.docx$/i.test(path) ? { kind: "workspaceWord", path } : /\.xls(?:x|m)?$/i.test(path) ? { kind: "workspaceSpreadsheet", path } : { kind: "workspaceImage", path };
+		return /\.md$/i.test(path) ? { kind: "markdownEditor", path } : /\.(?:doc|xls|xlsm)$/i.test(path) ? { kind: "workspaceLegacyDoc", path } : /\.pdf$/i.test(path) ? { kind: "workspacePdf", path } : /\.docx$/i.test(path) ? { kind: "workspaceWord", path } : /\.xlsx$/i.test(path) ? { kind: "workspaceSpreadsheet", path } : { kind: "workspaceImage", path };
 	}
 
 	function activeWorkspacePath(pane: RightPaneOccupant | null): string | null {
@@ -8665,7 +8665,7 @@ export function App() {
 			{persistentChat && !personChanged && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId && (
 				<div className="workspace-pane" hidden={activeWorkspacePath(rightPane) === null}>
 					<WorkspaceFileTabs tabs={workspaceTabs.paths} active={activeWorkspacePath(rightPane)} onSelect={(path) => openWorkspaceMarkdown({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} />
-					{rightPane && (rightPane.kind === "workspaceImage" || rightPane.kind === "workspacePdf" || rightPane.kind === "workspaceWord" || rightPane.kind === "workspaceSpreadsheet") && <WorkspaceOpenAction key={JSON.stringify([persistentChat.agentId, persistentChat.conversationId, rightPane.path])} agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={rightPane.path} />}
+					{rightPane && (rightPane.kind === "workspaceImage" || rightPane.kind === "workspacePdf" || rightPane.kind === "workspaceWord" || rightPane.kind === "workspaceSpreadsheet" || (rightPane.kind === "workspaceLegacyDoc" && !/\.doc$/i.test(rightPane.path))) && <WorkspaceOpenAction key={JSON.stringify([persistentChat.agentId, persistentChat.conversationId, rightPane.path])} agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={rightPane.path} />}
 					{rightPane?.kind === "markdownEditor" && <MarkdownEditorPane
 						ref={markdownEditorRef}
 						agentId={persistentChat.agentId}
@@ -8675,11 +8675,11 @@ export function App() {
 						onDirtyChange={onMarkdownEditorDirtyChange}
 						onOpenMarkdown={(path) => openWorkspaceMarkdown({ relativePath: path, extension: ".md" })}
 					/>}
-					{rightPane?.kind === "workspaceLegacyDoc" && <p className="workspace-preview-error">Save this old .doc file as .docx to preview it here.</p>}
+					{rightPane?.kind === "workspaceLegacyDoc" && <p className="workspace-preview-error">{/\.doc$/i.test(rightPane.path) ? "Save this old .doc file as .docx to preview it here." : "This file type cannot be previewed here."}</p>}
 					{workspaceTabs.paths.filter((path) => /\.docx$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceWord" || rightPane.path !== path}>
 						<WorkspaceWordPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />
 					</div>)}
-					{workspaceTabs.paths.filter((path) => /\.xls(?:x|m)?$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceSpreadsheet" || rightPane.path !== path}>
+					{workspaceTabs.paths.filter((path) => /\.xlsx$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceSpreadsheet" || rightPane.path !== path}>
 						<WorkspaceSpreadsheetPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />
 					</div>)}
 					{workspaceTabs.paths.filter((path) => /\.pdf$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspacePdf" || rightPane.path !== path}>
