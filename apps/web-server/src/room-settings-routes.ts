@@ -280,8 +280,8 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 	if (![".xlsx", ".xlsm", ".xls", ".docx", ".pdf"].includes(extension)) {
 		return reply.code(415).send({ code: "unsupported_file_type", error: "This file type cannot be previewed here." });
 	}
-	if (extension !== ".pdf" && extension !== ".docx") return reply.code(503).send({ code: "renderer_unavailable", error: "Preview rendering is unavailable on this system." });
-	const kind = extension === ".pdf" ? "pdf" : "word";
+	if (extension === ".xls") return reply.code(503).send({ code: "renderer_unavailable", error: "Preview rendering is unavailable on this system." });
+	const kind = extension === ".pdf" ? "pdf" : extension === ".docx" ? "word" : "spreadsheet";
 	const controller = new AbortController();
 	const abort = () => { if (!reply.raw.writableEnded) controller.abort(); };
 	req.raw.once("aborted", abort);

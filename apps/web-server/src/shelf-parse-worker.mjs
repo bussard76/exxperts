@@ -775,6 +775,7 @@ async function parseDocx(buffer) {
 			const buffer = readPreviewSnapshot(request);
 			if (kind === "pdf") post(await previewPdf(buffer));
 			else if (kind === "word") post(await previewWord(buffer));
+			else if (kind === "spreadsheet") { previewZipEntries(buffer); throw previewError("renderer_unavailable"); }
 			else throw previewError("renderer_unavailable");
 			return;
 		}

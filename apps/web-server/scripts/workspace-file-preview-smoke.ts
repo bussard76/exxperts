@@ -322,6 +322,10 @@ try {
 	}
 	const restored = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "standard" } }) });
 	assert(restored.status === 200, "workspace read restored");
+	if (networkChild || excelChild) {
+		const brokenBook = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=book.xlsx`);
+		assert(brokenBook.status === 422 && (await brokenBook.json()).code === "damaged_file", "malformed OOXML is refused through the real preview child");
+	}
 	if (excelChild) {
 		const response = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=actual.xlsx`);
 		const body = await response.json();
