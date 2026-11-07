@@ -338,7 +338,7 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 		try {
 			const expected = guarded.stat;
 			const matches = (stat: fs.Stats) => stat.isFile() && stat.dev === expected.dev && stat.ino === expected.ino
-				&& stat.size === expected.size && stat.mtimeMs === expected.mtimeMs && stat.ctimeMs === expected.ctimeMs;
+				&& stat.size === expected.size && stat.mtimeMs === expected.mtimeMs;
 			const fd = fs.openSync(guarded.absolutePath, "r");
 			try {
 				if (!matches(fs.fstatSync(fd))) throw new Error("file changed");
@@ -406,7 +406,7 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 		const current = resolvePersistentRoomEffectiveWorkspacePolicy(agentId, query.conversationId);
 		if (!current.policy || !current.workspaceToolsEnabled || !current.policy.modes.read || !persistentRoomWorkspaceToolNamesForPolicy(current.policy).includes("read")) throw new Error("permission");
 		const again = resolvePersistentRoomWorkspaceExistingFile(current.policy, relativePath);
-		if (again.absolutePath !== guarded.absolutePath || again.rootRealpath !== guarded.rootRealpath || again.stat.dev !== stat.dev || again.stat.ino !== stat.ino || again.stat.size !== stat.size || again.stat.mtimeMs !== stat.mtimeMs || again.stat.ctimeMs !== stat.ctimeMs) {
+		if (again.absolutePath !== guarded.absolutePath || again.rootRealpath !== guarded.rootRealpath || again.stat.dev !== stat.dev || again.stat.ino !== stat.ino || again.stat.size !== stat.size || again.stat.mtimeMs !== stat.mtimeMs) {
 			return reply.code(409).send({ code: "file_changed", error: "This file changed while the preview was loading; close the tab and open it again." });
 		}
 	} catch {
