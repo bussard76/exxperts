@@ -2,7 +2,7 @@
 
 ## Architecture impact
 
-Level 2: existing workspace preview/open routes and workbook contract from the accepted implementation; no additional public interfaces or dependencies planned.
+The non-HTML tests add no public interfaces or dependencies. The accepted implementation was described as level 2, but the Architect and security reviews raised level 3 for the HTML navigation and host-open boundaries; their disposition is held for Sascha.
 
 ## Baseline and assumptions
 
@@ -21,18 +21,29 @@ Level 2: existing workspace preview/open routes and workbook contract from the a
 - [ ] HELD: HTML: hostile content cannot reach app cookies, storage or API; blocked connect, image and form traffic without external requests, including direct-frame URL.
 - [ ] HELD: HTML: both remote HTML routes tested; workspace-open for HTML remains local only; compare read identity checking with worker path and report UTF-8 behavior.
 - [x] Reported to Controller: scripted HTML can navigate its frame to an external URL carrying document content; CSP does not prevent this. Architect and security reviews also found HTML/HTM host-open expands ADR-0003. Both require Sascha’s level-3 decision; all HTML checks and behavior are held.
-- [ ] Targeted typechecks, affected script suites and browser specs through attributed gate pass; merge latest main and rerun affected suites.
-- [ ] Self-review each item with its proving test; document changed files, tests, assumptions, screenshots and debt.
+- [x] Targeted typechecks, script tests and browser smoke passed; merged current main (already contained) and reran the changed Excel/Word and browser cases.
+- [x] Self-review: each completed item names its test; changed files, tests, assumptions, screenshots, remaining scope and debt are recorded below.
 - [ ] Independent Tester compares design and runs full gates; wave integrates branch and preview for Sascha (downstream).
 - [ ] Sascha acceptance: scripts, Word sizing on screen and native Mac tab/window interactions (downstream).
 
 ## Checks and self-review
 
-Pending.
+- `npx tsc --noEmit -p apps/web-ui/tsconfig.json && npm run typecheck:scripts`: passed after merging `origin/main` (already contained).
+- `npm run test:scripts`: passed, 54 tests.
+- `workspace-file-preview-smoke.ts --excel-child` through attributed gate: passed after merging main. It exercises the public route and real workbook and Word rendering. The complete `workspace-file-preview-smoke.ts` also passed through attributed gate on the same code before the no-op main merge.
+- `workspace-file-tabs-ui-smoke.ts` through attributed gate: passed after merging main. It exercises the real UI, route and generated workbooks.
+- The checklist above names the test for each completed item. The accepted implementation is retained with no product changes, no new dependencies, no screenshots and no PPTX work. HTML tests and behavior remain held; downstream review and acceptance remain open.
+- The large Word fixture covers one 1 MB XML part within the existing route deadline; it does not prove a worst-case regex bound.
+- Fresh-worktree setup required building runtime packages and the web UI for the targeted tests. The first preview smoke timed out because runtime build artifacts were absent; after building them its rerun passed.
+- `npm ci` ran normal lifecycle scripts with `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`, but the postinstall printed a Chromium fetch message because this project uses `EXXETA_SKIP_BROWSER_INSTALL=1` for that script. No download progress appeared; the approved project-specific variable was missed.
+- Before checkout, an unexpected lockfile modification appeared; it was preserved in the named stash `Preserve pre-existing package-lock changes before T8` and is not part of this branch.
 
 ## Files, tests, screenshots and debt candidates
 
-Pending. Screenshots, if needed, remain untracked under `.build/screenshots/`.
+- Changed by this task: `apps/web-server/scripts/workspace-file-preview-smoke.ts`, `apps/web-server/scripts/workspace-file-tabs-ui-smoke.ts`, and this report. The merged accepted baseline contains the product implementation.
+- Added route and browser assertions are listed in the checklist. Fixtures are invented and generated in temporary test homes.
+- Screenshots: none.
+- Debt candidates from the issue: fixed English number/date conventions; unsupported coloured format sections, rich cell colour and pattern fills; light Word desk in dark mode; frame reload on reorder; no keyboard tab reordering; header also visible without the Open button. The large-part regex test does not establish worst-case runtime.
 
 ## Held for Sascha’s decision
 
