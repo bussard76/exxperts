@@ -334,6 +334,11 @@ if (htmlRaceChild) for (const name of ["race-json.html", "race-frame.html", "lat
   fs.writeFileSync(path.join(folder, name + ".replacement"), "replacement invented document");
 }
 if (htmlRaceChild) for (const name of ["growing.txt", "chmod.txt", "failure.pptx", "revoke.txt"]) fs.writeFileSync(path.join(folder, name), "invented");
+if (htmlRaceChild) {
+	fs.writeFileSync(path.join(folder, "utf8.txt"), Buffer.from([0x3c, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x3e, 0xc3, 0x28]));
+	fs.writeFileSync(path.join(folder, "invalid.json"), "{bad json");
+	for (const [name, size] of [["large.txt", 16_777_217], ["large.pptx", 26_214_401]] as const) { fs.writeFileSync(path.join(folder, name), ""); fs.truncateSync(path.join(folder, name), size); }
+}
 if (excelChild) {
 	const { default: ExcelJS } = await import("exceljs");
 	const workbook = new ExcelJS.Workbook();
@@ -478,6 +483,14 @@ try {
         for (const name of ["race-json.txt", "race-frame.pptx", "late-json.txt", "late-frame.pptx"]) {
             const result = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=${name}`);
             assert(result.status === 409 && (await result.json()).code === "file_changed", `replacement is refused for ${name}`);
+        }
+        const utf8 = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=utf8.txt`);
+        assert(utf8.status === 200 && (await utf8.json()).text === "<script>�(", "text remains literal and malformed UTF-8 is replaced");
+        const invalidJson = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=invalid.json`);
+        assert(invalidJson.status === 200 && (await invalidJson.json()).text === "{bad json", "invalid JSON remains available as text");
+        for (const name of ["large.txt", "large.pptx"]) {
+            const large = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=${name}`);
+            assert(large.status === 413 && (await large.json()).code === "file_too_large", `${name} exceeds its hard input limit`);
         }
         const chmod = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=chmod.txt`);
         assert(chmod.status === 200 && (await chmod.json()).text === "invented", "metadata-only chmod remains accepted");

@@ -76,6 +76,8 @@ The app (`exxperts`, `./scripts/exxperts-web`, or the desktop app) is the one pr
 
 Within a room's granted workspace, select a PDF, image, `.html`, `.htm`, or `.docx` file in the file tree to open a read-only tab beside Markdown files. PDF pages and Word documents are rendered in an isolated child; Word content is displayed in a sandboxed frame, and external document resources are blocked. Preview tabs keep their loaded content when reselected; close and reopen a tab to load the file again. HTML scripts run in a sandbox that blocks data fetching, network images and forms. A script can still navigate its own frame to an external URL, including one carrying file content; Sascha accepted this risk. HTML is decoded as UTF-8, replacing invalid byte sequences. Legacy `.doc` files show guidance to save as `.docx`.
 
+PPTX and Excalidraw previews use isolated frames, while `.txt` and `.json` display as text. Text files are limited to 16,777,216 bytes and framed files to 26,214,400 bytes. Frames receive a file once; a stalled preview shows an error. The frame cannot fetch external resources, but it can navigate itself, including to a URL carrying the opened file’s content.
+
 ## How prompts are assembled
 
 **Persistent rooms (web)** boot from four code-assembled layers (L0

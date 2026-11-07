@@ -12,11 +12,13 @@ export function WorkspaceFramedPreview({ agentId, conversationId, path }: { agen
 	const [rendered, setRendered] = useState(false);
 	const frameRef = useRef<HTMLIFrameElement>(null);
 	const delivered = useRef(false);
+	const fetchController = useRef<AbortController | null>(null);
 	// Read once: changing it later would reload the frame and lose the zoom.
 	const [theme] = useState(() => (document.documentElement.dataset.theme === "dark" ? "dark" : "light"));
 	const route = `/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?${new URLSearchParams({ conversationId, path })}`;
 	useEffect(() => {
 		const controller = new AbortController();
+		fetchController.current = controller;
 		delivered.current = false;
 		void apiFetch(route, { signal: controller.signal })
 			.then(async (response) => {
@@ -29,7 +31,7 @@ export function WorkspaceFramedPreview({ agentId, conversationId, path }: { agen
 				if (!controller.signal.aborted) setBytes(buffer);
 			})
 			.catch(() => { if (!controller.signal.aborted) setError("This file could not be previewed."); });
-		return () => controller.abort();
+		return () => { controller.abort(); if (fetchController.current === controller) fetchController.current = null; };
 	}, [route]);
 	useEffect(() => {
 		const onMessage = (event: MessageEvent) => {
@@ -47,7 +49,7 @@ export function WorkspaceFramedPreview({ agentId, conversationId, path }: { agen
 	}, [bytes]);
 	useEffect(() => {
 		if (rendered || error) return;
-		const timer = window.setTimeout(() => setError("This preview took too long to load."), 30_000);
+		const timer = window.setTimeout(() => { fetchController.current?.abort(); setError("This preview took too long to load."); }, 30_000);
 		return () => window.clearTimeout(timer);
 	}, [rendered, error, route]);
 	if (error) return <div className="workspace-preview-html"><p>{error}</p></div>;
