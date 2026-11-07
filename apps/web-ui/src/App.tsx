@@ -145,6 +145,7 @@ function WorkspaceOpenAction({ agentId, conversationId, path }: { agentId: strin
 	const [pending, setPending] = useState(false);
 	const [failed, setFailed] = useState(false);
 	const pendingRef = useRef(false);
+	if (!local) return null;
 	const label = /\.pdf$/i.test(path) ? "Open PDF" : /\.docx$/i.test(path) ? "Open in Word" : /\.pptx$/i.test(path) ? "Open in PowerPoint" : /\.xls(?:x|m)?$/i.test(path) ? "Open in Excel" : "Open in default app";
 	const open = async () => {
 		if (pendingRef.current) return;
@@ -161,7 +162,7 @@ function WorkspaceOpenAction({ agentId, conversationId, path }: { agentId: strin
 		} catch { setFailed(true); }
 		finally { pendingRef.current = false; setPending(false); }
 	};
-	return <div className="workspace-open-action"><div className="workspace-open-title" title={path}>{path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ""}</div>{local && <button type="button" disabled={pending} onClick={() => void open()}>{label}</button>}{failed && <p role="alert">This file could not be opened in another program.</p>}</div>;
+	return <div className="workspace-open-action"><button type="button" disabled={pending} onClick={() => void open()}>{label}</button>{failed && <p role="alert">This file could not be opened in another program.</p>}</div>;
 }
 
 export function App() {
