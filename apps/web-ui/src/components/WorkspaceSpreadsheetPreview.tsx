@@ -4,7 +4,7 @@ import { apiFetch } from "../api";
 type Border = { style: string; color: string };
 type Style = { fill: string | null; font: { family: string; sizePt: number; color: string; bold: boolean; italic: boolean; underline: "none" | "single" | "double"; strike: boolean }; borders: { top: Border | null; right: Border | null; bottom: Border | null; left: Border | null }; align: { horizontal: "left" | "center" | "right"; vertical: "top" | "middle" | "bottom"; wrap: boolean } };
 type Cell = { row: number; column: number; text: string; style: number; runs: { text: string; style: number }[] | null; valueKind: string };
-type Sheet = { id: string; name: string; visibility: string; rowCount: number; columnCount: number; defaultRowHeightPx: number; defaultColumnWidthPx: number; rows: { index: number; heightPx: number }[]; columns: { index: number; widthPx: number }[]; cells: Cell[]; merges: { top: number; left: number; bottom: number; right: number }[] };
+type Sheet = { id: string; name: string; visibility: string; showGridLines: boolean; rowCount: number; columnCount: number; defaultRowHeightPx: number; defaultColumnWidthPx: number; rows: { index: number; heightPx: number }[]; columns: { index: number; widthPx: number }[]; cells: Cell[]; merges: { top: number; left: number; bottom: number; right: number }[] };
 type Workbook = { dateSystem: "1900" | "1904"; styles: Style[]; sheets: Sheet[] };
 
 const errorText: Record<string, string> = {
@@ -48,7 +48,7 @@ function validWorkbook(value: unknown): value is Workbook {
 	}
 	let slots = 0, cells = 0;
 	for (const [index, sheet] of value.sheets.entries()) {
-		if (!keys(sheet, ["id", "name", "visibility", "rowCount", "columnCount", "defaultRowHeightPx", "defaultColumnWidthPx", "rows", "columns", "cells", "merges"]) || sheet.id !== String(index + 1) || typeof sheet.name !== "string" || !sheet.name || !["visible", "hidden", "veryHidden"].includes(sheet.visibility) || !integer(sheet.rowCount, 0, 100_000) || !integer(sheet.columnCount, 0, 16_384) || ((sheet.rowCount === 0) !== (sheet.columnCount === 0)) || !dimension(sheet.defaultRowHeightPx) || !dimension(sheet.defaultColumnWidthPx) || !Array.isArray(sheet.rows) || !Array.isArray(sheet.columns) || !Array.isArray(sheet.cells) || !Array.isArray(sheet.merges)) return false;
+		if (!keys(sheet, ["id", "name", "visibility", "showGridLines", "rowCount", "columnCount", "defaultRowHeightPx", "defaultColumnWidthPx", "rows", "columns", "cells", "merges"]) || typeof sheet.showGridLines !== "boolean" || sheet.id !== String(index + 1) || typeof sheet.name !== "string" || !sheet.name || !["visible", "hidden", "veryHidden"].includes(sheet.visibility) || !integer(sheet.rowCount, 0, 100_000) || !integer(sheet.columnCount, 0, 16_384) || ((sheet.rowCount === 0) !== (sheet.columnCount === 0)) || !dimension(sheet.defaultRowHeightPx) || !dimension(sheet.defaultColumnWidthPx) || !Array.isArray(sheet.rows) || !Array.isArray(sheet.columns) || !Array.isArray(sheet.cells) || !Array.isArray(sheet.merges)) return false;
 		slots += sheet.rowCount * sheet.columnCount; cells += sheet.cells.length;
 		if (slots > 200_000 || cells > 100_000) return false;
 		for (const [entries, max, field] of [[sheet.rows, sheet.rowCount, "heightPx"], [sheet.columns, sheet.columnCount, "widthPx"]] as const) {
@@ -84,6 +84,15 @@ function border(value: Border | null): string | undefined {
 	return `${width}px ${kind} ${value.color}`;
 }
 
+function columnName(index: number): string {
+	let name = "";
+	for (let n = index; n > 0; n = Math.floor((n - 1) / 26)) name = String.fromCharCode(65 + (n - 1) % 26) + name;
+	return name;
+}
+
+// Like a sheet in Excel, the grid runs on past the last filled cell.
+const MIN_ROWS = 40, MIN_COLUMNS = 12, ROW_HEADER_PX = 44;
+
 export function WorkspaceSpreadsheetPreview({ agentId, conversationId, path }: { agentId: string; conversationId: string; path: string }) {
 	const [workbook, setWorkbook] = useState<Workbook | null>(null);
 	const [sheetIndex, setSheetIndex] = useState(0);
@@ -109,11 +118,14 @@ export function WorkspaceSpreadsheetPreview({ agentId, conversationId, path }: {
 	for (const merge of sheet.merges) for (let row = merge.top; row <= merge.bottom; row++) for (let column = merge.left; column <= merge.right; column++) if (row !== merge.top || column !== merge.left) covered.add(`${row}:${column}`);
 	const heights = new Map(sheet.rows.map((row) => [row.index, row.heightPx]));
 	const widths = new Map(sheet.columns.map((column) => [column.index, column.widthPx]));
-	const tableWidth = Array.from({ length: sheet.columnCount }, (_, index) => widths.get(index + 1) ?? sheet.defaultColumnWidthPx).reduce((sum, width) => sum + width, 0);
-	return <div className="workspace-spreadsheet">{notices.map((notice) => <p key={notice}>{notice}</p>)}{sheet.rowCount === 0 ? <p>This sheet is empty.</p> : <div className="workspace-spreadsheet-scroll"><table style={{ width: tableWidth }}><colgroup>{Array.from({ length: sheet.columnCount }, (_, index) => <col key={index} style={{ width: widths.get(index + 1) ?? sheet.defaultColumnWidthPx }} />)}</colgroup><tbody>{Array.from({ length: sheet.rowCount }, (_, rowIndex) => <tr key={rowIndex} style={{ height: heights.get(rowIndex + 1) ?? sheet.defaultRowHeightPx }}>{Array.from({ length: sheet.columnCount }, (_, columnIndex) => {
+	const rowCount = Math.max(sheet.rowCount, MIN_ROWS), columnCount = Math.max(sheet.columnCount, MIN_COLUMNS);
+	const tableWidth = Array.from({ length: columnCount }, (_, index) => widths.get(index + 1) ?? sheet.defaultColumnWidthPx).reduce((sum, width) => sum + width, ROW_HEADER_PX);
+	return <div className="workspace-spreadsheet">{notices.map((notice) => <p key={notice}>{notice}</p>)}{sheet.rowCount === 0 ? <p>This sheet is empty.</p> : <div className="workspace-spreadsheet-scroll"><table data-gridlines={sheet.showGridLines} style={{ width: tableWidth }}><colgroup><col style={{ width: ROW_HEADER_PX }} />{Array.from({ length: columnCount }, (_, index) => <col key={index} style={{ width: widths.get(index + 1) ?? sheet.defaultColumnWidthPx }} />)}</colgroup><thead><tr><th className="workspace-spreadsheet-corner" aria-hidden="true" />{Array.from({ length: columnCount }, (_, index) => <th key={index} scope="col">{columnName(index + 1)}</th>)}</tr></thead><tbody>{Array.from({ length: rowCount }, (_, rowIndex) => <tr key={rowIndex} style={{ height: heights.get(rowIndex + 1) ?? sheet.defaultRowHeightPx }}><th scope="row">{rowIndex + 1}</th>{Array.from({ length: columnCount }, (_, columnIndex) => {
 		const key = `${rowIndex + 1}:${columnIndex + 1}`;
 		if (covered.has(key)) return null;
 		const cell = cells.get(key), merge = merges.get(key), style = workbook.styles[cell?.style ?? 0];
-		return <td key={key} rowSpan={merge ? merge.bottom - merge.top + 1 : undefined} colSpan={merge ? merge.right - merge.left + 1 : undefined} style={{ ...fontStyle(style), backgroundColor: style.fill ?? "#FFFFFF", borderTop: border(style.borders.top), borderRight: border(style.borders.right), borderBottom: border(style.borders.bottom), borderLeft: border(style.borders.left), textAlign: style.align.horizontal, verticalAlign: style.align.vertical, whiteSpace: style.align.wrap ? "normal" : "nowrap" }} aria-label={cell?.valueKind === "formula-result-unavailable" ? `${cell.text} No calculated value is stored in this file.` : undefined}>{cell?.runs ? cell.runs.map((run, index) => <span key={index} style={fontStyle(workbook.styles[run.style])}>{run.text}</span>) : cell?.text}</td>;
+		// A filled cell hides the gridlines around it, as in Excel.
+		const fillEdge = style.fill ? `1px solid ${style.fill}` : undefined;
+		return <td key={key} rowSpan={merge ? merge.bottom - merge.top + 1 : undefined} colSpan={merge ? merge.right - merge.left + 1 : undefined} style={{ ...fontStyle(style), backgroundColor: style.fill ?? "#FFFFFF", borderTop: border(style.borders.top) ?? fillEdge, borderRight: border(style.borders.right) ?? fillEdge, borderBottom: border(style.borders.bottom) ?? fillEdge, borderLeft: border(style.borders.left) ?? fillEdge, textAlign: style.align.horizontal, verticalAlign: style.align.vertical, whiteSpace: style.align.wrap ? "normal" : "nowrap" }} aria-label={cell?.valueKind === "formula-result-unavailable" ? `${cell.text} No calculated value is stored in this file.` : undefined}>{cell?.runs ? cell.runs.map((run, index) => <span key={index} style={fontStyle(workbook.styles[run.style])}>{run.text}</span>) : cell?.text}</td>;
 	})}</tr>)}</tbody></table></div>}<div className="workspace-spreadsheet-sheets" aria-label="Workbook sheets">{workbook.sheets.map((item, index) => <button type="button" key={item.id} aria-pressed={index === sheetIndex} onClick={() => setSheetIndex(index)}>{item.name}</button>)}</div></div>;
 }

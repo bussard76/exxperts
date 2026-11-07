@@ -625,9 +625,19 @@ function sanitizeWordDocument(document, notices) {
 		}
 	}
 	const escapedCsp = WORD_CSP.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
-	const css = styles.join("\n").replaceAll("<", "\\3c ");
+	// docx-preview paints a grey desk behind its pages; a light desk keeps the white page reading as paper.
+	const css = `${styles.join("\n")}\nbody { margin: 0; background: #f3f0ea; }\n.docx-wrapper { background: #f3f0ea; padding: 24px; }\n.docx-wrapper > section.docx { background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18); margin-bottom: 24px; }`.replaceAll("<", "\\3c ");
 	const html = serializeWordBody(document, `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${escapedCsp}"><style>${css}</style></head>`);
 	return { ok: true, schemaVersion: 1, notices, result: { kind: "word", html } };
+}
+
+// Word also allows sizes like w:sz="4.3mm" (Teams transcripts do this). docx-preview reads only the number,
+// so that text comes out at 2pt. It gets the plain numbers it expects: half-points for font sizes, twips elsewhere.
+function wordMeasuresToNumbers(xml) {
+	const points = (value, unit) => Number(value) * { mm: 72 / 25.4, cm: 72 / 2.54, in: 72, pt: 1, pc: 12, pi: 12 }[unit];
+	return xml
+		.replace(/(<w:(?:sz|szCs|kern|position)\b[^>]*?w:val=")(-?[\d.]+)(mm|cm|in|pt|pc|pi)"/g, (_, start, value, unit) => `${start}${Math.round(points(value, unit) * 2)}"`)
+		.replace(/(\sw:[A-Za-z]+=")(-?[\d.]+)(mm|cm|in|pt|pc|pi)"/g, (_, start, value, unit) => `${start}${Math.round(points(value, unit) * 20)}"`);
 }
 
 async function previewWord(buffer) {
@@ -700,6 +710,7 @@ async function previewWord(buffer) {
 				zip.file(partName, new window.XMLSerializer().serializeToString(partXml));
 			}
 		}
+		for (const part of zip.file(/^word\/[^/]+\.xml$/)) zip.file(part.name, wordMeasuresToNumbers(await part.async("string")));
 		const sanitized = await zip.generateAsync({ type: "nodebuffer", compression: "STORE" });
 		await renderAsync(sanitized, window.document.getElementById("content"), window.document.getElementById("styles"), { inWrapper: true, ignoreWidth: false, ignoreHeight: false, useBase64URL: true });
 		const notices = blocked ? [{ code: "external_resources_blocked", text: "External document resources are blocked." }] : [];
@@ -768,17 +779,96 @@ async function previewPdf(buffer) {
 	}
 }
 
+const EXCEL_DEFAULT_THEME = ["FFFFFF", "000000", "E7E6E6", "44546A", "4472C4", "ED7D31", "A5A5A5", "FFC000", "5B9BD5", "70AD47", "0563C1", "954F72"];
+const EXCEL_INDEXED = "000000 FFFFFF FF0000 00FF00 0000FF FFFF00 FF00FF 00FFFF 000000 FFFFFF FF0000 00FF00 0000FF FFFF00 FF00FF 00FFFF 800000 008000 000080 808000 800080 008080 C0C0C0 808080 9999FF 993366 FFFFCC CCFFFF 660066 FF8080 0066CC CCCCFF 000080 FF00FF FFFF00 00FFFF 800080 800000 008080 0000FF 00CCFF CCFFFF CCFFCC FFFF99 99CCFF FF99CC CC99FF FFCC99 3366FF 33CCCC 99CC00 FFCC00 FF9900 FF6600 666699 969696 003366 339966 003300 333300 993300 993366 333399 333333".split(" ");
+
+// Excel numbers theme colours light before dark, the theme file lists dark first.
+function excelThemePalette(workbook) {
+	const xml = Object.values(workbook.model?.themes ?? {}).find((item) => typeof item === "string") ?? "";
+	const scheme = /<a:clrScheme\b[^]*?<\/a:clrScheme>/.exec(xml)?.[0];
+	if (!scheme) return EXCEL_DEFAULT_THEME;
+	const read = (name, fallback) => {
+		const entry = new RegExp(`<a:${name}>([^]*?)</a:${name}>`).exec(scheme)?.[1] ?? "";
+		return (/lastClr="([0-9a-f]{6})"/i.exec(entry) ?? /srgbClr val="([0-9a-f]{6})"/i.exec(entry))?.[1].toUpperCase() ?? fallback;
+	};
+	return ["lt1", "dk1", "lt2", "dk2", "accent1", "accent2", "accent3", "accent4", "accent5", "accent6", "hlink", "folHlink"].map((name, index) => read(name, EXCEL_DEFAULT_THEME[index]));
+}
+
+function excelTint(hex, tint) {
+	const [r, g, b] = [0, 2, 4].map((at) => parseInt(hex.slice(at, at + 2), 16) / 255);
+	const max = Math.max(r, g, b), min = Math.min(r, g, b), delta = max - min;
+	let l = (max + min) / 2;
+	const s = delta === 0 ? 0 : delta / (1 - Math.abs(2 * l - 1));
+	const h = delta === 0 ? 0 : max === r ? ((g - b) / delta + 6) % 6 : max === g ? (b - r) / delta + 2 : (r - g) / delta + 4;
+	l = tint < 0 ? l * (1 + tint) : l * (1 - tint) + tint;
+	const c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs(h % 2 - 1)), m = l - c / 2;
+	const rgb = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][Math.floor(h) % 6];
+	return rgb.map((part) => Math.round(Math.min(1, Math.max(0, part + m)) * 255).toString(16).padStart(2, "0")).join("").toUpperCase();
+}
+
+function excelColor(value, palette) {
+	if (/^[0-9a-f]{8}$/i.test(value?.argb ?? "")) return `#${value.argb.slice(2).toUpperCase()}`;
+	const base = Number.isInteger(value?.theme) ? palette[value.theme] : Number.isInteger(value?.indexed) ? EXCEL_INDEXED[value.indexed] : undefined;
+	if (!base) return null;
+	const tint = Number(value.tint);
+	return `#${tint ? excelTint(base, Math.max(-1, Math.min(1, tint))) : base}`;
+}
+
+// shortcut: the number and date formats people commonly use, in en-US digits; use a compatible formatter when broader fidelity is approved.
+const excelLiteral = (part) => part.replace(/\[\$([^\]-]*)(?:-[^\]]*)?\]/g, "$1").replace(/\[[^\]]*\]/g, "").replace(/"([^"]*)"/g, "$1").replace(/\\(.)/g, "$1").replace(/_./g, " ").replace(/\*./g, "");
+
+function excelNumberText(value, numFmt) {
+	const sections = numFmt.split(";");
+	const section = value < 0 && sections[1] !== undefined ? sections[1] : value === 0 && sections[2] !== undefined ? sections[2] : sections[0];
+	const signed = value < 0 && sections[1] === undefined;
+	const literal = excelLiteral(section);
+	const core = /[#0?][#0?,]*(?:\.[#0?]*)?|\.[#0?]+/.exec(literal);
+	if (!core) return literal;
+	const percent = literal.includes("%");
+	const digits = Math.min(core[0].split(".")[1]?.length ?? 0, 20);
+	const number = Math.abs(percent ? value * 100 : value).toLocaleString("en-US", { useGrouping: core[0].includes(","), minimumFractionDigits: digits, maximumFractionDigits: digits });
+	return (signed ? "-" : "") + literal.slice(0, core.index) + number + literal.slice(core.index + core[0].length);
+}
+
+function excelDateText(date, numFmt) {
+	const pad = (n, width = 2) => String(n).padStart(width, "0");
+	const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+	const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+	const midnight = date.getUTCHours() === 0 && date.getUTCMinutes() === 0 && date.getUTCSeconds() === 0;
+	const format = excelLiteral((numFmt || (midnight ? "yyyy-mm-dd" : "yyyy-mm-dd hh:mm")).split(";")[0]);
+	const tokens = format.match(/y+|m+|d+|h+|s+|am\/pm|a\/p|[^ymdhs]/gi) ?? [];
+	const twelveHour = tokens.some((token) => /^a/i.test(token) && token.includes("/"));
+	const hours = twelveHour ? date.getUTCHours() % 12 || 12 : date.getUTCHours();
+	return tokens.map((token, index) => {
+		const lower = token.toLowerCase(), size = token.length;
+		if (lower.includes("/") && lower.startsWith("a")) return date.getUTCHours() < 12 ? "AM" : "PM";
+		if (lower[0] === "y") return size <= 2 ? pad(date.getUTCFullYear() % 100) : String(date.getUTCFullYear());
+		if (lower[0] === "d") return size >= 4 ? days[date.getUTCDay()] : size === 3 ? days[date.getUTCDay()].slice(0, 3) : size === 2 ? pad(date.getUTCDate()) : String(date.getUTCDate());
+		if (lower[0] === "h") return size >= 2 ? pad(hours) : String(hours);
+		if (lower[0] === "s") return size >= 2 ? pad(date.getUTCSeconds()) : String(date.getUTCSeconds());
+		if (lower[0] === "m") {
+			// "m" means minutes right after hours or right before seconds, otherwise month.
+			const isField = (item) => /^[ymdhs]/i.test(item);
+			const before = tokens.slice(0, index).findLast(isField), after = tokens.slice(index + 1).find(isField);
+			if (size <= 2 && (/^h/i.test(before ?? "") || /^s/i.test(after ?? ""))) return size === 2 ? pad(date.getUTCMinutes()) : String(date.getUTCMinutes());
+			return size >= 4 ? months[date.getUTCMonth()] : size === 3 ? months[date.getUTCMonth()].slice(0, 3) : size === 2 ? pad(date.getUTCMonth() + 1) : String(date.getUTCMonth() + 1);
+		}
+		return token;
+	}).join("");
+}
+
 function previewSpreadsheet(workbook) {
-	const color = (value, fallback) => /^[0-9a-f]{8}$/i.test(value?.argb ?? "") ? `#${value.argb.slice(2).toUpperCase()}` : fallback;
+	const palette = excelThemePalette(workbook);
+	const color = (value, fallback) => excelColor(value, palette) ?? fallback;
 	const styles = [];
 	const styleIds = new Map();
-	const addStyle = (source = {}) => {
+	const addStyle = (source = {}, generalAlign = "left") => {
 		const font = source.font ?? {}, alignment = source.alignment ?? {}, borders = source.border ?? {};
 		const side = (item) => item?.style ? { style: item.style, color: color(item.color, "#000000") } : null;
 		const style = { fill: source.fill?.type === "pattern" && source.fill.pattern === "solid" ? color(source.fill.fgColor, null) : null,
 			font: { family: font.name || "Arial", sizePt: font.size || 11, color: color(font.color, "#000000"), bold: !!font.bold, italic: !!font.italic, underline: font.underline === "double" ? "double" : font.underline ? "single" : "none", strike: !!font.strike },
 			borders: { top: side(borders.top), right: side(borders.right), bottom: side(borders.bottom), left: side(borders.left) },
-			align: { horizontal: ["left", "center", "right"].includes(alignment.horizontal) ? alignment.horizontal : "left", vertical: ["top", "middle", "bottom"].includes(alignment.vertical) ? alignment.vertical : "bottom", wrap: !!alignment.wrapText } };
+			align: { horizontal: ["left", "center", "right"].includes(alignment.horizontal) ? alignment.horizontal : generalAlign, vertical: ["top", "middle", "bottom"].includes(alignment.vertical) ? alignment.vertical : "bottom", wrap: !!alignment.wrapText } };
 		const key = JSON.stringify(style);
 		if (!styleIds.has(key)) { styleIds.set(key, styles.length); styles.push(style); }
 		return styleIds.get(key);
@@ -802,20 +892,13 @@ function previewSpreadsheet(workbook) {
 				else if (typeof value === "number") valueKind = "number";
 				else if (typeof value === "boolean") valueKind = "boolean";
 				else if (value?.error) valueKind = "error";
-				let text = value == null ? "" : value instanceof Date ? value.toISOString() : value?.error ?? value?.text ?? (value?.richText ? value.richText.map((run) => run.text).join("") : String(value));
-				// shortcut: common numeric formats only; use a compatible formatter when broader fidelity is approved.
-				if (typeof value === "number" && cell.numFmt && /[0#]/.test(cell.numFmt)) {
-					const format = cell.numFmt.split(";")[0], decimal = /\.([0#]+)/.exec(format), percent = format.includes("%");
-					const digits = Math.min(decimal?.[1].length ?? 0, 20);
-					text = (percent ? value * 100 : value).toLocaleString("en-US", { useGrouping: format.includes(","), minimumFractionDigits: digits, maximumFractionDigits: digits });
-					const prefix = /^"([^"]*)"/.exec(format)?.[1] ?? (/^\$/.test(format) ? "$" : "");
-					text = prefix + text + (percent ? "%" : "");
-				}
-				cells.push({ row: rowNumber, column: columnNumber, text, style: addStyle(cell.style), runs: null, valueKind });
+				let text = value == null ? "" : value instanceof Date ? excelDateText(value, cell.numFmt) : value?.error ?? value?.text ?? (value?.richText ? value.richText.map((run) => run.text).join("") : String(value));
+				if (typeof value === "number" && cell.numFmt && /[0#]/.test(cell.numFmt)) text = excelNumberText(value, cell.numFmt);
+				cells.push({ row: rowNumber, column: columnNumber, text, style: addStyle(cell.style, typeof value === "number" || value instanceof Date ? "right" : typeof value === "boolean" || value?.error ? "center" : "left"), runs: null, valueKind });
 			});
 		});
 		for (let i = 1; i <= columnCount; i++) { const width = sheet.getColumn(i).width; if (width) columns.push({ index: i, widthPx: Math.round(width * 7 + 5) }); }
-		return { id: String(index + 1), name: sheet.name, visibility: sheet.state, rowCount, columnCount, defaultRowHeightPx: (sheet.properties.defaultRowHeight || 15) * 4 / 3, defaultColumnWidthPx: Math.round((sheet.properties.defaultColWidth || 8.43) * 7 + 5), rows, columns, cells, merges };
+		return { id: String(index + 1), name: sheet.name, visibility: sheet.state, showGridLines: sheet.views?.[0]?.showGridLines !== false, rowCount, columnCount, defaultRowHeightPx: (sheet.properties.defaultRowHeight || 15) * 4 / 3, defaultColumnWidthPx: Math.round((sheet.properties.defaultColWidth || 8.43) * 7 + 5), rows, columns, cells, merges };
 	});
 	return { ok: true, schemaVersion: 1, notices: [], result: { kind: "spreadsheet", workbook: { dateSystem: workbook.properties.date1904 ? "1904" : "1900", styles, sheets } } };
 }
