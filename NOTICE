@@ -13,3 +13,11 @@ The adapted Omnigent source is licensed under the Apache License, Version 2.0;
 its source paths, fixed commit, and exxperts changes are identified in the
 relevant source-file headers. No Omnigent third-party runtime dependencies are
 included by this port.
+
+The PPTX and Excalidraw preview frames use @aiden0z/pptx-renderer 1.4.0
+(Apache-2.0) and @excalidraw/excalidraw 0.18.1 (MIT). Their dependency
+inventory, included licence and notice texts, and sources for packages that
+omit those texts are in apps/web-ui/public/renderer-notices.txt and ship in
+the built web UI as renderer-notices.txt. The Excalidraw version-tag licence
+source is https://github.com/excalidraw/excalidraw/blob/v0.18.1/LICENSE;
+its installed npm package does not contain that licence file.

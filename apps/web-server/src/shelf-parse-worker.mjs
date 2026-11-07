@@ -266,8 +266,9 @@ function previewError(code) {
 function readPreviewSnapshot(request) {
 	const fd = fs.openSync(request.absolutePath, "r");
 	try {
+		// Not ctime: it moves on metadata alone (seen on files whose content was a day old), and the content is what must not change.
 		const matches = (stat) => stat.isFile() && String(stat.dev) === request.expected.dev && String(stat.ino) === request.expected.ino
-			&& stat.size === request.expected.size && stat.mtimeMs === request.expected.mtimeMs && stat.ctimeMs === request.expected.ctimeMs;
+			&& stat.size === request.expected.size && stat.mtimeMs === request.expected.mtimeMs;
 		const before = fs.fstatSync(fd);
 		if (!matches(before)) throw previewError("file_changed");
 		if (before.size > 26_214_400) throw previewError("file_too_large");
@@ -511,7 +512,7 @@ function denyPreviewNetwork() {
 }
 
 const WORD_CSP = "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
-const WORD_CSS_PROPERTIES = new Set(("background background-color border border-top border-right border-bottom border-left border-color border-style border-width border-collapse border-spacing border-radius box-sizing color display direction font font-family font-size font-style font-weight font-variant height line-height margin margin-top margin-right margin-bottom margin-left max-height max-width min-height min-width overflow overflow-wrap padding padding-top padding-right padding-bottom padding-left page-break-after page-break-before page-break-inside position text-align text-decoration text-indent text-transform vertical-align white-space width word-break word-spacing letter-spacing list-style-type table-layout").split(" "));
+const WORD_CSS_PROPERTIES = new Set(("background background-color border border-top border-right border-bottom border-left border-color border-style border-width border-collapse border-spacing border-radius box-sizing color display direction flex flex-basis flex-direction flex-flow flex-grow flex-shrink flex-wrap align-items align-self justify-content z-index font font-family font-size font-style font-weight font-variant height line-height margin margin-top margin-right margin-bottom margin-left max-height max-width min-height min-width overflow overflow-wrap padding padding-top padding-right padding-bottom padding-left page-break-after page-break-before page-break-inside position text-align text-decoration text-indent text-transform vertical-align white-space width word-break word-spacing letter-spacing list-style-type table-layout").split(" "));
 
 function safeWordStyle(style, markBlocked) {
 	const declarations = [];
@@ -626,7 +627,7 @@ function sanitizeWordDocument(document, notices) {
 	}
 	const escapedCsp = WORD_CSP.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
 	// docx-preview paints a grey desk behind its pages; a light desk keeps the white page reading as paper.
-	const css = `${styles.join("\n")}\nbody { margin: 0; background: #f3f0ea; }\n.docx-wrapper { background: #f3f0ea; padding: 24px; }\n.docx-wrapper > section.docx { background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18); margin-bottom: 24px; }`.replaceAll("<", "\\3c ");
+	const css = `${styles.join("\n")}\nbody { margin: 0; background: #f3f0ea; }\n.docx-wrapper { background: #f3f0ea; padding: 24px; align-items: safe center; width: fit-content; min-width: 100%; box-sizing: border-box; }\n.docx-wrapper > section.docx { flex: none; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18); margin-bottom: 24px; }`.replaceAll("<", "\\3c ");
 	const html = serializeWordBody(document, `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${escapedCsp}"><style>${css}</style></head>`);
 	return { ok: true, schemaVersion: 1, notices, result: { kind: "word", html } };
 }

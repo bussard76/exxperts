@@ -77,6 +77,31 @@ function ninePagePdf(): Buffer {
 const folder = path.join(tempHome, "Projects", "archive");
 fs.mkdirSync(folder, { recursive: true });
 fs.writeFileSync(path.join(folder, "photo.png"), ONE_PIXEL_PNG);
+fs.writeFileSync(path.join(folder, "single.excalidraw"), JSON.stringify({ elements: [] }).padEnd(500));
+const demoFrame = (id: string, x: number, isDeleted = false) => ({ id, type: "frame", x, y: 0, width: 200, height: 100, angle: 0, strokeColor: "#000000", backgroundColor: "transparent", fillStyle: "solid", strokeWidth: 1, strokeStyle: "solid", roughness: 1, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: 1, version: 1, versionNonce: 1, isDeleted, boundElements: null, updated: 1, link: null, locked: false, name: id });
+fs.writeFileSync(path.join(folder, "frames.excalidraw"), JSON.stringify({ elements: [demoFrame("First", 0), demoFrame("Second", 250), demoFrame("Deleted", 500, true)] }));
+fs.writeFileSync(path.join(folder, "hostile.excalidraw"), JSON.stringify({ elements: [{ ...demoFrame("<script>invented</script>", 0), link: "https://example.invalid/hostile-link" }, demoFrame("Other", 250)] }));
+fs.writeFileSync(path.join(folder, "external-image.excalidraw"), JSON.stringify({ elements: [{ ...demoFrame("Image", 0), type: "image", fileId: "external", status: "saved", scale: [1, 1], crop: null }], files: { external: { id: "external", mimeType: "image/png", dataURL: "https://example.invalid/hostile-image", created: 1 } } }));
+fs.writeFileSync(path.join(folder, "one.excalidraw"), JSON.stringify({ elements: [demoFrame("Only", 0)] }));
+{
+	const { default: JSZip } = await import("jszip");
+	const zip = new JSZip();
+	zip.file("[Content_Types].xml", `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>`);
+	zip.file("ppt/presentation.xml", `<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst><p:sldSz cx="9144000" cy="5143500" type="screen16x9"/></p:presentation>`);
+	zip.file("ppt/_rels/presentation.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/></Relationships>`);
+	zip.file("ppt/slides/slide1.xml", `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="914400" y="914400"/><a:ext cx="4572000" cy="914400"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="2400"/><a:t>Invented slide</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`);
+	fs.writeFileSync(path.join(folder, "invented.pptx"), await zip.generateAsync({ type: "nodebuffer" }));
+	const slide = await zip.file("ppt/slides/slide1.xml")!.async("string");
+	zip.file("ppt/slides/slide1.xml", slide.replace("xmlns:a=", 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:a=').replace('<a:rPr lang="en-US" sz="2400"/>', '<a:rPr lang="en-US" sz="2400"><a:hlinkClick r:id="rIdHostile"/></a:rPr>').replace("</p:spTree>", `<p:pic><p:nvPicPr><p:cNvPr id="3" name="External image"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:link="rIdImage"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic></p:spTree>`));
+	zip.file("ppt/slides/_rels/slide1.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdHostile" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.invalid/hostile-link" TargetMode="External"/><Relationship Id="rIdImage" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="https://example.invalid/hostile-image" TargetMode="External"/></Relationships>`);
+	fs.writeFileSync(path.join(folder, "hostile.pptx"), await zip.generateAsync({ type: "nodebuffer" }));
+}
+fs.writeFileSync(path.join(folder, "broken.pptx"), "invented broken deck");
+fs.writeFileSync(path.join(folder, "broken.excalidraw"), "invalid json");
+fs.writeFileSync(path.join(folder, "second.excalidraw"), JSON.stringify({ elements: [] }));
+fs.writeFileSync(path.join(folder, "good.json"), '{"invented":1}');
+fs.writeFileSync(path.join(folder, "invalid.json"), '{invalid');
+fs.writeFileSync(path.join(folder, "markup.txt"), Buffer.from([60, 115, 99, 114, 105, 112, 116, 62, 0xc3, 0x28]));
 fs.writeFileSync(path.join(folder, "slow.png"), ONE_PIXEL_PNG);
 {
 	const { createCanvas } = await import("@napi-rs/canvas");
@@ -90,6 +115,18 @@ fs.writeFileSync(path.join(folder, "slow.png"), ONE_PIXEL_PNG);
 }
 fs.writeFileSync(path.join(folder, "report.pdf"), ninePagePdf());
 fs.writeFileSync(path.join(folder, "report.docx"), await smallDocx());
+{
+	const { default: JSZip } = await import("jszip");
+	const zip = await JSZip.loadAsync(await smallDocx());
+	const document = await zip.file("word/document.xml")!.async("string");
+	zip.file("word/document.xml", document.replace("</w:body>", `<w:p><w:r><w:br w:type="page"/></w:r></w:p><w:p><w:r><w:t>Second invented page</w:t></w:r></w:p><w:sectPr><w:footerReference w:type="default" r:id="rIdFooter"/><w:pgSz w:w="24000" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:footer="720"/></w:sectPr></w:body>`));
+	const rels = await zip.file("word/_rels/document.xml.rels")!.async("string");
+	zip.file("word/_rels/document.xml.rels", rels.replace("</Relationships>", `<Relationship Id="rIdFooter" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/></Relationships>`));
+	const types = await zip.file("[Content_Types].xml")!.async("string");
+	zip.file("[Content_Types].xml", types.replace("</Types>", `<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/></Types>`));
+	zip.file("word/footer1.xml", `<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:r><w:t>Invented footer</w:t></w:r></w:p></w:ftr>`);
+	fs.writeFileSync(path.join(folder, "wide-pages.docx"), await zip.generateAsync({ type: "nodebuffer" }));
+}
 {
 	const { default: ExcelJS } = await import("exceljs");
 	const workbook = new ExcelJS.Workbook();
@@ -214,6 +251,7 @@ try {
 
 		let imageRequests = 0;
 		let previewRequests = 0;
+		let singleFileFetches = 0;
 		let openStatus = 202;
 		const openRequests: { method: string; body: unknown; intent: string | undefined }[] = [];
 		await page.route("**/workspace-open", async (route) => {
@@ -226,8 +264,188 @@ try {
 		});
 		page.on("request", (request) => {
 			if (request.url().includes("/workspace-image?")) imageRequests += 1;
-			if (request.url().includes("/workspace-preview?")) previewRequests += 1;
+			if (request.url().includes("/workspace-preview?")) {
+				previewRequests += 1;
+				const url = new URL(request.url());
+				if (url.searchParams.get("path") === "single.excalidraw" && url.searchParams.get("frame") !== "1") singleFileFetches += 1;
+			}
 		});
+		await page.evaluate(() => { (window as any).replacementBytes = 0; (window as any).replacementReady = false; (window as any).repeatBytes = 0; window.addEventListener("message", (event) => { if (event.data?.kind === "replacement-ready") (window as any).replacementReady = true; if (event.data?.kind === "repeat-received") (window as any).repeatBytes = event.data.length; if (event.data?.kind === "replacement-received") (window as any).replacementBytes = event.data.length; }); });
+		const fakeFrame = `<script>let received = false; onmessage = e => { if (e.data instanceof ArrayBuffer) { if (received) parent.postMessage({kind: "repeat-received", length: e.data.byteLength}, "*"); else { received = true; parent.postMessage({kind: "frame-rendered"}, "*"); parent.postMessage({kind: "frame-ready"}, "*"); setTimeout(() => location.href = "/replacement-frame", 100); } } }; parent.postMessage({kind: "frame-ready"}, "*");</script>`;
+		const replacement = `<script>onmessage = e => { if (e.data instanceof ArrayBuffer) parent.postMessage({kind: "replacement-received", length: e.data.byteLength}, "*"); }; parent.postMessage({kind: "replacement-ready"}, "*"); parent.postMessage({kind: "frame-ready"}, "*");</script>`;
+		await page.route("**/replacement-frame", (route) => route.fulfill({ status: 200, contentType: "text/html", body: replacement }));
+		await page.route("**/workspace-preview?*", (route) => {
+			const url = new URL(route.request().url());
+			if (url.searchParams.get("path") === "single.excalidraw" && url.searchParams.get("frame") === "1") return route.fulfill({ status: 200, contentType: "text/html", body: fakeFrame });
+			return route.continue();
+		});
+		await treeFile("single.excalidraw").click();
+		await page.locator(".workspace-preview-pptx-loading").waitFor({ state: "hidden", timeout: 30_000 });
+		await waitUntil(() => page.evaluate(() => (window as any).replacementReady), "replacement frame loaded");
+		await page.waitForTimeout(1000);
+		assert(await page.evaluate(() => (window as any).repeatBytes) === 0, "repeated ready cannot receive the file again");
+		assert(await page.evaluate(() => (window as any).replacementBytes) === 0 && singleFileFetches === 1, "a replacement frame cannot receive or refetch the 500-byte file");
+		await tab("single.excalidraw").getByRole("button", { name: /close/i }).click();
+		await page.unroute("**/workspace-preview?*");
+		await page.unroute("**/replacement-frame");
+		await treeFile("single.excalidraw").click();
+		await page.locator(".workspace-preview-pptx-loading").waitFor({ state: "hidden", timeout: 30_000 });
+		assert(await page.locator(".workspace-preview-html iframe").count() === 1, "the actual Excalidraw renderer accepts the route bytes");
+		await page.emulateMedia({ reducedMotion: "reduce" });
+		const drawing = page.frameLocator(".workspace-preview-html iframe");
+		const zoom = drawing.locator(".tools span");
+		const initialZoom = parseInt((await zoom.textContent())!, 10);
+		await drawing.getByRole("button", { name: "Zoom in" }).click();
+		await waitUntil(async () => parseInt((await zoom.textContent())!, 10) > initialZoom, "frame zoom in");
+		await drawing.getByRole("button", { name: "Fit" }).click();
+		assert(parseInt((await zoom.textContent())!, 10) === initialZoom, "Fit restores the original frame zoom");
+		await page.emulateMedia({ reducedMotion: "no-preference" });
+		const directFrameUrl = new URL((await page.locator(".workspace-preview-html iframe").getAttribute("src"))!, baseUrl).href;
+		const directRenderer = await context.newPage();
+		const directResponse = await directRenderer.goto(directFrameUrl);
+		const rendererCsp = directResponse?.headers()["content-security-policy"] ?? "";
+		assert(rendererCsp.includes("sandbox allow-scripts") && rendererCsp.includes("connect-src 'none'") && rendererCsp.includes("form-action 'none'") && rendererCsp.includes("img-src data: blob:"), "direct renderer retains the opaque sandbox and blocked external resources");
+		assert(await directRenderer.evaluate(() => { try { void document.cookie; return false; } catch { return true; } }), "direct renderer has no cookie access");
+		assert(await directRenderer.locator("#slides").count() === 1 && await directRenderer.locator("#slides").textContent() === "", "direct renderer navigation gets no workspace file bytes");
+		await directRenderer.close();
+		await treeFile("second.excalidraw").click();
+		await page.locator(".workspace-preview-content:not([hidden]) .workspace-preview-pptx-loading").waitFor({ state: "hidden", timeout: 30_000 });
+		assert(await page.locator(".workspace-preview-html iframe").count() === 2, "two framed tabs retain independent frames");
+		await tab("single.excalidraw").locator(".workspace-tab-select").click();
+		assert(await page.locator(".workspace-preview-content[hidden] .workspace-preview-html iframe").count() === 1, "switching keeps the other frame hidden and mounted");
+		await tab("single.excalidraw").locator(".workspace-tab-select").dragTo(tab("second.excalidraw").locator(".workspace-tab-select"));
+		assert(await page.locator(".workspace-preview-html iframe").count() === 2, "reordering retains both frames");
+		await tab("second.excalidraw").getByRole("button", { name: /close/i }).click();
+		await tab("single.excalidraw").getByRole("button", { name: /close/i }).click();
+		await page.route("**/workspace-preview?*", (route) => {
+			const url = new URL(route.request().url());
+			if (url.searchParams.get("path") === "single.excalidraw" && url.searchParams.get("frame") === "1") return route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><p>waiting</p>" });
+			return route.continue();
+		});
+		await treeFile("single.excalidraw").click();
+		await page.locator(".workspace-preview-html iframe").waitFor();
+		await tab("single.excalidraw").getByRole("button", { name: /close/i }).click();
+		assert(await page.locator(".workspace-preview-html iframe").count() === 0, "closing a loading tab removes its frame");
+		await page.evaluate(() => {
+			const original = window.setTimeout;
+			(window as any).restorePreviewTimer = () => { window.setTimeout = original; };
+			window.setTimeout = ((handler: TimerHandler, delay?: number, ...args: any[]) => original(handler, delay === 30_000 ? 100 : delay, ...args)) as typeof window.setTimeout;
+		});
+		await treeFile("single.excalidraw").click();
+		await page.getByText("This preview took too long to load.").waitFor({ timeout: 10_000 });
+		await page.evaluate(() => (window as any).restorePreviewTimer());
+		await tab("single.excalidraw").getByRole("button", { name: /close/i }).click();
+		await page.unroute("**/workspace-preview?*");
+		let releasePending!: () => void;
+		const pendingResponse = new Promise<void>((resolve) => { releasePending = resolve; });
+		let pendingStarted = false, pendingAborted = false;
+		const abortedRequest = (request: import("playwright").Request) => { if (request.url().includes("path=single.excalidraw")) pendingAborted = true; };
+		page.on("requestfailed", abortedRequest);
+		await page.route("**/workspace-preview?*", async (route) => {
+			const url = new URL(route.request().url());
+			if (url.searchParams.get("path") !== "single.excalidraw" || url.searchParams.has("frame")) return route.continue();
+			pendingStarted = true;
+			await pendingResponse;
+			await route.abort().catch(() => {});
+		});
+		await treeFile("single.excalidraw").click();
+		await waitUntil(() => Promise.resolve(pendingStarted), "pending frame file request");
+		await tab("single.excalidraw").getByRole("button", { name: /close/i }).click();
+		await waitUntil(() => Promise.resolve(pendingAborted), "closing aborts the frame file request");
+		releasePending();
+		page.off("requestfailed", abortedRequest);
+		await page.unroute("**/workspace-preview?*");
+		let frameExternalRequests = 0;
+		await context.route("https://example.invalid/**", async (route) => { frameExternalRequests++; await route.abort(); });
+		await treeFile("hostile.excalidraw").click();
+		const hostileDrawing = page.frameLocator(".workspace-preview-html iframe");
+		await hostileDrawing.getByRole("button", { name: "<script>invented</script>", exact: true }).waitFor({ timeout: 30_000 });
+		await hostileDrawing.locator("body").evaluate(() => {
+			void fetch("https://example.invalid/hostile-fetch").catch(() => {});
+			const image = document.createElement("img"); image.src = "https://example.invalid/hostile-image"; document.body.append(image);
+			const form = document.createElement("form"); form.action = "https://example.invalid/hostile-form"; document.body.append(form); form.submit();
+		});
+		await page.waitForTimeout(200);
+		assert(await hostileDrawing.locator("script[src]").count() === 0 && frameExternalRequests === 0, "script-like drawing labels stay inert and do not request external resources");
+		await tab("hostile.excalidraw").getByRole("button", { name: /close/i }).click();
+		await treeFile("external-image.excalidraw").click();
+		await page.locator(".workspace-preview-pptx-loading").waitFor({ state: "hidden", timeout: 30_000 });
+		assert(frameExternalRequests === 0, "a drawing with an external image makes no external request");
+		await tab("external-image.excalidraw").getByRole("button", { name: /close/i }).click();
+		await treeFile("hostile.pptx").click();
+		await page.frameLocator(".workspace-preview-html iframe").getByText("Invented slide", { exact: true }).waitFor({ timeout: 30_000 });
+		assert(frameExternalRequests === 0, "a PPTX with an external link makes no external request");
+		await tab("hostile.pptx").getByRole("button", { name: /close/i }).click();
+		await context.unroute("https://example.invalid/**");
+		await treeFile("frames.excalidraw").click();
+		const frames = page.frameLocator(".workspace-preview-html iframe");
+		await frames.getByRole("button", { name: "First", exact: true }).waitFor({ timeout: 30_000 });
+		assert(await frames.getByRole("button", { name: "Second", exact: true }).count() === 1 && await frames.getByRole("button", { name: "Deleted", exact: true }).count() === 0, "two live frames become tabs and deleted frames are omitted");
+		await frames.getByRole("button", { name: "Second", exact: true }).click();
+		assert(await frames.getByRole("button", { name: "Second", exact: true }).getAttribute("aria-pressed") === "true", "drawing frame tabs select the requested frame");
+		await page.emulateMedia({ reducedMotion: "reduce" });
+		const frameZoom = frames.locator(".tools span");
+		for (let i = 0; i < 40; i++) await frames.getByRole("button", { name: "Zoom in" }).click();
+		await waitUntil(async () => await frameZoom.textContent() === "3200%", "frame maximum zoom");
+		const drawingStage = frames.locator(".stage");
+		const content = frames.locator(".content");
+		const beforeDrag = await content.evaluate((node) => getComputedStyle(node).transform);
+		const drawingStageBox = (await drawingStage.boundingBox())!;
+		await page.mouse.move(drawingStageBox.x + drawingStageBox.width / 2, drawingStageBox.y + drawingStageBox.height / 2);
+		await page.mouse.down(); await page.mouse.move(drawingStageBox.x + drawingStageBox.width / 2 - 30, drawingStageBox.y + drawingStageBox.height / 2 - 20); await page.mouse.up();
+		assert(await content.evaluate((node) => getComputedStyle(node).transform) !== beforeDrag, "drag moves a zoomed drawing");
+		const anchorX = drawingStageBox.x + drawingStageBox.width / 2, anchorY = drawingStageBox.y + drawingStageBox.height / 2;
+		const beforeAnchor = (await content.boundingBox())!;
+		await page.mouse.move(anchorX, anchorY); await page.mouse.wheel(0, 50);
+		await waitUntil(async () => await frameZoom.textContent() !== "3200%", "wheel changes maximum zoom");
+		const afterAnchor = (await content.boundingBox())!;
+		assert(Math.abs((anchorX - beforeAnchor.x) / beforeAnchor.width - (anchorX - afterAnchor.x) / afterAnchor.width) < 0.02 && Math.abs((anchorY - beforeAnchor.y) / beforeAnchor.height - (anchorY - afterAnchor.y) / afterAnchor.height) < 0.02, "wheel keeps the drawing point under the pointer");
+		for (let i = 0; i < 80; i++) await frames.getByRole("button", { name: "Zoom out" }).click();
+		await waitUntil(async () => await frameZoom.textContent() === "2%", "frame minimum zoom");
+		await frames.getByRole("button", { name: "Fit" }).click();
+		const fittedZoom = await frameZoom.textContent();
+		await drawingStage.dblclick();
+		await waitUntil(async () => await frameZoom.textContent() !== fittedZoom, "frame double-click zoom");
+		await frames.getByRole("button", { name: "Fit" }).click();
+		const beforeWheel = await frameZoom.textContent();
+		await page.mouse.move(drawingStageBox.x + drawingStageBox.width / 2, drawingStageBox.y + drawingStageBox.height / 2); await page.mouse.wheel(0, -100);
+		await waitUntil(async () => await frameZoom.textContent() !== beforeWheel, "frame wheel zoom");
+		await frames.getByRole("button", { name: "Fit" }).click();
+		const stageHeight = (await drawingStage.boundingBox())!.height;
+		await page.setViewportSize({ width: 1400, height: 700 });
+		await waitUntil(async () => (await drawingStage.boundingBox())!.height !== stageHeight, "drawing resizes with its pane");
+		await page.setViewportSize({ width: 1400, height: 900 });
+		await page.emulateMedia({ reducedMotion: "no-preference" });
+		await tab("frames.excalidraw").getByRole("button", { name: /close/i }).click();
+		await treeFile("one.excalidraw").click();
+		await page.locator(".workspace-preview-pptx-loading").waitFor({ state: "hidden", timeout: 30_000 });
+		assert(await page.frameLocator(".workspace-preview-html iframe").locator(".pages").count() === 0, "a single drawing frame does not create a tab bar");
+		await tab("one.excalidraw").getByRole("button", { name: /close/i }).click();
+		const previousTheme = await page.evaluate(() => { const previous = document.documentElement.dataset.theme; document.documentElement.dataset.theme = "dark"; return previous; });
+		await treeFile("one.excalidraw").click();
+		await page.locator(".workspace-preview-pptx-loading").waitFor({ state: "hidden", timeout: 30_000 });
+		assert(await page.frameLocator(".workspace-preview-html iframe").locator("html").getAttribute("data-theme") === "dark", "drawing frame receives the dark theme");
+		await tab("one.excalidraw").getByRole("button", { name: /close/i }).click();
+		await page.evaluate((theme) => { if (theme === undefined) delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = theme; }, previousTheme);
+		await treeFile("invented.pptx").click();
+		await page.frameLocator(".workspace-preview-html iframe").getByText("Invented slide", { exact: true }).waitFor({ timeout: 30_000 });
+		const directPptx = await context.newPage();
+		const directPptxUrl = new URL((await page.locator(".workspace-preview-html iframe").getAttribute("src"))!, baseUrl).href;
+		const directPptxResponse = await directPptx.goto(directPptxUrl);
+		assert((directPptxResponse?.headers()["content-security-policy"] ?? "").includes("sandbox allow-scripts") && await directPptx.locator("#slides").textContent() === "", "direct PPTX frame navigation has no file bytes and stays sandboxed");
+		await directPptx.close();
+		await tab("invented.pptx").getByRole("button", { name: /close/i }).click();
+		for (const name of ["broken.pptx", "broken.excalidraw"]) {
+			await treeFile(name).click();
+			await page.getByText("This file is damaged or cannot be read.").waitFor({ timeout: 30_000 });
+			await tab(name).getByRole("button", { name: /close/i }).click();
+		}
+		for (const [name, expected] of [["good.json", '{\n  "invented": 1\n}'], ["invalid.json", '{invalid'], ["markup.txt", '<script>�(']] as const) {
+			await treeFile(name).click();
+			await page.locator(".workspace-preview-text pre").getByText(expected, { exact: true }).waitFor();
+			assert(await page.locator(".workspace-preview-text script").count() === 0, `${name} remains inert text`);
+			await tab(name).getByRole("button", { name: /close/i }).click();
+		}
         const forbiddenRequests: string[] = [];
         context.on("requestfinished", request => { if (/hostile-(fetch|api|xhr|ws|image|form)/.test(request.url())) forbiddenRequests.push(request.url()); });
         await treeFile("hostile.html").click();
@@ -616,6 +834,21 @@ try {
 			if (route.request().url().includes("example.invalid")) { externalRequests++; await route.abort(); }
 			else await route.continue();
 		});
+		await treeFile("wide-pages.docx").click();
+		const wideWord = page.frameLocator(".workspace-preview-word iframe");
+		await wideWord.getByText("Second invented page", { exact: true }).waitFor({ timeout: 20_000 });
+		const pageLayout = await wideWord.locator(".docx-wrapper").evaluate((wrapper) => {
+			const pages = [...wrapper.querySelectorAll("section.docx")];
+			const footer = [...wrapper.querySelectorAll("*")].find((node) => node.textContent?.trim() === "Invented footer");
+			const body = pages[0]?.querySelector("article");
+			const scroll = wrapper.ownerDocument.scrollingElement!;
+			scroll.scrollLeft = 0;
+			const firstLeft = scroll.scrollLeft;
+			scroll.scrollLeft = scroll.scrollWidth;
+			return { firstLeft, count: pages.length, footerMarkup: footer?.parentElement?.outerHTML.slice(0, 500), firstBottom: pages[0]?.getBoundingClientRect().bottom, secondTop: pages[1]?.getBoundingClientRect().top, footerTop: footer?.getBoundingClientRect().top, bodyBottom: body?.getBoundingClientRect().bottom, scrollLeft: scroll.scrollLeft };
+		});
+		assert(pageLayout.count >= 2 && pageLayout.secondTop! >= pageLayout.firstBottom! && pageLayout.footerTop! >= pageLayout.bodyBottom! && pageLayout.firstLeft === 0 && pageLayout.scrollLeft > 0, `Word pages stack, footer follows text and wide pages scroll: ${JSON.stringify(pageLayout)}`);
+		await tab("wide-pages.docx").getByRole("button", { name: /close/i }).click();
 		await treeFile("report.docx").click();
 		const wordFrame = page.locator(".workspace-preview-word iframe");
 		await wordFrame.waitFor({ timeout: 20_000 });

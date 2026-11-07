@@ -40,7 +40,7 @@ export function WorkspaceImagePreview({ agentId, conversationId, path }: { agent
 		return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
 	}, [agentId, conversationId, path]);
 
-	// A picture smaller than the stage stays centred; a larger one cannot leave a gap at its edges.
+	// A picture narrower than the stage stays centred; a larger one cannot leave a gap at its edges.
 	function clampAxis(offset: number, content: number, stage: number): number {
 		if (content <= stage) return (stage - content) / 2;
 		return Math.min(0, Math.max(stage - content, offset));
@@ -50,7 +50,9 @@ export function WorkspaceImagePreview({ agentId, conversationId, path }: { agent
 		if (!stage || !image) return;
 		const current = view.current;
 		current.x = clampAxis(current.x, size.current.width * current.scale, stage.clientWidth);
-		current.y = clampAxis(current.y, size.current.height * current.scale, stage.clientHeight);
+		// Vertically a picture that fits sits at the top, like a document.
+		const height = size.current.height * current.scale;
+		current.y = height <= stage.clientHeight - FIT_PADDING ? FIT_PADDING : clampAxis(current.y, height, stage.clientHeight);
 		image.style.transform = `translate(${current.x}px, ${current.y}px) scale(${current.scale})`;
 		// Past 400% the pixels themselves are what someone is looking at.
 		image.style.imageRendering = current.scale > 4 ? "pixelated" : "auto";

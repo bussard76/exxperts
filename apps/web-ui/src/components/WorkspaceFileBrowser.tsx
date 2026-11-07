@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { WORKSPACE_PATH_DRAG_TYPE } from "../composer-text-insertion";
 import { listWorkspaceFiles, type WorkspaceFileEntry } from "../workspace-files-api";
+import { useHoverTooltip } from "./workspace-hover-tooltip";
 
 interface Props {
 	agentId: string;
@@ -110,6 +111,8 @@ export function WorkspaceFileBrowser({ agentId, conversationId, selectedPath = n
 		if (!entriesByPath[entry.relativePath] && !loadingPaths.has(entry.relativePath)) void loadDirectory(entry.relativePath);
 	}
 
+	const { show: showTooltip, hide: hideTooltip, tooltip } = useHoverTooltip();
+
 	function renderEntries(relativePath: string, depth: number): ReactNode {
 		return (entriesByPath[relativePath] ?? []).map((entry) => {
 			const isDirectory = entry.kind === "directory";
@@ -124,7 +127,9 @@ export function WorkspaceFileBrowser({ agentId, conversationId, selectedPath = n
 							className="workspace-file-browser-entry workspace-file-browser-directory"
 							style={{ paddingLeft: `${10 + depth * 14}px` }}
 							aria-expanded={isOpen}
-							title={isOpen ? `Collapse ${entry.name}` : `Expand ${entry.name}`}
+							aria-label={isOpen ? `Collapse ${entry.name}` : `Expand ${entry.name}`}
+							onMouseEnter={(event) => showTooltip(event, entry.name)}
+							onMouseLeave={hideTooltip}
 							onClick={() => toggleDirectory(entry)}
 						>
 							<span className="workspace-file-browser-caret" aria-hidden="true">{isOpen ? "▾" : "▸"}</span>
@@ -139,9 +144,11 @@ export function WorkspaceFileBrowser({ agentId, conversationId, selectedPath = n
 							className={`workspace-file-browser-entry workspace-file-browser-file${selectedPath === entry.relativePath ? " selected" : ""}`}
 							aria-current={selectedPath === entry.relativePath ? "true" : undefined}
 							style={{ paddingLeft: `${24 + depth * 14}px` }}
-							title={onFileSelect ? entry.relativePath : "File actions will be added later"}
+							onMouseEnter={(event) => showTooltip(event, entry.name)}
+							onMouseLeave={hideTooltip}
 							draggable
 							onDragStart={(event) => {
+								hideTooltip();
 								event.dataTransfer.setData(WORKSPACE_PATH_DRAG_TYPE, entry.relativePath);
 								event.dataTransfer.setData("text/plain", entry.relativePath);
 								event.dataTransfer.effectAllowed = "copy";
@@ -154,7 +161,7 @@ export function WorkspaceFileBrowser({ agentId, conversationId, selectedPath = n
 					)}
 					{isDirectory && isOpen && (
 						<div className="workspace-file-browser-children">
-							{isLoading && !childEntries ? <p className="workspace-file-browser-status">Loading…</p> : childEntries?.length === 0 ? <p className="workspace-file-browser-status">Empty folder.</p> : renderEntries(entry.relativePath, depth + 1)}
+							{isLoading && !childEntries ? <p className="workspace-file-browser-status" style={{ paddingLeft: `${24 + (depth + 1) * 14}px` }}>Loading…</p> : childEntries?.length === 0 ? <p className="workspace-file-browser-status" style={{ paddingLeft: `${24 + (depth + 1) * 14}px` }}>Empty folder.</p> : renderEntries(entry.relativePath, depth + 1)}
 						</div>
 					)}
 				</Fragment>
@@ -169,6 +176,7 @@ export function WorkspaceFileBrowser({ agentId, conversationId, selectedPath = n
 				{root && <span className="workspace-file-browser-count">{entriesByPath[ROOT_PATH]?.length ?? 0}</span>}
 			</header>
 			{loading ? <p className="workspace-file-browser-status">Loading…</p> : error ? <p className="workspace-file-browser-status workspace-file-browser-error">{error}</p> : !root ? <p className="workspace-file-browser-status">No workspace folder connected.</p> : entriesByPath[ROOT_PATH]?.length === 0 ? <p className="workspace-file-browser-status">The workspace is empty.</p> : <div className="workspace-file-browser-tree">{renderEntries(ROOT_PATH, 0)}</div>}
+			{tooltip}
 		</section>
 	);
 }

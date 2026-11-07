@@ -1,7 +1,7 @@
 /* The room's workspace: the resizable sidebar, the file tree in it, and the
    Markdown editor pane. */
 .app.sidebar-resizable {
-	grid-template-columns: var(--sidebar-width, 260px) 8px minmax(0, 1fr);
+	grid-template-columns: var(--sidebar-width, 260px) 1px minmax(0, 1fr);
 }
 .sidebar-scroll-area {
 	flex: 1 1 auto;
@@ -11,17 +11,18 @@
 	flex-direction: column;
 }
 .sidebar-footer { flex: 0 0 auto; }
+/* A one-pixel line with a wider area to grab. Above the drag strip and the topbar (z 21), under the overlays. */
 .sidebar-resizer {
+	position: relative;
 	cursor: col-resize;
-	background: transparent;
-	border-left: 1px solid var(--border);
-	border-right: 1px solid var(--border);
-	z-index: 2;
+	background: var(--border);
+	z-index: 22;
 }
+.sidebar-resizer::before { content: ""; position: absolute; inset: 0 -4px; }
 .sidebar-resizer:hover,
 .sidebar-resizer:focus-visible,
 .sidebar-resizer.is-dragging {
-	background: color-mix(in srgb, var(--fg) 7%, transparent);
+	background: color-mix(in srgb, var(--fg) 40%, transparent);
 }
 .sidebar-resizer:focus-visible { outline: 2px solid var(--exx-focus); outline-offset: -2px; }
 .app.sidebar-resizable > .sidebar { border-right: 0; }
@@ -39,18 +40,14 @@ html.sidebar-collapsed .sidebar-resizer { display: none; }
 }
 .markdown-editor-header {
  min-width: 0;
- min-height: 72px;
- padding: 12px 14px;
+ padding: 8px 14px;
  border-bottom: 1px solid var(--border);
  display: flex;
  align-items: center;
- justify-content: space-between;
+ justify-content: flex-end;
  gap: 12px;
 }
 .markdown-editor-header:focus-visible { outline: 2px solid var(--exx-focus); outline-offset: -2px; }
-.markdown-editor-title { min-width: 0; display: grid; gap: 3px; }
-.markdown-editor-title h2 { margin: 0; font-size: 15px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.markdown-editor-title span { color: var(--fg-soft); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .markdown-editor-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .markdown-editor-mode { display: flex; border: 1px solid var(--border); border-radius: 5px; overflow: hidden; }
 .markdown-editor-mode button,
@@ -130,8 +127,6 @@ html.sidebar-collapsed .sidebar-resizer { display: none; }
 		border-left: none;
 		border-top: 1px solid var(--border);
 	}
-	.markdown-editor-header { min-height: 64px; }
-	.markdown-editor-title span { max-width: 30vw; }
 }
 
 /* ── Workspace file browser ───────────────────────────────────────────────── */
@@ -310,9 +305,6 @@ html.desktop-app-mac .workspace-tab {
 .workspace-pane { min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; }
 .workspace-pane[hidden], .workspace-pane [hidden] { display: none; }
 .workspace-open-action { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.5rem; padding: 0.5rem 1rem; border-bottom: 1px solid var(--exx-border); background: var(--exx-surface); }
-.workspace-open-title { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.workspace-open-title strong { font-size: 13px; font-weight: 600; }
-.workspace-open-title span { overflow: hidden; color: var(--exx-text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-open-action button { flex: none; padding: 5px 12px; border: 1px solid var(--exx-border); border-radius: 6px; background: transparent; color: inherit; font-size: 13px; cursor: pointer; }
 .workspace-open-action button:hover:not(:disabled) { background: var(--exx-surface-hover); }
 .workspace-open-action p { flex-basis: 100%; margin: 0; text-align: right; }
@@ -340,7 +332,8 @@ html.desktop-app-mac .workspace-tab {
 .workspace-tab[data-active="true"] { border-color: var(--exx-border); background: var(--exx-surface); font-weight: 600; }
 .workspace-tab:not([data-active="true"]) + .workspace-tab:not([data-active="true"]) { box-shadow: -3px 0 0 -2px var(--exx-border); }
 .workspace-tab button { border: 0; background: transparent; color: inherit; cursor: pointer; }
-.workspace-tab-select { padding: 7px 4px 7px 12px; font-weight: inherit; }
+.workspace-tab-select { max-width: 180px; overflow: hidden; padding: 7px 4px 7px 12px; font-weight: inherit; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-tab-tooltip { position: fixed; z-index: 90; max-width: min(480px, 90vw); padding: 4px 8px; border: 1px solid var(--exx-border); border-radius: 5px; background: var(--exx-surface-raised); color: var(--exx-text); font-size: 12px; font-weight: 400; overflow-wrap: anywhere; pointer-events: none; }
 .workspace-tab-close { padding: 7px 10px 7px 4px; opacity: 0.6; }
 .workspace-tab-close:hover { opacity: 1; }
 .workspace-preview-image-frame { height: 100%; display: flex; flex-direction: column; }
@@ -358,5 +351,9 @@ html.desktop-app-mac .workspace-tab {
 .workspace-preview-image { box-sizing: border-box; }
 .workspace-preview-word { height: 100%; overflow: hidden; display: flex; flex-direction: column; }
 .workspace-preview-word iframe { width: 100%; flex: 1; min-height: 0; border: 0; }
-.workspace-preview-html { height: 100%; }
+.workspace-preview-text { height: 100%; overflow: auto; background: var(--exx-surface); }
+.workspace-preview-text pre { margin: 0; padding: 16px; font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.workspace-preview-text p { padding: 16px; margin: 0; }
+.workspace-preview-html { height: 100%; position: relative; }
+.workspace-preview-pptx-loading { position: absolute; top: 16px; left: 16px; margin: 0; }
 .workspace-preview-html iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }

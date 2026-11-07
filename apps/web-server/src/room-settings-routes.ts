@@ -28,7 +28,7 @@ import { undoMemorySave } from "./memory-undo.js";
 import { withRoomSaveLock } from "./memory-commit.js";
 import { isSharedServer } from "./server-hooks.js";
 import { activeRoomLock, REPO_ROOT, roomLockBusyStatus } from "./server-install-root.js";
-import { app, PORT } from "./server-app.js";
+import { app, PORT, WEB_UI_DIST } from "./server-app.js";
 import { getUsablePersistentAgentStatusForNormalUse, persistentAgentNormalUseErrorReply } from "./room-status.js";
 import { parseRoomModelPatch, roomModelsPayload } from "./ai-models.js";
 import { memoryBudgetRaiseRefusal, refuseMemoryBudgetRaise, refuseMemoryModelTooSmall } from "./ai-profile-models.js";
@@ -258,7 +258,7 @@ app.post("/api/persistent-agents/:id/workspace-open", async (req, reply) => {
 		}
 		return refuse(500, "open_failed");
 	}
-	if (![".xlsx", ".xlsm", ".xls", ".docx", ".pdf", ".html", ".htm", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"].includes(path.extname(relativePath).toLowerCase())) return refuse(415, "unsupported_file_type");
+	if (![".xlsx", ".xlsm", ".docx", ".pptx", ".excalidraw", ".drawio", ".dio", ".txt", ".json", ".pdf", ".html", ".htm", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"].includes(path.extname(relativePath).toLowerCase())) return refuse(415, "unsupported_file_type");
 	let initial: fs.BigIntStats;
 	try { initial = fs.statSync(guarded.absolutePath, { bigint: true }); } catch { return refuse(409, "file_changed"); }
 	if (Number(initial.dev) !== guarded.stat.dev || Number(initial.ino) !== guarded.stat.ino || Number(initial.size) !== guarded.stat.size || Math.abs(Number(initial.mtimeNs) / 1e6 - guarded.stat.mtimeMs) > 0.001 || Math.abs(Number(initial.ctimeNs) / 1e6 - guarded.stat.ctimeMs) > 0.001) return refuse(409, "file_changed");
@@ -332,13 +332,59 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 	}
 	const extension = path.extname(relativePath).toLowerCase();
 	if (extension === ".doc") return reply.code(415).send({ code: "legacy_doc", error: "Save this old .doc file as .docx to preview it here." });
+	const framedEntry = extension === ".pptx" ? "pptx" : extension === ".excalidraw" ? "excalidraw" : null;
+	if (framedEntry && query.frame === "1") {
+		// The frame's document, with the renderer inline: an opaque origin carries no sign-in, so it could not load the script as a file.
+		const assets = path.join(WEB_UI_DIST, "assets");
+		const file = fs.existsSync(assets) ? fs.readdirSync(assets).find((name) => new RegExp(`^${framedEntry}-frame-entry-[\\w-]+\\.js$`).test(name)) : undefined;
+		if (!file) return reply.code(503).send({ code: "renderer_unavailable", error: "Preview rendering is unavailable on this system." });
+		const scripts = `<script>${fs.readFileSync(path.join(assets, file), "utf8").replaceAll("</script", "<\\/script")}</script>`;
+		return reply.header("Content-Security-Policy", `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'`).type("text/html; charset=utf-8").send(`<!doctype html><html><head><style>html, body { margin: 0; background: #f3f0ea; } #slides { padding: 16px; box-sizing: border-box; }</style></head><body><div id="slides"></div>${scripts}</body></html>`);
+	}
+	if (extension === ".txt" || extension === ".json" || framedEntry) {
+		const limit = framedEntry ? 26_214_400 : 16_777_216;
+		const tooLarge = () => reply.code(413).send({ code: "file_too_large", error: "This file is too large or complex to preview here." });
+		const changed = () => reply.code(409).send({ code: "file_changed", error: "This file changed while the preview was loading; close the tab and open it again." });
+		if (guarded.stat.size > limit) return tooLarge();
+		const expected = guarded.stat;
+		const matches = (stat: fs.Stats) => stat.isFile() && stat.dev === expected.dev && stat.ino === expected.ino
+			&& stat.size === expected.size && stat.mtimeMs === expected.mtimeMs;
+		let bytes: Buffer;
+		try {
+			const fd = fs.openSync(guarded.absolutePath, "r");
+			try {
+				if (!matches(fs.fstatSync(fd))) return changed();
+				bytes = Buffer.alloc(expected.size);
+				let offset = 0;
+				while (offset < bytes.length) {
+					const count = fs.readSync(fd, bytes, offset, bytes.length - offset, offset);
+					if (!count) return changed();
+					offset += count;
+				}
+				const after = fs.fstatSync(fd);
+				if (after.size > limit) return tooLarge();
+				if (!matches(after)) return changed();
+			} finally { fs.closeSync(fd); }
+		} catch { return changed(); }
+		try {
+			const current = resolvePersistentRoomEffectiveWorkspacePolicy(agentId, query.conversationId);
+			if (!current.policy || !current.workspaceToolsEnabled || !current.policy.modes.read || !persistentRoomWorkspaceToolNamesForPolicy(current.policy).includes("read")) throw new Error("permission");
+			const again = resolvePersistentRoomWorkspaceExistingFile(current.policy, relativePath);
+			if (again.absolutePath !== guarded.absolutePath || again.rootRealpath !== guarded.rootRealpath || !matches(again.stat)) return changed();
+		} catch (error) {
+			if (error instanceof PersistentRoomWorkspaceToolError && error.code === "file_not_found") return changed();
+			return reply.code(403).send({ code: "workspace_read_forbidden", error: "This file is not available under the current workspace permissions." });
+		}
+		if (framedEntry) return reply.type("application/octet-stream").send(bytes);
+		return reply.send({ schemaVersion: 1, agentId, conversationId: query.conversationId, path: relativePath, kind: "text", text: bytes.toString("utf8"), notices: [] });
+	}
 	if (extension === ".html" || extension === ".htm") {
 		if (guarded.stat.size > 16_777_216) return reply.code(413).send({ code: "file_too_large", error: "This file is too large or complex to preview here." });
 		let html: string;
 		try {
 			const expected = guarded.stat;
 			const matches = (stat: fs.Stats) => stat.isFile() && stat.dev === expected.dev && stat.ino === expected.ino
-				&& stat.size === expected.size && stat.mtimeMs === expected.mtimeMs && stat.ctimeMs === expected.ctimeMs;
+				&& stat.size === expected.size && stat.mtimeMs === expected.mtimeMs;
 			const fd = fs.openSync(guarded.absolutePath, "r");
 			try {
 				if (!matches(fs.fstatSync(fd))) throw new Error("file changed");
@@ -406,7 +452,7 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 		const current = resolvePersistentRoomEffectiveWorkspacePolicy(agentId, query.conversationId);
 		if (!current.policy || !current.workspaceToolsEnabled || !current.policy.modes.read || !persistentRoomWorkspaceToolNamesForPolicy(current.policy).includes("read")) throw new Error("permission");
 		const again = resolvePersistentRoomWorkspaceExistingFile(current.policy, relativePath);
-		if (again.absolutePath !== guarded.absolutePath || again.rootRealpath !== guarded.rootRealpath || again.stat.dev !== stat.dev || again.stat.ino !== stat.ino || again.stat.size !== stat.size || again.stat.mtimeMs !== stat.mtimeMs || again.stat.ctimeMs !== stat.ctimeMs) {
+		if (again.absolutePath !== guarded.absolutePath || again.rootRealpath !== guarded.rootRealpath || again.stat.dev !== stat.dev || again.stat.ino !== stat.ino || again.stat.size !== stat.size || again.stat.mtimeMs !== stat.mtimeMs) {
 			return reply.code(409).send({ code: "file_changed", error: "This file changed while the preview was loading; close the tab and open it again." });
 		}
 	} catch {

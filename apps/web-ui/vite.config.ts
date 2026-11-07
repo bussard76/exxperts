@@ -12,6 +12,8 @@ export default defineConfig({
 	define: {
 		__APP_VERSION__: JSON.stringify(rootPackage.version ?? "unknown"),
 	},
+	// The preview frames' renderers must be one file: their sandbox cannot fetch further chunks.
+	worker: { rollupOptions: { output: { inlineDynamicImports: true } } },
 	build: {
 		// Fonts stay files: the page's security header loads fonts only from
 		// its own origin, so a small font inlined as data: would be refused.
