@@ -170,6 +170,8 @@ export interface LastMessageEdit {
 const FOLLOW_RESUME_BOTTOM_PX = 2;
 const FOLLOW_CATCH_BOTTOM_PX = 24;
 const UP_GESTURE_QUIET_MS = 300;
+// Wide enough to read long file names in the workspace tree.
+const SIDEBAR_MAX_WIDTH = 720;
 /** A scroll this soon after a wheel or touch event belongs to that gesture. */
 const GESTURE_SCROLL_WINDOW_MS = 100;
 /** A scroll this soon after the app wrote scrollTop is the app's own. */
@@ -1340,7 +1342,7 @@ export function InRoomChatShellView({
 		"composer-layout",
 		composerRightActions ? "with-actions" : "",
 	].filter(Boolean).join(" ");
-	const clampSidebarWidth = (width: number): number => Math.min(420, Math.max(220, width));
+	const clampSidebarWidth = (width: number): number => Math.min(SIDEBAR_MAX_WIDTH, Math.max(220, width));
 	const startSidebarResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
 		if (event.pointerType === "mouse" && event.button !== 0) return;
 		event.preventDefault();
@@ -1369,7 +1371,7 @@ export function InRoomChatShellView({
 			setSidebarWidth(220);
 		} else if (event.key === "End") {
 			event.preventDefault();
-			setSidebarWidth(420);
+			setSidebarWidth(SIDEBAR_MAX_WIDTH);
 		}
 	}, []);
 	const appStyle = sidebarResizable ? ({ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties) : undefined;
@@ -1630,7 +1632,7 @@ export function InRoomChatShellView({
 					aria-orientation="vertical"
 					aria-label="Resize sidebar"
 					aria-valuemin={220}
-					aria-valuemax={420}
+					aria-valuemax={SIDEBAR_MAX_WIDTH}
 					aria-valuenow={sidebarWidth}
 					tabIndex={0}
 					onKeyDown={keySidebarResize}
