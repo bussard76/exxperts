@@ -258,7 +258,7 @@ app.post("/api/persistent-agents/:id/workspace-open", async (req, reply) => {
 		}
 		return refuse(500, "open_failed");
 	}
-	if (![".xlsx", ".xlsm", ".xls", ".docx", ".pptx", ".excalidraw", ".drawio", ".dio", ".txt", ".json", ".pdf", ".html", ".htm", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"].includes(path.extname(relativePath).toLowerCase())) return refuse(415, "unsupported_file_type");
+	if (![".xlsx", ".xlsm", ".docx", ".pptx", ".excalidraw", ".drawio", ".dio", ".txt", ".json", ".pdf", ".html", ".htm", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"].includes(path.extname(relativePath).toLowerCase())) return refuse(415, "unsupported_file_type");
 	let initial: fs.BigIntStats;
 	try { initial = fs.statSync(guarded.absolutePath, { bigint: true }); } catch { return refuse(409, "file_changed"); }
 	if (Number(initial.dev) !== guarded.stat.dev || Number(initial.ino) !== guarded.stat.ino || Number(initial.size) !== guarded.stat.size || Math.abs(Number(initial.mtimeNs) / 1e6 - guarded.stat.mtimeMs) > 0.001 || Math.abs(Number(initial.ctimeNs) / 1e6 - guarded.stat.ctimeMs) > 0.001) return refuse(409, "file_changed");

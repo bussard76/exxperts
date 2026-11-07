@@ -58,8 +58,15 @@ if (${htmlRaceChild}) {
   const realOpen = fs.openSync, realFstat = fs.fstatSync;
   const realRead = fs.readSync;
   const growing = new Map();
+  const chmodFiles = new Map();
+  const failingFiles = new Set();
+  const revokeFiles = new Set();
   fs.readSync = function(fd, ...args) {
+    if (failingFiles.delete(fd)) throw new Error("invented read failure");
+    if (revokeFiles.delete(fd)) fs.unlinkSync(${JSON.stringify(path.join(tempRoot, "home", ".exxperts", "app", "personalized-agents", "archive", "runtime", "workspace-default.json"))});
     const count = realRead.call(this, fd, ...args);
+    const chmodFile = chmodFiles.get(fd);
+    if (chmodFile) { chmodFiles.delete(fd); fs.chmodSync(chmodFile, 0o600); }
     const target = growing.get(fd);
     if (target) { growing.delete(fd); fs.appendFileSync(target, Buffer.alloc(16_777_217)); }
     return count;
@@ -69,6 +76,9 @@ if (${htmlRaceChild}) {
     const fd = realOpen.call(this, file, ...args);
     if (typeof file === "string" && /late-(json|frame)\\.(html|txt|pptx)$/.test(file)) lateFiles.set(fd, { file, checks: 0 });
     if (typeof file === "string" && file.endsWith("growing.txt")) growing.set(fd, file);
+    if (typeof file === "string" && file.endsWith("chmod.txt")) chmodFiles.set(fd, file);
+    if (typeof file === "string" && file.endsWith("failure.pptx")) failingFiles.add(fd);
+    if (typeof file === "string" && file.endsWith("revoke.txt")) revokeFiles.add(fd);
     return fd;
   };
   fs.fstatSync = function(fd, ...args) {
@@ -323,7 +333,7 @@ if (htmlRaceChild) for (const name of ["race-json.html", "race-frame.html", "lat
   fs.writeFileSync(path.join(folder, name), "original invented document");
   fs.writeFileSync(path.join(folder, name + ".replacement"), "replacement invented document");
 }
-if (htmlRaceChild) fs.writeFileSync(path.join(folder, "growing.txt"), "invented");
+if (htmlRaceChild) for (const name of ["growing.txt", "chmod.txt", "failure.pptx", "revoke.txt"]) fs.writeFileSync(path.join(folder, name), "invented");
 if (excelChild) {
 	const { default: ExcelJS } = await import("exceljs");
 	const workbook = new ExcelJS.Workbook();
@@ -382,6 +392,7 @@ fs.truncateSync(path.join(folder, "oversize.pdf"), 26_214_401);
 fs.writeFileSync(path.join(folder, "old.doc"), "invented");
 fs.writeFileSync(path.join(folder, "notes.txt"), "invented");
 fs.writeFileSync(path.join(folder, "notes.csv"), "invented");
+fs.writeFileSync(path.join(folder, "old.xls"), "invented");
 fs.symlinkSync(path.join(folder, "book.xlsx"), path.join(folder, "link.xlsx"));
 fs.mkdirSync(path.join(folder, "directory.xlsx"));
 
@@ -468,8 +479,16 @@ try {
             const result = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=${name}`);
             assert(result.status === 409 && (await result.json()).code === "file_changed", `replacement is refused for ${name}`);
         }
+        const chmod = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=chmod.txt`);
+        assert(chmod.status === 200 && (await chmod.json()).text === "invented", "metadata-only chmod remains accepted");
+        const failure = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=failure.pptx`);
+        assert(failure.status === 409 && (await failure.json()).code === "file_changed", "read failure never returns partial bytes");
         const growing = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=growing.txt`);
         assert(growing.status === 413 && (await growing.json()).code === "file_too_large", "a file growing past the hard read limit is refused");
+        const revoked = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=revoke.txt`);
+        assert(revoked.status === 403 && (await revoked.json()).code === "workspace_read_forbidden", "revocation during reading refuses the bytes");
+        const renewed = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: folder, workspaceAccessMode: "localFiles" }) });
+        assert(renewed.status === 200, "workspace restored after revocation");
     }
 	if (excelChild) {
 		const response = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=actual.xlsx`);
@@ -500,6 +519,8 @@ try {
 		assert(refused.status === status && refused.body.code === code && refused.body.error === "This file could not be opened in another program.", `local open rejects ${code} safely`);
 	}
 	if (openChild && process.platform === "linux") {
+		const oldExcel = await openRequest({ conversationId: "demo-thread", path: "old.xls" });
+		assert(oldExcel.status === 415 && oldExcel.body.code === "unsupported_file_type" && !fs.existsSync(spawnMarker), "unsupported .xls never reaches the opener");
 		const opened = await openRequest({ conversationId: "demo-thread", path: "report.pdf" });
 		assert(opened.status === 202 && opened.body.accepted === true, `guarded local open waits for a successful dispatcher: ${JSON.stringify(opened)}`);
 		const calls = fs.readFileSync(spawnMarker, "utf8").trim().split("\n").map((line) => JSON.parse(line));
