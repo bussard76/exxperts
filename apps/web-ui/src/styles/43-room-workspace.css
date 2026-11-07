@@ -1,7 +1,7 @@
 /* The room's workspace: the resizable sidebar, the file tree in it, and the
    Markdown editor pane. */
 .app.sidebar-resizable {
-	grid-template-columns: var(--sidebar-width, 260px) 8px minmax(0, 1fr);
+	grid-template-columns: var(--sidebar-width, 260px) 1px minmax(0, 1fr);
 }
 .sidebar-scroll-area {
 	flex: 1 1 auto;
@@ -11,17 +11,18 @@
 	flex-direction: column;
 }
 .sidebar-footer { flex: 0 0 auto; }
+/* A one-pixel line with a wider area to grab. Above the drag strip and the topbar (z 21), under the overlays. */
 .sidebar-resizer {
+	position: relative;
 	cursor: col-resize;
-	background: transparent;
-	border-left: 1px solid var(--border);
-	border-right: 1px solid var(--border);
-	z-index: 2;
+	background: var(--border);
+	z-index: 22;
 }
+.sidebar-resizer::before { content: ""; position: absolute; inset: 0 -4px; }
 .sidebar-resizer:hover,
 .sidebar-resizer:focus-visible,
 .sidebar-resizer.is-dragging {
-	background: color-mix(in srgb, var(--fg) 7%, transparent);
+	background: color-mix(in srgb, var(--fg) 40%, transparent);
 }
 .sidebar-resizer:focus-visible { outline: 2px solid var(--exx-focus); outline-offset: -2px; }
 .app.sidebar-resizable > .sidebar { border-right: 0; }

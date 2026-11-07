@@ -9,7 +9,7 @@
 }
 .workbench.with-preview,
 .workbench.with-right-pane {
-	grid-template-columns: minmax(0, 1fr) 8px minmax(360px, var(--right-pane-width, 420px));
+	grid-template-columns: minmax(0, 1fr) 1px minmax(360px, var(--right-pane-width, 420px));
 }
 /* V5: artifact viewer maximize — collapse the chat column + resizer and give the
    pane the whole workbench. workbenchStyle is set to undefined in this state
@@ -21,13 +21,15 @@
 .workbench.artifact-pane-maximized .pane-resizer {
 	display: none;
 }
+/* A one-pixel line with a wider area to grab. Above the lifted panes (z 21), under the overlays. */
 .pane-resizer {
+	position: relative;
+	z-index: 22;
 	cursor: col-resize;
-	background: transparent;
-	border-left: 1px solid var(--border);
-	border-right: 1px solid var(--border);
+	background: var(--border);
 }
-.pane-resizer:hover { background: color-mix(in srgb, var(--fg) 7%, transparent); }
+.pane-resizer::before { content: ""; position: absolute; inset: 0 -4px; }
+.pane-resizer:hover { background: color-mix(in srgb, var(--fg) 40%, transparent); }
 /* While the divider is being dragged: keep the col-resize cursor everywhere
    (instead of flickering per-element), suppress text selection, and shield
    pane iframes so they cannot swallow the drag's mouse events. */
