@@ -339,6 +339,7 @@ html.desktop-app-mac .workspace-tab {
 .workspace-tab:not([data-active="true"]) + .workspace-tab:not([data-active="true"]) { box-shadow: -3px 0 0 -2px var(--exx-border); }
 .workspace-tab button { border: 0; background: transparent; color: inherit; cursor: pointer; }
 .workspace-tab-select { max-width: 180px; overflow: hidden; padding: 7px 4px 7px 12px; font-weight: inherit; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-tab-tooltip { position: fixed; z-index: 90; max-width: min(480px, 90vw); padding: 4px 8px; border: 1px solid var(--exx-border); border-radius: 5px; background: var(--exx-surface-raised); color: var(--exx-text); font-size: 12px; font-weight: 400; overflow-wrap: anywhere; pointer-events: none; }
 .workspace-tab-close { padding: 7px 10px 7px 4px; opacity: 0.6; }
 .workspace-tab-close:hover { opacity: 1; }
 .workspace-preview-image-frame { height: 100%; display: flex; flex-direction: column; }
