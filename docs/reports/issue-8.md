@@ -45,6 +45,12 @@ The non-HTML tests add no public interfaces or dependencies. The accepted implem
 - Screenshots: none.
 - Debt candidates from the issue: fixed English number/date conventions; unsupported coloured format sections, rich cell colour and pattern fills; light Word desk in dark mode; frame reload on reorder; no keyboard tab reordering; header also visible without the Open button. The large-part regex test does not establish worst-case runtime.
 
-## Held for Sascha’s decision
+## Continuation after Sascha’s decision
 
-The Controller instructed this worker to leave HTML behavior, host-open scope and HTML security tests untouched. The direct-frame, cookies/storage/API isolation, blocked connect/image/form traffic, remote-route and identity-check work remains open. No tests may send requests outside localhost.
+Sascha decided on 2026-11-07: “Skripte an, Risiko akzeptiert”. The remaining HTML work proceeds under the ADR addendum; tests use invented data and intercept hostile navigation without external requests.
+
+- [ ] Record HTML decision and local-only HTML/HTM opening in ADR-0003.
+- [ ] Prove embedded and direct HTML isolation, blocked connections, images and forms, and intercepted self-navigation.
+- [ ] Prove both HTML GETs and local-only open for both remote capabilities, hidden room and revoked grant.
+- [ ] Match worker file identity and bounded reads; verify replacement and UTF-8 behavior for both GETs.
+- [ ] Run targeted checks, merge main, rerun affected suites, complete self-review and push.

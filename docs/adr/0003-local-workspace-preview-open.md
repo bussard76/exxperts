@@ -63,3 +63,9 @@ The accepted boundary has the following consequences for the implementation spec
 1. Record option A and the #4-only Figma exception in this accepted ADR. Verify dated quotes and constraints against the issue comments and `~/controller-exxperts/inbox-done.md`; commit only this text record.
 2. Prepare the draft implementation spec at `~/controller-exxperts/analysis/T4-ADR-spec.md`: exact proposed request/response and opener seams, authorization order, dependency inventory, tests mapped to every Result and Observable acceptance item, and unresolved decisions. Obtain a fresh independent Architect spec review before building.
 3. After #5 integration and resolution of build-affecting decisions, implement previews and the separately authorized local opening flow test-first through public entry points within this level-3 boundary. Run the Developer's targeted checks with fake integrations; Testers and the wave own full gates. Record functional review and conformance before integration; Sascha accepts real-file and Electron behavior on the preview on his own computer.
+
+## HTML addendum
+
+Decided by: Sascha (2026-11-07): “Skripte an, Risiko akzeptiert”. Scripts stay enabled in sandboxed HTML previews. Data fetching is blocked, including connections, network images and forms; frame self-navigation remains possible and is accepted. A remote navigation URL can carry file contents. CSP does not prevent that navigation.
+
+The local-only OS-open scope above explicitly includes `.html` and `.htm` files, subject to the same authorization and workspace guards. The external application operates outside the preview sandbox. This addendum preserves option A for issue #4.
