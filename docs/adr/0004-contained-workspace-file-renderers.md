@@ -23,7 +23,7 @@ Avoid the new frame and host-action boundaries but defer the accepted experience
 
 Option A. Sascha said “Festhalten, weitermachen” on 2026-11-07 in issue #9. He accepted this exact residual risk: "a redirected frame can carry the content of the one opened file outside." No broader host access is approved.
 
-The local-only, explicit OS Open action retains ADR-0003's workspace authorization and guards. Its approved extensions are `.xlsx`, `.xlsm`, `.xls`, `.docx`, `.pdf`, `.html`, `.htm`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, plus `.pptx`, `.excalidraw`, `.txt`, and `.json`. `.drawio` and `.dio` are excluded.
+The local-only, explicit OS Open action retains ADR-0003's workspace authorization and guards. Its approved extensions are `.xlsx`, `.xlsm`, `.docx`, `.pdf`, `.html`, `.htm`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, plus `.pptx`, `.excalidraw`, `.txt`, `.json`, `.drawio`, and `.dio`. `.drawio` and `.dio` are Open-only and have no preview renderer; `.xls` is unsupported.
 
 ## Consequences
 
