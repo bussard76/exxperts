@@ -44,7 +44,7 @@ New features go from the outside in. Nothing is built until Sascha has signed of
 - The Controller applies this rule by hand and records each case in its report; no mechanism is built to enforce or prove it, and a run without complete evidence stays red (decided by Sascha, 2026-11-06, answering "Wie weit soll der Controller die Testregel „einzeln grün zählt" technisch absichern?": "Keine neue Technik").
 - Workers stay on the OpenAI models; the Claude fallback in `factory.config.json` is not used, even when the Codex limit is reached. Sascha, 2026-11-06, asked whether to switch to Claude or pause: "nein es soll bei den openai modellen geblieben werden". The weekly limit is no reason to save or to wait, because Sascha can reset it (2026-11-06: "ich habe credits um das wochenlimit zurück zu setzen"). When the limit is near or reached, the Controller pushes what exists and puts it under "Needs Sascha" in `status.md`, so he can reset it.
 - Documentation-only changes get no full gate.
-- Every full gate runs through `gate` (fair slots, pooled by unit and browser), as `GATE_SLOTS=1 GATE_E2E_SLOTS=1 gate bash -c '<command>'` because `gate` starts a program without a shell.
+- Every full gate runs through the project-aware `~/.local/bin/gate` shim (fair slots, pooled by unit and browser), as `GATE_SLOTS=1 GATE_E2E_SLOTS=1 gate bash -c '<command>'` because `gate` starts a program without a shell. In this project the shim selects `~/controller-exxperts/gate.mjs` from `factory.config.json`; other projects keep their configured routing (decided by Sascha, 2026-11-07: “yes, this project only”).
 
 ## Capacity by measurement (decided by Sascha, 2026-11-04)
 
