@@ -16,7 +16,7 @@ Level 2: existing workspace preview/open routes and workbook contract from the a
 - [x] Excel: currency, negative and zero sections, dates, times, percentage and unformatted values (`workspace-file-preview-smoke.ts --excel-child`).
 - [x] Excel: hidden gridlines and filled cells suppress their gridlines (`workspace-file-tabs-ui-smoke.ts`).
 - [x] Word: 4.3 mm, cm, in, pt, pc, pi and numeric sizes render correctly; a 1 MB XML part completes within the route deadline (`workspace-file-preview-smoke.ts --excel-child`).
-- [ ] Tabs: drag before, after and past end, self-drop, composer drop and unsaved Markdown draft survival.
+- [x] Tabs: drag before, after and past end, self-drop, composer drop and unsaved Markdown draft survival (`workspace-file-tabs-ui-smoke.ts`).
 - [ ] Image: pointer anchored wheel and pinch, 2% and 3200% bounds, show-tab fit, gap-free drag, double-click and buttons.
 - [ ] HELD: HTML: hostile content cannot reach app cookies, storage or API; blocked connect, image and form traffic without external requests, including direct-frame URL.
 - [ ] HELD: HTML: both remote HTML routes tested; workspace-open for HTML remains local only; compare read identity checking with worker path and report UTF-8 behavior.
