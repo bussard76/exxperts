@@ -541,7 +541,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 	return (
 		<aside className="markdown-editor-pane" aria-label={`Markdown editor: ${filename}`}>
 			<header className="markdown-editor-header" tabIndex={-1}>
-				<div className="markdown-editor-title"><h2>{filename}</h2><span title={path}>{path}</span></div>
+				<h2 className="sr-only">{filename}</h2>
 				<div className="markdown-editor-actions">
 					<div className="markdown-editor-mode" role="group" aria-label="Editor mode">
 						<button type="button" aria-pressed={mode === "edit"} onClick={() => setEditorMode("edit")}>Edit</button>
