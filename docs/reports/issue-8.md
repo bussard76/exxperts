@@ -49,8 +49,8 @@ The non-HTML tests add no public interfaces or dependencies. The accepted implem
 
 Sascha decided on 2026-11-07: “Skripte an, Risiko akzeptiert”. The remaining HTML work proceeds under the ADR addendum; tests use invented data and intercept hostile navigation without external requests.
 
-- [ ] Record HTML decision and local-only HTML/HTM opening in ADR-0003.
+- [x] Record HTML decision and local-only HTML/HTM opening in ADR-0003.
 - [ ] Prove embedded and direct HTML isolation, blocked connections, images and forms, and intercepted self-navigation.
 - [ ] Prove both HTML GETs and local-only open for both remote capabilities, hidden room and revoked grant.
-- [ ] Match worker file identity and bounded reads; verify replacement and UTF-8 behavior for both GETs.
+- [x] Match worker descriptor identity and bounded reads; `workspace-file-preview-smoke.ts --html-race-child` verifies replacement refusal and malformed UTF-8 replacement for both GETs.
 - [ ] Run targeted checks, merge main, rerun affected suites, complete self-review and push.

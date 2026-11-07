@@ -32,9 +32,10 @@ const badWordChild = process.argv.includes("--bad-word-child");
 const networkChild = process.argv.includes("--network-child");
 const openChild = process.argv.includes("--open-child");
 const excelChild = process.argv.includes("--excel-child");
+const htmlRaceChild = process.argv.includes("--html-race-child");
 const windowsParentChild = process.argv.includes("--windows-parent-child");
 const windowsNativeChild = process.argv.includes("--windows-native-child");
-const fakeChild = malformedChild || admissionChild || timeoutChild || extraChild || crashChild || exitRaceChild || revokeChild || replaceChild || badWordChild || networkChild || openChild || excelChild || windowsParentChild || windowsNativeChild;
+const fakeChild = htmlRaceChild || malformedChild || admissionChild || timeoutChild || extraChild || crashChild || exitRaceChild || revokeChild || replaceChild || badWordChild || networkChild || openChild || excelChild || windowsParentChild || windowsNativeChild;
 const spawnMarker = path.join(tempRoot, "preview-spawns");
 const releaseMarker = path.join(tempRoot, "preview-release");
 const killMarker = path.join(tempRoot, "dispatcher-killed");
@@ -53,6 +54,18 @@ const { syncBuiltinESMExports } = require("node:module");
 const original = childProcess.fork;
 const fs = require("node:fs");
 const realPlatform = process.platform;
+if (${htmlRaceChild}) {
+  for (const method of ["readFileSync", "openSync"]) {
+    const originalRead = fs[method];
+    fs[method] = function(file, ...args) {
+      if (typeof file === "string" && /race-(json|frame)\\.html$/.test(file)) {
+        const replacement = file + ".replacement";
+        if (fs.existsSync(replacement)) fs.renameSync(replacement, file);
+      }
+      return originalRead.call(this, file, ...args);
+    };
+  }
+}
 if (${windowsParentChild || windowsNativeChild}) Object.defineProperty(process, "platform", { configurable: true, get() { return new Error().stack.includes("openWorkspacePreviewFile") ? "win32" : realPlatform; } });
 if (${windowsNativeChild} && String(process.argv[1]).endsWith("workspace-open-worker.mjs")) {
   const koffi = require(${JSON.stringify(path.join(repoRoot, "node_modules", "koffi"))});
@@ -283,6 +296,11 @@ async function oversizedExpansionDocx(): Promise<Buffer> {
 const folder = path.join(tempHome, "Projects", "archive");
 fs.mkdirSync(folder, { recursive: true });
 fs.writeFileSync(path.join(folder, "book.xlsx"), "invented");
+fs.writeFileSync(path.join(folder, "encoding.htm"), Buffer.from([0x41, 0xc3, 0x28, 0x42]));
+if (htmlRaceChild) for (const name of ["race-json.html", "race-frame.html"]) {
+  fs.writeFileSync(path.join(folder, name), "original invented document");
+  fs.writeFileSync(path.join(folder, name + ".replacement"), "replacement invented document");
+}
 if (excelChild) {
 	const { default: ExcelJS } = await import("exceljs");
 	const workbook = new ExcelJS.Workbook();
@@ -413,6 +431,16 @@ try {
 	}
 	const restored = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "standard" } }) });
 	assert(restored.status === 200, "workspace read restored");
+	if (htmlRaceChild) {
+        for (const suffix of ["", "&frame=1"]) {
+            const encoding = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=encoding.htm${suffix}`);
+            assert(encoding.status === 200 && (suffix ? await encoding.text() : (await encoding.json()).html) === "A�(B", "malformed UTF-8 decodes with replacement in both responses");
+        }
+        for (const [name, suffix] of [["race-json.html", ""], ["race-frame.html", "&frame=1"]]) {
+            const result = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=${name}${suffix}`);
+            assert(result.status === 409 && (await result.json()).code === "file_changed", `HTML replacement is refused for ${name}`);
+        }
+    }
 	if (excelChild) {
 		const response = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=actual.xlsx`);
 		const body = await response.json();
@@ -532,7 +560,9 @@ try {
 	const unsupported = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=notes.txt`);
 	assert(unsupported.status === 415 && (await unsupported.json()).code === "unsupported_file_type", "unapproved types receive a controlled refusal");
 	const pdfUrl = `${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=report.pdf`;
-	if (admissionChild) {
+	if (htmlRaceChild) {
+		// HTML checks above are the complete race test.
+	} else if (admissionChild) {
 		const first = new AbortController();
 		const second = new AbortController();
 		const pending = [authedFetch(pdfUrl, { signal: first.signal }).catch(() => null), authedFetch(pdfUrl, { signal: second.signal }).catch(() => null)];
@@ -666,7 +696,7 @@ try {
 }
 
 if (!fakeChild) {
-	for (const testCase of ["--excel-child", "--malformed-child", "--extra-child", "--bad-word-child", "--admission-child", "--revoke-child", "--replace-child", "--crash-child", "--exit-race-child", "--network-child", "--timeout-child"]) {
+	for (const testCase of ["--html-race-child", "--excel-child", "--malformed-child", "--extra-child", "--bad-word-child", "--admission-child", "--revoke-child", "--replace-child", "--crash-child", "--exit-race-child", "--network-child", "--timeout-child"]) {
 		const check = spawnSync(process.execPath, ["--import", "tsx", fileURLToPath(import.meta.url), testCase], { encoding: "utf8", timeout: 90_000 });
 		assert(check.status === 0, `${testCase} check failed: ${check.stderr || check.stdout}`);
 	}

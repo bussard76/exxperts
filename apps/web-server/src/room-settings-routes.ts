@@ -335,7 +335,24 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 	if (extension === ".html" || extension === ".htm") {
 		if (guarded.stat.size > 16_777_216) return reply.code(413).send({ code: "file_too_large", error: "This file is too large or complex to preview here." });
 		let html: string;
-		try { html = fs.readFileSync(guarded.absolutePath, "utf8"); }
+		try {
+			const expected = guarded.stat;
+			const matches = (stat: fs.Stats) => stat.isFile() && stat.dev === expected.dev && stat.ino === expected.ino
+				&& stat.size === expected.size && stat.mtimeMs === expected.mtimeMs && stat.ctimeMs === expected.ctimeMs;
+			const fd = fs.openSync(guarded.absolutePath, "r");
+			try {
+				if (!matches(fs.fstatSync(fd))) throw new Error("file changed");
+				const buffer = Buffer.alloc(expected.size);
+				let offset = 0;
+				while (offset < buffer.length) {
+					const count = fs.readSync(fd, buffer, offset, buffer.length - offset, offset);
+					if (!count) throw new Error("file changed");
+					offset += count;
+				}
+				if (!matches(fs.fstatSync(fd))) throw new Error("file changed");
+				html = buffer.toString("utf8");
+			} finally { fs.closeSync(fd); }
+		}
 		catch { return reply.code(409).send({ code: "file_changed", error: "This file changed while the preview was loading; close the tab and open it again." }); }
 		// The frame's document: the CSP sandbox gives it an opaque origin even when opened directly, so its scripts have no cookies or API.
 		if (query.frame === "1") return reply.header("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'").type("text/html; charset=utf-8").send(html);
