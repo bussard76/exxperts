@@ -59,6 +59,7 @@ if (${htmlRaceChild}) {
   const realRead = fs.readSync;
   const growing = new Map();
   const chmodFiles = new Map();
+  const changingFiles = new Map();
   const failingFiles = new Set();
   const revokeFiles = new Set();
   fs.readSync = function(fd, ...args) {
@@ -67,16 +68,19 @@ if (${htmlRaceChild}) {
     const count = realRead.call(this, fd, ...args);
     const chmodFile = chmodFiles.get(fd);
     if (chmodFile) { chmodFiles.delete(fd); fs.chmodSync(chmodFile, 0o600); }
+    const changedFile = changingFiles.get(fd);
+    if (changedFile) { changingFiles.delete(fd); fs.appendFileSync(changedFile, "changed"); }
     const target = growing.get(fd);
-    if (target) { growing.delete(fd); fs.appendFileSync(target, Buffer.alloc(16_777_217)); }
+    if (target) { growing.delete(fd); fs.appendFileSync(target, Buffer.alloc(target.endsWith(".pptx") ? 26_214_401 : 16_777_217)); }
     return count;
   };
   const lateFiles = new Map();
   fs.openSync = function(file, ...args) {
     const fd = realOpen.call(this, file, ...args);
     if (typeof file === "string" && /late-(json|frame)\\.(html|txt|pptx)$/.test(file)) lateFiles.set(fd, { file, checks: 0 });
-    if (typeof file === "string" && file.endsWith("growing.txt")) growing.set(fd, file);
+    if (typeof file === "string" && /growing\\.(txt|pptx)$/.test(file)) growing.set(fd, file);
     if (typeof file === "string" && file.endsWith("chmod.txt")) chmodFiles.set(fd, file);
+    if (typeof file === "string" && /changing\\.(txt|pptx)$/.test(file)) changingFiles.set(fd, file);
     if (typeof file === "string" && file.endsWith("failure.pptx")) failingFiles.add(fd);
     if (typeof file === "string" && file.endsWith("revoke.txt")) revokeFiles.add(fd);
     return fd;
@@ -333,7 +337,7 @@ if (htmlRaceChild) for (const name of ["race-json.html", "race-frame.html", "lat
   fs.writeFileSync(path.join(folder, name), "original invented document");
   fs.writeFileSync(path.join(folder, name + ".replacement"), "replacement invented document");
 }
-if (htmlRaceChild) for (const name of ["growing.txt", "chmod.txt", "failure.pptx", "revoke.txt"]) fs.writeFileSync(path.join(folder, name), "invented");
+if (htmlRaceChild) for (const name of ["growing.txt", "growing.pptx", "changing.txt", "changing.pptx", "chmod.txt", "failure.pptx", "revoke.txt"]) fs.writeFileSync(path.join(folder, name), "invented");
 if (htmlRaceChild) {
 	fs.writeFileSync(path.join(folder, "utf8.txt"), Buffer.from([0x3c, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x3e, 0xc3, 0x28]));
 	fs.writeFileSync(path.join(folder, "invalid.json"), "{bad json");
@@ -399,6 +403,7 @@ fs.writeFileSync(path.join(folder, "notes.txt"), "invented");
 fs.writeFileSync(path.join(folder, "notes.csv"), "invented");
 fs.writeFileSync(path.join(folder, "old.xls"), "invented");
 fs.symlinkSync(path.join(folder, "book.xlsx"), path.join(folder, "link.xlsx"));
+if (htmlRaceChild) for (const name of ["link.txt", "link.pptx"]) fs.symlinkSync(path.join(folder, "book.xlsx"), path.join(folder, name));
 fs.mkdirSync(path.join(folder, "directory.xlsx"));
 
 // A provider at an address nobody answers: the room only has to open, never answer.
@@ -484,6 +489,10 @@ try {
             const result = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=${name}`);
             assert(result.status === 409 && (await result.json()).code === "file_changed", `replacement is refused for ${name}`);
         }
+        for (const name of ["link.txt", "link.pptx"]) {
+            const denied = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=${name}`);
+            assert(denied.status === 403 && (await denied.json()).code === "blocked_by_policy", `guarded path denied for ${name}`);
+        }
         const utf8 = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=utf8.txt`);
         assert(utf8.status === 200 && (await utf8.json()).text === "<script>�(", "text remains literal and malformed UTF-8 is replaced");
         const invalidJson = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=invalid.json`);
@@ -492,12 +501,18 @@ try {
             const large = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=${name}`);
             assert(large.status === 413 && (await large.json()).code === "file_too_large", `${name} exceeds its hard input limit`);
         }
+        for (const name of ["changing.txt", "changing.pptx"]) {
+            const changed = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=${name}`);
+            assert(changed.status === 409 && (await changed.json()).code === "file_changed", `content change is refused for ${name}`);
+        }
         const chmod = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=chmod.txt`);
         assert(chmod.status === 200 && (await chmod.json()).text === "invented", "metadata-only chmod remains accepted");
         const failure = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=failure.pptx`);
         assert(failure.status === 409 && (await failure.json()).code === "file_changed", "read failure never returns partial bytes");
-        const growing = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=growing.txt`);
-        assert(growing.status === 413 && (await growing.json()).code === "file_too_large", "a file growing past the hard read limit is refused");
+        for (const name of ["growing.txt", "growing.pptx"]) {
+            const growing = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=${name}`);
+            assert(growing.status === 413 && (await growing.json()).code === "file_too_large", `${name} growing past its hard read limit is refused`);
+        }
         const revoked = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=revoke.txt`);
         assert(revoked.status === 403 && (await revoked.json()).code === "workspace_read_forbidden", "revocation during reading refuses the bytes");
         const renewed = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: folder, workspaceAccessMode: "localFiles" }) });

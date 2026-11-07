@@ -6,19 +6,19 @@ Level 3: workspace preview routes, renderer frames, parent-to-frame bytes and lo
 
 ## Result and observable acceptance checklist
 
-- [ ] Word multi-page layout, footer and horizontal scrolling.
-- [ ] Metadata-only chmod accepted; content changes rejected.
-- [ ] PPTX valid deck, damaged input and 26,214,400-byte ceiling.
-- [ ] Excalidraw empty, one and multiple frames, deleted elements, invalid input.
-- [ ] Frame viewer zoom, pointer anchoring and limits, drag, double-click, controls, tabs, resize and themes.
-- [ ] Text and JSON success, invalid JSON, UTF-8 replacement, 16,777,216-byte ceiling and text-only rendering.
-- [ ] Concurrent framed tabs, switching, reordering, hidden tab and close while loading.
+- [x] Word multi-page layout, footer and horizontal scrolling — `workspace-file-tabs-ui-smoke.ts` uses an invented wide two-page document.
+- [x] Metadata-only chmod accepted; content changes rejected — `workspace-file-preview-smoke.ts --html-race-child`.
+- [x] PPTX valid deck, damaged input and 26,214,400-byte ceiling — `workspace-file-tabs-ui-smoke.ts` and `workspace-file-preview-smoke.ts --html-race-child`.
+- [x] Excalidraw empty, one and multiple frames, deleted elements, invalid input — `workspace-file-tabs-ui-smoke.ts`.
+- [x] Frame viewer zoom, pointer anchoring and limits, drag, double-click, controls, tabs, resize and themes — `workspace-file-tabs-ui-smoke.ts`.
+- [x] Text and JSON success, invalid JSON, UTF-8 replacement, 16,777,216-byte ceiling and text-only rendering — `workspace-file-preview-smoke.ts` and `workspace-file-tabs-ui-smoke.ts`.
+- [x] Concurrent framed tabs, switching, reordering, hidden tab and close while loading — `workspace-file-tabs-ui-smoke.ts`.
 - [ ] Opaque origin, direct frame load, blocked network resources and forms, hostile inputs and isolation of renderer code.
-- [ ] Real route: bounded stable descriptor, replacement, growth, content change, denied path, revocation and failure.
-- [ ] Frame single delivery: repeated ready, replacement navigation and no repeated fetch/resend; failure and timeout.
+- [x] Real route: bounded stable descriptor, replacement, growth, content change, denied path, revocation and failure — `workspace-file-preview-smoke.ts --html-race-child`.
+- [x] Frame single delivery: repeated ready, replacement navigation and no repeated fetch/resend; failure and timeout — `workspace-file-tabs-ui-smoke.ts`.
 - [ ] Local authorized OS open and approved extension list, denied paths and paired devices.
 - [ ] Renderer assets in package, payload limits, notices, audit and Electron CSP/build evidence.
-- [ ] Changed `.txt` smoke expectation and success case per Sascha's decision; KaTeX scope evidence without modifying its smoke.
+- [x] Changed `.txt` smoke expectation and success case per Sascha's decision; KaTeX scope evidence without modifying its smoke — `workspace-file-preview-smoke.ts` and inspection of `answer-content-smoke.ts:345-356`.
 - [ ] Developer targeted checks and item-by-item self-review; merge current main and rerun affected suites.
 - [ ] Independent Tester, architecture conformance and wave integration (owned by subsequent stages).
 
@@ -35,3 +35,5 @@ The browser regression in `workspace-file-tabs-ui-smoke.ts` uses a 500-byte inve
 Additional `--html-race-child` cases pass for chmod-only changes, read failure and policy revocation during the read. `--open-child` failed before removing `.xls` from the local Open allowlist and passed afterwards, using a fake opener. The coordinator clarified that the later #7 decision excludes `.xls`, while `.drawio` and `.dio` remain Open-only; this supersedes the generated dispatch's contrary ADR list. The full affected `workspace-file-preview-smoke.ts` passed before these last added cases.
 
 `workspace-file-preview-smoke.ts --html-race-child` also passes the text and framed byte ceilings, malformed UTF-8 and invalid JSON route cases. `workspace-file-tabs-ui-smoke.ts` passes repeated-ready and replacement-navigation checks, actual Excalidraw rendering, direct frame navigation, two mounted framed tabs, switching, reorder, timeout, and text/JSON literal rendering. The initial expanded browser run failed because `valid.json` also matched `invalid.json`; renaming the invented fixture fixed the test selector and the rerun passed. `npm run test:scripts` passed 54 tests. No screenshots were captured.
+
+The later browser test adds a generated PPTX and a generated wide two-page Word document, including footer placement and horizontal scrolling, and Excalidraw zero/one/two/deleted frames, zoom limits, pointer anchoring, drag, double-click, wheel, resize and dark theme. A first resize check expected viewport width to change a fixed-width pane and timed out; changing viewport height exercised an actual resize and passed. Direct renderer CSP and cookie isolation, closing while loading, broken PPTX/Excalidraw and growth and content changes for both text and framed files also passed. The local UI build is 21 MiB, including a 7.5 MiB Excalidraw and 1.5 MiB PPTX frame bundle. `npm run build --prefix apps/desktop` failed because Electron dependencies are absent; an offline normal-lifecycle `npm ci` with downloads disabled failed `ENOTCACHED` for yargs-parser 21.1.1. The worker cannot contact external services, so desktop build and a registry audit need a permitted local source or a later stage. The installed PPTX package contains Apache and MPL third-party notices; Excalidraw declares MIT but its installed package has no root licence file. Packaged renderer notices remain unverified.
