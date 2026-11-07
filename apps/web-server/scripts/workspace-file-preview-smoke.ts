@@ -299,6 +299,16 @@ if (excelChild) {
 	sheet.getCell("A4").font = { color: { theme: 4, tint: 0.5 } } as any;
 	sheet.getCell("A5").value = "Indexed";
 	sheet.getCell("A5").font = { color: { indexed: 10 } } as any;
+	const formatted: [number | Date, string | undefined][] = [
+		[1234.5, '#,##0.00 "€"'], [1234.5, '"$"#,##0.00'], [-5, '0;(0);"-"'], [0, '0;(0);"-"'],
+		[0.231, "0.0%"], [new Date("2026-03-05T14:07:00Z"), "dd.mm.yyyy"], [new Date("2026-03-05T14:07:00Z"), "d-mmm-yy"],
+		[new Date("2026-03-05T14:07:00Z"), "mmmm yyyy"], [new Date("2026-03-05T14:07:00Z"), "hh:mm"], [new Date("2026-03-05T14:07:00Z"), "h:mm AM/PM"], [42.5, undefined],
+	];
+	for (const [index, [value, format]] of formatted.entries()) {
+		const cell = sheet.getCell(index + 6, 1);
+		cell.value = value;
+		if (format) cell.numFmt = format;
+	}
 	workbook.addWorksheet("Detail").getCell("A1").value = "Second sheet";
 	fs.writeFileSync(path.join(folder, "actual.xlsx"), Buffer.from(await workbook.xlsx.writeBuffer()));
 }
@@ -406,6 +416,8 @@ try {
 		assert(style.fill === "#FFFF00" && style.font.bold && style.font.color === "#CC2200" && first.columns.some((column: { index: number; widthPx: number }) => column.index === 1 && column.widthPx === 173), "the required fill, font and column width survive");
 		const colorAt = (row: number) => body.workbook.styles[first.cells.find((item: { row: number; column: number }) => item.row === row && item.column === 1).style].font.color;
 		assert(colorAt(3) === "#4F81BD" && colorAt(4) === "#A7C0DE" && colorAt(5) === "#FF0000", `theme, tint and indexed colours resolve: ${[colorAt(3), colorAt(4), colorAt(5)].join(", ")}`);
+		const formattedText = first.cells.filter((item: { row: number; column: number }) => item.row >= 6 && item.column === 1).map((item: { text: string }) => item.text);
+		assert(JSON.stringify(formattedText) === JSON.stringify(["1,234.50 €", "$1,234.50", "(5)", "-", "23.1%", "05.03.2026", "5-Mar-26", "March 2026", "14:07", "2:07 PM", "42.5"]), `Excel formats render as expected: ${JSON.stringify(formattedText)}`);
 	}
 	const openRequest = (body: unknown) => api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-open`, { method: "POST", headers: { origin: baseUrl, "x-exxperts-local-action": "open-workspace-file" }, body: JSON.stringify(body) });
 	for (const [body, status, code] of [
