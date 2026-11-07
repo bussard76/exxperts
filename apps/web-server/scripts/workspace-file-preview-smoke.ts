@@ -293,6 +293,12 @@ if (excelChild) {
 	sheet.getColumn(1).width = 24;
 	sheet.getCell("B2").value = { formula: "SUM(20,34)", result: 54 };
 	sheet.getCell("B2").numFmt = '"$"#,##0.00';
+	sheet.getCell("A3").value = "Theme";
+	sheet.getCell("A3").font = { color: { theme: 4 } };
+	sheet.getCell("A4").value = "Tint";
+	sheet.getCell("A4").font = { color: { theme: 4, tint: 0.5 } } as any;
+	sheet.getCell("A5").value = "Indexed";
+	sheet.getCell("A5").font = { color: { indexed: 10 } } as any;
 	workbook.addWorksheet("Detail").getCell("A1").value = "Second sheet";
 	fs.writeFileSync(path.join(folder, "actual.xlsx"), Buffer.from(await workbook.xlsx.writeBuffer()));
 }
@@ -398,6 +404,8 @@ try {
 		const cell = first.cells.find((item: { row: number; column: number }) => item.row === 1 && item.column === 1);
 		const style = body.workbook.styles[cell.style];
 		assert(style.fill === "#FFFF00" && style.font.bold && style.font.color === "#CC2200" && first.columns.some((column: { index: number; widthPx: number }) => column.index === 1 && column.widthPx === 173), "the required fill, font and column width survive");
+		const colorAt = (row: number) => body.workbook.styles[first.cells.find((item: { row: number; column: number }) => item.row === row && item.column === 1).style].font.color;
+		assert(colorAt(3) === "#4F81BD" && colorAt(4) === "#A7C0DE" && colorAt(5) === "#FF0000", `theme, tint and indexed colours resolve: ${[colorAt(3), colorAt(4), colorAt(5)].join(", ")}`);
 	}
 	const openRequest = (body: unknown) => api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-open`, { method: "POST", headers: { origin: baseUrl, "x-exxperts-local-action": "open-workspace-file" }, body: JSON.stringify(body) });
 	for (const [body, status, code] of [
@@ -628,7 +636,7 @@ try {
 }
 
 if (!fakeChild) {
-	for (const testCase of ["--malformed-child", "--extra-child", "--bad-word-child", "--admission-child", "--revoke-child", "--replace-child", "--crash-child", "--exit-race-child", "--network-child", "--timeout-child"]) {
+	for (const testCase of ["--excel-child", "--malformed-child", "--extra-child", "--bad-word-child", "--admission-child", "--revoke-child", "--replace-child", "--crash-child", "--exit-race-child", "--network-child", "--timeout-child"]) {
 		const check = spawnSync(process.execPath, ["--import", "tsx", fileURLToPath(import.meta.url), testCase], { encoding: "utf8", timeout: 90_000 });
 		assert(check.status === 0, `${testCase} check failed: ${check.stderr || check.stdout}`);
 	}

@@ -12,7 +12,7 @@ Level 2: existing workspace preview/open routes and workbook contract from the a
 
 ## Results and observable acceptance checklist
 
-- [ ] Excel: real invented workbook through route resolves theme, tint and indexed colours.
+- [x] Excel: real invented workbook through route resolves theme, tint and indexed colours (`workspace-file-preview-smoke.ts --excel-child`).
 - [ ] Excel: permanent coverage for currency, negative and zero sections, dates, times, percentage and unformatted values specified in issue 8.
 - [ ] Excel: hidden gridlines and filled cells suppress their gridlines.
 - [ ] Word: invented document converts 4.3 mm and other units to rendering sizes; plain numeric sizes stay unchanged; check a very large part for regex performance.
