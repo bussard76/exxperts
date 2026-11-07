@@ -310,9 +310,7 @@ html.desktop-app-mac .workspace-tab {
 .workspace-pane { min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; }
 .workspace-pane[hidden], .workspace-pane [hidden] { display: none; }
 .workspace-open-action { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.5rem; padding: 0.5rem 1rem; border-bottom: 1px solid var(--exx-border); background: var(--exx-surface); }
-.workspace-open-title { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.workspace-open-title strong { font-size: 13px; font-weight: 600; }
-.workspace-open-title span { overflow: hidden; color: var(--exx-text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-open-title { flex: 1; min-width: 0; overflow: hidden; color: var(--exx-text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-open-action button { flex: none; padding: 5px 12px; border: 1px solid var(--exx-border); border-radius: 6px; background: transparent; color: inherit; font-size: 13px; cursor: pointer; }
 .workspace-open-action button:hover:not(:disabled) { background: var(--exx-surface-hover); }
 .workspace-open-action p { flex-basis: 100%; margin: 0; text-align: right; }
@@ -340,7 +338,7 @@ html.desktop-app-mac .workspace-tab {
 .workspace-tab[data-active="true"] { border-color: var(--exx-border); background: var(--exx-surface); font-weight: 600; }
 .workspace-tab:not([data-active="true"]) + .workspace-tab:not([data-active="true"]) { box-shadow: -3px 0 0 -2px var(--exx-border); }
 .workspace-tab button { border: 0; background: transparent; color: inherit; cursor: pointer; }
-.workspace-tab-select { padding: 7px 4px 7px 12px; font-weight: inherit; }
+.workspace-tab-select { max-width: 180px; overflow: hidden; padding: 7px 4px 7px 12px; font-weight: inherit; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-tab-close { padding: 7px 10px 7px 4px; opacity: 0.6; }
 .workspace-tab-close:hover { opacity: 1; }
 .workspace-preview-image-frame { height: 100%; display: flex; flex-direction: column; }

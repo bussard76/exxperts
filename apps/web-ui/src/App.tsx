@@ -161,7 +161,7 @@ function WorkspaceOpenAction({ agentId, conversationId, path }: { agentId: strin
 		} catch { setFailed(true); }
 		finally { pendingRef.current = false; setPending(false); }
 	};
-	return <div className="workspace-open-action"><div className="workspace-open-title"><strong>{path.split("/").pop() ?? path}</strong><span>{path}</span></div>{local && <button type="button" disabled={pending} onClick={() => void open()}>{label}</button>}{failed && <p role="alert">This file could not be opened in another program.</p>}</div>;
+	return <div className="workspace-open-action"><div className="workspace-open-title" title={path}>{path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ""}</div>{local && <button type="button" disabled={pending} onClick={() => void open()}>{label}</button>}{failed && <p role="alert">This file could not be opened in another program.</p>}</div>;
 }
 
 export function App() {
