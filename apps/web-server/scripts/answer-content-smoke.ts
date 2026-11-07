@@ -350,8 +350,11 @@ try {
 		// The chart's rules are in the page's stylesheet; its drawing code (ChartBlock.tsx) is not.
 		const late = start.filter((file) => (file.endsWith(".css") ? /font-family:\s*KaTeX_/ : /KaTeX parse error|answer-chart-hit/).test(read(file)));
 		assert(start.length > 0 && late.length === 0, `what index.html loads at start holds no KaTeX, its stylesheet or the chart drawing, found in ${late}`);
-		const katex = assets.filter((file) => file.endsWith(".js") && read(`assets/${file}`).includes("KaTeX parse error"));
-		assert(katex.length === 1, `the build holds one KaTeX, got ${katex}`);
+		const frameBundles = assets.filter((file) => /^(?:pptx|excalidraw)-frame-entry-[\w-]+\.js$/.test(file));
+		assert(["pptx", "excalidraw"].every((kind) => frameBundles.some((file) => file.startsWith(`${kind}-frame-entry-`))), "both renderer frame bundles are present");
+		console.log(`Frame bundle sizes: ${frameBundles.map((file) => `${file} ${fs.statSync(path.join(dist, "assets", file)).size} bytes`).join(", ")}`);
+		const katex = assets.filter((file) => file.endsWith(".js") && !frameBundles.includes(file) && read(`assets/${file}`).includes("KaTeX parse error"));
+		assert(katex.length === 1, `the app page holds one KaTeX, got ${katex}`);
 		const users = assets.filter((file) => file.endsWith(".js") && read(`assets/${file}`).includes(katex[0]));
 		assert(users.some((file) => file.startsWith("mermaid")) && users.some((file) => !file.startsWith("mermaid")), `the answer's maths and mermaid's load the same KaTeX chunk, got ${users}`);
 		const inlined = assets.filter((file) => file.endsWith(".css") && /url\(\s*["']?data:font/.test(read(`assets/${file}`)));

@@ -77,7 +77,7 @@ if (${htmlRaceChild}) {
   const lateFiles = new Map();
   fs.openSync = function(file, ...args) {
     const fd = realOpen.call(this, file, ...args);
-    if (typeof file === "string" && /late-(json|frame)\\.(html|txt|pptx)$/.test(file)) lateFiles.set(fd, { file, checks: 0 });
+    if (typeof file === "string" && /(?:late-(?:json|frame)|removed)\\.(html|txt|pptx)$/.test(file)) lateFiles.set(fd, { file, checks: 0 });
     if (typeof file === "string" && /growing\\.(txt|pptx)$/.test(file)) growing.set(fd, file);
     if (typeof file === "string" && file.endsWith("chmod.txt")) chmodFiles.set(fd, file);
     if (typeof file === "string" && /changing\\.(txt|pptx)$/.test(file)) changingFiles.set(fd, file);
@@ -87,7 +87,7 @@ if (${htmlRaceChild}) {
   };
   fs.fstatSync = function(fd, ...args) {
     const stat = realFstat.call(this, fd, ...args), state = lateFiles.get(fd);
-    if (state && ++state.checks === 2) { fs.renameSync(state.file + ".replacement", state.file); lateFiles.delete(fd); }
+    if (state && ++state.checks === 2) { if (state.file.includes("removed.")) fs.unlinkSync(state.file); else fs.renameSync(state.file + ".replacement", state.file); lateFiles.delete(fd); }
     return stat;
   };
   for (const method of ["readFileSync", "openSync"]) {
@@ -337,7 +337,7 @@ if (htmlRaceChild) for (const name of ["race-json.html", "race-frame.html", "lat
   fs.writeFileSync(path.join(folder, name), "original invented document");
   fs.writeFileSync(path.join(folder, name + ".replacement"), "replacement invented document");
 }
-if (htmlRaceChild) for (const name of ["growing.txt", "growing.pptx", "changing.txt", "changing.pptx", "chmod.txt", "failure.pptx", "revoke.txt"]) fs.writeFileSync(path.join(folder, name), "invented");
+if (htmlRaceChild) for (const name of ["growing.txt", "growing.pptx", "changing.txt", "changing.pptx", "removed.txt", "removed.pptx", "chmod.txt", "failure.pptx", "revoke.txt"]) fs.writeFileSync(path.join(folder, name), "invented");
 if (htmlRaceChild) {
 	fs.writeFileSync(path.join(folder, "utf8.txt"), Buffer.from([0x3c, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x3e, 0xc3, 0x28]));
 	fs.writeFileSync(path.join(folder, "invalid.json"), "{bad json");
@@ -402,6 +402,7 @@ fs.writeFileSync(path.join(folder, "old.doc"), "invented");
 fs.writeFileSync(path.join(folder, "notes.txt"), "invented");
 fs.writeFileSync(path.join(folder, "notes.csv"), "invented");
 fs.writeFileSync(path.join(folder, "old.xls"), "invented");
+if (openChild) for (const name of ["example.json", "deck.pptx", "drawing.excalidraw"]) fs.writeFileSync(path.join(folder, name), "invented");
 fs.symlinkSync(path.join(folder, "book.xlsx"), path.join(folder, "link.xlsx"));
 if (htmlRaceChild) for (const name of ["link.txt", "link.pptx"]) fs.symlinkSync(path.join(folder, "book.xlsx"), path.join(folder, name));
 fs.mkdirSync(path.join(folder, "directory.xlsx"));
@@ -505,6 +506,10 @@ try {
             const changed = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=${name}`);
             assert(changed.status === 409 && (await changed.json()).code === "file_changed", `content change is refused for ${name}`);
         }
+        for (const name of ["removed.txt", "removed.pptx"]) {
+            const removed = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=${name}`);
+            assert(removed.status === 409 && (await removed.json()).code === "file_changed", `removed target is refused for ${name}`);
+        }
         const chmod = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=chmod.txt`);
         assert(chmod.status === 200 && (await chmod.json()).text === "invented", "metadata-only chmod remains accepted");
         const failure = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=failure.pptx`);
@@ -513,6 +518,15 @@ try {
             const growing = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=${name}`);
             assert(growing.status === 413 && (await growing.json()).code === "file_too_large", `${name} growing past its hard read limit is refused`);
         }
+        const assets = path.join(repoRoot, "apps/web-ui/dist/assets");
+        const renderer = fs.readdirSync(assets).find((name) => /^pptx-frame-entry-[\w-]+\.js$/.test(name));
+        assert(renderer, "the built PPTX renderer exists for the missing-asset check");
+        const rendererPath = path.join(assets, renderer);
+        fs.renameSync(rendererPath, `${rendererPath}.test-hidden`);
+        try {
+            const absentRenderer = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=failure.pptx&frame=1`);
+            assert(absentRenderer.status === 503 && (await absentRenderer.json()).code === "renderer_unavailable", "a missing renderer has a controlled response");
+        } finally { fs.renameSync(`${rendererPath}.test-hidden`, rendererPath); }
         const revoked = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=revoke.txt`);
         assert(revoked.status === 403 && (await revoked.json()).code === "workspace_read_forbidden", "revocation during reading refuses the bytes");
         const renewed = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: folder, workspaceAccessMode: "localFiles" }) });
@@ -553,6 +567,11 @@ try {
 		assert(opened.status === 202 && opened.body.accepted === true, `guarded local open waits for a successful dispatcher: ${JSON.stringify(opened)}`);
 		const calls = fs.readFileSync(spawnMarker, "utf8").trim().split("\n").map((line) => JSON.parse(line));
 		assert(calls.length === 1 && calls[0].file === "/usr/bin/xdg-open" && JSON.stringify(calls[0].args) === JSON.stringify([path.join(folder, "report.pdf")]) && calls[0].options.shell === false && calls[0].options.detached === false, "the production adapter receives one inert absolute argument");
+        for (const name of ["notes.txt", "example.json", "deck.pptx", "drawing.excalidraw"]) {
+            const result = await openRequest({ conversationId: "demo-thread", path: name });
+            const call = JSON.parse(fs.readFileSync(spawnMarker, "utf8").trim().split("\n").at(-1)!);
+            assert(result.status === 202 && JSON.stringify(call.args) === JSON.stringify([path.join(folder, name)]), `${name} opens locally through the fake opener`);
+        }
         for (const name of ["example.html", "encoding.htm"]) {
             const result = await openRequest({ conversationId: "demo-thread", path: name });
             const call = JSON.parse(fs.readFileSync(spawnMarker, "utf8").trim().split("\n").at(-1)!);

@@ -371,7 +371,10 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 			if (!current.policy || !current.workspaceToolsEnabled || !current.policy.modes.read || !persistentRoomWorkspaceToolNamesForPolicy(current.policy).includes("read")) throw new Error("permission");
 			const again = resolvePersistentRoomWorkspaceExistingFile(current.policy, relativePath);
 			if (again.absolutePath !== guarded.absolutePath || again.rootRealpath !== guarded.rootRealpath || !matches(again.stat)) return changed();
-		} catch { return reply.code(403).send({ code: "workspace_read_forbidden", error: "This file is not available under the current workspace permissions." }); }
+		} catch (error) {
+			if (error instanceof PersistentRoomWorkspaceToolError && error.code === "file_not_found") return changed();
+			return reply.code(403).send({ code: "workspace_read_forbidden", error: "This file is not available under the current workspace permissions." });
+		}
 		if (framedEntry) return reply.type("application/octet-stream").send(bytes);
 		return reply.send({ schemaVersion: 1, agentId, conversationId: query.conversationId, path: relativePath, kind: "text", text: bytes.toString("utf8"), notices: [] });
 	}

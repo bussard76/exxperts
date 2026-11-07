@@ -81,6 +81,7 @@ fs.writeFileSync(path.join(folder, "single.excalidraw"), JSON.stringify({ elemen
 const demoFrame = (id: string, x: number, isDeleted = false) => ({ id, type: "frame", x, y: 0, width: 200, height: 100, angle: 0, strokeColor: "#000000", backgroundColor: "transparent", fillStyle: "solid", strokeWidth: 1, strokeStyle: "solid", roughness: 1, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: 1, version: 1, versionNonce: 1, isDeleted, boundElements: null, updated: 1, link: null, locked: false, name: id });
 fs.writeFileSync(path.join(folder, "frames.excalidraw"), JSON.stringify({ elements: [demoFrame("First", 0), demoFrame("Second", 250), demoFrame("Deleted", 500, true)] }));
 fs.writeFileSync(path.join(folder, "hostile.excalidraw"), JSON.stringify({ elements: [{ ...demoFrame("<script>invented</script>", 0), link: "https://example.invalid/hostile-link" }, demoFrame("Other", 250)] }));
+fs.writeFileSync(path.join(folder, "external-image.excalidraw"), JSON.stringify({ elements: [{ ...demoFrame("Image", 0), type: "image", fileId: "external", status: "saved", scale: [1, 1], crop: null }], files: { external: { id: "external", mimeType: "image/png", dataURL: "https://example.invalid/hostile-image", created: 1 } } }));
 fs.writeFileSync(path.join(folder, "one.excalidraw"), JSON.stringify({ elements: [demoFrame("Only", 0)] }));
 {
 	const { default: JSZip } = await import("jszip");
@@ -90,6 +91,10 @@ fs.writeFileSync(path.join(folder, "one.excalidraw"), JSON.stringify({ elements:
 	zip.file("ppt/_rels/presentation.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/></Relationships>`);
 	zip.file("ppt/slides/slide1.xml", `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="914400" y="914400"/><a:ext cx="4572000" cy="914400"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="2400"/><a:t>Invented slide</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`);
 	fs.writeFileSync(path.join(folder, "invented.pptx"), await zip.generateAsync({ type: "nodebuffer" }));
+	const slide = await zip.file("ppt/slides/slide1.xml")!.async("string");
+	zip.file("ppt/slides/slide1.xml", slide.replace("xmlns:a=", 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:a=').replace('<a:rPr lang="en-US" sz="2400"/>', '<a:rPr lang="en-US" sz="2400"><a:hlinkClick r:id="rIdHostile"/></a:rPr>').replace("</p:spTree>", `<p:pic><p:nvPicPr><p:cNvPr id="3" name="External image"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:link="rIdImage"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic></p:spTree>`));
+	zip.file("ppt/slides/_rels/slide1.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdHostile" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.invalid/hostile-link" TargetMode="External"/><Relationship Id="rIdImage" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="https://example.invalid/hostile-image" TargetMode="External"/></Relationships>`);
+	fs.writeFileSync(path.join(folder, "hostile.pptx"), await zip.generateAsync({ type: "nodebuffer" }));
 }
 fs.writeFileSync(path.join(folder, "broken.pptx"), "invented broken deck");
 fs.writeFileSync(path.join(folder, "broken.excalidraw"), "invalid json");
@@ -355,8 +360,22 @@ try {
 		await treeFile("hostile.excalidraw").click();
 		const hostileDrawing = page.frameLocator(".workspace-preview-html iframe");
 		await hostileDrawing.getByRole("button", { name: "<script>invented</script>", exact: true }).waitFor({ timeout: 30_000 });
+		await hostileDrawing.locator("body").evaluate(() => {
+			void fetch("https://example.invalid/hostile-fetch").catch(() => {});
+			const image = document.createElement("img"); image.src = "https://example.invalid/hostile-image"; document.body.append(image);
+			const form = document.createElement("form"); form.action = "https://example.invalid/hostile-form"; document.body.append(form); form.submit();
+		});
+		await page.waitForTimeout(200);
 		assert(await hostileDrawing.locator("script[src]").count() === 0 && frameExternalRequests === 0, "script-like drawing labels stay inert and do not request external resources");
 		await tab("hostile.excalidraw").getByRole("button", { name: /close/i }).click();
+		await treeFile("external-image.excalidraw").click();
+		await page.locator(".workspace-preview-pptx-loading").waitFor({ state: "hidden", timeout: 30_000 });
+		assert(frameExternalRequests === 0, "a drawing with an external image makes no external request");
+		await tab("external-image.excalidraw").getByRole("button", { name: /close/i }).click();
+		await treeFile("hostile.pptx").click();
+		await page.frameLocator(".workspace-preview-html iframe").getByText("Invented slide", { exact: true }).waitFor({ timeout: 30_000 });
+		assert(frameExternalRequests === 0, "a PPTX with an external link makes no external request");
+		await tab("hostile.pptx").getByRole("button", { name: /close/i }).click();
 		await context.unroute("https://example.invalid/**");
 		await treeFile("frames.excalidraw").click();
 		const frames = page.frameLocator(".workspace-preview-html iframe");
@@ -410,6 +429,11 @@ try {
 		await page.evaluate((theme) => { if (theme === undefined) delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = theme; }, previousTheme);
 		await treeFile("invented.pptx").click();
 		await page.frameLocator(".workspace-preview-html iframe").getByText("Invented slide", { exact: true }).waitFor({ timeout: 30_000 });
+		const directPptx = await context.newPage();
+		const directPptxUrl = new URL((await page.locator(".workspace-preview-html iframe").getAttribute("src"))!, baseUrl).href;
+		const directPptxResponse = await directPptx.goto(directPptxUrl);
+		assert((directPptxResponse?.headers()["content-security-policy"] ?? "").includes("sandbox allow-scripts") && await directPptx.locator("#slides").textContent() === "", "direct PPTX frame navigation has no file bytes and stays sandboxed");
+		await directPptx.close();
 		await tab("invented.pptx").getByRole("button", { name: /close/i }).click();
 		for (const name of ["broken.pptx", "broken.excalidraw"]) {
 			await treeFile(name).click();
