@@ -313,6 +313,15 @@ if (excelChild) {
 	fs.writeFileSync(path.join(folder, "actual.xlsx"), Buffer.from(await workbook.xlsx.writeBuffer()));
 }
 fs.writeFileSync(path.join(folder, "report.docx"), await smallDocx());
+{
+	const { default: JSZip } = await import("jszip");
+	const zip = await JSZip.loadAsync(await smallDocx());
+	const document = await zip.file("word/document.xml")!.async("string");
+	const paragraphs = ["4.3mm", "1.27cm", "0.5in", "12pt", "1pc", "1pi", "24"].map((size, index) => `<w:p><w:r><w:rPr><w:sz w:val="${size}"/></w:rPr><w:t>Size ${index}</w:t></w:r></w:p>`).join("");
+	zip.file("word/document.xml", document.replace("</w:body>", `${paragraphs}</w:body>`));
+	zip.file("word/custom.xml", `<root>${"x".repeat(1_000_000)}</root>`);
+	fs.writeFileSync(path.join(folder, "sizes.docx"), await zip.generateAsync({ type: "nodebuffer" }));
+}
 fs.writeFileSync(path.join(folder, "streamed.docx"), await streamedDocx());
 fs.writeFileSync(path.join(folder, "css-only.docx"), await cssOnlyDocx());
 fs.writeFileSync(path.join(folder, "conflicting.docx"), await conflictingZipDocx());
@@ -599,6 +608,15 @@ try {
 	const embedded = await canvasApi.loadImage(Buffer.from(embeddedSrc.split(",")[1] ?? "", "base64"));
 	assert(embedded.width === 1 && embedded.height === 1, "the embedded image decodes with its invented dimensions");
 	wordDom.window.close();
+	const sizesResponse = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=sizes.docx`);
+	assert(sizesResponse.status === 200, "Word sizes and a large XML part render through the real preview route within its deadline");
+	const sizesDom = new JSDOM((await sizesResponse.json()).html);
+	const expectedSizes = [12, 36, 36, 12, 12, 12, 12];
+	for (const [index, expected] of expectedSizes.entries()) {
+		const span = [...sizesDom.window.document.querySelectorAll("span")].find((node) => node.textContent === `Size ${index}`);
+		assert(span && parseFloat(sizesDom.window.getComputedStyle(span).fontSize) === expected, `Word size ${index} renders as ${expected}pt`);
+	}
+	sizesDom.window.close();
 	const cssOnly = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=css-only.docx`);
 	const cssBody = await cssOnly.json();
 	assert(cssOnly.status === 200 && !cssBody.html.includes("example.invalid") && cssBody.notices.some((notice: { code: string }) => notice.code === "external_resources_blocked"), "escaped external CSS is blocked and announced even without external relationships");
