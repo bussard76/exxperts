@@ -154,7 +154,7 @@ export function WorkspaceFileBrowser({ agentId, conversationId, selectedPath = n
 					)}
 					{isDirectory && isOpen && (
 						<div className="workspace-file-browser-children">
-							{isLoading && !childEntries ? <p className="workspace-file-browser-status">Loading…</p> : childEntries?.length === 0 ? <p className="workspace-file-browser-status">Empty folder.</p> : renderEntries(entry.relativePath, depth + 1)}
+							{isLoading && !childEntries ? <p className="workspace-file-browser-status" style={{ paddingLeft: `${24 + (depth + 1) * 14}px` }}>Loading…</p> : childEntries?.length === 0 ? <p className="workspace-file-browser-status" style={{ paddingLeft: `${24 + (depth + 1) * 14}px` }}>Empty folder.</p> : renderEntries(entry.relativePath, depth + 1)}
 						</div>
 					)}
 				</Fragment>

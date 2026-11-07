@@ -5,6 +5,8 @@ import { WorkspaceFileBrowser } from "./components/WorkspaceFileBrowser";
 import { WorkspaceFileTabs } from "./components/WorkspaceFileTabs";
 import { WorkspaceHtmlPreview } from "./components/WorkspaceHtmlPreview";
 import { WorkspaceImagePreview } from "./components/WorkspaceImagePreview";
+import { WorkspaceFramedPreview } from "./components/WorkspaceFramedPreview";
+import { WorkspaceTextPreview } from "./components/WorkspaceTextPreview";
 import { WorkspacePdfPreview } from "./components/WorkspacePdfPreview";
 import { WorkspaceWordPreview } from "./components/WorkspaceWordPreview";
 import { WorkspaceSpreadsheetPreview } from "./components/WorkspaceSpreadsheetPreview";
@@ -143,7 +145,7 @@ function WorkspaceOpenAction({ agentId, conversationId, path }: { agentId: strin
 	const [pending, setPending] = useState(false);
 	const [failed, setFailed] = useState(false);
 	const pendingRef = useRef(false);
-	const label = /\.pdf$/i.test(path) ? "Open PDF" : /\.docx$/i.test(path) ? "Open in Word" : /\.xls(?:x|m)?$/i.test(path) ? "Open in Excel" : "Open in default app";
+	const label = /\.pdf$/i.test(path) ? "Open PDF" : /\.docx$/i.test(path) ? "Open in Word" : /\.pptx$/i.test(path) ? "Open in PowerPoint" : /\.xls(?:x|m)?$/i.test(path) ? "Open in Excel" : "Open in default app";
 	const open = async () => {
 		if (pendingRef.current) return;
 		pendingRef.current = true;
@@ -481,6 +483,8 @@ export function App() {
 		| { kind: "workspacePdf"; path: string }
 		| { kind: "workspaceWord"; path: string }
 		| { kind: "workspaceHtml"; path: string }
+		| { kind: "workspaceFramed"; path: string }
+		| { kind: "workspaceText"; path: string }
 		| { kind: "workspaceSpreadsheet"; path: string }
 		// The run view: the live task's stream in the
 		// same pane slot; renders from taskState and swaps to the artifact viewer
@@ -573,7 +577,7 @@ export function App() {
 	// lose them, and leaving the room closes them itself.
 	const setPreview = (data: ApprovalPreviewData | null) => {
 		if (data && rightPaneRef.current?.kind === "markdownEditor" && !guardMarkdownEditorAction(() => setPreview(data), "switch")) return;
-		setRightPane((pane) => (data ? { kind: "preview", data } : pane?.kind === "attachments" || pane?.kind === "workspaceImage" || pane?.kind === "workspaceLegacyDoc" || pane?.kind === "workspacePdf" || pane?.kind === "workspaceWord" || pane?.kind === "workspaceHtml" || pane?.kind === "workspaceSpreadsheet" || (pane?.kind === "artifactViewer" && pane.backTo) ? pane : null));
+		setRightPane((pane) => (data ? { kind: "preview", data } : pane?.kind === "attachments" || pane?.kind === "workspaceImage" || pane?.kind === "workspaceLegacyDoc" || pane?.kind === "workspacePdf" || pane?.kind === "workspaceWord" || pane?.kind === "workspaceHtml" || pane?.kind === "workspaceFramed" || pane?.kind === "workspaceText" || pane?.kind === "workspaceSpreadsheet" || (pane?.kind === "artifactViewer" && pane.backTo) ? pane : null));
 	};
 	const onMarkdownEditorDirtyChange = useCallback((dirty: boolean) => {
 		markdownEditorDirtyRef.current = dirty;
@@ -620,11 +624,11 @@ export function App() {
 	}
 
 	function workspacePaneFor(path: string): RightPaneOccupant {
-		return /\.md$/i.test(path) ? { kind: "markdownEditor", path } : /\.(?:doc|xls|xlsm)$/i.test(path) ? { kind: "workspaceLegacyDoc", path } : /\.pdf$/i.test(path) ? { kind: "workspacePdf", path } : /\.docx$/i.test(path) ? { kind: "workspaceWord", path } : /\.html?$/i.test(path) ? { kind: "workspaceHtml", path } : /\.xlsx$/i.test(path) ? { kind: "workspaceSpreadsheet", path } : { kind: "workspaceImage", path };
+		return /\.md$/i.test(path) ? { kind: "markdownEditor", path } : /\.(?:doc|xls|xlsm|drawio|dio)$/i.test(path) ? { kind: "workspaceLegacyDoc", path } : /\.pdf$/i.test(path) ? { kind: "workspacePdf", path } : /\.docx$/i.test(path) ? { kind: "workspaceWord", path } : /\.html?$/i.test(path) ? { kind: "workspaceHtml", path } : /\.(?:pptx|excalidraw)$/i.test(path) ? { kind: "workspaceFramed", path } : /\.(?:txt|json)$/i.test(path) ? { kind: "workspaceText", path } : /\.xlsx$/i.test(path) ? { kind: "workspaceSpreadsheet", path } : { kind: "workspaceImage", path };
 	}
 
 	function activeWorkspacePath(pane: RightPaneOccupant | null): string | null {
-		return pane?.kind === "markdownEditor" || pane?.kind === "workspaceImage" || pane?.kind === "workspaceLegacyDoc" || pane?.kind === "workspacePdf" || pane?.kind === "workspaceWord" || pane?.kind === "workspaceHtml" || pane?.kind === "workspaceSpreadsheet" ? pane.path : null;
+		return pane?.kind === "markdownEditor" || pane?.kind === "workspaceImage" || pane?.kind === "workspaceLegacyDoc" || pane?.kind === "workspacePdf" || pane?.kind === "workspaceWord" || pane?.kind === "workspaceHtml" || pane?.kind === "workspaceFramed" || pane?.kind === "workspaceText" || pane?.kind === "workspaceSpreadsheet" ? pane.path : null;
 	}
 
 	function requestCloseWorkspaceTab(path: string): void {
@@ -649,7 +653,7 @@ export function App() {
 
 	function openWorkspaceMarkdown(entry: { relativePath: string; extension: string }): void {
 		const path = entry.relativePath;
-		if (!/\.(md|doc|docx|pdf|html?|xls|xlsx|xlsm|png|jpe?g|gif|webp|svg)$/i.test(path) || !persistentChat) return;
+		if (!/\.(md|doc|docx|pptx|excalidraw|drawio|dio|txt|json|pdf|html?|xls|xlsx|xlsm|png|jpe?g|gif|webp|svg)$/i.test(path) || !persistentChat) return;
 		if (activeWorkspacePath(rightPaneRef.current) === path && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId) return;
 		if (rightPaneRef.current?.kind === "markdownEditor" && !guardMarkdownEditorAction(() => openWorkspaceMarkdown(entry), "switch")) return;
 		setArtifactMaximized(false);
@@ -691,13 +695,13 @@ export function App() {
 	// until dismissed — one Escape, one layer.
 	// As an Escape layer it keeps that Escape from the room's own keys too: the
 	// composer's Stop and a waiting question's deny.
-	const paneTakesEscape = rightPane?.kind === "artifactViewer" || rightPane?.kind === "taskRun" || rightPane?.kind === "attachments" || rightPane?.kind === "markdownEditor" || rightPane?.kind === "workspaceImage" || rightPane?.kind === "workspaceLegacyDoc" || rightPane?.kind === "workspacePdf" || rightPane?.kind === "workspaceWord" || rightPane?.kind === "workspaceHtml" || rightPane?.kind === "workspaceSpreadsheet";
+	const paneTakesEscape = rightPane?.kind === "artifactViewer" || rightPane?.kind === "taskRun" || rightPane?.kind === "attachments" || rightPane?.kind === "markdownEditor" || rightPane?.kind === "workspaceImage" || rightPane?.kind === "workspaceLegacyDoc" || rightPane?.kind === "workspacePdf" || rightPane?.kind === "workspaceWord" || rightPane?.kind === "workspaceHtml" || rightPane?.kind === "workspaceFramed" || rightPane?.kind === "workspaceText" || rightPane?.kind === "workspaceSpreadsheet";
 	useEscapeKey(() => {
 		// A dialog that is not in this component's state (the expanded
 		// diagram viewer) owns Escape the same way: one Escape, one layer.
 		if (document.querySelector('[aria-modal="true"]')) return;
 		if (artifactMaximized) setArtifactMaximized(false);
-		else if (rightPane?.kind === "markdownEditor" || rightPane?.kind === "workspaceImage" || rightPane?.kind === "workspaceLegacyDoc" || rightPane?.kind === "workspacePdf" || rightPane?.kind === "workspaceWord" || rightPane?.kind === "workspaceHtml" || rightPane?.kind === "workspaceSpreadsheet") requestCloseMarkdownEditor();
+		else if (rightPane?.kind === "markdownEditor" || rightPane?.kind === "workspaceImage" || rightPane?.kind === "workspaceLegacyDoc" || rightPane?.kind === "workspacePdf" || rightPane?.kind === "workspaceWord" || rightPane?.kind === "workspaceHtml" || rightPane?.kind === "workspaceFramed" || rightPane?.kind === "workspaceText" || rightPane?.kind === "workspaceSpreadsheet") requestCloseMarkdownEditor();
 		else if (rightPane?.kind === "attachments" && rightPane.view === "gallery") setRightPane({ kind: "attachments", view: "panel" });
 		else closePaneFile();
 	}, paneTakesEscape && !assetDeleteConfirm && !exportCollision && !fileDeleteConfirm && !saveAsPrompt && !roomSettingsOpen && !markdownEditorPrompt);
@@ -757,7 +761,7 @@ export function App() {
 	const [persistentChat, setPersistentChat] = useState<PersistentChatConfig>(null);
 	useEffect(() => {
 		setWorkspaceTabs(null);
-		setRightPane((pane) => pane?.kind === "markdownEditor" || pane?.kind === "workspaceImage" || pane?.kind === "workspaceLegacyDoc" || pane?.kind === "workspacePdf" || pane?.kind === "workspaceWord" || pane?.kind === "workspaceHtml" || pane?.kind === "workspaceSpreadsheet" ? null : pane);
+		setRightPane((pane) => pane?.kind === "markdownEditor" || pane?.kind === "workspaceImage" || pane?.kind === "workspaceLegacyDoc" || pane?.kind === "workspacePdf" || pane?.kind === "workspaceWord" || pane?.kind === "workspaceHtml" || pane?.kind === "workspaceFramed" || pane?.kind === "workspaceText" || pane?.kind === "workspaceSpreadsheet" ? null : pane);
 	}, [persistentChat?.agentId, persistentChat?.conversationId, personChanged]);
 	// Another conversation holds none of this one's edit.
 	useEffect(() => {
@@ -8666,7 +8670,7 @@ export function App() {
 			{persistentChat && !personChanged && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId && (
 				<div className="workspace-pane" hidden={activeWorkspacePath(rightPane) === null}>
 					<WorkspaceFileTabs tabs={workspaceTabs.paths} active={activeWorkspacePath(rightPane)} onSelect={(path) => openWorkspaceMarkdown({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} onReorder={(paths) => setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths } : tabs)} />
-					{rightPane && (rightPane.kind === "workspaceImage" || rightPane.kind === "workspacePdf" || rightPane.kind === "workspaceWord" || rightPane.kind === "workspaceHtml" || rightPane.kind === "workspaceSpreadsheet" || (rightPane.kind === "workspaceLegacyDoc" && !/\.doc$/i.test(rightPane.path))) && <WorkspaceOpenAction key={JSON.stringify([persistentChat.agentId, persistentChat.conversationId, rightPane.path])} agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={rightPane.path} />}
+					{rightPane && (rightPane.kind === "workspaceImage" || rightPane.kind === "workspacePdf" || rightPane.kind === "workspaceWord" || rightPane.kind === "workspaceHtml" || rightPane.kind === "workspaceFramed" || rightPane.kind === "workspaceText" || rightPane.kind === "workspaceSpreadsheet" || (rightPane.kind === "workspaceLegacyDoc" && !/\.doc$/i.test(rightPane.path))) && <WorkspaceOpenAction key={JSON.stringify([persistentChat.agentId, persistentChat.conversationId, rightPane.path])} agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={rightPane.path} />}
 					{rightPane?.kind === "markdownEditor" && <MarkdownEditorPane
 						ref={markdownEditorRef}
 						agentId={persistentChat.agentId}
@@ -8682,6 +8686,12 @@ export function App() {
 					</div>)}
 					{workspaceTabs.paths.filter((path) => /\.html?$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceHtml" || rightPane.path !== path}>
 						<WorkspaceHtmlPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />
+					</div>)}
+					{workspaceTabs.paths.filter((path) => /\.(?:txt|json)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceText" || rightPane.path !== path}>
+						<WorkspaceTextPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />
+					</div>)}
+					{workspaceTabs.paths.filter((path) => /\.(?:pptx|excalidraw)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceFramed" || rightPane.path !== path}>
+						<WorkspaceFramedPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />
 					</div>)}
 					{workspaceTabs.paths.filter((path) => /\.xlsx$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceSpreadsheet" || rightPane.path !== path}>
 						<WorkspaceSpreadsheetPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />
