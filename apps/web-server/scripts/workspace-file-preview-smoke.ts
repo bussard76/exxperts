@@ -55,6 +55,18 @@ const original = childProcess.fork;
 const fs = require("node:fs");
 const realPlatform = process.platform;
 if (${htmlRaceChild}) {
+  const realOpen = fs.openSync, realFstat = fs.fstatSync;
+  const lateFiles = new Map();
+  fs.openSync = function(file, ...args) {
+    const fd = realOpen.call(this, file, ...args);
+    if (typeof file === "string" && /late-(json|frame)\\.html$/.test(file)) lateFiles.set(fd, { file, checks: 0 });
+    return fd;
+  };
+  fs.fstatSync = function(fd, ...args) {
+    const stat = realFstat.call(this, fd, ...args), state = lateFiles.get(fd);
+    if (state && ++state.checks === 2) { fs.renameSync(state.file + ".replacement", state.file); lateFiles.delete(fd); }
+    return stat;
+  };
   for (const method of ["readFileSync", "openSync"]) {
     const originalRead = fs[method];
     fs[method] = function(file, ...args) {
@@ -297,7 +309,8 @@ const folder = path.join(tempHome, "Projects", "archive");
 fs.mkdirSync(folder, { recursive: true });
 fs.writeFileSync(path.join(folder, "book.xlsx"), "invented");
 fs.writeFileSync(path.join(folder, "encoding.htm"), Buffer.from([0x41, 0xc3, 0x28, 0x42]));
-if (htmlRaceChild) for (const name of ["race-json.html", "race-frame.html"]) {
+fs.writeFileSync(path.join(folder, "example.html"), "<p>Invented</p>");
+if (htmlRaceChild) for (const name of ["race-json.html", "race-frame.html", "late-json.html", "late-frame.html"]) {
   fs.writeFileSync(path.join(folder, name), "original invented document");
   fs.writeFileSync(path.join(folder, name + ".replacement"), "replacement invented document");
 }
@@ -436,7 +449,7 @@ try {
             const encoding = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=encoding.htm${suffix}`);
             assert(encoding.status === 200 && (suffix ? await encoding.text() : (await encoding.json()).html) === "A�(B", "malformed UTF-8 decodes with replacement in both responses");
         }
-        for (const [name, suffix] of [["race-json.html", ""], ["race-frame.html", "&frame=1"]]) {
+        for (const [name, suffix] of [["race-json.html", ""], ["race-frame.html", "&frame=1"], ["late-json.html", ""], ["late-frame.html", "&frame=1"]]) {
             const result = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=${name}${suffix}`);
             assert(result.status === 409 && (await result.json()).code === "file_changed", `HTML replacement is refused for ${name}`);
         }
@@ -474,6 +487,11 @@ try {
 		assert(opened.status === 202 && opened.body.accepted === true, `guarded local open waits for a successful dispatcher: ${JSON.stringify(opened)}`);
 		const calls = fs.readFileSync(spawnMarker, "utf8").trim().split("\n").map((line) => JSON.parse(line));
 		assert(calls.length === 1 && calls[0].file === "/usr/bin/xdg-open" && JSON.stringify(calls[0].args) === JSON.stringify([path.join(folder, "report.pdf")]) && calls[0].options.shell === false && calls[0].options.detached === false, "the production adapter receives one inert absolute argument");
+        for (const name of ["example.html", "encoding.htm"]) {
+            const result = await openRequest({ conversationId: "demo-thread", path: name });
+            const call = JSON.parse(fs.readFileSync(spawnMarker, "utf8").trim().split("\n").at(-1)!);
+            assert(result.status === 202 && JSON.stringify(call.args) === JSON.stringify([path.join(folder, name)]), `${name} opens locally through the fake opener`);
+        }
 		for (const [name, status, code] of [["missing-opener.pdf", 503, "opener_unavailable"], ["denied-opener.pdf", 500, "open_failed"], ["signal.pdf", 500, "open_failed"], ["exit2.pdf", 500, "open_failed"], ["exit3.pdf", 503, "opener_unavailable"]] as const) {
 			const failure = await openRequest({ conversationId: "demo-thread", path: name });
 			assert(failure.status === status && failure.body.code === code, `dispatcher failure ${name} maps safely: ${JSON.stringify(failure)}`);

@@ -352,6 +352,8 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 				if (!matches(fs.fstatSync(fd))) throw new Error("file changed");
 				html = buffer.toString("utf8");
 			} finally { fs.closeSync(fd); }
+			const again = resolvePersistentRoomWorkspaceExistingFile(effective.policy, relativePath);
+			if (again.absolutePath !== guarded.absolutePath || again.rootRealpath !== guarded.rootRealpath || !matches(again.stat)) throw new Error("file changed");
 		}
 		catch { return reply.code(409).send({ code: "file_changed", error: "This file changed while the preview was loading; close the tab and open it again." }); }
 		// The frame's document: the CSP sandbox gives it an opaque origin even when opened directly, so its scripts have no cookies or API.
