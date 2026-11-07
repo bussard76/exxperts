@@ -51,6 +51,6 @@ Sascha decided on 2026-11-07: “Skripte an, Risiko akzeptiert”. The remaining
 
 - [x] Record HTML decision and local-only HTML/HTM opening in ADR-0003.
 - [ ] Prove embedded and direct HTML isolation, blocked connections, images and forms, and intercepted self-navigation.
-- [ ] Prove both HTML GETs and local-only open for both remote capabilities, hidden room and revoked grant.
+- [x] `remote-capability-smoke.ts` exercises both HTML GETs and local-only open for full and read-only paired devices, hidden room and revoked grant over the local tunnel.
 - [x] Match worker descriptor identity and bounded reads; `workspace-file-preview-smoke.ts --html-race-child` verifies replacement refusal and malformed UTF-8 replacement for both GETs.
 - [ ] Run targeted checks, merge main, rerun affected suites, complete self-review and push.
