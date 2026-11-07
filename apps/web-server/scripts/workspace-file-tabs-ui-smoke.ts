@@ -102,7 +102,8 @@ fs.writeFileSync(path.join(folder, "report.docx"), await smallDocx());
 	sheet.getCell("B2").numFmt = '"$"#,##0.00';
 	sheet.mergeCells("A3:B3");
 	sheet.getCell("A3").value = "Invented merge";
-	workbook.addWorksheet("Real detail").getCell("A1").value = "Second sheet";
+	const detail = workbook.addWorksheet("Real detail", { views: [{ showGridLines: false }] });
+	detail.getCell("A1").value = "Second sheet";
 	fs.writeFileSync(path.join(folder, "actual.xlsx"), Buffer.from(await workbook.xlsx.writeBuffer()));
 }
 fs.writeFileSync(path.join(folder, "sample.xlsx"), "invented placeholder");
@@ -441,10 +442,12 @@ try {
 		await realCell.waitFor({ timeout: 10_000 });
 		const realStyle = await realCell.evaluate((node) => ({ color: getComputedStyle(node).color, weight: getComputedStyle(node).fontWeight, fill: getComputedStyle(node).backgroundColor }));
 		assert(realStyle.color === "rgb(204, 34, 0)" && Number(realStyle.weight) >= 700 && realStyle.fill === "rgb(255, 255, 0)", "the real workbook displays its font and fill");
+		assert(await realCell.evaluate((node) => getComputedStyle(node).borderRightColor) === "rgb(255, 255, 0)", "the filled cell hides its own gridline with its fill");
 		assert(await page.getByText("$54.00", { exact: true }).count() === 1, "the real workbook displays the cached formatted result");
 		assert(await page.getByText("Invented merge", { exact: true }).getAttribute("colspan") === "2", "the real workbook displays its merged range");
 		await page.getByRole("button", { name: "Real detail", exact: true }).click();
 		await page.getByText("Second sheet", { exact: true }).waitFor();
+		assert(await page.getByText("Second sheet", { exact: true }).evaluate((node) => getComputedStyle(node).borderRightColor) === "rgba(0, 0, 0, 0)", "a sheet that hides gridlines renders transparent cell borders");
 		await assertPreviewHasNoEditingControls();
 		await tab("actual.xlsx").locator(".workspace-tab-close").click();
 		let corruptWorkbook = false;
