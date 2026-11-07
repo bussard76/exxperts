@@ -11,11 +11,13 @@ export function WorkspaceFramedPreview({ agentId, conversationId, path }: { agen
 	const [error, setError] = useState<string | null>(null);
 	const [rendered, setRendered] = useState(false);
 	const frameRef = useRef<HTMLIFrameElement>(null);
+	const delivered = useRef(false);
 	// Read once: changing it later would reload the frame and lose the zoom.
 	const [theme] = useState(() => (document.documentElement.dataset.theme === "dark" ? "dark" : "light"));
 	const route = `/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?${new URLSearchParams({ conversationId, path })}`;
 	useEffect(() => {
 		const controller = new AbortController();
+		delivered.current = false;
 		void apiFetch(route, { signal: controller.signal })
 			.then(async (response) => {
 				if (!response.ok) {
@@ -33,13 +35,21 @@ export function WorkspaceFramedPreview({ agentId, conversationId, path }: { agen
 		const onMessage = (event: MessageEvent) => {
 			const frame = frameRef.current?.contentWindow;
 			if (!frame || event.source !== frame) return;
-			if (event.data?.kind === "frame-ready" && bytes) frame.postMessage(bytes.slice(0), "*");
+			if (event.data?.kind === "frame-ready" && bytes && !delivered.current) {
+				delivered.current = true;
+				frame.postMessage(bytes, "*", [bytes]);
+			}
 			else if (event.data?.kind === "frame-rendered") setRendered(true);
 			else if (event.data?.kind === "frame-failed") setError("This file is damaged or cannot be read.");
 		};
 		window.addEventListener("message", onMessage);
 		return () => window.removeEventListener("message", onMessage);
 	}, [bytes]);
+	useEffect(() => {
+		if (rendered || error) return;
+		const timer = window.setTimeout(() => setError("This preview took too long to load."), 30_000);
+		return () => window.clearTimeout(timer);
+	}, [rendered, error, route]);
 	if (error) return <div className="workspace-preview-html"><p>{error}</p></div>;
 	return <div className="workspace-preview-html">{!rendered && <p className="workspace-preview-pptx-loading">Loading preview…</p>}{bytes && <iframe ref={frameRef} sandbox="allow-scripts" title={path.split("/").pop() ?? path} src={`${route}&frame=1#theme=${theme}`} />}</div>;
 }

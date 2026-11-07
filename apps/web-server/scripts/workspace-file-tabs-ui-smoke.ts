@@ -77,6 +77,7 @@ function ninePagePdf(): Buffer {
 const folder = path.join(tempHome, "Projects", "archive");
 fs.mkdirSync(folder, { recursive: true });
 fs.writeFileSync(path.join(folder, "photo.png"), ONE_PIXEL_PNG);
+fs.writeFileSync(path.join(folder, "single.excalidraw"), JSON.stringify({ elements: [] }).padEnd(500));
 fs.writeFileSync(path.join(folder, "slow.png"), ONE_PIXEL_PNG);
 {
 	const { createCanvas } = await import("@napi-rs/canvas");
@@ -228,6 +229,23 @@ try {
 			if (request.url().includes("/workspace-image?")) imageRequests += 1;
 			if (request.url().includes("/workspace-preview?")) previewRequests += 1;
 		});
+		await page.evaluate(() => { (window as any).replacementBytes = 0; (window as any).replacementReady = false; window.addEventListener("message", (event) => { if (event.data?.kind === "replacement-ready") (window as any).replacementReady = true; if (event.data?.kind === "replacement-received") (window as any).replacementBytes = event.data.length; }); });
+		const fakeFrame = `<script>onmessage = e => { if (e.data instanceof ArrayBuffer) { parent.postMessage({kind: "frame-rendered"}, "*"); location.href = "/replacement-frame"; } }; parent.postMessage({kind: "frame-ready"}, "*");</script>`;
+		const replacement = `<script>onmessage = e => { if (e.data instanceof ArrayBuffer) parent.postMessage({kind: "replacement-received", length: e.data.byteLength}, "*"); }; parent.postMessage({kind: "replacement-ready"}, "*"); parent.postMessage({kind: "frame-ready"}, "*");</script>`;
+		await page.route("**/replacement-frame", (route) => route.fulfill({ status: 200, contentType: "text/html", body: replacement }));
+		await page.route("**/workspace-preview?*", (route) => {
+			const url = new URL(route.request().url());
+			if (url.searchParams.get("path") === "single.excalidraw" && url.searchParams.get("frame") === "1") return route.fulfill({ status: 200, contentType: "text/html", body: fakeFrame });
+			return route.continue();
+		});
+		await treeFile("single.excalidraw").click();
+		await page.locator(".workspace-preview-pptx-loading").waitFor({ state: "hidden", timeout: 30_000 });
+		await waitUntil(() => page.evaluate(() => (window as any).replacementReady), "replacement frame loaded");
+		await page.waitForTimeout(1000);
+		assert(await page.evaluate(() => (window as any).replacementBytes) === 0, "a replacement frame cannot receive the 500-byte file again");
+		await tab("single.excalidraw").getByRole("button", { name: /close/i }).click();
+		await page.unroute("**/workspace-preview?*");
+		await page.unroute("**/replacement-frame");
         const forbiddenRequests: string[] = [];
         context.on("requestfinished", request => { if (/hostile-(fetch|api|xhr|ws|image|form)/.test(request.url())) forbiddenRequests.push(request.url()); });
         await treeFile("hostile.html").click();
@@ -406,6 +424,7 @@ try {
 		assert(imageRequests === requestsBeforeChange + 1, "closing and reopening fetches the current image once");
 		if (process.platform === "linux") assert(fs.readFileSync(openerMarker, "utf8") === callsBeforeChange, "tab activation and reopening never dispatch the opener");
 		fs.writeFileSync(path.join(folder, "photo.png"), ONE_PIXEL_PNG);
+fs.writeFileSync(path.join(folder, "single.excalidraw"), JSON.stringify({ elements: [] }).padEnd(500));
 		for (const name of ["first.jpg", "second.JPEG", "image.webp", "frame.gif"]) {
 			await treeFile(name).click();
 			const rendered = page.locator(".workspace-preview-image img:visible");
