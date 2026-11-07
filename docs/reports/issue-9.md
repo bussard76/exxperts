@@ -27,3 +27,5 @@ Draw.io and all its feature/test points are excluded. The Mac at cf043a6 passed 
 ## Files changed, tests, assumptions and debt
 
 Pending implementation. Screenshots, if any, stay untracked under `.build/screenshots/`.
+
+The public-route replacement regression failed before the fix for `race-json.txt` and passes after descriptor checks for early and late replacement of text and PPTX files and growth beyond the text limit (`workspace-file-preview-smoke.ts --html-race-child`). The smoke now checks successful `.txt` and uses `.csv` for the unsupported-type assertion, following Sascha's decision. The KaTeX smoke's startup assertion reads `index.html`, but its one-copy assertion scans every JavaScript file in `dist/assets`, including frame bundles (`answer-content-smoke.ts:345-356`); its stated purpose is answer and Mermaid maths, and the test and dependency remain unchanged pending Sascha's decision.

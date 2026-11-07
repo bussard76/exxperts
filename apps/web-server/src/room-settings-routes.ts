@@ -341,21 +341,39 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 		const scripts = `<script>${fs.readFileSync(path.join(assets, file), "utf8").replaceAll("</script", "<\\/script")}</script>`;
 		return reply.header("Content-Security-Policy", `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'`).type("text/html; charset=utf-8").send(`<!doctype html><html><head><style>html, body { margin: 0; background: #f3f0ea; } #slides { padding: 16px; box-sizing: border-box; }</style></head><body><div id="slides"></div>${scripts}</body></html>`);
 	}
-	if (extension === ".txt" || extension === ".json") {
-		if (guarded.stat.size > 16_777_216) return reply.code(413).send({ code: "file_too_large", error: "This file is too large or complex to preview here." });
+	if (extension === ".txt" || extension === ".json" || framedEntry) {
+		const limit = framedEntry ? 26_214_400 : 16_777_216;
+		const tooLarge = () => reply.code(413).send({ code: "file_too_large", error: "This file is too large or complex to preview here." });
+		const changed = () => reply.code(409).send({ code: "file_changed", error: "This file changed while the preview was loading; close the tab and open it again." });
+		if (guarded.stat.size > limit) return tooLarge();
+		const expected = guarded.stat;
+		const matches = (stat: fs.Stats) => stat.isFile() && stat.dev === expected.dev && stat.ino === expected.ino
+			&& stat.size === expected.size && stat.mtimeMs === expected.mtimeMs;
+		let bytes: Buffer;
 		try {
-			return reply.send({ schemaVersion: 1, agentId, conversationId: query.conversationId, path: relativePath, kind: "text", text: fs.readFileSync(guarded.absolutePath, "utf8"), notices: [] });
-		} catch {
-			return reply.code(409).send({ code: "file_changed", error: "This file changed while the preview was loading; close the tab and open it again." });
-		}
-	}
-	if (framedEntry) {
-		if (guarded.stat.size > 26_214_400) return reply.code(413).send({ code: "file_too_large", error: "This file is too large or complex to preview here." });
+			const fd = fs.openSync(guarded.absolutePath, "r");
+			try {
+				if (!matches(fs.fstatSync(fd))) return changed();
+				bytes = Buffer.alloc(expected.size);
+				let offset = 0;
+				while (offset < bytes.length) {
+					const count = fs.readSync(fd, bytes, offset, bytes.length - offset, offset);
+					if (!count) return changed();
+					offset += count;
+				}
+				const after = fs.fstatSync(fd);
+				if (after.size > limit) return tooLarge();
+				if (!matches(after)) return changed();
+			} finally { fs.closeSync(fd); }
+		} catch { return changed(); }
 		try {
-			return reply.type("application/octet-stream").send(fs.readFileSync(guarded.absolutePath));
-		} catch {
-			return reply.code(409).send({ code: "file_changed", error: "This file changed while the preview was loading; close the tab and open it again." });
-		}
+			const current = resolvePersistentRoomEffectiveWorkspacePolicy(agentId, query.conversationId);
+			if (!current.policy || !current.workspaceToolsEnabled || !current.policy.modes.read || !persistentRoomWorkspaceToolNamesForPolicy(current.policy).includes("read")) throw new Error("permission");
+			const again = resolvePersistentRoomWorkspaceExistingFile(current.policy, relativePath);
+			if (again.absolutePath !== guarded.absolutePath || again.rootRealpath !== guarded.rootRealpath || !matches(again.stat)) return changed();
+		} catch { return reply.code(403).send({ code: "workspace_read_forbidden", error: "This file is not available under the current workspace permissions." }); }
+		if (framedEntry) return reply.type("application/octet-stream").send(bytes);
+		return reply.send({ schemaVersion: 1, agentId, conversationId: query.conversationId, path: relativePath, kind: "text", text: bytes.toString("utf8"), notices: [] });
 	}
 	if (extension === ".html" || extension === ".htm") {
 		if (guarded.stat.size > 16_777_216) return reply.code(413).send({ code: "file_too_large", error: "This file is too large or complex to preview here." });

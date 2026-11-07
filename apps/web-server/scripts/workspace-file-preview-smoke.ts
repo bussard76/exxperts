@@ -56,10 +56,19 @@ const fs = require("node:fs");
 const realPlatform = process.platform;
 if (${htmlRaceChild}) {
   const realOpen = fs.openSync, realFstat = fs.fstatSync;
+  const realRead = fs.readSync;
+  const growing = new Map();
+  fs.readSync = function(fd, ...args) {
+    const count = realRead.call(this, fd, ...args);
+    const target = growing.get(fd);
+    if (target) { growing.delete(fd); fs.appendFileSync(target, Buffer.alloc(16_777_217)); }
+    return count;
+  };
   const lateFiles = new Map();
   fs.openSync = function(file, ...args) {
     const fd = realOpen.call(this, file, ...args);
-    if (typeof file === "string" && /late-(json|frame)\\.html$/.test(file)) lateFiles.set(fd, { file, checks: 0 });
+    if (typeof file === "string" && /late-(json|frame)\\.(html|txt|pptx)$/.test(file)) lateFiles.set(fd, { file, checks: 0 });
+    if (typeof file === "string" && file.endsWith("growing.txt")) growing.set(fd, file);
     return fd;
   };
   fs.fstatSync = function(fd, ...args) {
@@ -70,7 +79,7 @@ if (${htmlRaceChild}) {
   for (const method of ["readFileSync", "openSync"]) {
     const originalRead = fs[method];
     fs[method] = function(file, ...args) {
-      if (typeof file === "string" && /race-(json|frame)\\.html$/.test(file)) {
+      if (typeof file === "string" && /race-(json|frame)\\.(html|txt|pptx)$/.test(file)) {
         const replacement = file + ".replacement";
         if (fs.existsSync(replacement)) fs.renameSync(replacement, file);
       }
@@ -310,10 +319,11 @@ fs.mkdirSync(folder, { recursive: true });
 fs.writeFileSync(path.join(folder, "book.xlsx"), "invented");
 fs.writeFileSync(path.join(folder, "encoding.htm"), Buffer.from([0x41, 0xc3, 0x28, 0x42]));
 fs.writeFileSync(path.join(folder, "example.html"), "<p>Invented</p>");
-if (htmlRaceChild) for (const name of ["race-json.html", "race-frame.html", "late-json.html", "late-frame.html"]) {
+if (htmlRaceChild) for (const name of ["race-json.html", "race-frame.html", "late-json.html", "late-frame.html", "race-json.txt", "race-frame.pptx", "late-json.txt", "late-frame.pptx"]) {
   fs.writeFileSync(path.join(folder, name), "original invented document");
   fs.writeFileSync(path.join(folder, name + ".replacement"), "replacement invented document");
 }
+if (htmlRaceChild) fs.writeFileSync(path.join(folder, "growing.txt"), "invented");
 if (excelChild) {
 	const { default: ExcelJS } = await import("exceljs");
 	const workbook = new ExcelJS.Workbook();
@@ -371,6 +381,7 @@ fs.writeFileSync(path.join(folder, "oversize.pdf"), "%PDF-");
 fs.truncateSync(path.join(folder, "oversize.pdf"), 26_214_401);
 fs.writeFileSync(path.join(folder, "old.doc"), "invented");
 fs.writeFileSync(path.join(folder, "notes.txt"), "invented");
+fs.writeFileSync(path.join(folder, "notes.csv"), "invented");
 fs.symlinkSync(path.join(folder, "book.xlsx"), path.join(folder, "link.xlsx"));
 fs.mkdirSync(path.join(folder, "directory.xlsx"));
 
@@ -453,6 +464,12 @@ try {
             const result = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=${name}${suffix}`);
             assert(result.status === 409 && (await result.json()).code === "file_changed", `HTML replacement is refused for ${name}`);
         }
+        for (const name of ["race-json.txt", "race-frame.pptx", "late-json.txt", "late-frame.pptx"]) {
+            const result = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=${name}`);
+            assert(result.status === 409 && (await result.json()).code === "file_changed", `replacement is refused for ${name}`);
+        }
+        const growing = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=growing.txt`);
+        assert(growing.status === 413 && (await growing.json()).code === "file_too_large", "a file growing past the hard read limit is refused");
     }
 	if (excelChild) {
 		const response = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=actual.xlsx`);
@@ -575,7 +592,10 @@ try {
 	assert(directory.status === 400 && (await directory.json()).code === "not_file", "preview refuses a directory");
 	const oldWord = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=old.doc`);
 	assert(oldWord.status === 415 && (await oldWord.json()).code === "legacy_doc", "old Word files receive the approved error");
-	const unsupported = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=notes.txt`);
+	const textPreview = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=notes.txt`);
+	const textBody = await textPreview.json();
+	assert(textPreview.status === 200 && textBody.kind === "text" && textBody.text === "invented", "approved text previews return the file content");
+	const unsupported = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=notes.csv`);
 	assert(unsupported.status === 415 && (await unsupported.json()).code === "unsupported_file_type", "unapproved types receive a controlled refusal");
 	const pdfUrl = `${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=report.pdf`;
 	if (htmlRaceChild) {
