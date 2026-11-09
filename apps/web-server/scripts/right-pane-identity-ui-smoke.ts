@@ -55,11 +55,13 @@ try {
 	await first.getByTitle("Open beta.html").click();
 	await page.getByRole("button", { name: "Hide right pane" }).waitFor();
 	await viewer.getByRole("tab", { name: "beta.html", selected: true }).waitFor();
-	assert((await viewer.locator("iframe").getAttribute("src"))?.includes("/tsk-first/beta.html"), "another artifact of the same task unfolds and renders");
+	assert((await viewer.locator("iframe").getAttribute("src"))?.includes("/tsk-first/beta.html"), "another artifact of the same task unfolds");
+	await viewer.frameLocator("iframe").getByText("beta.html", { exact: true }).waitFor();
 	await page.getByRole("button", { name: "Hide right pane" }).click();
 	await second.getByTitle("Open beta.html").click();
 	await page.getByRole("button", { name: "Hide right pane" }).waitFor();
-	assert((await viewer.locator("iframe").getAttribute("src"))?.includes("/tsk-second/beta.html"), "same path of another task unfolds and renders");
+	assert((await viewer.locator("iframe").getAttribute("src"))?.includes("/tsk-second/beta.html"), "same path of another task unfolds");
+	await viewer.frameLocator("iframe").getByText("beta.html", { exact: true }).waitFor();
 	await viewer.getByRole("button", { name: "Close artifact viewer" }).click();
 	await page.locator(".attachments-entry").click();
 	await page.getByRole("button", { name: "Hide right pane" }).click();
