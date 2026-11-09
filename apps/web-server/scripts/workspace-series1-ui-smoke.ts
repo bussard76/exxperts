@@ -166,6 +166,11 @@ try {
   await page.locator(".workspace-tab").filter({ hasText: "single.pptx" }).getByRole("button", { name: "Close single.pptx" }).click();
   await page.unroute("**/workspace-preview?*");
   await page.unroute("**/replacement-frame");
+  await page.route("**/workspace-preview?*", route => { const url = new URL(route.request().url()); if (url.searchParams.get("path") === "single.pptx" && url.searchParams.get("frame") === "1") return route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><p>waiting</p>" }); return route.continue(); });
+  await tree.locator(".workspace-file-browser-file", { hasText: "single.pptx" }).click();
+  await page.getByText("This preview took too long to load.").waitFor({ timeout: 35000 });
+  await page.locator(".workspace-tab").filter({ hasText: "single.pptx" }).getByRole("button", { name: "Close single.pptx" }).click();
+  await page.unroute("**/workspace-preview?*");
   await page.getByRole("button", { name: "Open in PowerPoint" }).waitFor({ timeout: 5000 });
   await tree.locator(".workspace-file-browser-file", { hasText: "old.xls" }).click();
   await page.getByText("This file type cannot be previewed here.").waitFor();
