@@ -195,8 +195,19 @@ require("node:module").syncBuiltinESMExports();
 	});
 	assert(putDefault.status === 200, `PUT default should succeed, got ${putDefault.status}: ${JSON.stringify(putDefault.body)}`);
 	fs.writeFileSync(path.join(workspaceRoot, "invented.txt"), "invented content");
+	fs.mkdirSync(path.join(workspaceRoot, "notes"));
+	fs.writeFileSync(path.join(workspaceRoot, "notes", "item.txt"), "invented");
+	fs.writeFileSync(path.join(workspaceRoot, ".hidden"), "invented");
+	fs.symlinkSync(path.join(workspaceRoot, "notes"), path.join(workspaceRoot, "linked-notes"));
 	const listing = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-files?conversationId=demo-thread`);
 	assert(listing.status === 200 && listing.body.entries.some((entry: { name: string }) => entry.name === "invented.txt"), "workspace listing exposes an allowed file through the public route");
+	assert(listing.body.entries[0].kind === "directory" && !listing.body.entries.some((entry: { name: string }) => [".hidden", "linked-notes"].includes(entry.name)), "directories sort first and hidden files and symlinks are omitted");
+	const nested = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-files?conversationId=demo-thread&path=notes`);
+	assert(nested.status === 200 && nested.body.path === "notes" && nested.body.entries[0].relativePath === "notes/item.txt", "nested listing returns relative file paths");
+	for (const blocked of ["../", "linked-notes", ".hidden"]) {
+		const response = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-files?conversationId=demo-thread&path=${encodeURIComponent(blocked)}`);
+		assert(response.status >= 400, `invalid or linked directory ${blocked} is refused`);
+	}
 	fs.mkdirSync(path.join(workspaceRoot, "private-invented"));
 	const badListing = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-files?conversationId=demo-thread&path=private-invented`);
 	assert(badListing.status >= 400 && !JSON.stringify(badListing.body).includes("invented private detail") && !JSON.stringify(badListing.body).includes(workspaceRoot), "unexpected listing failures never expose internal details or absolute paths");
