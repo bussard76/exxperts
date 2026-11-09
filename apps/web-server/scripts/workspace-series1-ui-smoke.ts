@@ -93,7 +93,8 @@ try {
  assert.equal((await api(`/api/persistent-agents/${encodeURIComponent(id)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: folder, workspaceAccessMode: "localFiles" }) })).status, 200);
  const browser = await chromium.launch();
  try {
-  const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  const page = await context.newPage();
   await page.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
   await page.waitForLoadState("networkidle");
   const dismiss = page.locator(".whats-new-close"); if (await dismiss.count()) await dismiss.click();
@@ -174,6 +175,14 @@ try {
   assert(!/hostile-(fetch|image|form)/.test(serverOutput.join("")), "blocked HTML requests never reach the server");
   await tree.locator(".workspace-file-browser-file", { hasText: "invented.pptx" }).click();
   await page.frameLocator(".workspace-preview-content:not([hidden]) .workspace-preview-html iframe").getByText("Invented slide").waitFor({ timeout: 15000 });
+  const framePath = await page.locator(".workspace-preview-content:not([hidden]) .workspace-preview-html iframe").getAttribute("src");
+  assert(framePath);
+  const directFrame = await page.context().newPage();
+  const directResponse = await directFrame.goto(new URL(framePath, baseUrl).href);
+  const frameCsp = directResponse?.headers()["content-security-policy"] ?? "";
+  assert(frameCsp.includes("sandbox allow-scripts") && frameCsp.includes("connect-src 'none'") && frameCsp.includes("form-action 'none'"));
+  assert.equal(await directFrame.locator("#slides").textContent(), "", "direct frame navigation gets no file bytes");
+  await directFrame.close();
   let singleFileFetches = 0;
   page.on("request", request => { const url = new URL(request.url()); if (url.pathname.endsWith("/workspace-preview") && url.searchParams.get("path") === "single.pptx" && url.searchParams.get("frame") !== "1") singleFileFetches++; });
   await page.evaluate(() => { (window as any).replacementBytes = 0; (window as any).replacementReady = false; (window as any).repeatBytes = 0; window.addEventListener("message", event => { if (event.data?.kind === "replacement-ready") (window as any).replacementReady = true; if (event.data?.kind === "repeat-received") (window as any).repeatBytes = event.data.length; if (event.data?.kind === "replacement-received") (window as any).replacementBytes = event.data.length; }); });
