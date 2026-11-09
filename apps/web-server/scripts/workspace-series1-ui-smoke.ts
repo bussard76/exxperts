@@ -73,8 +73,11 @@ async function api(pathname: string, init: AuthedFetchInit = {}) {
  return { status: response.status, body: await response.json() };
 }
 let server: ChildProcessWithoutNullStreams | undefined;
+const serverOutput: string[] = [];
 try {
  server = spawn("npx", ["tsx", "src/index.ts"], { ...SMOKE_SERVER_SPAWN_TREE_OPTIONS, cwd: path.join(repoRoot, "apps/web-server"), env: smokeHomeEnv(tempHome, { PORT: String(port), ...SMOKE_SERVER_AUTH_ENV, EXXETA_HOME: repoRoot, EXXPERTS_CODING_AGENT_DIR: agentDir, EXXETA_PERSISTENT_AGENTS_ROOT: agentsRoot }) as NodeJS.ProcessEnv });
+ server.stdout.on("data", chunk => serverOutput.push(String(chunk)));
+ server.stderr.on("data", chunk => serverOutput.push(String(chunk)));
  await waitUntil(() => fetch(`${baseUrl}/healthz`).then(r => r.ok).catch(() => false), "server ready", 60000);
  const created = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Invented room", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
  assert.equal(created.status, 201);
@@ -137,12 +140,14 @@ try {
   await tree.locator(".workspace-file-browser-file", { hasText: "invented.html" }).click();
   await page.frameLocator(".workspace-preview-html iframe").getByText("Invented HTML").waitFor({ timeout: 10000 });
   const forbiddenRequests: string[] = [];
-  page.on("request", request => { if (/hostile-(fetch|image|form)/.test(request.url())) forbiddenRequests.push(request.url()); });
+  page.on("requestfinished", request => { if (/hostile-(fetch|image|form)/.test(request.url())) forbiddenRequests.push(request.url()); });
   await tree.locator(".workspace-file-browser-file", { hasText: "hostile.html" }).click();
   const hostileFrame = page.frameLocator(".workspace-preview-content:not([hidden]) .workspace-preview-html iframe");
   await waitUntil(async () => (await hostileFrame.locator("body").getAttribute("data-result")) !== null, "hostile frame script runs in sandbox");
   assert.equal(await hostileFrame.locator("body").getAttribute("data-result"), "cookie:blocked,storage:blocked,parent:blocked");
+  await page.waitForTimeout(500);
   assert.deepEqual(forbiddenRequests, [], "HTML preview cannot make network requests");
+  assert(!/hostile-(fetch|image|form)/.test(serverOutput.join("")), "blocked HTML requests never reach the server");
   await tree.locator(".workspace-file-browser-file", { hasText: "invented.pptx" }).click();
   await page.frameLocator(".workspace-preview-content:not([hidden]) .workspace-preview-html iframe").getByText("Invented slide").waitFor({ timeout: 15000 });
   let singleFileFetches = 0;
