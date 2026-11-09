@@ -183,5 +183,16 @@ try {
   await page.keyboard.press("Escape");
   assert.equal(await page.locator(".workspace-tab").filter({ hasText: "old.doc" }).count(), 0, "Escape closes the active workspace tab");
   assert.equal(await page.locator(".workspace-tab[data-active=true]").count(), 1, "closing selects a neighbouring tab");
+  await page.close();
+  const pairedPage = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  await pairedPage.route("**/api/remote/client-context", route => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ remote: true, capability: "read-only", sharedServer: false, person: null, signOut: null }) }));
+  await pairedPage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+  await pairedPage.waitForLoadState("networkidle");
+  const pairedDismiss = pairedPage.locator(".whats-new-close"); if (await pairedDismiss.count()) await pairedDismiss.click();
+  await pairedPage.locator(".persistent-agent-card").filter({ hasText: "Invented room" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+  await pairedPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "invented.pdf" }).click();
+  await pairedPage.locator(".workspace-preview-pdf img[alt='Page 1']").waitFor({ timeout: 10000 });
+  assert.equal(await pairedPage.getByRole("button", { name: "Open PDF" }).count(), 0, "a paired read-only context hides local Open");
+  await pairedPage.close();
  } finally { await browser.close(); }
 } finally { if (server) await stopSmokeServer(server); fs.rmSync(tempRoot, { recursive: true, force: true }); }
