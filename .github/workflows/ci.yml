@@ -215,6 +215,12 @@ jobs:
       - name: Build the linux release archive
         run: node scripts/bundle-release.mjs --target linux-x64 --out dist-release
 
+      - name: Check the packaged preview route
+        run: |
+          mkdir -p "$RUNNER_TEMP/t11-release"
+          tar -xzf dist-release/exxperts-*-linux-x64.tar.gz -C "$RUNNER_TEMP/t11-release"
+          EXXPERTS_SMOKE_PACKAGED_APP="$RUNNER_TEMP/t11-release/exxperts/app" npx tsx apps/web-server/scripts/workspace-file-preview-smoke.ts --excel-child
+
       # Same assembly as release.yml, so the installer parses the exact
       # checksum-file format that GitHub Releases serves.
       - name: Assemble SHA256SUMS.txt
@@ -363,6 +369,21 @@ jobs:
 
       - name: Build the win-x64 release archive
         run: node scripts/bundle-release.mjs --target win-x64 --out dist-release
+
+      - name: Install desktop dependencies
+        run: npm ci --prefix apps/desktop
+
+      - name: Package the fresh Windows desktop payload
+        shell: pwsh
+        run: |
+          $archive = (Get-ChildItem dist-release/exxperts-*-win-x64.zip | Select-Object -First 1).FullName
+          node apps/desktop/scripts/package.mjs --target win-x64 --archive $archive
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($app in @("apps/desktop/build/server/app", "apps/desktop/dist-app/win-unpacked/resources/server/app")) {
+            foreach ($asset in @("apps/web-server/dist/server.mjs", "apps/web-server/dist/shelf-parse-worker.mjs", "apps/web-ui/dist/renderer-notices.txt", "apps/web-ui/dist/assets/pptx-frame-entry-*.js", "apps/web-ui/dist/assets/excalidraw-frame-entry-*.js")) {
+              if (-not (Test-Path (Join-Path $app $asset))) { throw "Missing packaged asset: $app/$asset" }
+            }
+          }
 
       # Same assembly as release.yml; bash so the file is written without a
       # BOM regardless of the PowerShell version's Set-Content default.
