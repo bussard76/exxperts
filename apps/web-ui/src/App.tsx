@@ -595,6 +595,7 @@ export function App() {
 		// diagram viewer) owns Escape the same way: one Escape, one layer.
 		if (document.querySelector('[aria-modal="true"]')) return;
 		if (artifactMaximized) setArtifactMaximized(false);
+		else if (activeWorkspacePath(rightPane)) requestCloseWorkspaceTab(activeWorkspacePath(rightPane)!);
 		else if (rightPane?.kind === "attachments" && rightPane.view === "gallery") setRightPane({ kind: "attachments", view: "panel" });
 		else closePaneFile();
 	}, paneTakesEscape && !assetDeleteConfirm && !exportCollision && !fileDeleteConfirm && !saveAsPrompt && !roomSettingsOpen);

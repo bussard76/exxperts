@@ -123,5 +123,8 @@ try {
   await tree.locator(".workspace-file-browser-file", { hasText: "old.doc" }).click();
   await page.getByText("Save this old .doc file as .docx to preview it here.").waitFor();
   assert.equal(await page.getByRole("button", { name: /Open in/ }).count(), 0);
+  await page.keyboard.press("Escape");
+  assert.equal(await page.locator(".workspace-tab").filter({ hasText: "old.doc" }).count(), 0, "Escape closes the active workspace tab");
+  assert.equal(await page.locator(".workspace-tab[data-active=true]").count(), 1, "closing selects a neighbouring tab");
  } finally { await browser.close(); }
 } finally { if (server) await stopSmokeServer(server); fs.rmSync(tempRoot, { recursive: true, force: true }); }
