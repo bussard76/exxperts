@@ -342,6 +342,15 @@ require("node:module").syncBuiltinESMExports();
 	const malformed = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=malformed-invented.xlsx`);
 	assert(malformed.status === 500 && malformed.body.code === "preview_failed", "the parent rejects a non-boolean spreadsheet gridline field");
 	assert(pdf.status === 200 && pdf.body.kind === "pdf" && pdf.body.totalPages === 1 && pdf.body.pages[0].mimeType === "image/jpeg", "PDF travels through the real child and guarded public route");
+	for (const [name, expectedStatus, expectedCode] of [["legacy.doc", 415, "legacy_doc"], ["legacy.xls", 415, "unsupported_file_type"], ["broken.pdf", 422, "damaged_file"]] as const) {
+		fs.writeFileSync(path.join(workspaceRoot, name), "invented damaged content");
+		const response = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=${name}`);
+		assert(response.status === expectedStatus && response.body.code === expectedCode, `${name} receives its controlled preview refusal`);
+	}
+	fs.writeFileSync(path.join(workspaceRoot, "oversize.pdf"), "");
+	fs.truncateSync(path.join(workspaceRoot, "oversize.pdf"), 26_214_401);
+	const oversizePdf = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=oversize.pdf`);
+	assert(oversizePdf.status === 413 && oversizePdf.body.code === "file_too_large", "PDF input over the child limit is refused");
 	fs.writeFileSync(path.join(workspaceRoot, "diagnostic-fake.docx"), "invented");
 	for (const mode of ["chunked", "duplicate", "invalid"]) {
 		fs.writeFileSync(diagnosticMarker, mode);
