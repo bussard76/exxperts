@@ -99,6 +99,12 @@ try {
   const dismiss = page.locator(".whats-new-close"); if (await dismiss.count()) await dismiss.click();
   await page.locator(".persistent-agent-card").filter({ hasText: "Invented room" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
   const tree = page.locator(".sidebar-workspace-files");
+  const sidebarResizer = page.getByRole("separator", { name: "Resize sidebar" });
+  await sidebarResizer.focus({ timeout: 5000 });
+  await sidebarResizer.press("End");
+  assert.equal(await sidebarResizer.getAttribute("aria-valuenow"), "720", "keyboard can widen workspace sidebar");
+  await sidebarResizer.press("Home");
+  assert.equal(await sidebarResizer.getAttribute("aria-valuenow"), "220", "keyboard can restore the minimum sidebar width");
   let imageRequests = 0;
   page.on("request", (request) => { if (request.url().includes("/workspace-image?") && request.url().includes("image.png")) imageRequests++; });
   await tree.locator(".workspace-file-browser-file", { hasText: "notes.md" }).click({ timeout: 10000 });

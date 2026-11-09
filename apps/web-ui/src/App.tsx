@@ -8659,6 +8659,7 @@ export function App() {
 	return (
 		<InRoomChatShellView
 			onHome={goHome}
+			sidebarResizable
 			sidebar={
 				<Sidebar
 					onHome={goHome}
