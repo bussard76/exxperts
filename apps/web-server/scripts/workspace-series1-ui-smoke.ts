@@ -54,5 +54,12 @@ try {
   assert.equal(await page.locator(".workspace-tab").count(), 2);
   await page.locator(".workspace-tab").filter({ hasText: "other.txt" }).getByRole("button", { name: "Close other.txt" }).click();
   assert.equal(await page.locator(".workspace-tab[data-active=true]").count(), 1);
+  const composer = page.locator(".composer-input textarea");
+  await composer.fill("before after");
+  await composer.evaluate((node: HTMLTextAreaElement) => { node.focus(); node.setSelectionRange(7, 7); });
+  const transfer = await page.evaluateHandle(() => new DataTransfer());
+  await tree.locator(".workspace-file-browser-file", { hasText: "notes.md" }).dispatchEvent("dragstart", { dataTransfer: transfer });
+  await composer.dispatchEvent("drop", { dataTransfer: transfer });
+  assert.equal(await composer.inputValue(), "before notes.mdafter", "drag inserts the relative file path at the composer caret");
  } finally { await browser.close(); }
 } finally { if (server) await stopSmokeServer(server); fs.rmSync(tempRoot, { recursive: true, force: true }); }

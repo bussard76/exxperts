@@ -1,3 +1,4 @@
+import { insertTextAtSelection, WORKSPACE_PATH_DRAG_TYPE } from "../composer-text-insertion";
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent, CSSProperties, KeyboardEvent, MutableRefObject, ReactNode, Ref } from "react";
 import { approvalAsking, confirmApprovalLabels } from "./Approval";
@@ -1027,6 +1028,14 @@ export function ComposerInput({
 		setDraft(text);
 	}, [draft, caret]);
 
+	const insertComposerText = useCallback((text: string, selectionStart: number, selectionEnd: number) => {
+		const insertion = insertTextAtSelection(draft, text, selectionStart, selectionEnd);
+		pendingCaretRef.current = insertion.caret;
+		setMentionDismissed(false);
+		setConsultGateNotice(null);
+		setDraft(insertion.value);
+	}, [draft]);
+
 	const submitDraft = useCallback(() => {
 		if (sendDisabled) return;
 		if (mention && leadingMention?.kind === "consult") {
@@ -1145,6 +1154,17 @@ export function ComposerInput({
 					onSelect={(e) => syncCaret(e.currentTarget)}
 					onKeyDown={handleComposerKeyDown}
 					onPaste={handleComposerPaste}
+					onDragOver={(event) => {
+						if (!Array.from(event.dataTransfer.types).includes(WORKSPACE_PATH_DRAG_TYPE)) return;
+						event.preventDefault();
+						event.dataTransfer.dropEffect = "copy";
+					}}
+					onDrop={(event) => {
+						const relativePath = event.dataTransfer.getData(WORKSPACE_PATH_DRAG_TYPE);
+						if (!relativePath) return;
+						event.preventDefault();
+						insertComposerText(relativePath, event.currentTarget.selectionStart, event.currentTarget.selectionEnd);
+					}}
 					onScroll={(e) => { if (mirrorRef.current) mirrorRef.current.scrollTop = e.currentTarget.scrollTop; }}
 					onCompositionStart={() => setComposing(true)}
 					onCompositionEnd={() => setComposing(false)}
