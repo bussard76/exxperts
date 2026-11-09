@@ -395,6 +395,13 @@ require("node:module").syncBuiltinESMExports();
 		assert(opened.status === 202 && opened.body.accepted === true, "explicit local open accepts the guarded file with the fake opener");
 		const call = JSON.parse(fs.readFileSync(path.join(tempHome, "fake-opener"), "utf8"));
 		assert(call.file === "/usr/bin/xdg-open" && call.shell === false && call.args[0] === path.join(workspaceRoot, "invented.txt"), "opener receives the guarded path without a shell");
+		for (const name of ["macro.xlsm", "diagram.drawio", "diagram.dio"]) {
+			fs.writeFileSync(path.join(workspaceRoot, name), "invented");
+			const accepted = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-open`, { method: "POST", headers: openHeaders, body: JSON.stringify({ conversationId: "demo-thread", path: name }) });
+			assert(accepted.status === 202 && accepted.body.accepted === true, `open-only ${name} is dispatched`);
+			const preview = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=${name}`);
+			assert(preview.status === 415 && preview.body.code === "unsupported_file_type", `open-only ${name} has no preview parser`);
+		}
 	}
 	for (const [allowed, listAllowed, readAllowed] of [[[], false, false], [["ls"], true, false], [["read"], false, true]] as const) {
 		const updated = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-default`, { method: "PUT", body: JSON.stringify({ workspaceAccessMode: "bounded", toolSelection: { kind: "custom", allowedToolNames: allowed }, bashEnabled: false }) });
