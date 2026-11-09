@@ -6,14 +6,14 @@ Level 2: existing Word worker and parent stderr boundary; no new modules, export
 
 ## Result and observable acceptance checklist
 
-- [ ] Invented VML in body, header, footer and text box passes public route and browser as HTML, not damaged_file; text-box contents need not survive.
+- [x] Invented VML in body, header, footer and text box passes public route and browser as HTML, not damaged_file — `workspace-file-preview-smoke.ts --vml-child` and `workspace-file-tabs-ui-smoke.ts`.
 - [x] Anchored drawings retain distinct left/top offsets — `workspace-file-preview-smoke.ts --vml-child`.
 - [x] VML line becomes a double-border div with no SVG — `workspace-file-preview-smoke.ts --vml-child`.
 - [x] Rotation survives while URL styles are rejected — `workspace-file-preview-smoke.ts --vml-child`.
 - [x] Header page-relative horizontal offset subtracts pgMar left — `workspace-file-preview-smoke.ts --vml-child`.
 - [x] Saved page-break markers form sections; no markers leave a long page — `workspace-file-preview-smoke.ts --vml-child`.
 - [ ] Header/footer survive with margin-top and min-height — `--vml-child` proves header margin-top, footer margin-bottom, and both min-height; footer margin-top remains unresolved.
-- [ ] Sanitization rejects foreignObject contents, scripts, handlers, external URLs and active SVG through route and browser.
+- [x] Sanitization rejects foreignObject contents, scripts, handlers, external URLs and active SVG — `--vml-child` and `workspace-file-tabs-ui-smoke.ts`.
 - [ ] Existing parser limits, no-network policy, CSP, cancellation, refusal states and no-op RAF/cancel remain intact.
 - [ ] Non-previewCode errors retain damaged_file and produce the exact bounded private diagnostic contract; no document content or raw stderr reaches logs.
 - [ ] Real producer-to-parent captured-log tests cover unexpected errors with marker, known message, unknown name, malformed/chunked/duplicate stderr and ordering; OOM tail remains intact. `--diagnostic-child`, `--diagnostic-known`, `--diagnostic-unknown`, and `--diagnostic-stderr-{chunked,invalid,duplicate}` pass; OOM and all settlement cases still need checks.
@@ -32,4 +32,6 @@ The public route and sandboxed browser are the approved test seams specified by 
 
 Initial merge hook typecheck failed because local runtime outputs were absent; `npm ci` and `cd runtime && npm run build` completed, and the merge succeeded with hooks enabled. The npm install command set PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD but the project uses EXXETA_SKIP_BROWSER_INSTALL; its lifecycle printed a Chromium fetch message, so the approved skip setting must be used on any repeat. Existing package-lock.json modification predates this task and is not included.
 
-Targeted route tests `--vml-child`, `--diagnostic-child`, `--diagnostic-known`, `--diagnostic-unknown`, `--diagnostic-stderr-chunked`, `--diagnostic-stderr-invalid`, and `--diagnostic-stderr-duplicate` passed. The browser gate is queued. No screenshots captured.
+Targeted route tests `--vml-child`, `--diagnostic-child`, `--diagnostic-known`, `--diagnostic-unknown`, `--diagnostic-stderr-chunked`, `--diagnostic-stderr-invalid`, and `--diagnostic-stderr-duplicate` passed. The attributed browser gate passed `workspace-file-tabs-ui-smoke.ts`. No screenshots captured.
+
+Additional checks: UI and script typechecks passed; `npm run test:scripts` passed 54 tests; the UI-only Vite build passed. The full affected `workspace-file-preview-smoke.ts` initially failed because the fresh worktree lacked UI dist assets; after the UI-only build its rerun is in progress. Foreign-host network-failure reruns: 0. No full build or full smoke suite was run. The RAF diagnostic is flushed before the child posts its result.
