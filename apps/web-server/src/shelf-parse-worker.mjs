@@ -723,7 +723,10 @@ async function previewWord(buffer) {
 				zip.file(partName, new window.XMLSerializer().serializeToString(partXml));
 			}
 		}
-		for (const part of zip.file(/^word\/[^/]+\.xml$/)) zip.file(part.name, wordMeasuresToNumbers(await part.async("string")));
+		// docx-preview lays every anchored drawing out from its paragraph, so a page-relative horizontal offset must lose the page's left margin.
+		const pageMarginLeftEmu = Number(/<w:pgMar\b[^>]*\sw:left="(\d+)"/.exec(await zip.file("word/document.xml")?.async("string") ?? "")?.[1] ?? 0) * 635;
+		const anchoredFromPage = (xml) => pageMarginLeftEmu ? xml.replace(/(<wp:positionH\b[^>]*relativeFrom="page"[^>]*>\s*<wp:posOffset>)(-?\d+)(<\/wp:posOffset>)/g, (_, head, offset, tail) => `${head}${Number(offset) - pageMarginLeftEmu}${tail}`) : xml;
+		for (const part of zip.file(/^word\/[^/]+\.xml$/)) zip.file(part.name, anchoredFromPage(wordMeasuresToNumbers(await part.async("string"))));
 		const sanitized = await zip.generateAsync({ type: "nodebuffer", compression: "STORE" });
 		await renderAsync(sanitized, window.document.getElementById("content"), window.document.getElementById("styles"), { inWrapper: true, ignoreWidth: false, ignoreHeight: false, useBase64URL: true });
 		const notices = blocked ? [{ code: "external_resources_blocked", text: "External document resources are blocked." }] : [];
