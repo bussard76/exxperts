@@ -1,3 +1,4 @@
+import { smallDocx } from "./workspace-preview-fixtures.js";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { authedFetch, freePort, type AuthedFetchInit, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, stopSmokeServer, waitForServer } from "./smoke-server-process.js";
 import fs from "node:fs";
@@ -25,6 +26,18 @@ const baseUrl = `http://127.0.0.1:${port}`;
 
 function assert(condition: unknown, message: string): asserts condition {
 	if (!condition) throw new Error(message);
+}
+
+function inventedPdf(): Buffer {
+	const stream = "0 0 0 rg 10 10 20 20 re f";
+	const objects = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R >>", `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`];
+	let body = "%PDF-1.4\n";
+	const offsets: number[] = [];
+	objects.forEach((object, index) => { offsets.push(body.length); body += `${index + 1} 0 obj\n${object}\nendobj\n`; });
+	const xref = body.length;
+	body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+	for (const offset of offsets) body += `${String(offset).padStart(10, "0")} 00000 n \n`;
+	return Buffer.from(body + `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`, "latin1");
 }
 
 async function requestJson(pathname: string, init: AuthedFetchInit = {}): Promise<{ status: number; body: any }> {
@@ -76,6 +89,19 @@ fs.openSync = function(file, ...args) { const fd = originals.open.call(this, fil
 fs.readSync = function(fd, ...args) { if (selected.delete(fd) && fs.existsSync(${JSON.stringify(policyRaceMarker)})) fs.unlinkSync(fs.readFileSync(${JSON.stringify(policyRaceMarker)}, "utf8")); return originals.read.call(this, fd, ...args); };
 const cp = require("node:child_process");
 const realSpawn = cp.spawn;
+const realFork = cp.fork;
+cp.fork = function(file, args, options) {
+  let request; try { request = JSON.parse(args?.[0] || "{}"); } catch {}
+  if (!request?.absolutePath?.endsWith("malformed-invented.xlsx")) return realFork.apply(this, arguments);
+  const child = new (require("node:events").EventEmitter)();
+  child.stderr = new (require("node:events").EventEmitter)();
+  child.kill = () => { setImmediate(() => child.emit("close", 0, null)); return true; };
+  const font = { family:"Arial", sizePt:11, color:"#000000", bold:false, italic:false, underline:"none", strike:false };
+  const style = { fill:null, font, borders:{top:null,right:null,bottom:null,left:null}, align:{horizontal:"left",vertical:"top",wrap:false} };
+  const sheet = { id:"1", name:"Invented", visibility:"visible", showGridLines:"invalid", rowCount:0, columnCount:0, defaultRowHeightPx:20, defaultColumnWidthPx:80, rows:[], columns:[], cells:[], merges:[] };
+  setImmediate(() => child.emit("message", { ok:true, schemaVersion:1, notices:[], result:{kind:"spreadsheet",workbook:{dateSystem:"1900",styles:[style],sheets:[sheet]}} }));
+  return child;
+};
 cp.spawn = function(file, args, options) {
   if (file !== "/usr/bin/xdg-open" && file !== "/usr/bin/open") return realSpawn.apply(this, arguments);
   const child = new (require("node:events").EventEmitter)();
@@ -152,6 +178,21 @@ require("node:module").syncBuiltinESMExports();
 	const htmlFrame = await authedFetch(`${baseUrl}/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=invented.html&frame=1`);
 	assert(htmlFrame.status === 200 && htmlFrame.headers.get("content-security-policy")?.includes("connect-src 'none'"), "HTML frame is served with a sandboxed network policy");
 	fs.writeFileSync(path.join(workspaceRoot, "race-invented.html"), "<p>Private invented content</p>");
+	fs.writeFileSync(path.join(workspaceRoot, "invented.pdf"), inventedPdf());
+	const pdf = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=invented.pdf`);
+	fs.writeFileSync(path.join(workspaceRoot, "invented.docx"), await smallDocx());
+	const { default: ExcelJS } = await import("exceljs");
+	const workbook = new ExcelJS.Workbook();
+	workbook.addWorksheet("Invented").getCell("A1").value = "Invented cell";
+	fs.writeFileSync(path.join(workspaceRoot, "invented.xlsx"), Buffer.from(await workbook.xlsx.writeBuffer()));
+	const word = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=invented.docx`);
+	const sheet = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=invented.xlsx`);
+	assert(word.status === 200 && word.body.kind === "word" && typeof word.body.html === "string", "Word travels through the real child and guarded public route");
+	assert(sheet.status === 200 && sheet.body.kind === "spreadsheet" && sheet.body.workbook.sheets[0].cells[0].text === "Invented cell", "XLSX travels through the real child and guarded public route");
+	fs.writeFileSync(path.join(workspaceRoot, "malformed-invented.xlsx"), "invented");
+	const malformed = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=malformed-invented.xlsx`);
+	assert(malformed.status === 500 && malformed.body.code === "preview_failed", "the parent rejects a non-boolean spreadsheet gridline field");
+	assert(pdf.status === 200 && pdf.body.kind === "pdf" && pdf.body.totalPages === 1 && pdf.body.pages[0].mimeType === "image/jpeg", "PDF travels through the real child and guarded public route");
 	fs.writeFileSync(path.join(workspaceRoot, "invented.xls"), "invented");
 	const openHeaders = { origin: baseUrl, "x-exxperts-local-action": "open-workspace-file" };
 	const rejectedXls = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-open`, { method: "POST", headers: openHeaders, body: JSON.stringify({ conversationId: "demo-thread", path: "invented.xls" }) });

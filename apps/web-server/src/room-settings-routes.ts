@@ -1,3 +1,4 @@
+import { runWorkspacePreviewWorker } from "./persistent-room-shelf-reading.js";
 import { fork, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -392,7 +393,60 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 		if (query.frame === "1") return reply.header("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'").type("text/html; charset=utf-8").send(html);
 		return reply.send({ schemaVersion: 1, agentId, conversationId: query.conversationId, path: relativePath, kind: "html", html, notices: [] });
 	}
-	return reply.code(415).send({ code: "unsupported_file_type", error: "This file type cannot be previewed here." });
+	if (extension === ".doc") return reply.code(415).send({ code: "legacy_doc", error: "Save this old .doc file as .docx to preview it here." });
+	if (![".xlsx", ".docx", ".pdf"].includes(extension)) {
+		return reply.code(415).send({ code: "unsupported_file_type", error: "This file type cannot be previewed here." });
+	}
+	const kind = extension === ".pdf" ? "pdf" : extension === ".docx" ? "word" : "spreadsheet";
+	const controller = new AbortController();
+	const abort = () => { if (!reply.raw.writableEnded) controller.abort(); };
+	req.raw.once("aborted", abort);
+	reply.raw.once("close", abort);
+	const stat = guarded.stat;
+	let result: Awaited<ReturnType<typeof runWorkspacePreviewWorker>>;
+	try {
+		result = await runWorkspacePreviewWorker({
+			mode: "workspace-preview-v1", kind, absolutePath: guarded.absolutePath,
+			expected: { dev: String(stat.dev), ino: String(stat.ino), size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs },
+			limits: { inputBytes: 26214400, timeoutMs: kind === "pdf" ? 60000 : 30000, zipEntries: 10000, zipTotalBytes: 134217728, zipEntryBytes: 33554432, zipExpansionRatio: 200,
+				gridSlots: 200000, cells: 100000, maxRow: 100000, maxColumn: 16384, cellTextChars: 32767, gridDimensionPx: 10000,
+				wordHtmlBytes: 16777216, wordElements: 200000, imagePixels: 40000000,
+				totalImagePixels: 80000000, unknownImageBytes: 2097152, pdfPages: 200, pdfPagePixels: 4000000, pdfTotalPixels: 80000000,
+				pdfJpegBytes: 33554432, resultJsonBytes: 50331648 },
+		}, controller.signal);
+	} finally {
+		req.raw.removeListener("aborted", abort);
+		reply.raw.removeListener("close", abort);
+	}
+	if (!result.ok) {
+		const errors: Record<string, [number, string]> = {
+			file_changed: [409, "This file changed while the preview was loading; close the tab and open it again."],
+			file_too_large: [413, "This file is too large or complex to preview here."],
+			preview_too_complex: [413, "This file is too large or complex to preview here."],
+			expanded_content_too_large: [413, "This file is too large or complex to preview here."],
+			decoded_image_too_large: [413, "This file is too large or complex to preview here."],
+			unsupported_document_feature: [422, "This document uses a feature that cannot be previewed here."],
+			damaged_file: [422, "This file is damaged or cannot be read."],
+			encrypted_file: [422, "Password-protected files cannot be previewed here."],
+			renderer_unavailable: [503, "Preview rendering is unavailable on this system."],
+			preview_busy: [503, "Another preview is loading; close this tab and open it again shortly."],
+			preview_timeout: [504, "This preview took too long to load."],
+		};
+		const code = result.code && errors[result.code] ? result.code : "preview_failed";
+		const [status, error] = errors[code] ?? [500, "This file could not be previewed."];
+		return reply.code(status).send({ code, error });
+	}
+	try {
+		const current = resolvePersistentRoomEffectiveWorkspacePolicy(agentId, query.conversationId);
+		if (!current.policy || !current.workspaceToolsEnabled || !current.policy.modes.read || !persistentRoomWorkspaceToolNamesForPolicy(current.policy).includes("read")) throw new Error("permission");
+		const again = resolvePersistentRoomWorkspaceExistingFile(current.policy, relativePath);
+		if (again.absolutePath !== guarded.absolutePath || again.rootRealpath !== guarded.rootRealpath || again.stat.dev !== stat.dev || again.stat.ino !== stat.ino || again.stat.size !== stat.size || again.stat.mtimeMs !== stat.mtimeMs) {
+			return reply.code(409).send({ code: "file_changed", error: "This file changed while the preview was loading; close the tab and open it again." });
+		}
+	} catch {
+		return reply.code(403).send({ code: "workspace_read_forbidden", error: "This file is not available under the current workspace permissions." });
+	}
+	return { schemaVersion: 1, agentId, conversationId: query.conversationId, path: relativePath, notices: result.notices, ...(result.result as object) };
 });
 
 app.delete("/api/persistent-agents/:id/workspace-policy", async (req, reply) => {
