@@ -14,7 +14,7 @@ Level 2: existing Word worker and parent stderr boundary; no new modules, export
 - [x] Saved page-break markers form sections; no markers leave a long page — `workspace-file-preview-smoke.ts --vml-child`.
 - [ ] Header/footer survive with margin-top and min-height — `--vml-child` proves header margin-top, footer margin-bottom, and both min-height; footer margin-top remains unresolved.
 - [x] Sanitization rejects foreignObject contents, scripts, handlers, external URLs and active SVG — `--vml-child` and `workspace-file-tabs-ui-smoke.ts`.
-- [ ] Existing parser limits, no-network policy, CSP, cancellation, refusal states and no-op RAF/cancel remain intact.
+- [x] Existing parser limits, no-network policy, CSP, cancellation, refusal states and no-op RAF/cancel remain intact — complete `workspace-file-preview-smoke.ts` and `--vml-child`.
 - [ ] Non-previewCode errors retain damaged_file and produce the exact bounded private diagnostic contract; no document content or raw stderr reaches logs.
 - [ ] Real producer-to-parent captured-log tests cover unexpected errors with marker, known message, unknown name, malformed/chunked/duplicate stderr and ordering; OOM tail remains intact. `--diagnostic-child`, `--diagnostic-known`, `--diagnostic-unknown`, and `--diagnostic-stderr-{chunked,invalid,duplicate}` pass; OOM and all settlement cases still need checks.
 - [ ] Targeted typechecks, affected suites and attributed browser gate pass; self-review each item with test evidence, merge current main, rerun affected suites and push.
@@ -34,4 +34,6 @@ Initial merge hook typecheck failed because local runtime outputs were absent; `
 
 Targeted route tests `--vml-child`, `--diagnostic-child`, `--diagnostic-known`, `--diagnostic-unknown`, `--diagnostic-stderr-chunked`, `--diagnostic-stderr-invalid`, and `--diagnostic-stderr-duplicate` passed. The attributed browser gate passed `workspace-file-tabs-ui-smoke.ts`. No screenshots captured.
 
-Additional checks: UI and script typechecks passed; `npm run test:scripts` passed 54 tests; the UI-only Vite build passed. The full affected `workspace-file-preview-smoke.ts` initially failed because the fresh worktree lacked UI dist assets; after the UI-only build its rerun is in progress. Foreign-host network-failure reruns: 0. No full build or full smoke suite was run. The RAF diagnostic is flushed before the child posts its result.
+Additional checks: UI and script typechecks passed; `npm run test:scripts` passed 54 tests; the UI-only Vite build passed. The full affected `workspace-file-preview-smoke.ts` initially failed because the fresh worktree lacked UI dist assets; after the UI-only build its complete rerun passed, including isolated child cases. Foreign-host network-failure reruns: 0. No full build or full smoke suite was run. The RAF diagnostic is flushed before the child posts its result.
+
+The branch includes the seven source commits, the current origin/main and the T13-R3 review branch. A subsequent fetch found no new origin/main commits. The only uncommitted file is the pre-existing package-lock.json modification. The remaining interpretation is whether the footer must carry a top margin: docx-preview actually generates a negative bottom margin on the footer and a negative top margin on the header, both with min-height; `--vml-child` verifies those values.
