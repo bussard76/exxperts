@@ -224,6 +224,38 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 		}
 		return reply.send({ schemaVersion: 1, agentId, conversationId: query.conversationId, path: relativePath, kind: "text", text: bytes.toString("utf8"), notices: [] });
 	}
+	if (extension === ".html" || extension === ".htm") {
+		if (guarded.stat.size > 16_777_216) return reply.code(413).send({ code: "file_too_large", error: "This file is too large or complex to preview here." });
+		let html: string;
+		try {
+			const expected = guarded.stat;
+			const matches = (stat: fs.Stats) => stat.isFile() && stat.dev === expected.dev && stat.ino === expected.ino
+				&& stat.size === expected.size && stat.mtimeMs === expected.mtimeMs;
+			const fd = fs.openSync(guarded.absolutePath, "r");
+			try {
+				if (!matches(fs.fstatSync(fd))) throw new Error("file changed");
+				const buffer = Buffer.alloc(expected.size);
+				let offset = 0;
+				while (offset < buffer.length) {
+					const count = fs.readSync(fd, buffer, offset, buffer.length - offset, offset);
+					if (!count) throw new Error("file changed");
+					offset += count;
+				}
+				if (!matches(fs.fstatSync(fd))) throw new Error("file changed");
+				html = buffer.toString("utf8");
+			} finally { fs.closeSync(fd); }
+		} catch { return reply.code(409).send({ code: "file_changed", error: "This file changed while the preview was loading; close the tab and open it again." }); }
+		try {
+			const current = resolvePersistentRoomEffectiveWorkspacePolicy(agentId, query.conversationId);
+			if (!current.policy || !current.workspaceToolsEnabled || !current.policy.modes.read || !persistentRoomWorkspaceToolNamesForPolicy(current.policy).includes("read")) throw new Error("permission");
+			const again = resolvePersistentRoomWorkspaceExistingFile(current.policy, relativePath);
+			const expected = guarded.stat;
+			if (again.absolutePath !== guarded.absolutePath || again.rootRealpath !== guarded.rootRealpath || !again.stat.isFile() || again.stat.dev !== expected.dev || again.stat.ino !== expected.ino || again.stat.size !== expected.size || again.stat.mtimeMs !== expected.mtimeMs) return reply.code(409).send({ code: "file_changed", error: "This file changed while the preview was loading; close the tab and open it again." });
+		} catch { return reply.code(403).send({ code: "workspace_read_forbidden", error: "This file is not available under the current workspace permissions." }); }
+		// The frame's document: the CSP sandbox gives it an opaque origin even when opened directly, so its scripts have no cookies or API.
+		if (query.frame === "1") return reply.header("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'").type("text/html; charset=utf-8").send(html);
+		return reply.send({ schemaVersion: 1, agentId, conversationId: query.conversationId, path: relativePath, kind: "html", html, notices: [] });
+	}
 	return reply.code(415).send({ code: "unsupported_file_type", error: "This file type cannot be previewed here." });
 });
 

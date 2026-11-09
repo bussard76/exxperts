@@ -66,12 +66,23 @@ try {
 	fs.mkdirSync(productAppStateRoot, { recursive: true });
 	fs.mkdirSync(workspaceRoot, { recursive: true });
 
+	const policyRaceMarker = path.join(tempHome, "policy-race-marker");
+	const policyRacePreload = path.join(tempHome, "policy-race-preload.cjs");
+	fs.writeFileSync(policyRacePreload, `
+const fs = require("node:fs");
+const originals = { open: fs.openSync, read: fs.readSync };
+const selected = new Set();
+fs.openSync = function(file, ...args) { const fd = originals.open.call(this, file, ...args); if (typeof file === "string" && file.endsWith("race-invented.html")) selected.add(fd); return fd; };
+fs.readSync = function(fd, ...args) { if (selected.delete(fd) && fs.existsSync(${JSON.stringify(policyRaceMarker)})) fs.unlinkSync(fs.readFileSync(${JSON.stringify(policyRaceMarker)}, "utf8")); return originals.read.call(this, fd, ...args); };
+require("node:module").syncBuiltinESMExports();
+`);
 	server = spawn("npx", ["tsx", "src/index.ts"], {
 		shell: process.platform === "win32",
 		...SMOKE_SERVER_SPAWN_TREE_OPTIONS,
 		cwd: webServerDir,
 		env: {
 			...process.env,
+			NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require=${policyRacePreload}`,
 			HOME: tempHome, USERPROFILE: tempHome,
 			PORT: String(port),
 			...SMOKE_SERVER_AUTH_ENV,
@@ -124,6 +135,21 @@ try {
 	fs.writeFileSync(path.join(workspaceRoot, "invented.md"), Buffer.from([35, 32, 65, 0, 0xff]));
 	const markdown = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=invented.md`);
 	assert(markdown.status === 200 && markdown.body.kind === "text" && markdown.body.text === "# A\0\ufffd", "Markdown is read-only text with replacement decoding and NUL preserved");
+	fs.writeFileSync(path.join(workspaceRoot, "invented.html"), "<p>Invented page</p>");
+	const html = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=invented.html`);
+	assert(html.status === 200 && html.body.kind === "html" && html.body.html === "<p>Invented page</p>", "HTML preview returns the guarded invented content");
+	const htmlFrame = await authedFetch(`${baseUrl}/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=invented.html&frame=1`);
+	assert(htmlFrame.status === 200 && htmlFrame.headers.get("content-security-policy")?.includes("connect-src 'none'"), "HTML frame is served with a sandboxed network policy");
+	fs.writeFileSync(path.join(workspaceRoot, "race-invented.html"), "<p>Private invented content</p>");
+	const policyBeforeRace = fs.readFileSync(defaultPath);
+	for (const suffix of ["", "&frame=1"]) {
+		fs.writeFileSync(policyRaceMarker, defaultPath);
+		const revoked = await authedFetch(`${baseUrl}/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=race-invented.html${suffix}`);
+		const payload = await revoked.text();
+		assert(revoked.status === 403 && payload.includes("workspace_read_forbidden") && !payload.includes("Private invented content"), "HTML preview rechecks revoked policy before returning content");
+		fs.writeFileSync(defaultPath, policyBeforeRace);
+		fs.rmSync(policyRaceMarker);
+	}
 	assert(putDefault.body?.storage?.kind === "persistent-agent-runtime-default", "PUT should report room-default storage kind");
 	assert(putDefault.body?.policy?.rootCount === 1, "PUT should return one redacted root");
 	assert(putDefault.body?.policy?.roots?.[0]?.displayLabel === "Smoke Workspace", "PUT should preserve safe display label");
