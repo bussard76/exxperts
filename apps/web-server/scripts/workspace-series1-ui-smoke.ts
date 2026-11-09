@@ -1,3 +1,4 @@
+import { smallDocx } from "./workspace-preview-fixtures.js";
 // Browser workspace acceptance with invented files and an offline model profile.
 import assert from "node:assert/strict";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
@@ -33,6 +34,7 @@ for (const dir of [agentsRoot, agentDir, folder]) fs.mkdirSync(dir, { recursive:
 fs.writeFileSync(path.join(folder, "notes.md"), "# Invented note\n");
 fs.writeFileSync(path.join(folder, "other.txt"), "Invented second file\n");
 fs.writeFileSync(path.join(folder, "invented.pdf"), inventedPdf());
+fs.writeFileSync(path.join(folder, "invented.docx"), await smallDocx());
 fs.writeFileSync(path.join(folder, "image.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==", "base64"));
 fs.writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({ providers: { "fake-claude": { name: "Fake Claude", baseUrl: "http://127.0.0.1:9", api: "anthropic-messages", models: [{ id: "claude-fake", name: "Claude Fake", input: ["text"], contextWindow: 200000, maxTokens: 32000 }] } } }));
 fs.writeFileSync(path.join(agentDir, "auth.json"), JSON.stringify({ "fake-claude": { type: "api_key", key: "synthetic-claude" } }));
@@ -79,5 +81,7 @@ try {
   await page.locator(".workspace-preview-image img[alt='image.png']").waitFor({ timeout: 5000 });
   await tree.locator(".workspace-file-browser-file", { hasText: "invented.pdf" }).click();
   await page.locator(".workspace-preview-pdf img[alt='Page 1']").waitFor({ timeout: 10000 });
+  await tree.locator(".workspace-file-browser-file", { hasText: "invented.docx" }).click();
+  await page.locator(".workspace-preview-word iframe").waitFor({ timeout: 10000 });
  } finally { await browser.close(); }
 } finally { if (server) await stopSmokeServer(server); fs.rmSync(tempRoot, { recursive: true, force: true }); }
