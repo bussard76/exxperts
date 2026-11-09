@@ -74,6 +74,16 @@ const originals = { open: fs.openSync, read: fs.readSync };
 const selected = new Set();
 fs.openSync = function(file, ...args) { const fd = originals.open.call(this, file, ...args); if (typeof file === "string" && file.endsWith("race-invented.html")) selected.add(fd); return fd; };
 fs.readSync = function(fd, ...args) { if (selected.delete(fd) && fs.existsSync(${JSON.stringify(policyRaceMarker)})) fs.unlinkSync(fs.readFileSync(${JSON.stringify(policyRaceMarker)}, "utf8")); return originals.read.call(this, fd, ...args); };
+const cp = require("node:child_process");
+const realSpawn = cp.spawn;
+cp.spawn = function(file, args, options) {
+  if (file !== "/usr/bin/xdg-open" && file !== "/usr/bin/open") return realSpawn.apply(this, arguments);
+  const child = new (require("node:events").EventEmitter)();
+  fs.writeFileSync(${JSON.stringify(path.join(tempHome, "fake-opener"))}, JSON.stringify({ file, args, shell: options.shell }));
+  child.kill = () => true;
+  setImmediate(() => child.emit("close", 0, null));
+  return child;
+};
 require("node:module").syncBuiltinESMExports();
 `);
 	server = spawn("npx", ["tsx", "src/index.ts"], {
@@ -83,6 +93,7 @@ require("node:module").syncBuiltinESMExports();
 		env: {
 			...process.env,
 			NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --require=${policyRacePreload}`,
+			DISPLAY: ":987",
 			HOME: tempHome, USERPROFILE: tempHome,
 			PORT: String(port),
 			...SMOKE_SERVER_AUTH_ENV,
@@ -141,6 +152,16 @@ require("node:module").syncBuiltinESMExports();
 	const htmlFrame = await authedFetch(`${baseUrl}/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=invented.html&frame=1`);
 	assert(htmlFrame.status === 200 && htmlFrame.headers.get("content-security-policy")?.includes("connect-src 'none'"), "HTML frame is served with a sandboxed network policy");
 	fs.writeFileSync(path.join(workspaceRoot, "race-invented.html"), "<p>Private invented content</p>");
+	fs.writeFileSync(path.join(workspaceRoot, "invented.xls"), "invented");
+	const openHeaders = { origin: baseUrl, "x-exxperts-local-action": "open-workspace-file" };
+	const rejectedXls = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-open`, { method: "POST", headers: openHeaders, body: JSON.stringify({ conversationId: "demo-thread", path: "invented.xls" }) });
+	assert(rejectedXls.status === 415 && rejectedXls.body.code === "unsupported_file_type", "legacy XLS is refused by the local open route");
+	if (process.platform === "linux") {
+		const opened = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-open`, { method: "POST", headers: openHeaders, body: JSON.stringify({ conversationId: "demo-thread", path: "invented.txt" }) });
+		assert(opened.status === 202 && opened.body.accepted === true, "explicit local open accepts the guarded file with the fake opener");
+		const call = JSON.parse(fs.readFileSync(path.join(tempHome, "fake-opener"), "utf8"));
+		assert(call.file === "/usr/bin/xdg-open" && call.shell === false && call.args[0] === path.join(workspaceRoot, "invented.txt"), "opener receives the guarded path without a shell");
+	}
 	const policyBeforeRace = fs.readFileSync(defaultPath);
 	for (const suffix of ["", "&frame=1"]) {
 		fs.writeFileSync(policyRaceMarker, defaultPath);

@@ -1,8 +1,10 @@
+import { fork, spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
 import { PersistentRoomWorkspaceToolError, resolvePersistentRoomWorkspaceExistingFile, resolvePersistentRoomWorkspacePath } from "./persistent-room-workspace-tools.js";
 import { readWorkspaceImageFile } from "./persistent-room-workspace-image.js";
-import { ARTIFACT_SECURITY_HEADERS } from "./request-checks.js";
+import { ARTIFACT_SECURITY_HEADERS, remoteMode } from "./request-checks.js";
 import { listPersistentRoomWorkspaceFiles } from "./persistent-room-workspace-files.js";
 import type { FastifyRequest } from "fastify";
 import { MAINTENANCE_DIAGNOSTICS_KEEP, MAINTENANCE_DIAGNOSTICS_DEFAULT_LIMIT, listMaintenanceDiagnostics, exportMaintenanceDiagnostics } from "./maintenance-diagnostics.js";
@@ -25,7 +27,7 @@ import { undoMemorySave } from "./memory-undo.js";
 import { withRoomSaveLock } from "./memory-commit.js";
 import { isSharedServer } from "./server-hooks.js";
 import { activeRoomLock, REPO_ROOT, roomLockBusyStatus } from "./server-install-root.js";
-import { app } from "./server-app.js";
+import { app, PORT } from "./server-app.js";
 import { getUsablePersistentAgentStatusForNormalUse, persistentAgentNormalUseErrorReply } from "./room-status.js";
 import { parseRoomModelPatch, roomModelsPayload } from "./ai-models.js";
 import { memoryBudgetRaiseRefusal, refuseMemoryBudgetRaise, refuseMemoryModelTooSmall } from "./ai-profile-models.js";
@@ -86,6 +88,75 @@ function workspacePolicyViewFor(req: FastifyRequest, policy: PersistentRoomCapab
 	return persistentRoomCapabilityPolicyView(policy, { withPaths: requestGetsLocalPaths(req) });
 }
 
+async function openWorkspacePreviewFile(absolutePath: string, signal: AbortSignal): Promise<"accepted" | "opener_unavailable" | "open_failed" | "open_timeout"> {
+	if (process.platform === "win32") {
+		return new Promise((resolve) => {
+			let settled = false;
+			let messages = 0;
+			let processError = false;
+			let result: "accepted" | "opener_unavailable" | "open_failed" | "open_timeout" = "open_failed";
+			const finish = (value: typeof result) => { if (!settled) { settled = true; clearTimeout(timer); signal.removeEventListener("abort", abort); resolve(value); } };
+			let child: ReturnType<typeof fork> | undefined;
+			const dispose = () => {
+				if (!child) return;
+				const target = child;
+				const cleanup = setTimeout(() => { console.warn("workspace opener cleanup timed out"); target.unref?.(); }, 1_000);
+				cleanup.unref();
+				target.once("close", () => clearTimeout(cleanup));
+				try { target.kill(); } catch { /* Cleanup is still bounded and recorded. */ }
+			};
+			const timer = setTimeout(() => { finish("open_timeout"); dispose(); }, 10_000);
+			const abort = () => { finish("open_failed"); dispose(); };
+			signal.addEventListener("abort", abort, { once: true });
+			if (signal.aborted) { abort(); return; }
+			try {
+				const directory = path.dirname(fileURLToPath(import.meta.url));
+				const env = { ...process.env };
+				delete env.NODE_OPTIONS;
+				delete env.NODE_PATH;
+				child = fork(path.join(directory, "workspace-open-worker.mjs"), [], { execPath: process.execPath, execArgv: [], cwd: directory, env, shell: false, detached: false, windowsHide: true, stdio: ["ignore", "ignore", "ignore", "ipc"] } as import("node:child_process").ForkOptions);
+				child.on("message", (message: unknown) => {
+					messages++;
+					if (processError || messages !== 1 || !message || typeof message !== "object" || Array.isArray(message) || Buffer.byteLength(JSON.stringify(message)) > 256) { result = "open_failed"; return; }
+					const reply = message as Record<string, unknown>;
+					const keys = Object.keys(reply).sort().join(",");
+					if (keys === "accepted" && reply.accepted === true) result = "accepted";
+					else if (keys === "accepted,code" && reply.accepted === false && ["opener_unavailable", "open_failed", "open_timeout"].includes(String(reply.code))) result = reply.code as typeof result;
+					else result = "open_failed";
+				});
+				child.once("error", (error: NodeJS.ErrnoException) => { processError = true; result = ["ENOENT", "ENOSYS"].includes(error.code ?? "") ? "opener_unavailable" : "open_failed"; });
+				child.once("close", (code, signal) => finish(!processError && (code !== 0 || signal) ? "open_failed" : result));
+				child.send({ path: absolutePath }, (error) => { if (error) { processError = true; result = "open_failed"; } });
+			} catch (error) {
+				finish(["ENOENT", "ENOSYS"].includes((error as NodeJS.ErrnoException).code ?? "") ? "opener_unavailable" : "open_failed");
+				dispose();
+			}
+		});
+	}
+	if (process.platform !== "linux" && process.platform !== "darwin") return "opener_unavailable";
+	if (process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) return "opener_unavailable";
+	return new Promise((resolve) => {
+		let failure: "opener_unavailable" | "open_failed" | "open_timeout" | undefined;
+		let child: ReturnType<typeof spawn>;
+		try {
+			child = spawn(process.platform === "linux" ? "/usr/bin/xdg-open" : "/usr/bin/open", [absolutePath], { shell: false, detached: false, windowsHide: true, stdio: "ignore" });
+		} catch (error) {
+			resolve(["ENOENT", "ENOSYS"].includes((error as NodeJS.ErrnoException).code ?? "") ? "opener_unavailable" : "open_failed");
+			return;
+		}
+		const timer = setTimeout(() => {
+			failure = "open_timeout";
+			try { child.kill(); } catch { /* A failed kill cannot hold the HTTP response open. */ }
+			resolve("open_timeout");
+		}, 10_000);
+		child.once("error", (error: NodeJS.ErrnoException) => { failure ??= ["ENOENT", "ENOSYS"].includes(error.code ?? "") ? "opener_unavailable" : "open_failed"; });
+		child.once("close", (code, signal) => {
+			clearTimeout(timer);
+			resolve(failure ?? (code === 0 && !signal ? "accepted" : process.platform === "linux" && code === 3 ? "opener_unavailable" : "open_failed"));
+		});
+	});
+}
+
 app.get("/api/persistent-agents/:id/workspace-policy", async (req, reply) => {
 	const idRaw = String((req.params as any).id ?? "").trim();
 	try {
@@ -135,6 +206,71 @@ app.get("/api/persistent-agents/:id/workspace-image", async (req, reply) => {
 		const payload = persistentRoomWorkspaceErrorPayload(e);
 		return reply.code(payload.statusCode).send(payload.body);
 	}
+});
+
+app.post("/api/persistent-agents/:id/workspace-open", async (req, reply) => {
+	reply.headers({ "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
+	const refuse = (status: number, code: string) => reply.code(status).send({ code, error: "This file could not be opened in another program." });
+	const raw = req.raw.rawHeaders;
+	const names = raw.filter((_, i) => i % 2 === 0).map((name) => name.toLowerCase());
+	const one = (name: string) => names.filter((entry) => entry === name).length === 1;
+	const address = req.raw.socket?.remoteAddress;
+	const hosts = [`localhost:${PORT}`, `127.0.0.1:${PORT}`, `[::1]:${PORT}`];
+	const origins = hosts.map((host) => `http://${host}`);
+	if (process.env.NODE_ENV !== "production") origins.push("http://localhost:5173", "http://127.0.0.1:5173", "http://[::1]:5173");
+	if (isSharedServer() || (req as any).exxRemoteDevice || remoteMode.isRemoteSocket(req.raw.socket)
+		|| !["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(address ?? "")
+		|| names.some((name) => name === "forwarded" || name === "via" || name === "x-real-ip" || name.startsWith("x-forwarded-"))
+		|| !one("host") || !hosts.includes(String(req.headers.host ?? "").toLowerCase())
+		|| !one("origin") || !origins.includes(String(req.headers.origin ?? ""))
+		|| !one("x-exxperts-local-action") || req.headers["x-exxperts-local-action"] !== "open-workspace-file") return refuse(403, "local_action_forbidden");
+	const body = req.body;
+	if (!body || typeof body !== "object" || Array.isArray(body)) return refuse(400, "invalid_request");
+	const fields = body as Record<string, unknown>;
+	if (Object.keys(fields).length !== 2 || typeof fields.conversationId !== "string" || !fields.conversationId || typeof fields.path !== "string" || !fields.path) return refuse(400, "invalid_request");
+	const relativePath = fields.path.replaceAll("\\", "/");
+	if (relativePath.includes("\0") || relativePath.startsWith("~") || relativePath.startsWith("/") || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(relativePath)
+		|| relativePath.split("/").some((segment) => !segment || segment.startsWith(".")) || (process.platform === "win32" && relativePath.includes(":"))) return refuse(400, "invalid_path");
+	let agentId: string;
+	try { agentId = getUsablePersistentAgentStatusForNormalUse(String((req.params as any).id ?? "").trim()).id; }
+	catch { return refuse(404, "room_not_found"); }
+	try { if (!getPersistentAgentThread(agentId, fields.conversationId)) return refuse(404, "conversation_not_found"); }
+	catch { return refuse(404, "conversation_not_found"); }
+	const effective = resolvePersistentRoomEffectiveWorkspacePolicy(agentId, fields.conversationId);
+	if (!effective.policy) return refuse(404, "workspace_not_found");
+	if (!effective.workspaceToolsEnabled || !effective.policy.modes.read || !persistentRoomWorkspaceToolNamesForPolicy(effective.policy).includes("read")) return refuse(403, "workspace_read_forbidden");
+	let guarded: ReturnType<typeof resolvePersistentRoomWorkspaceExistingFile>;
+	try { guarded = resolvePersistentRoomWorkspaceExistingFile(effective.policy, relativePath); }
+	catch (error) {
+		if (error instanceof PersistentRoomWorkspaceToolError) {
+			if (error.code === "file_not_found") return refuse(404, "file_not_found");
+			if (error.code === "not_file") {
+				try { if (!resolvePersistentRoomWorkspacePath(effective.policy, relativePath, "read").lstat.isSymbolicLink()) return refuse(400, "not_file"); } catch { /* Refuse a changed target. */ }
+			}
+			return refuse(403, "blocked_by_policy");
+		}
+		return refuse(500, "open_failed");
+	}
+	if (![".xlsx", ".xlsm", ".docx", ".pptx", ".drawio", ".dio", ".txt", ".json", ".pdf", ".html", ".htm", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"].includes(path.extname(relativePath).toLowerCase())) return refuse(415, "unsupported_file_type");
+	let initial: fs.BigIntStats;
+	try { initial = fs.statSync(guarded.absolutePath, { bigint: true }); } catch { return refuse(409, "file_changed"); }
+	if (Number(initial.dev) !== guarded.stat.dev || Number(initial.ino) !== guarded.stat.ino || Number(initial.size) !== guarded.stat.size || Math.abs(Number(initial.mtimeNs) / 1e6 - guarded.stat.mtimeMs) > 0.001 || Math.abs(Number(initial.ctimeNs) / 1e6 - guarded.stat.ctimeMs) > 0.001) return refuse(409, "file_changed");
+	try {
+		const current = resolvePersistentRoomEffectiveWorkspacePolicy(agentId, fields.conversationId);
+		if (!current.policy || !current.workspaceToolsEnabled || !current.policy.modes.read || !persistentRoomWorkspaceToolNamesForPolicy(current.policy).includes("read") || current.fingerprint.value !== effective.fingerprint.value) return refuse(403, "workspace_read_forbidden");
+		const again = resolvePersistentRoomWorkspaceExistingFile(current.policy, relativePath);
+		const stat = fs.statSync(again.absolutePath, { bigint: true });
+		if (again.absolutePath !== guarded.absolutePath || again.rootRealpath !== guarded.rootRealpath || again.relativePath !== guarded.relativePath || stat.dev !== initial.dev || stat.ino !== initial.ino || stat.size !== initial.size || stat.mtimeNs !== initial.mtimeNs || stat.ctimeNs !== initial.ctimeNs) return refuse(409, "file_changed");
+		const controller = new AbortController();
+		const abort = () => { if (!reply.raw.writableEnded) controller.abort(); };
+		req.raw.once("aborted", abort);
+		reply.raw.once("close", abort);
+		let outcome: Awaited<ReturnType<typeof openWorkspacePreviewFile>>;
+		try { outcome = await openWorkspacePreviewFile(again.absolutePath, controller.signal); }
+		finally { req.raw.removeListener("aborted", abort); reply.raw.removeListener("close", abort); }
+		if (outcome === "accepted") return reply.code(202).send({ accepted: true });
+		return refuse(outcome === "opener_unavailable" ? 503 : outcome === "open_timeout" ? 504 : 500, outcome);
+	} catch { return refuse(403, "workspace_read_forbidden"); }
 });
 
 app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
