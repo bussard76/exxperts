@@ -1,6 +1,6 @@
 # ADR-0006: Route macOS close shortcuts to workspace tabs
 
-Status: proposed
+Status: accepted
 Date: 2026-11-09
 Decided by: Sascha (2026-11-09), option A
 Architecture impact: level 3 — desktop main and sandboxed web UI share a new transient close-request contract.
@@ -21,7 +21,7 @@ Keep normal window closing and avoid the new process boundary, leaving the reque
 
 ## Decision
 
-Sascha selected option A in the Front agent chat on 2026-11-09. The exact transport and state rules in the companion proposed spec are for fresh architecture review before implementation.
+Sascha selected option A and approved the flow in the Front agent chat on 2026-11-09. He explicitly waived the clickable fake for this task because no visible design changes. The exact transport and state rules in the companion spec remain subject to fresh architecture review before implementation.
 
 ## Consequences
 
@@ -29,4 +29,4 @@ The change spans the desktop main process and web UI. It preserves existing menu
 
 ## Slicing
 
-One level-3 change after the proposal and revised spec pass an independent architecture review and this ADR is accepted. Implement test-first, independent Tester and conformance review, then the normal gate.
+One level-3 change after the revised spec passes an independent architecture review. Implement test-first, independent Tester and conformance review, then the normal gate.

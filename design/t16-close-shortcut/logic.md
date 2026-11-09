@@ -1,6 +1,6 @@
-# Proposed T16 shortcut behavior — awaiting outside-in sign-off
+# T16 shortcut behavior — approved by Sascha on 2026-11-09
 
-This is a reviewable logic and interface proposal for the Front agent. The visible controls and dirty dialog already exist. This document is not a design export, a clickable fake or evidence of Sascha's sign-off.
+Sascha approved this flow through the Front agent on 2026-11-09 and explicitly waived a clickable fake for this task because the visible controls and dirty dialog already exist. The implementation interface remains subject to architecture review.
 
 ```mermaid
 stateDiagram-v2
