@@ -115,7 +115,10 @@ html.sidebar-collapsed .sidebar-resizer { display: none; }
 .markdown-editor-tiptap .ProseMirror .selectedCell:after { position: absolute; inset: 0; z-index: 2; pointer-events: none; background: color-mix(in srgb, var(--accent, #6ea8fe) 18%, transparent); content: ""; }
 .markdown-editor-tiptap .ProseMirror ul[data-type="taskList"] { padding: 0; list-style: none; }
 .markdown-editor-tiptap .ProseMirror ul[data-type="taskList"] li { display: flex; gap: 8px; align-items: flex-start; }
-.markdown-editor-tiptap .ProseMirror ul[data-type="taskList"] li > label { margin-top: 5px; }
+.markdown-editor-tiptap .ProseMirror ul[data-type="taskList"] li > label { display: flex; align-items: center; height: 1lh; margin: 0; }
+.markdown-editor-tiptap .ProseMirror ul[data-type="taskList"] li > label input { margin: 0; }
+.markdown-editor-tiptap .ProseMirror ul[data-type="taskList"] li > div > p:first-child { margin-top: 0; }
+.markdown-editor-tiptap .ProseMirror ul[data-type="taskList"] li > div > p:last-child { margin-bottom: 0; }
 .markdown-editor-tiptap .ProseMirror ul[data-type="taskList"] li > div { flex: 1; }
 .markdown-editor-preview { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 16px; }
 .markdown-editor-raw { min-width: 0; min-height: 0; flex: 1 1 auto; margin: 0; overflow: auto; padding: 16px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg); background: transparent; font: 13px/1.55 var(--exx-font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace); }
