@@ -315,6 +315,8 @@ try {
 		await tree.getByText("Demo unavailable").waitFor({ timeout: 10000 });
 		treeMode = "normal";
 		await tree.locator(".workspace-file-browser-directory", { hasText: "docs" }).click({ timeout: 15_000 });
+		fs.writeFileSync(path.join(folder, "docs", "new-invented.md"), "# New\n");
+		await tree.locator(".workspace-file-browser-file", { hasText: "new-invented.md" }).waitFor({ timeout: 10000 });
 		await tree.locator(".workspace-file-browser-file", { hasText: "guide.md" }).click({ timeout: 15_000 });
 
 		const tabs = page.getByRole("tablist", { name: "Open files" });
@@ -337,6 +339,9 @@ try {
 		assert((await tabs.getByRole("tab").allTextContents()).join(",") === "other.md,guide.md", "tab dragging reorders open files");
 		await tab("guide.md").click();
 		await tabs.getByRole("button", { name: "Close other.md" }).click();
+		await tabs.getByRole("button", { name: "Close guide.md" }).click();
+		await waitUntil(async () => !(await tabs.isVisible()), "closing last tab closes the pane");
+		await tree.locator(".workspace-file-browser-file", { hasText: "guide.md" }).click();
 
 		const images = page.locator('.markdown-editor-tiptap .ProseMirror img[alt="near"], .markdown-editor-tiptap .ProseMirror img[alt="above"]');
 		await waitUntil(async () => (await images.count()) === 2, "both images are in the editor");
@@ -359,6 +364,8 @@ try {
 			}
 		}
 		assert(externalRequests === 0, `external images made ${externalRequests} requests`);
+		await page.getByRole("button", { name: "RAW", exact: true }).click();
+		assert(await page.getByPlaceholder("Find in file…").count() === 0, "find is absent from RAW");
 		await page.getByRole("button", { name: "Edit", exact: true }).click();
 
 		await page.getByRole("button", { name: /Find in file/ }).click();
@@ -579,9 +586,12 @@ try {
 		await tree.locator(".workspace-file-browser-file", { hasText: "other.md" }).click();
 		await page.getByRole("complementary", { name: "Markdown editor: other.md" }).waitFor();
 		const composer = page.locator("textarea").first();
-		await composer.fill("Read ");
+		await composer.fill("Read REPLACE here");
+		await composer.focus();
+		await composer.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(5, 12));
 		await tree.locator(".workspace-file-browser-file", { hasText: "guide.md" }).dragTo(composer);
-		await waitUntil(async () => (await composer.inputValue()).includes("docs/guide.md"), "the dragged path is in the composer");
+		await waitUntil(async () => (await composer.inputValue()) === "Read docs/guide.md here", "drag replaces the selected text at the caret");
+		assert(await composer.evaluate((el: HTMLTextAreaElement) => el.selectionStart === 18 && el.selectionEnd === 18), "caret follows the inserted path");
 		console.log("  ok  a file dragged onto the composer inserts its path");
 
 		const conversationId = imageUrl.searchParams.get("conversationId")!;
