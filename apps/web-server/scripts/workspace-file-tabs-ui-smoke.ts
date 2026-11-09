@@ -250,6 +250,27 @@ try {
 		const activeName = async () => (await page.locator(".workspace-tab[data-active='true'] .workspace-tab-select").textContent())?.trim();
 		const tabNames = async () => (await tabs.locator(".workspace-tab-select").allTextContents()).map((name) => name.trim());
 
+		// The right pane stays mounted while folded, and a new file opens it again.
+		assert(await page.getByRole("button", { name: /^(Show|Hide) right pane$/ }).count() === 0, "no right pane toggle before opening a file");
+		await treeFile("photo.png").click();
+		const toggle = page.getByRole("button", { name: "Hide right pane" });
+		await toggle.waitFor();
+		await toggle.click();
+		assert(await page.getByRole("button", { name: "Show right pane" }).getAttribute("aria-expanded") === "false", "folded toggle announces its state");
+		assert(await page.locator(".workbench.right-pane-collapsed .workspace-tab").count() === 1, "folded tab remains mounted");
+		assert(await page.locator(".workspace-pane").evaluate((pane) => getComputedStyle(pane).display) === "none", "folded pane is hidden");
+		await treeFile("first.jpg").click();
+		await page.getByRole("button", { name: "Hide right pane" }).waitFor();
+		assert(await activeName() === "first.jpg", "opening a different image unfolds it");
+		await tab("first.jpg").locator(".workspace-tab-close").click();
+		await page.getByRole("button", { name: "Hide right pane" }).click();
+		await tab("photo.png").locator(".workspace-tab-close").evaluate((button: HTMLElement) => button.click());
+		assert(await page.getByRole("button", { name: /^(Show|Hide) right pane$/ }).count() === 0, "closing the last folded tab removes the toggle");
+		assert(await page.locator(".workbench.right-pane-collapsed").count() === 0, "closing the last tab clears the collapsed class");
+		await treeFile("photo.png").click();
+		await page.getByRole("button", { name: "Hide right pane" }).waitFor();
+		await tab("photo.png").locator(".workspace-tab-close").click();
+
 		let imageRequests = 0;
 		let previewRequests = 0;
 		let singleFileFetches = 0;

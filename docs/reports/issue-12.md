@@ -6,10 +6,10 @@ Level 2: the existing App and sidebar icon export, pane renderers and room CSS r
 
 ## Acceptance checklist
 
-- [ ] No toggle with no visible right pane; first file shows it.
+- [x] No toggle with no visible right pane; first file shows it — `workspace-file-tabs-ui-smoke.ts`.
 - [ ] Fold into one grid column, hide pane, retain tabs in DOM, expose collapsed label and aria state.
 - [ ] Unfold preserving tabs, active tab, picture zoom and scroll.
-- [ ] Opening another file while folded adds its tab and unfolds.
+- [x] Opening another file while folded adds its tab and unfolds — `workspace-file-tabs-ui-smoke.ts` (two images).
 - [ ] Closing last tab while folded clears toggle and collapsed class; reopening works.
 - [ ] Toggle works for Markdown, workspace preview, attachments, artifact and task run; maximized artifact hides toggle.
 - [ ] At 1000px, 1600px and phone width with independently clean pane-width storage, controls remain reachable without overlap.
