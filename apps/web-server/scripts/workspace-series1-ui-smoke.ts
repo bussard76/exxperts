@@ -107,6 +107,10 @@ try {
  assert.equal(created.status, 201);
  const id = String(created.body.agent.id);
  assert.equal((await api(`/api/persistent-agents/${encodeURIComponent(id)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: folder, workspaceAccessMode: "localFiles" }) })).status, 200);
+ const other = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Workshop", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
+ assert.equal(other.status, 201);
+ const otherId = String(other.body.agent.id);
+ assert.equal((await api(`/api/persistent-agents/${encodeURIComponent(otherId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: folder, workspaceAccessMode: "localFiles" }) })).status, 200);
  const browser = await chromium.launch();
  try {
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
@@ -247,6 +251,10 @@ try {
   await page.keyboard.press("Escape");
   assert.equal(await page.locator(".workspace-tab").filter({ hasText: "old.doc" }).count(), 0, "Escape closes the active workspace tab");
   assert.equal(await page.locator(".workspace-tab[data-active=true]").count(), 1, "closing selects a neighbouring tab");
+  await page.getByRole("button", { name: "Home", exact: true }).click();
+  await page.locator(".persistent-agent-card").filter({ hasText: "Workshop" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+  await page.locator(".sidebar-workspace-files").waitFor();
+  assert.equal(await page.locator(".workspace-tab").count(), 0, "workspace tabs do not leak into another room");
   await page.close();
   const pairedPage = await browser.newPage({ viewport: { width: 1400, height: 900 } });
   await pairedPage.route("**/api/remote/client-context", route => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ remote: true, capability: "read-only", sharedServer: false, person: null, signOut: null }) }));
