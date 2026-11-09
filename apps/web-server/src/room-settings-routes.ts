@@ -325,8 +325,8 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 		return reply.code(500).send({ code: "preview_failed", error: "This file could not be previewed." });
 	}
 	const extension = path.extname(relativePath).toLowerCase();
-	if (extension === ".txt" || extension === ".json" || extension === ".md") {
-		const limit = 16_777_216;
+	if (extension === ".txt" || extension === ".json" || extension === ".md" || extension === ".pptx") {
+		const limit = extension === ".pptx" ? 26_214_400 : 16_777_216;
 		const tooLarge = () => reply.code(413).send({ code: "file_too_large", error: "This file is too large or complex to preview here." });
 		const changed = () => reply.code(409).send({ code: "file_changed", error: "This file changed while the preview was loading; close the tab and open it again." });
 		if (guarded.stat.size > limit) return tooLarge();
@@ -359,6 +359,7 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 			if (error instanceof PersistentRoomWorkspaceToolError && error.code === "file_not_found") return changed();
 			return reply.code(403).send({ code: "workspace_read_forbidden", error: "This file is not available under the current workspace permissions." });
 		}
+		if (extension === ".pptx") return reply.type("application/octet-stream").send(bytes);
 		return reply.send({ schemaVersion: 1, agentId, conversationId: query.conversationId, path: relativePath, kind: "text", text: bytes.toString("utf8"), notices: [] });
 	}
 	if (extension === ".html" || extension === ".htm") {
