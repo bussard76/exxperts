@@ -118,6 +118,12 @@ const realFork = cp.fork;
 let heldCount = 0;
 cp.fork = function(file, args, options) {
   let request; try { request = JSON.parse(args?.[0] || "{}"); } catch {}
+  if (request?.absolutePath?.endsWith("exit-race.pdf")) {
+   const child = new (require("node:events").EventEmitter)(); child.stderr = new (require("node:events").EventEmitter)();
+   child.kill = () => { setImmediate(() => child.emit("close", 0, null)); return true; };
+   setImmediate(() => { child.emit("exit", 0, null); setTimeout(() => child.emit("message", { ok:false, schemaVersion:1, code:"renderer_unavailable" }), 20); });
+   return child;
+  }
   if (request?.absolutePath?.endsWith("held.pdf")) {
    const child = new (require("node:events").EventEmitter)(); child.stderr = new (require("node:events").EventEmitter)();
    child.kill = () => { setImmediate(() => child.emit("close", 0, null)); return true; };
@@ -362,6 +368,9 @@ require("node:module").syncBuiltinESMExports();
 		assert(!output.includes("invented private marker"), "invalid stderr is never relayed");
 		fs.rmSync(diagnosticMarker);
 	}
+	fs.writeFileSync(path.join(workspaceRoot, "exit-race.pdf"), "invented");
+	const exitRace = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=exit-race.pdf`);
+	assert(exitRace.status === 503 && exitRace.body.code === "renderer_unavailable", "late child IPC settles correctly after an exit event");
 	fs.writeFileSync(path.join(workspaceRoot, "held.pdf"), "invented");
 	const heldUrl = `${baseUrl}/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=held.pdf`;
 	const firstAbort = new AbortController(), secondAbort = new AbortController();
