@@ -936,7 +936,7 @@ export function App() {
 	// Folds the whole right side away while its tabs and panes stay open (the pane's own state is kept, only hidden).
 	const [rightPaneCollapsed, setRightPaneCollapsed] = useState(false);
 	// Something new on the right (another file, another pane) unfolds it again.
-	const rightPaneKey = rightPane ? `${rightPane.kind}:${(rightPane as { path?: string }).path ?? ""}` : "";
+	const rightPaneKey = rightPane ? JSON.stringify(rightPane.kind === "artifactViewer" ? [rightPane.kind, rightPane.taskId, rightPane.artifact.relativePath] : rightPane.kind === "taskRun" ? [rightPane.kind, rightPane.taskId] : [rightPane.kind, "path" in rightPane ? rightPane.path : ""]) : "";
 	useEffect(() => { if (rightPaneKey) setRightPaneCollapsed(false); }, [rightPaneKey]);
 	// Only a real divider drag makes the width a preference worth keeping;
 	// defaults and window-resize clamps are not the user speaking.

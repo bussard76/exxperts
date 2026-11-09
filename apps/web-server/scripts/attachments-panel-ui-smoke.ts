@@ -318,6 +318,15 @@ try {
 	await card("high water").locator(".att-open").click();
 	await viewer.waitFor({ timeout: 5_000 });
 	assert((await gallery.isVisible()), "a file opens beside the gallery");
+	await page.getByRole("button", { name: "Hide right pane" }).click();
+	assert(await gallery.isVisible(), "the gallery stays visible when its file viewer is folded");
+	await card("contract").locator(".att-open").click();
+	await page.getByRole("button", { name: "Hide right pane" }).waitFor({ timeout: 5_000 });
+	assert((await viewer.locator(".artifact-viewer-template").innerText()).includes("contract"), "opening a different gallery file unfolds and displays it");
+	await page.getByRole("button", { name: "Hide right pane" }).click();
+	await card("contract").locator(".att-open").click();
+	assert((await viewer.count()) === 0 && await gallery.isVisible(), "clicking the selected folded file closes it back to Attachments");
+	await card("high water").locator(".att-open").click();
 	await viewer.getByRole("button", { name: "Close file viewer" }).click();
 	await viewer.waitFor({ state: "detached", timeout: 5_000 });
 	assert((await gallery.isVisible()), "closing the file leaves the gallery");
