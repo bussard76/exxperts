@@ -321,6 +321,14 @@ require("node:module").syncBuiltinESMExports();
 	const openHeaders = { origin: baseUrl, "x-exxperts-local-action": "open-workspace-file" };
 	const rejectedXls = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-open`, { method: "POST", headers: openHeaders, body: JSON.stringify({ conversationId: "demo-thread", path: "invented.xls" }) });
 	assert(rejectedXls.status === 415 && rejectedXls.body.code === "unsupported_file_type", "legacy XLS is refused by the local open route");
+	const openerMarker = path.join(tempHome, "fake-opener");
+	const noIntent = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-open`, { method: "POST", headers: { origin: baseUrl }, body: JSON.stringify({ conversationId: "demo-thread", path: "invented.txt" }) });
+	assert(noIntent.status === 403 && noIntent.body.code === "local_action_forbidden", "missing local intent refuses opening");
+	for (const [file, status, code] of [["../invented.txt", 400, "invalid_path"], ["link.png", 403, "blocked_by_policy"], ["invented.md", 415, "unsupported_file_type"], ["missing.pdf", 404, "file_not_found"]] as const) {
+		const refused = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-open`, { method: "POST", headers: openHeaders, body: JSON.stringify({ conversationId: "demo-thread", path: file }) });
+		assert(refused.status === status && refused.body.code === code && refused.body.error === "This file could not be opened in another program.", `open refuses ${file} with a safe error`);
+		assert(!fs.existsSync(openerMarker), `refused ${file} never calls the opener`);
+	}
 	if (process.platform === "linux") {
 		const opened = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-open`, { method: "POST", headers: openHeaders, body: JSON.stringify({ conversationId: "demo-thread", path: "invented.txt" }) });
 		assert(opened.status === 202 && opened.body.accepted === true, "explicit local open accepts the guarded file with the fake opener");
