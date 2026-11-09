@@ -593,6 +593,15 @@ function sanitizeWordDocument(document, notices) {
 			}
 		} catch (error) { if (error?.previewCode) throw error; throw previewError("damaged_file"); }
 	}
+	// Word's horizontal lines (VML) come out of docx-preview as <svg>, which is removed below; keep them as a plain double rule.
+	for (const svg of document.querySelectorAll("svg")) {
+		const rule = document.createElement("div");
+		rule.setAttribute("style", svg.getAttribute("style") || "");
+		if (!rule.style.width) continue;
+		rule.style.height = "0";
+		rule.style.borderTop = "3px double #000";
+		svg.replaceWith(rule);
+	}
 	for (const element of document.querySelectorAll("script, style, link, iframe, frame, object, embed, svg, math, form, input, button, textarea, select, meta, base, video, audio, source")) element.remove();
 	const allowedTags = new Set("DIV SECTION ARTICLE P SPAN B STRONG I EM U S STRIKE TABLE TBODY THEAD TFOOT TR TD TH COLGROUP COL BR HR IMG H1 H2 H3 H4 H5 H6 OL UL LI SUP SUB BLOCKQUOTE PRE CODE A".split(" "));
 	const elements = [...document.body.querySelectorAll("*")];
