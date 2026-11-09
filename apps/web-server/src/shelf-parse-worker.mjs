@@ -603,7 +603,7 @@ function sanitizeWordDocument(document, notices) {
 		svg.replaceWith(rule);
 	}
 	for (const element of document.querySelectorAll("script, style, link, iframe, frame, object, embed, svg, math, form, input, button, textarea, select, meta, base, video, audio, source")) element.remove();
-	const allowedTags = new Set("DIV SECTION ARTICLE P SPAN B STRONG I EM U S STRIKE TABLE TBODY THEAD TFOOT TR TD TH COLGROUP COL BR HR IMG H1 H2 H3 H4 H5 H6 OL UL LI SUP SUB BLOCKQUOTE PRE CODE A".split(" "));
+	const allowedTags = new Set("DIV SECTION ARTICLE HEADER FOOTER P SPAN B STRONG I EM U S STRIKE TABLE TBODY THEAD TFOOT TR TD TH COLGROUP COL BR HR IMG H1 H2 H3 H4 H5 H6 OL UL LI SUP SUB BLOCKQUOTE PRE CODE A".split(" "));
 	const elements = [...document.body.querySelectorAll("*")];
 	let renderedPixels = 0;
 	if (elements.length > 200_000) throw previewError("preview_too_complex");
