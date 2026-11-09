@@ -357,6 +357,17 @@ require("node:module").syncBuiltinESMExports();
 	fs.truncateSync(path.join(workspaceRoot, "oversize.pdf"), 26_214_401);
 	const oversizePdf = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=oversize.pdf`);
 	assert(oversizePdf.status === 413 && oversizePdf.body.code === "file_too_large", "PDF input over the child limit is refused");
+	const { default: JSZip } = await import("jszip");
+	const expansionZip = new JSZip();
+	expansionZip.file("word/document.xml", "x".repeat(1_000_000));
+	fs.writeFileSync(path.join(workspaceRoot, "expansion.docx"), await expansionZip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }));
+	const expansion = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=expansion.docx`);
+	assert(expansion.status === 413 && expansion.body.code === "expanded_content_too_large", "Word ZIP expansion is refused before rendering");
+	const elementsZip = await JSZip.loadAsync(await smallDocx());
+	elementsZip.file("word/custom.xml", `<root>${"<x/>".repeat(200_001)}</root>`);
+	fs.writeFileSync(path.join(workspaceRoot, "elements.docx"), await elementsZip.generateAsync({ type: "nodebuffer" }));
+	const elements = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=elements.docx`);
+	assert(elements.status === 413 && elements.body.code === "preview_too_complex", "Word XML element budget is enforced");
 	fs.writeFileSync(path.join(workspaceRoot, "diagnostic-fake.docx"), "invented");
 	for (const mode of ["chunked", "duplicate", "invalid"]) {
 		fs.writeFileSync(diagnosticMarker, mode);
