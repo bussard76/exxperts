@@ -29,6 +29,7 @@ function assert(condition: unknown, message: string): asserts condition {
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const webServerDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(webServerDir, "..", "..");
+const packagedApp = process.env.EXXPERTS_SMOKE_PACKAGED_APP;
 const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
 
@@ -203,11 +204,11 @@ async function api(pathname: string, init: AuthedFetchInit = {}): Promise<{ stat
 let server: ChildProcessWithoutNullStreams | undefined;
 const serverOutput: string[] = [];
 try {
-	server = spawn("npx", ["tsx", "src/index.ts"], {
+	server = spawn(packagedApp ? process.execPath : "npx", packagedApp ? [path.join(packagedApp, "apps/web-server/dist/server.mjs")] : ["tsx", "src/index.ts"], {
 		shell: process.platform === "win32",
 		...SMOKE_SERVER_SPAWN_TREE_OPTIONS,
 		cwd: webServerDir,
-		env: smokeHomeEnv(tempHome, { PORT: String(port), ...SMOKE_SERVER_AUTH_ENV, EXXETA_HOME: repoRoot, EXXPERTS_CODING_AGENT_DIR: agentDir, EXXETA_PERSISTENT_AGENTS_ROOT: agentsRoot, ...(process.platform === "linux" ? { DISPLAY: ":987", NODE_OPTIONS: `--require=${openerPreload}` } : {}) }) as NodeJS.ProcessEnv,
+		env: smokeHomeEnv(tempHome, { PORT: String(port), ...SMOKE_SERVER_AUTH_ENV, EXXETA_HOME: packagedApp ?? repoRoot, EXXPERTS_CODING_AGENT_DIR: agentDir, EXXETA_PERSISTENT_AGENTS_ROOT: agentsRoot, ...(process.platform === "linux" ? { DISPLAY: ":987", NODE_OPTIONS: `--require=${openerPreload}` } : {}) }) as NodeJS.ProcessEnv,
 	});
 	server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
 	server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
