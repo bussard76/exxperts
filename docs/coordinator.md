@@ -120,3 +120,8 @@ Sascha, 2026-11-09: "make all workers and yourself use graphify in this repo but
 ## Decision history
 
 Append dated sections below as decisions are made. Superseded rules stay here with "superseded by …" and are removed from `docs/dev-workflow.md`.
+
+## Additional decisions, 2026-11-09
+
+- **Upstream:** one upstream pull request is intended later, but not now. Do not prepare or send anything to `EXXETA/exxperts` until Sascha resumes that work. Sascha: "einer aber warten".
+- **Excalidraw:** keep it only in the fork and keep its changes separable, so a future upstream port can omit them cleanly. Sascha: "nur im fork".

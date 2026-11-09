@@ -80,7 +80,7 @@ flowchart TD
 3. **Bauen:** Ein Developer baut testgetrieben, führt eine Checkliste aller Anforderungen, pusht nach jedem Punkt und prüft am Ende seine Arbeit selbst gegen die Spec.
 4. **Unabhängiger Test:** Ein anderer Worker prüft gegen die Spec und lässt die vollen Testläufe laufen (außer bei reinen Dokumentationsänderungen). Befunde gehen an den Developer zurück, danach prüft ein neuer Tester.
 5. **Konformität:** Bei Stufe 2 und 3 prüft ein Architekt grob, ob der Code die entschiedene Architektur umsetzt.
-6. **Wave:** Der Controller sammelt bestandene Aufgaben und führt sie zusammen. Auf dem gemeinsamen Stand laufen noch einmal alle Tests, dann geht der Stand nach `main`. Eine Wave startet, sobald zwei Aufgaben warten, eine 60 Minuten wartet oder eine Aufgabe andere blockiert.
+6. **Wave:** Der Controller sammelt bestandene Aufgaben und führt sie zusammen. Auf dem gemeinsamen Stand laufen noch einmal alle Tests, dann geht der Stand nach `main`. Eine Wave startet, sobald zwei Aufgaben warten, eine 60 Minuten wartet oder eine Aufgabe andere blockiert. Wenn sonst nichts in der Warteschlange liegt oder läuft, beginnt die Integration sofort (entschieden von Sascha am 09.11.2026).
 7. **Abnahme:** Der Preview zieht den neuen `main` automatisch. Der Mensch testet dort in seiner eigenen Umgebung, auf einer privaten Kopie, wo Daten im Spiel sind. Befunde werden neue Tickets.
 
 **Fehler** laufen denselben Weg. Zuerst muss ein Test den Fehler zeigen, ohne Nachstellung gibt es keinen Fix.
@@ -216,6 +216,8 @@ Bei jedem Ereignis eines Workers, sonst alle 10 Minuten:
 ## Die Fabrik verbessert sich selbst
 
 - **Ereignisjournal:** jedes Ereignis mit Ursache: Start, Ergebnis, Review-Runde, Wiederholung, Hänger, Wave, Gate-Wartezeit.
+- **Tester- und Integrations-Gates:** Eine grüne Integration reicht für den Push, auch wenn parallele Smoke-Ausreißer aus dem Tester-Lauf einzeln bestanden haben. Jeder Ausreißer und beide Ergebnisse stehen im Review. Ein einzeln fehlschlagender Smoke oder ein rotes Integrations-Gate bleibt ein Blocker (entschieden von Sascha am 07.11.2026, am 09.11.2026 bestätigt: „Grüne Integration reicht“).
+- **Upstream und Excalidraw:** Ein Upstream-Pull-Request ist später vorgesehen, wird jetzt aber weder vorbereitet noch an `EXXETA/exxperts` gesendet. Excalidraw bleibt ausschließlich im Fork und muss so getrennt bleiben, dass es bei einem späteren Upstream-Port entfallen kann (entschieden von Sascha am 09.11.2026).
 - **Pipeline-Auditor:** jede Nacht nach der letzten Wave und sofort bei Häufungen. Liest Journal, Lastlog, Reviews, Schulden und Regeln. Fragt, wo Zeit verloren geht, welche Fehlerursachen sich häufen, welche Regeln Nacharbeit erzeugen, welche Risiken wachsen und ob die letzten Verbesserungen gewirkt haben. Liefert eine Seite mit den drei wichtigsten Verbesserungen und Risiken, jeweils mit Messwert, Ursache, Vorschlag und prüfbarem Erfolgskriterium.
 - **Retro pro Agentenlauf** mit dem `retro`-Skill: nach zwei Fehlrunden, vorzeitigem Abbruch, zwei Hängern oder wiederholten eigenen Fehlern liest ein Retro-Worker das Sitzungsprotokoll und schlägt 1–3 belegte Verbesserungen an der Arbeitsumgebung vor. Neue Regeln kommen nie in `AGENTS.md`, neue Checks werden erst getestet.
 - **Schnellspur:** Kleine Verbesserungen (Doku, Vorlagen, Skripte, Tests) setzt der Controller selbst um, höchstens eine gleichzeitig. Die nächste Auswertung prüft die Wirkung.
