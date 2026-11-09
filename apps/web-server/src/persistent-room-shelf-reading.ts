@@ -210,12 +210,34 @@ function runShelfWorker(request: Record<string, unknown>, timeoutMs: number, sig
 		// V8's OOM abort reports on stderr; keep a bounded tail so a heap-capped
 		// death maps to the honest too_complex refusal below.
 		let stderrTail = "";
+		let diagnosticLine = "";
+		let diagnosticOverflow = false;
+		let diagnostic: string | undefined;
+		let duplicateDiagnostic = false;
 		child.stderr?.on("data", (chunk: Buffer) => {
-			stderrTail = (stderrTail + chunk.toString()).slice(-8192);
+			const data = chunk.toString("latin1");
+			stderrTail = (stderrTail + data).slice(-8192);
+			if (request.mode !== "workspace-preview-v1" || request.kind !== "word") return;
+			for (const char of data) {
+				if (char === "\n") {
+					if (!diagnosticOverflow && /^WORD_PREVIEW_DIAGNOSTIC (Error|TypeError|ReferenceError|RangeError|SyntaxError|UnknownError)\|(requestAnimationFrame is not defined|Unexpected renderer error)$/.test(diagnosticLine)) {
+						if (diagnostic) duplicateDiagnostic = true;
+						else diagnostic = diagnosticLine;
+					}
+					diagnosticLine = "";
+					diagnosticOverflow = false;
+				} else if (!diagnosticOverflow) {
+					if (diagnosticLine.length >= 128) { diagnosticLine = ""; diagnosticOverflow = true; }
+					else diagnosticLine += char;
+				}
+			}
 		});
 		let settled = false;
 		let closed = false;
-		child.once("close", () => { closed = true; });
+		child.once("close", () => {
+			closed = true;
+			if (diagnostic && !duplicateDiagnostic) console.error(diagnostic);
+		});
 		const settle = (fn: () => void) => {
 			if (settled) return;
 			settled = true;
