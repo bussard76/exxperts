@@ -100,6 +100,8 @@ if (String(process.argv[1]).endsWith("shelf-parse-worker.mjs") && fs.existsSync(
 }
 const originals = { open: fs.openSync, read: fs.readSync };
 const realReaddir = fs.readdirSync;
+const realReadFile = fs.readFileSync;
+fs.readFileSync = function(file, ...args) { if (typeof file === "string" && file.endsWith("private-image.png")) throw new Error("invented private image detail " + file); return realReadFile.call(this, file, ...args); };
 fs.readdirSync = function(file, ...args) { if (typeof file === "string" && file.endsWith("private-invented")) throw new Error("invented private detail " + file); return realReaddir.call(this, file, ...args); };
 const selected = new Set();
 fs.openSync = function(file, ...args) { const fd = originals.open.call(this, file, ...args); if (typeof file === "string" && file.endsWith("race-invented.html")) selected.add(fd); return fd; };
@@ -217,6 +219,9 @@ require("node:module").syncBuiltinESMExports();
 	fs.truncateSync(path.join(workspaceRoot, "oversize.png"), 20 * 1024 * 1024 + 1);
 	const largeImage = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-image?conversationId=demo-thread&path=oversize.png`);
 	assert(largeImage.status === 413 && largeImage.body.code === "file_too_large", "image above 20 MiB is refused");
+	fs.writeFileSync(path.join(workspaceRoot, "private-image.png"), "invented");
+	const badImage = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-image?conversationId=demo-thread&path=private-image.png`);
+	assert(badImage.status === 500 && badImage.body.code === "workspace_file_error" && !JSON.stringify(badImage.body).includes("invented private image detail") && !JSON.stringify(badImage.body).includes(workspaceRoot), "unexpected image failure is private");
 	writePersistentAgentThread(agentId, "demo-thread", { state: "standby", origin: "home", model, items: [] });
 	fs.writeFileSync(path.join(workspaceRoot, "invented.md"), Buffer.from([35, 32, 65, 0, 0xff]));
 	const markdown = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=invented.md`);
