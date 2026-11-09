@@ -84,6 +84,8 @@ try {
 	fs.writeFileSync(policyRacePreload, `
 const fs = require("node:fs");
 const originals = { open: fs.openSync, read: fs.readSync };
+const realReaddir = fs.readdirSync;
+fs.readdirSync = function(file, ...args) { if (typeof file === "string" && file.endsWith("private-invented")) throw new Error("invented private detail " + file); return realReaddir.call(this, file, ...args); };
 const selected = new Set();
 fs.openSync = function(file, ...args) { const fd = originals.open.call(this, file, ...args); if (typeof file === "string" && file.endsWith("race-invented.html")) selected.add(fd); return fd; };
 fs.readSync = function(fd, ...args) { if (selected.delete(fd) && fs.existsSync(${JSON.stringify(policyRaceMarker)})) fs.unlinkSync(fs.readFileSync(${JSON.stringify(policyRaceMarker)}, "utf8")); return originals.read.call(this, fd, ...args); };
@@ -164,6 +166,9 @@ require("node:module").syncBuiltinESMExports();
 	fs.writeFileSync(path.join(workspaceRoot, "invented.txt"), "invented content");
 	const listing = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-files?conversationId=demo-thread`);
 	assert(listing.status === 200 && listing.body.entries.some((entry: { name: string }) => entry.name === "invented.txt"), "workspace listing exposes an allowed file through the public route");
+	fs.mkdirSync(path.join(workspaceRoot, "private-invented"));
+	const badListing = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-files?conversationId=demo-thread&path=private-invented`);
+	assert(badListing.status >= 400 && !JSON.stringify(badListing.body).includes("invented private detail") && !JSON.stringify(badListing.body).includes(workspaceRoot), "unexpected listing failures never expose internal details or absolute paths");
 	fs.writeFileSync(path.join(workspaceRoot, "invented.png"), Buffer.from([137, 80, 78, 71]));
 	const image = await authedFetch(`${baseUrl}/api/persistent-agents/${encodedAgentId}/workspace-image?conversationId=demo-thread&path=invented.png`);
 	assert(image.status === 200 && image.headers.get("content-type") === "image/png" && image.headers.get("x-content-type-options") === "nosniff", "workspace image route serves guarded image bytes with safe headers");

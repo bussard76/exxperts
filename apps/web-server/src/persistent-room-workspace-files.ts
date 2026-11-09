@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { PersistentRoomCapabilityPolicy } from "./persistent-room-workspace-policy.js";
 import { persistentRoomWorkspaceToolNamesForPolicy } from "./persistent-room-tool-policy.js";
-import { resolvePersistentRoomWorkspacePath } from "./persistent-room-workspace-tools.js";
+import { PersistentRoomWorkspaceToolError, resolvePersistentRoomWorkspacePath } from "./persistent-room-workspace-tools.js";
 
 export interface PersistentRoomWorkspaceFileEntry {
 	name: string;
@@ -48,7 +48,10 @@ function hiddenOrDenied(name: string, policy: PersistentRoomCapabilityPolicy): b
 
 function workspaceUnavailableError(error: unknown): Error & { code: string; statusCode: number } {
 	const cause = error as NodeJS.ErrnoException;
-	if (cause?.code !== "EACCES" && cause?.code !== "EPERM" && cause?.code !== "workspace_unavailable") throw error;
+	if (cause?.code !== "EACCES" && cause?.code !== "EPERM" && cause?.code !== "workspace_unavailable") {
+		if (error instanceof PersistentRoomWorkspaceToolError) throw error;
+		throw new Error("The workspace folder could not be listed.");
+	}
 	const unavailable = new Error("The workspace folder is not readable. Check OneDrive permissions or make the folder available offline.") as Error & { code: string; statusCode: number };
 	unavailable.code = "workspace_unavailable";
 	unavailable.statusCode = 503;
