@@ -728,7 +728,7 @@ async function previewWord(buffer) {
 		const anchoredFromPage = (xml) => pageMarginLeftEmu ? xml.replace(/(<wp:positionH\b[^>]*relativeFrom="page"[^>]*>\s*<wp:posOffset>)(-?\d+)(<\/wp:posOffset>)/g, (_, head, offset, tail) => `${head}${Number(offset) - pageMarginLeftEmu}${tail}`) : xml;
 		for (const part of zip.file(/^word\/[^/]+\.xml$/)) zip.file(part.name, anchoredFromPage(wordMeasuresToNumbers(await part.async("string"))));
 		const sanitized = await zip.generateAsync({ type: "nodebuffer", compression: "STORE" });
-		await renderAsync(sanitized, window.document.getElementById("content"), window.document.getElementById("styles"), { inWrapper: true, ignoreWidth: false, ignoreHeight: false, useBase64URL: true });
+		await renderAsync(sanitized, window.document.getElementById("content"), window.document.getElementById("styles"), { inWrapper: true, ignoreWidth: false, ignoreHeight: false, ignoreLastRenderedPageBreak: false, useBase64URL: true });
 		const notices = blocked ? [{ code: "external_resources_blocked", text: "External document resources are blocked." }] : [];
 		return sanitizeWordDocument(window.document, notices);
 	} catch (error) {
