@@ -335,6 +335,18 @@ require("node:module").syncBuiltinESMExports();
 		const call = JSON.parse(fs.readFileSync(path.join(tempHome, "fake-opener"), "utf8"));
 		assert(call.file === "/usr/bin/xdg-open" && call.shell === false && call.args[0] === path.join(workspaceRoot, "invented.txt"), "opener receives the guarded path without a shell");
 	}
+	for (const [allowed, listAllowed, readAllowed] of [[[], false, false], [["ls"], true, false], [["read"], false, true]] as const) {
+		const updated = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-default`, { method: "PUT", body: JSON.stringify({ workspaceAccessMode: "bounded", toolSelection: { kind: "custom", allowedToolNames: allowed }, bashEnabled: false }) });
+		assert(updated.status === 200, "invented workspace tool selection is saved");
+		const listed = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-files?conversationId=demo-thread`);
+		assert((listed.body.root !== null) === listAllowed, `listing follows ls selection ${allowed}`);
+		const preview = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=invented.md`);
+		assert((preview.status === 200) === readAllowed, `preview follows read selection ${allowed}`);
+		const selectedImage = await authedFetch(`${baseUrl}/api/persistent-agents/${encodedAgentId}/workspace-image?conversationId=demo-thread&path=invented.png`);
+		assert((selectedImage.status === 200) === readAllowed, `image follows read selection ${allowed}`);
+	}
+	const restoreTools = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-default`, { method: "PUT", body: JSON.stringify({ workspaceAccessMode: "localFiles", toolSelection: { kind: "standard" } }) });
+	assert(restoreTools.status === 200, "workspace permissions restored after tool matrix");
 	const policyBeforeRace = fs.readFileSync(defaultPath);
 	for (const suffix of ["", "&frame=1"]) {
 		fs.writeFileSync(policyRaceMarker, defaultPath);
