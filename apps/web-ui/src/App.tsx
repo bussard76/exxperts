@@ -3,6 +3,7 @@ import { Sidebar } from "./components/Sidebar";
 import { AttachmentsBrowser, AttachmentsEntry, type AttachmentsView } from "./components/attachments-panel";
 import { WorkspaceFileBrowser } from "./components/WorkspaceFileBrowser";
 import { WorkspaceFileTabs } from "./components/WorkspaceFileTabs";
+import { PanelIcon } from "./sidebar-collapse";
 import { WorkspaceHtmlPreview } from "./components/WorkspaceHtmlPreview";
 import { WorkspaceImagePreview } from "./components/WorkspaceImagePreview";
 import { WorkspaceFramedPreview } from "./components/WorkspaceFramedPreview";
@@ -932,6 +933,11 @@ export function App() {
 		return getDefaultKnowledgePaneWidth();
 	});
 	const [resizingRightPane, setResizingRightPane] = useState(false);
+	// Folds the whole right side away while its tabs and panes stay open (the pane's own state is kept, only hidden).
+	const [rightPaneCollapsed, setRightPaneCollapsed] = useState(false);
+	// Something new on the right (another file, another pane) unfolds it again.
+	const rightPaneKey = rightPane ? JSON.stringify(rightPane.kind === "artifactViewer" ? [rightPane.kind, rightPane.taskId, rightPane.artifact.relativePath] : rightPane.kind === "taskRun" ? [rightPane.kind, rightPane.taskId] : [rightPane.kind, "path" in rightPane ? rightPane.path : ""]) : "";
+	useEffect(() => { if (rightPaneKey) setRightPaneCollapsed(false); }, [rightPaneKey]);
 	// Only a real divider drag makes the width a preference worth keeping;
 	// defaults and window-resize clamps are not the user speaking.
 	const rightPaneUserSizedRef = useRef(false);
@@ -8620,6 +8626,7 @@ export function App() {
 
 	const rightPaneVisible = Boolean(rightPane) && !(rightPane?.kind === "attachments" && galleryShown);
 	const artifactPaneMaximized = artifactMaximized && rightPane?.kind === "artifactViewer";
+	const rightCollapsed = rightPaneVisible && !artifactPaneMaximized && rightPaneCollapsed;
 	// Maximized: no inline style — the .artifact-pane-maximized class drives a
 	// single-track grid. The width travels as a custom property (consumed by the
 	// .with-right-pane grid rule) rather than an inline grid-template-columns,
@@ -8794,7 +8801,7 @@ export function App() {
 			}
 			withPreview={false}
 			workbenchRef={workbenchRef}
-			workbenchClassName={`${rightPaneVisible ? (artifactPaneMaximized ? "with-right-pane artifact-pane-maximized" : "with-right-pane") : ""}${resizingRightPane ? " pane-resizing" : ""}${rightPane?.kind === "attachments" || rightPane?.kind === "artifactViewer" ? " with-file-pane" : ""}${galleryShown ? " attachments-gallery-open" : ""}`}
+			workbenchClassName={`${rightPaneVisible && !rightCollapsed ? (artifactPaneMaximized ? "with-right-pane artifact-pane-maximized" : "with-right-pane") : ""}${rightCollapsed ? " right-pane-collapsed" : ""}${resizingRightPane ? " pane-resizing" : ""}${rightPane?.kind === "attachments" || rightPane?.kind === "artifactViewer" ? " with-file-pane" : ""}${galleryShown ? " attachments-gallery-open" : ""}`}
 			workbenchStyle={workbenchStyle}
 			activeDisplay={activeDisplay || ""}
 			ownerSecondary=""
@@ -8814,6 +8821,7 @@ export function App() {
 							    would be the worst possible moment to lose it. */}
 							<button className="icon-btn icon-btn-square icon-btn-danger" aria-label="Forget" title="Forget this conversation and start fresh. Nothing is saved to memory" onClick={() => void mementoPersistentThread()}><TrashIcon /></button>
 							{currentPersistentStatus?.exists && <button className="icon-btn icon-btn-square" aria-label="Room settings" title={`Room settings — ${roomSettingsChordHint()}`} onClick={() => openRoomSettings()}><GearIcon /></button>}
+							{rightPaneVisible && !artifactPaneMaximized && <button className="icon-btn icon-btn-square right-pane-toggle" aria-label={rightCollapsed ? "Show right pane" : "Hide right pane"} aria-expanded={!rightCollapsed} title={rightCollapsed ? "Show right pane" : "Hide right pane"} onClick={() => setRightPaneCollapsed((collapsed) => !collapsed)}><PanelIcon side="right" /></button>}
 						</>
 					)
 					: undefined

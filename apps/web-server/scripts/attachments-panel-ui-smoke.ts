@@ -223,6 +223,10 @@ try {
 	assert((await composer.isVisible()), "the box stays beside the open file");
 	assert((await viewer.locator(".artifact-viewer-quiet").filter({ hasText: "Download" }).count()) === 1 && (await viewer.locator(".artifact-viewer-quiet").filter({ hasText: "Save" }).count()) === 1, "the viewer keeps Download and Save");
 	assert((await viewer.getByRole("button", { name: "Maximize panel" }).count()) === 1, "the viewer keeps its maximize");
+	await viewer.getByRole("button", { name: "Maximize panel" }).click();
+	assert(await page.getByRole("button", { name: /^(Show|Hide) right pane$/ }).count() === 0, "a maximized artifact has no pane toggle");
+	await viewer.getByRole("button", { name: "Restore panel size" }).click();
+	await page.getByRole("button", { name: "Hide right pane" }).waitFor();
 	assert((await entry.getAttribute("aria-expanded")) === "true", "the entry stays open behind a file");
 	await viewer.getByRole("button", { name: "Back to Attachments" }).click();
 	await panel.waitFor({ timeout: 5_000 });
@@ -318,6 +322,15 @@ try {
 	await card("high water").locator(".att-open").click();
 	await viewer.waitFor({ timeout: 5_000 });
 	assert((await gallery.isVisible()), "a file opens beside the gallery");
+	await page.getByRole("button", { name: "Hide right pane" }).click();
+	assert(await gallery.isVisible(), "the gallery stays visible when its file viewer is folded");
+	await card("contract").locator(".att-open").click();
+	await page.getByRole("button", { name: "Hide right pane" }).waitFor({ timeout: 5_000 });
+	assert((await viewer.locator(".artifact-viewer-template").innerText()).includes("contract"), "opening a different gallery file unfolds and displays it");
+	await page.getByRole("button", { name: "Hide right pane" }).click();
+	await card("contract").locator(".att-open").click();
+	assert((await viewer.count()) === 0 && await gallery.isVisible(), "clicking the selected folded file closes it back to Attachments");
+	await card("high water").locator(".att-open").click();
 	await viewer.getByRole("button", { name: "Close file viewer" }).click();
 	await viewer.waitFor({ state: "detached", timeout: 5_000 });
 	assert((await gallery.isVisible()), "closing the file leaves the gallery");
