@@ -512,7 +512,7 @@ function denyPreviewNetwork() {
 }
 
 const WORD_CSP = "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
-const WORD_CSS_PROPERTIES = new Set(("background background-color border border-top border-right border-bottom border-left border-color border-style border-width border-collapse border-spacing border-radius box-sizing color display direction flex flex-basis flex-direction flex-flow flex-grow flex-shrink flex-wrap align-items align-self justify-content z-index font font-family font-size font-style font-weight font-variant height line-height margin margin-top margin-right margin-bottom margin-left max-height max-width min-height min-width overflow overflow-wrap padding padding-top padding-right padding-bottom padding-left page-break-after page-break-before page-break-inside position text-align text-decoration text-indent text-transform vertical-align white-space width word-break word-spacing letter-spacing list-style-type table-layout").split(" "));
+const WORD_CSS_PROPERTIES = new Set(("background background-color border border-top border-right border-bottom border-left border-color border-style border-width border-collapse border-spacing border-radius box-sizing color display direction flex flex-basis flex-direction flex-flow flex-grow flex-shrink flex-wrap align-items align-self justify-content z-index font font-family font-size font-style font-weight font-variant height line-height margin margin-top margin-right margin-bottom margin-left max-height max-width min-height min-width overflow overflow-wrap padding padding-top padding-right padding-bottom padding-left page-break-after page-break-before page-break-inside position left top right bottom transform transform-origin text-align text-decoration text-indent text-transform vertical-align white-space width word-break word-spacing letter-spacing list-style-type table-layout").split(" "));
 
 function safeWordStyle(style, markBlocked) {
 	const declarations = [];
@@ -593,8 +593,17 @@ function sanitizeWordDocument(document, notices) {
 			}
 		} catch (error) { if (error?.previewCode) throw error; throw previewError("damaged_file"); }
 	}
+	// Word's horizontal lines (VML) come out of docx-preview as <svg>, which is removed below; keep them as a plain double rule.
+	for (const svg of document.querySelectorAll("svg")) {
+		const rule = document.createElement("div");
+		rule.setAttribute("style", svg.getAttribute("style") || "");
+		if (!rule.style.width) continue;
+		rule.style.height = "0";
+		rule.style.borderTop = "3px double #000";
+		svg.replaceWith(rule);
+	}
 	for (const element of document.querySelectorAll("script, style, link, iframe, frame, object, embed, svg, math, form, input, button, textarea, select, meta, base, video, audio, source")) element.remove();
-	const allowedTags = new Set("DIV SECTION ARTICLE P SPAN B STRONG I EM U S STRIKE TABLE TBODY THEAD TFOOT TR TD TH COLGROUP COL BR HR IMG H1 H2 H3 H4 H5 H6 OL UL LI SUP SUB BLOCKQUOTE PRE CODE A".split(" "));
+	const allowedTags = new Set("DIV SECTION ARTICLE HEADER FOOTER P SPAN B STRONG I EM U S STRIKE TABLE TBODY THEAD TFOOT TR TD TH COLGROUP COL BR HR IMG H1 H2 H3 H4 H5 H6 OL UL LI SUP SUB BLOCKQUOTE PRE CODE A".split(" "));
 	const elements = [...document.body.querySelectorAll("*")];
 	let renderedPixels = 0;
 	if (elements.length > 200_000) throw previewError("preview_too_complex");
@@ -655,6 +664,9 @@ async function previewWord(buffer) {
 	try {
 		for (const name of ["window", "document", "HTMLElement", "Element", "Node", "DOMParser", "XMLSerializer", "FileReader", "Blob"]) globalThis[name] = name === "window" ? window : window[name];
 		globalThis.getComputedStyle = window.getComputedStyle.bind(window);
+		// docx-preview measures legacy drawings (VML) in a frame callback; jsdom has no layout, so the callback never runs.
+		globalThis.requestAnimationFrame = () => 0;
+		globalThis.cancelAnimationFrame = () => {};
 		let createdElements = 0;
 		let createdTextBytes = 0;
 		let encodedImageBytes = 0;
@@ -711,13 +723,19 @@ async function previewWord(buffer) {
 				zip.file(partName, new window.XMLSerializer().serializeToString(partXml));
 			}
 		}
-		for (const part of zip.file(/^word\/[^/]+\.xml$/)) zip.file(part.name, wordMeasuresToNumbers(await part.async("string")));
+		// docx-preview lays every anchored drawing out from its paragraph, so a page-relative horizontal offset must lose the page's left margin.
+		const pageMarginLeftEmu = Number(/<w:pgMar\b[^>]*\sw:left="(\d+)"/.exec(await zip.file("word/document.xml")?.async("string") ?? "")?.[1] ?? 0) * 635;
+		const anchoredFromPage = (xml) => pageMarginLeftEmu ? xml.replace(/(<wp:positionH\b[^>]*relativeFrom="page"[^>]*>\s*<wp:posOffset>)(-?\d+)(<\/wp:posOffset>)/g, (_, head, offset, tail) => `${head}${Number(offset) - pageMarginLeftEmu}${tail}`) : xml;
+		for (const part of zip.file(/^word\/[^/]+\.xml$/)) zip.file(part.name, anchoredFromPage(wordMeasuresToNumbers(await part.async("string"))));
 		const sanitized = await zip.generateAsync({ type: "nodebuffer", compression: "STORE" });
-		await renderAsync(sanitized, window.document.getElementById("content"), window.document.getElementById("styles"), { inWrapper: true, ignoreWidth: false, ignoreHeight: false, useBase64URL: true });
+		await renderAsync(sanitized, window.document.getElementById("content"), window.document.getElementById("styles"), { inWrapper: true, ignoreWidth: false, ignoreHeight: false, ignoreLastRenderedPageBreak: false, useBase64URL: true });
 		const notices = blocked ? [{ code: "external_resources_blocked", text: "External document resources are blocked." }] : [];
 		return sanitizeWordDocument(window.document, notices);
 	} catch (error) {
 		if (error?.previewCode) throw error;
+		const name = ["Error", "TypeError", "ReferenceError", "RangeError", "SyntaxError"].includes(error?.name) ? error.name : "UnknownError";
+		const message = error?.message === "requestAnimationFrame is not defined" ? error.message : "Unexpected renderer error";
+		await new Promise((resolve) => process.stderr.write(`WORD_PREVIEW_DIAGNOSTIC ${name}|${message}\n`, resolve));
 		throw previewError("damaged_file");
 	} finally { window.close(); }
 }

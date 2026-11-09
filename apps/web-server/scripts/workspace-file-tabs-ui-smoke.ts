@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { authedFetch, SMOKE_AUTH_TOKEN, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, smokeHomeEnv, stopSmokeServer, freePort, type AuthedFetchInit } from "./smoke-server-process.js";
 import { waitEvery } from "./smoke-wait.js";
-import { smallDocx } from "./workspace-preview-fixtures.js";
+import { smallDocx, vmlDocx } from "./workspace-preview-fixtures.js";
 const ONE_PIXEL_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==", "base64");
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -115,6 +115,7 @@ fs.writeFileSync(path.join(folder, "slow.png"), ONE_PIXEL_PNG);
 }
 fs.writeFileSync(path.join(folder, "report.pdf"), ninePagePdf());
 fs.writeFileSync(path.join(folder, "report.docx"), await smallDocx());
+fs.writeFileSync(path.join(folder, "vml.docx"), await vmlDocx());
 {
 	const { default: JSZip } = await import("jszip");
 	const zip = await JSZip.loadAsync(await smallDocx());
@@ -834,6 +835,15 @@ try {
 			if (route.request().url().includes("example.invalid")) { externalRequests++; await route.abort(); }
 			else await route.continue();
 		});
+		await treeFile("vml.docx").click();
+		const vmlFrame = page.frameLocator(".workspace-preview-word iframe");
+		await vmlFrame.getByText("Second saved page", { exact: true }).waitFor({ timeout: 20_000 });
+		assert(await vmlFrame.locator("section.docx").count() === 2, "saved VML document shows two pages");
+		assert(await vmlFrame.locator("header").count() > 0 && await vmlFrame.locator("footer").count() > 0, "VML header and footer survive in the browser");
+		assert(await vmlFrame.locator("svg, foreignObject, script, [onload]").count() === 0 && await vmlFrame.getByText("Invented box", { exact: true }).count() === 0, "active VML and foreignObject contents are absent in the browser");
+		assert(await vmlFrame.locator("body").evaluate((body) => !body.outerHTML.includes("example.invalid") && !body.outerHTML.includes("inventedHandler")), "hostile VML attributes and URLs are absent in the browser");
+		assert(await vmlFrame.locator("div").evaluateAll((nodes) => nodes.some((node) => (node as HTMLElement).style.borderTopStyle === "double")), "VML line appears as a double rule in the browser");
+		await tab("vml.docx").getByRole("button", { name: /close/i }).click();
 		await treeFile("wide-pages.docx").click();
 		const wideWord = page.frameLocator(".workspace-preview-word iframe");
 		await wideWord.getByText("Second invented page", { exact: true }).waitFor({ timeout: 20_000 });
