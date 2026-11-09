@@ -226,6 +226,30 @@ try {
 
 	const browser = await chromium.launch();
 	try {
+		for (const width of [1000, 1600, 390]) {
+			const layoutContext = await browser.newContext({ viewport: { width, height: 900 } });
+			const layoutPage = await layoutContext.newPage();
+			await layoutPage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+			await layoutPage.waitForLoadState("networkidle");
+			if (await layoutPage.locator(".whats-new-close").count()) await layoutPage.locator(".whats-new-close").click();
+			await layoutPage.locator(".persistent-agent-card").filter({ hasText: "Archive" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+			if (width === 390) await layoutPage.locator(".sidebar-toggle-floating").click();
+			await layoutPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "photo.png" }).click();
+			if (width === 390) await layoutPage.getByRole("button", { name: "Hide sidebar" }).click();
+			const layoutToggle = layoutPage.getByRole("button", { name: "Hide right pane" });
+			await layoutToggle.waitFor();
+			const layout = await layoutPage.evaluate(() => {
+				const button = document.querySelector('[aria-label="Hide right pane"]')!.getBoundingClientRect();
+				const pane = document.querySelector(".workspace-pane")!.getBoundingClientRect();
+				const topbar = document.querySelector(".topbar")!.getBoundingClientRect();
+				return { button: { left: button.left, right: button.right, top: button.top, bottom: button.bottom }, pane: { left: pane.left, right: pane.right, top: pane.top, bottom: pane.bottom }, topbar: { bottom: topbar.bottom }, width: innerWidth };
+			});
+			assert(layout.button.left >= 0 && layout.button.right <= layout.width && layout.button.top >= 0 && layout.button.bottom <= 900, `${width}px toggle is reachable: ${JSON.stringify(layout)}`);
+			assert(layout.pane.left >= 0 && layout.pane.right <= layout.width && (width > 760 || layout.pane.top >= layout.topbar.bottom), `${width}px pane stays on screen without covering the topbar: ${JSON.stringify(layout)}`);
+			await layoutToggle.click();
+			await layoutPage.getByRole("button", { name: "Show right pane" }).click();
+			await layoutContext.close();
+		}
 		const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
 		const page = await context.newPage();
 		const pageErrors: string[] = [];
@@ -258,6 +282,10 @@ try {
 		assert(await page.getByRole("button", { name: "Show right pane" }).getAttribute("aria-expanded") === "false", "folded toggle announces its state");
 		assert(await page.locator(".workbench.right-pane-collapsed .workspace-tab").count() === 1, "folded tab remains mounted");
 		assert(await page.locator(".workspace-pane").evaluate((pane) => getComputedStyle(pane).display) === "none", "folded pane is hidden");
+		assert(await page.locator(".workbench").evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" ").length) === 1, "folded workbench has one column");
+		await page.getByRole("button", { name: "Show right pane" }).click();
+		assert(await activeName() === "photo.png", "unfolding preserves the active tab");
+		await page.getByRole("button", { name: "Hide right pane" }).click();
 		await treeFile("first.jpg").click();
 		await page.getByRole("button", { name: "Hide right pane" }).waitFor();
 		assert(await activeName() === "first.jpg", "opening a different image unfolds it");
@@ -268,6 +296,13 @@ try {
 		assert(await page.locator(".workbench.right-pane-collapsed").count() === 0, "closing the last tab clears the collapsed class");
 		await treeFile("photo.png").click();
 		await page.getByRole("button", { name: "Hide right pane" }).waitFor();
+		await page.getByRole("button", { name: "Room settings" }).focus();
+		await page.keyboard.press("Tab");
+		assert(await page.getByRole("button", { name: "Hide right pane" }).evaluate((button) => document.activeElement === button), "Tab reaches the pane toggle");
+		await page.keyboard.press("Enter");
+		assert(await page.getByRole("button", { name: "Show right pane" }).count() === 1, "Enter folds the pane");
+		await page.keyboard.press("Space");
+		assert(await page.getByRole("button", { name: "Hide right pane" }).count() === 1, "Space unfolds the pane");
 		await tab("photo.png").locator(".workspace-tab-close").click();
 
 		let imageRequests = 0;
@@ -532,6 +567,14 @@ try {
 		const editor = page.locator(".markdown-editor-tiptap .ProseMirror");
 		await editor.click();
 		await page.keyboard.type(" new draft");
+		await page.getByRole("button", { name: "Hide right pane" }).click();
+		assert(await page.getByRole("dialog", { name: "Unsaved Markdown changes" }).count() === 0, "folding does not guard an unsaved draft");
+		await treeFile("photo.png").click();
+		const foldedPrompt = page.getByRole("dialog", { name: "Unsaved Markdown changes" });
+		await foldedPrompt.getByRole("button", { name: "Cancel" }).click();
+		assert(await page.getByRole("button", { name: "Show right pane" }).count() === 1 && (await activeName()) === "notes.md", "cancelled folded switch preserves the selected draft");
+		await page.getByRole("button", { name: "Show right pane" }).click();
+		assert((await editor.textContent())?.includes("new draft"), "folding and unfolding preserves the draft");
 		const dragTab = async (source: string, x: number, y: number) => {
 			const box = (await tab(source).boundingBox())!;
 			await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -578,9 +621,13 @@ try {
 		});
 		await page.locator(".markdown-editor-tiptap .ProseMirror").click();
 		await page.keyboard.type(" conflict draft");
+		await page.getByRole("button", { name: "Hide right pane" }).click();
 		await treeFile("photo.png").click();
 		await prompt.waitFor();
 		await prompt.getByRole("button", { name: "Save and continue" }).click();
+		await page.locator(".markdown-editor-conflict").waitFor({ state: "attached" });
+		assert(await page.getByRole("button", { name: "Show right pane" }).count() === 1, "failed save leaves the pane folded");
+		await page.getByRole("button", { name: "Show right pane" }).click();
 		await page.getByText("This file changed outside the editor.", { exact: true }).waitFor();
 		assert(refusedSaves > 0 && (await activeName()) === "notes.md" && (await page.locator(".markdown-editor-tiptap .ProseMirror").textContent())?.includes("conflict draft"), "a failed conflict save keeps the draft and cancels the pending switch");
 		await treeFile("photo.png").click();
@@ -595,10 +642,12 @@ try {
 		await page.locator(".markdown-editor-tiptap .ProseMirror").waitFor();
 		await page.locator(".markdown-editor-tiptap .ProseMirror").click();
 		await page.keyboard.type(" saved draft");
+		await page.getByRole("button", { name: "Hide right pane" }).click();
 		await treeFile("photo.png").click();
 		await prompt.waitFor();
 		await prompt.getByRole("button", { name: "Save and continue" }).click();
 		await waitUntil(async () => (await activeName()) === "photo.png", "successful save resumes the requested preview");
+		await page.getByRole("button", { name: "Hide right pane" }).waitFor();
 		assert(fs.readFileSync(path.join(folder, "draft.md"), "utf8").includes("saved draft"), "save and continue writes the invented Markdown draft before switching");
 		await tab("draft.md").locator(".workspace-tab-close").click();
 		await treeFile("conflict-real.md").click();
@@ -724,6 +773,11 @@ try {
 		assert(dragged.x <= stageBox.x + 1 && dragged.y <= stageBox.y + 1 && dragged.x + dragged.width >= stageBox.x + stageBox.width - 1 && dragged.y + dragged.height >= stageBox.y + stageBox.height - 1, "dragging cannot expose a gap");
 		await page.getByRole("button", { name: "Zoom in" }).click();
 		await waitUntil(async () => (await zoomLabel.textContent()) === "125%", "zoom in button");
+		const beforeFold = (await svg.boundingBox())!;
+		await page.getByRole("button", { name: "Hide right pane" }).click();
+		await page.getByRole("button", { name: "Show right pane" }).click();
+		const afterFold = (await svg.boundingBox())!;
+		assert((await zoomLabel.textContent()) === "125%" && Math.abs(beforeFold.x - afterFold.x) < 1 && Math.abs(beforeFold.y - afterFold.y) < 1, "folding preserves the picture zoom and position");
 		await page.getByRole("button", { name: "Zoom out" }).click();
 		await waitUntil(async () => (await zoomLabel.textContent()) === "100%", "zoom out button");
 		await page.getByRole("button", { name: "Fit", exact: true }).click();
@@ -781,6 +835,9 @@ try {
 			return { top: node.scrollTop, height: node.clientHeight, content: node.scrollHeight, parent: node.parentElement?.clientHeight, pane: node.closest(".workspace-pane")?.clientHeight };
 		});
 		assert(scrollMetrics.top > 0, `PDF pages scroll vertically: ${JSON.stringify(scrollMetrics)}`);
+		await page.getByRole("button", { name: "Hide right pane" }).click();
+		await page.getByRole("button", { name: "Show right pane" }).click();
+		assert(await scrollable.evaluate((node) => node.scrollTop) === scrollMetrics.top, "folding preserves preview scroll");
 		await treeFile("notes.md").click();
 		await treeFile("report.pdf").click();
 		assert(previewRequests === 1, "switching back does not refetch the PDF");
