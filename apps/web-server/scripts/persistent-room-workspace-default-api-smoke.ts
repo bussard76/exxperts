@@ -83,6 +83,15 @@ try {
 	const policyRacePreload = path.join(tempHome, "policy-race-preload.cjs");
 	fs.writeFileSync(policyRacePreload, `
 const fs = require("node:fs");
+const diagnosticMarker = ${JSON.stringify(path.join(tempHome, "diagnostic-mode"))};
+if (String(process.argv[1]).endsWith("shelf-parse-worker.mjs") && fs.existsSync(diagnosticMarker)) {
+ const mode = fs.readFileSync(diagnosticMarker, "utf8");
+ Object.defineProperty(globalThis, "getComputedStyle", { configurable: true, set() {
+  const error = new TypeError(mode === "known" ? "requestAnimationFrame is not defined" : "invented private marker");
+  if (mode === "unknown") error.name = "invented-name";
+  throw error;
+ }});
+}
 const originals = { open: fs.openSync, read: fs.readSync };
 const realReaddir = fs.readdirSync;
 fs.readdirSync = function(file, ...args) { if (typeof file === "string" && file.endsWith("private-invented")) throw new Error("invented private detail " + file); return realReaddir.call(this, file, ...args); };
@@ -94,6 +103,20 @@ const realSpawn = cp.spawn;
 const realFork = cp.fork;
 cp.fork = function(file, args, options) {
   let request; try { request = JSON.parse(args?.[0] || "{}"); } catch {}
+  if (request?.absolutePath?.endsWith("diagnostic-fake.docx")) {
+   const child = new (require("node:events").EventEmitter)();
+   child.stderr = new (require("node:events").EventEmitter)();
+   child.kill = () => { setImmediate(() => child.emit("close", 0, null)); return true; };
+   const mode = fs.readFileSync(diagnosticMarker, "utf8");
+   setImmediate(() => {
+    const line = "WORD_PREVIEW_DIAGNOSTIC TypeError|Unexpected renderer error\\n";
+    if (mode === "chunked") { child.stderr.emit("data", Buffer.from(line.slice(0, 15))); child.stderr.emit("data", Buffer.from(line.slice(15))); }
+    else if (mode === "duplicate") child.stderr.emit("data", Buffer.from(line + line));
+    else child.stderr.emit("data", Buffer.from("WORD_PREVIEW_DIAGNOSTIC secret|invented private marker\\n"));
+    child.emit("message", { ok:false, schemaVersion:1, code:"damaged_file" });
+   });
+   return child;
+  }
   if (!request?.absolutePath?.endsWith("malformed-invented.xlsx")) return realFork.apply(this, arguments);
   const child = new (require("node:events").EventEmitter)();
   child.stderr = new (require("node:events").EventEmitter)();
@@ -238,11 +261,33 @@ require("node:module").syncBuiltinESMExports();
 	assert(!dom.window.document.querySelector("svg,foreignObject,script") && !vml.body.html.includes("example.invalid") && !vml.body.html.includes("inventedHandler") && !vml.body.html.includes("Invented box"), "active VML content is removed");
 	assert([...dom.window.document.querySelectorAll("div")].some(node => node.style.borderTopStyle === "double"), "VML line is a double rule");
 	dom.window.close();
+	const diagnosticMarker = path.join(tempHome, "diagnostic-mode");
+	for (const [mode, line] of [["normal", "TypeError|Unexpected renderer error"], ["known", "TypeError|requestAnimationFrame is not defined"], ["unknown", "UnknownError|Unexpected renderer error"]]) {
+		fs.writeFileSync(diagnosticMarker, mode);
+		const prior = serverOutput.length;
+		const failedWord = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=invented.docx`);
+		assert(failedWord.status === 422 && failedWord.body.code === "damaged_file", `diagnostic ${mode} retains safe response`);
+		const output = serverOutput.slice(prior).join("");
+		assert(output.includes(`WORD_PREVIEW_DIAGNOSTIC ${line}`), `diagnostic ${mode} is validated and logged`);
+		assert(!output.includes("invented private marker") && !JSON.stringify(failedWord.body).includes("invented private marker"), "diagnostics do not expose private details");
+		fs.rmSync(diagnosticMarker);
+	}
 	assert(sheet.status === 200 && sheet.body.kind === "spreadsheet" && sheet.body.workbook.sheets[0].cells[0].text === "Invented cell", "XLSX travels through the real child and guarded public route");
 	fs.writeFileSync(path.join(workspaceRoot, "malformed-invented.xlsx"), "invented");
 	const malformed = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=malformed-invented.xlsx`);
 	assert(malformed.status === 500 && malformed.body.code === "preview_failed", "the parent rejects a non-boolean spreadsheet gridline field");
 	assert(pdf.status === 200 && pdf.body.kind === "pdf" && pdf.body.totalPages === 1 && pdf.body.pages[0].mimeType === "image/jpeg", "PDF travels through the real child and guarded public route");
+	fs.writeFileSync(path.join(workspaceRoot, "diagnostic-fake.docx"), "invented");
+	for (const mode of ["chunked", "duplicate", "invalid"]) {
+		fs.writeFileSync(diagnosticMarker, mode);
+		const prior = serverOutput.length;
+		const failedWord = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=diagnostic-fake.docx`);
+		const output = serverOutput.slice(prior).join("");
+		assert(failedWord.status === 422 && failedWord.body.code === "damaged_file", `fake diagnostic ${mode} retains safe response`);
+		assert(output.includes("WORD_PREVIEW_DIAGNOSTIC") === (mode === "chunked"), `only valid single diagnostic ${mode} is logged`);
+		assert(!output.includes("invented private marker"), "invalid stderr is never relayed");
+		fs.rmSync(diagnosticMarker);
+	}
 	fs.writeFileSync(path.join(workspaceRoot, "invented.xls"), "invented");
 	const openHeaders = { origin: baseUrl, "x-exxperts-local-action": "open-workspace-file" };
 	const rejectedXls = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-open`, { method: "POST", headers: openHeaders, body: JSON.stringify({ conversationId: "demo-thread", path: "invented.xls" }) });
