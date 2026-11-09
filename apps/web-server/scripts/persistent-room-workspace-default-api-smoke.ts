@@ -79,6 +79,8 @@ try {
 	fs.mkdirSync(productAppStateRoot, { recursive: true });
 	fs.mkdirSync(workspaceRoot, { recursive: true });
 
+	const { createCanvas } = await import("@napi-rs/canvas");
+	const validJpeg = createCanvas(1, 1).toBuffer("image/jpeg").toString("base64");
 	const policyRaceMarker = path.join(tempHome, "policy-race-marker");
 	const policyRacePreload = path.join(tempHome, "policy-race-preload.cjs");
 	fs.writeFileSync(policyRacePreload, `
@@ -118,6 +120,13 @@ const realFork = cp.fork;
 let heldCount = 0;
 cp.fork = function(file, args, options) {
   let request; try { request = JSON.parse(args?.[0] || "{}"); } catch {}
+  if (request?.absolutePath?.endsWith("changing-preview.pdf")) {
+   const child = new (require("node:events").EventEmitter)(); child.stderr = new (require("node:events").EventEmitter)();
+   fs.writeFileSync(${JSON.stringify(path.join(tempHome, "preview-started"))}, "started");
+   const timer = setInterval(() => { if (!fs.existsSync(${JSON.stringify(path.join(tempHome, "preview-release"))})) return; clearInterval(timer); child.emit("message", { ok:true, schemaVersion:1, notices:[], result:{kind:"pdf",totalPages:1,pages:[{page:1,mimeType:"image/jpeg",imageBase64:${JSON.stringify(validJpeg)},widthPx:1,heightPx:1}]} }); }, 10);
+   child.kill = () => { clearInterval(timer); setImmediate(() => child.emit("close", 0, null)); return true; };
+   return child;
+  }
   if (request?.absolutePath?.endsWith("exit-race.pdf")) {
    const child = new (require("node:events").EventEmitter)(); child.stderr = new (require("node:events").EventEmitter)();
    child.kill = () => { setImmediate(() => child.emit("close", 0, null)); return true; };
@@ -442,6 +451,25 @@ require("node:module").syncBuiltinESMExports();
 	}
 	const restoreTools = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-default`, { method: "PUT", body: JSON.stringify({ workspaceAccessMode: "localFiles", toolSelection: { kind: "standard" } }) });
 	assert(restoreTools.status === 200, "workspace permissions restored after tool matrix");
+	const changingPreview = path.join(workspaceRoot, "changing-preview.pdf");
+	const previewStarted = path.join(tempHome, "preview-started"), previewRelease = path.join(tempHome, "preview-release");
+	for (const scenario of ["permission", "file"]) {
+		fs.writeFileSync(changingPreview, "invented");
+		const savedPolicy = fs.readFileSync(defaultPath);
+		const pendingPreview = authedFetch(`${baseUrl}/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=changing-preview.pdf`);
+		for (let i = 0; i < 100 && !fs.existsSync(previewStarted); i++) await new Promise(resolve => setTimeout(resolve, 50));
+		assert(fs.existsSync(previewStarted), "preview child started before change");
+		if (scenario === "permission") {
+			const revoked = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-default`, { method: "PUT", body: JSON.stringify({ workspaceAccessMode: "bounded", toolSelection: { kind: "custom", allowedToolNames: [] }, bashEnabled: false }) });
+			assert(revoked.status === 200, "workspace access revoked during rendering");
+		} else fs.appendFileSync(changingPreview, "changed");
+		fs.writeFileSync(previewRelease, "release");
+		const response = await pendingPreview;
+		const body = await response.json();
+		assert(scenario === "permission" ? response.status === 403 && body.code === "workspace_read_forbidden" : response.status === 409 && body.code === "file_changed", `changed ${scenario} is refused after rendering`);
+		fs.writeFileSync(defaultPath, savedPolicy);
+		fs.rmSync(previewStarted); fs.rmSync(previewRelease);
+	}
 	const policyBeforeRace = fs.readFileSync(defaultPath);
 	for (const suffix of ["", "&frame=1"]) {
 		fs.writeFileSync(policyRaceMarker, defaultPath);
