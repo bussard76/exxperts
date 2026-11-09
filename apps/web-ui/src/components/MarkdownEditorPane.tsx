@@ -105,6 +105,10 @@ interface SurfaceHandle {
 	focus: () => void;
 	getContent: () => string;
 	markSaved: (content: string) => void;
+	/** RAW typing: the exact text becomes the content, the rich editor is not touched. */
+	setRaw: (text: string) => void;
+	/** Leaving RAW after typing: load the rich editor from the typed text. */
+	leaveRaw: () => void;
 }
 
 interface SurfaceProps {
@@ -116,6 +120,7 @@ interface SurfaceProps {
 	isSaving: boolean;
 	saveError: boolean;
 	readOnly: boolean;
+	rawActive: boolean;
 	onPreviewLink?: (href: string, isWikiLink?: boolean) => boolean;
 	resolveImageSrc: (src: string) => string | null;
 	setDirty: (dirty: boolean) => void;
@@ -134,6 +139,7 @@ function MarkdownEditorSurface({
 	isSaving,
 	saveError,
 	readOnly,
+	rawActive,
 	onPreviewLink,
 	resolveImageSrc,
 	setDirty,
@@ -143,7 +149,12 @@ function MarkdownEditorSurface({
 	contentSetterRef,
 }: SurfaceProps, ref: Ref<SurfaceHandle>) {
 	const trailingNewlinesRef = useRef(content.match(/(?:\r?\n)+$/)?.[0] ?? "");
-	const editorMarkdown = (current: Editor) => current.getMarkdown() + trailingNewlinesRef.current;
+	// While RAW text has been typed, that exact text is the content: saving it must
+	// not pass through the rich editor, which would rewrite the user's formatting.
+	const rawRef = useRef<string | null>(null);
+	const rawActiveRef = useRef(rawActive);
+	rawActiveRef.current = rawActive;
+	const editorMarkdown = (current: Editor) => rawRef.current ?? current.getMarkdown() + trailingNewlinesRef.current;
 	const baselineRef = useRef(content);
 	const editorRef = useRef<Editor | null>(null);
 	const userEditedRef = useRef(false);
@@ -247,6 +258,7 @@ function MarkdownEditorSurface({
 		const current = editorRef.current;
 		if (!current) return;
 		const next = baselineRef.current;
+		rawRef.current = null;
 		current.commands.setContent(next, { emitUpdate: false, contentType: "markdown" });
 		draftRef.current = next;
 		onDraftChange(next);
@@ -263,19 +275,52 @@ function MarkdownEditorSurface({
 		setDirty(userEditedRef.current);
 	}, [onDraftChange, setDirty]);
 
+	const setRaw = useCallback((text: string) => {
+		if (!canEdit) return;
+		rawRef.current = text;
+		draftRef.current = text;
+		onDraftChange(text);
+		userEditedRef.current = true;
+		setDirty(text !== baselineRef.current);
+	}, [canEdit, onDraftChange, setDirty]);
+
+	const leaveRaw = useCallback(() => {
+		const raw = rawRef.current;
+		const current = editorRef.current;
+		if (raw === null || !current) return;
+		rawRef.current = null;
+		trailingNewlinesRef.current = raw.match(/(?:\r?\n)+$/)?.[0] ?? "";
+		current.commands.setContent(raw, { emitUpdate: false, contentType: "markdown" });
+		const markdown = editorMarkdown(current);
+		draftRef.current = markdown;
+		onDraftChange(markdown);
+		if (raw === baselineRef.current) {
+			// Typed back to what was saved: the rich editor's own rendering is the new baseline.
+			baselineRef.current = markdown;
+			userEditedRef.current = false;
+			setDirty(false);
+			return;
+		}
+		userEditedRef.current = true;
+		setDirty(markdown !== baselineRef.current);
+	}, [onDraftChange, setDirty]);
+
 	useImperativeHandle(ref, () => ({
 		save,
 		discard,
 		focus: () => editorRef.current?.commands.focus(),
 		getContent: () => editorRef.current ? editorMarkdown(editorRef.current) : draftRef.current,
 		markSaved,
-	}), [discard, markSaved, save]);
+		setRaw,
+		leaveRaw,
+	}), [discard, leaveRaw, markSaved, save, setRaw]);
 
 	useEffect(() => {
 		if (!editor) return;
 		editor.setEditable(canEdit && !readOnly);
 		contentSetterRef.current = (next: string) => {
 			if (editor.isDestroyed) return;
+			rawRef.current = null;
 			trailingNewlinesRef.current = next.match(/(?:\r?\n)+$/)?.[0] ?? "";
 			editor.commands.setContent(next, { emitUpdate: false, contentType: "markdown" });
 			baselineRef.current = next;
@@ -294,7 +339,7 @@ function MarkdownEditorSurface({
 			if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
 				event.preventDefault();
 				void headerSaveRef.current?.();
-			} else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+			} else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f" && !rawActiveRef.current) {
 				event.preventDefault();
 				setSearchOpen(true);
 			}
@@ -489,6 +534,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		return false;
 	}, [onOpenMarkdown, path]);
 	const setEditorMode = useCallback((nextMode: EditorMode) => {
+		if (mode === "raw" && nextMode !== "raw") surfaceRef.current?.leaveRaw();
 		// TipTap is the source of truth after a formatting command. Mirror it
 		// before switching views so Preview/RAW never show a stale React draft.
 		if (isDirty) {
@@ -499,7 +545,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			}
 		}
 		setMode(nextMode);
-	}, [isDirty]);
+	}, [isDirty, mode]);
 	useImperativeHandle(ref, () => ({ save, discard, focus }), [discard, focus, save]);
 
 	const reloadLatest = useCallback(async () => {
@@ -556,8 +602,8 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			{error && <p className="markdown-editor-error" role="alert">{error}</p>}
 			<div className="markdown-editor-body">
 				{phase === "loading" && <p className="markdown-editor-placeholder">Loading file…</p>}
-				{phase !== "loading" && file && <div className={mode === "raw" ? "markdown-editor-surface markdown-editor-surface-hidden" : "markdown-editor-surface"}><MarkdownEditorSurfaceWithRef key={`${conversationId}:${path}:${editorKey}`} ref={surfaceRef} resolveImageSrc={resolveImageSrc} content={draft} revision={file.revision} canEdit={canEdit} isDirty={isDirty} hasExternalUpdate={hasExternalUpdate || phase === "conflict"} isSaving={phase === "saving"} saveError={phase === "error"} readOnly={mode === "preview"} onPreviewLink={handlePreviewLink} setDirty={setDirty} onDraftChange={handleDraftChange} onSave={persist} discardAndApplyExternal={discardAndApplyExternal} contentSetterRef={contentSetterRef} /></div>}
-				{phase !== "loading" && mode === "raw" && <pre className="markdown-editor-raw" aria-label="Raw Markdown source">{draft}</pre>}
+				{phase !== "loading" && file && <div className={mode === "raw" ? "markdown-editor-surface markdown-editor-surface-hidden" : "markdown-editor-surface"}><MarkdownEditorSurfaceWithRef key={`${conversationId}:${path}:${editorKey}`} ref={surfaceRef} resolveImageSrc={resolveImageSrc} content={draft} revision={file.revision} canEdit={canEdit} isDirty={isDirty} hasExternalUpdate={hasExternalUpdate || phase === "conflict"} isSaving={phase === "saving"} saveError={phase === "error"} readOnly={mode === "preview"} rawActive={mode === "raw"} onPreviewLink={handlePreviewLink} setDirty={setDirty} onDraftChange={handleDraftChange} onSave={persist} discardAndApplyExternal={discardAndApplyExternal} contentSetterRef={contentSetterRef} /></div>}
+				{phase !== "loading" && mode === "raw" && <textarea className="markdown-editor-raw markdown-editor-raw-input" aria-label="Raw Markdown source" spellCheck={false} readOnly={!canEdit} value={draft} onChange={(event) => surfaceRef.current?.setRaw(event.target.value)} />}
 			</div>
 			{conflict && <div className="markdown-editor-conflict" role="alert"><strong>This file changed outside the editor.</strong>{conflictRevision ? <span> Reload the latest version or save your draft over it.</span> : <span> Reload the latest version or keep your local draft.</span>}<div className="markdown-editor-conflict-actions"><button type="button" onClick={() => void reloadLatest()}>Reload</button><button type="button" onClick={() => void keepMine()} disabled={!canEdit}>Keep mine</button></div></div>}
 		</aside>
