@@ -2,7 +2,7 @@
 
 Verdict: pass
 Reviewed commit: 34c8a431c4fb742a95af1790e53f7c4691d80f74
-Gates: **full gate failed**, build passed, 376/378 smokes passed. Browser flows: topbar and sidebar reopen smokes passed.
+Gates: **pass** on the clean normal-install rerun: build passed and 378/378 smokes passed. The original full gate failed (376/378); details below. Browser flows: topbar and sidebar reopen smokes passed.
 Ponytail: full diff reviewed; no functional defect found. Assumed local single-user app load; no load test performed.
 
 What this change does: It integrates upstream 0.15.2, keeps the floating sidebar toggle below dialog backdrops, and adds browser checks for stacking and mac-style drag regions. The fork already had the toggle after the draggable topbar in page order.
@@ -21,14 +21,16 @@ What this change does: It integrates upstream 0.15.2, keeps the floating sidebar
 
 ## Gate evidence
 
-Current `origin/main` was 82b5e8cdcd0263de57ee17f93f666e57eb0d6e8a; merging it into a temporary branch from the reviewed head was already up to date. The diff is mixed (eight paths, including CSS, TypeScript and JSON). The clean checkout had no old build output. The required host-locked gate ran once at the reviewed SHA: build passed, but smokes failed, 376/378. The full gate verdict remains **failed** for normal disposition.
+Current `origin/main` was 82b5e8cdcd0263de57ee17f93f666e57eb0d6e8a; merging it into a temporary branch from the reviewed head was already up to date. The diff is mixed (eight paths, including CSS, TypeScript and JSON). The clean checkout had no old build output. The required host-locked gate ran once at the reviewed SHA: build passed, but smokes failed, 376/378. The original full gate verdict remains **failed** and is retained here as evidence.
 
 I prepared dependencies with `npm ci --offline --ignore-scripts`, inadvertently omitting the required `scripts/patch-mcp-adapter.mjs` postinstall step. Both failures were rerun individually via the required host lock on the same SHA, first in that same state, and both failed again:
 
 - `mcp-oauth-issuer-smoke.ts`: missing issuer stamps and issuer-switch protections (18 checks failed); isolated rerun failed.
 - `persistent-room-mcp-scope-smoke.ts`: granted connector absent from manifest; isolated rerun failed.
 
-After running the repository's local MCP adapter patch, each was rerun individually again through the host lock at the same SHA; both passed (1/1 each). This identifies the checkout setup as the cause of those observed failures, not a demonstrated change defect; it does not turn the full gate green. The controller must disposition that failed gate. The suite reports some platform-specific and unavailable-fd cases skipped; native macOS was not available.
+After running the repository's local MCP adapter patch, each was rerun individually again through the host lock at the same SHA; both passed (1/1 each). This identifies the checkout setup as the cause of those observed failures, not a demonstrated change defect; the original full gate remains failed.
+
+A second clean checkout at the same SHA was installed with `EXXETA_SKIP_BROWSER_INSTALL=1 npm ci --offline` (normal lifecycle scripts, including the MCP patch). The required host-locked full gate then passed: build and 378/378 smokes, including both MCP cases, the topbar browser smoke and sidebar reopen smoke. The suite reports some platform-specific and unavailable-fd cases skipped; native macOS was not available.
 
 ## Architecture impact
 
@@ -36,7 +38,7 @@ Level 1: existing sidebar styling and smoke coverage, plus release version metad
 
 ## Findings
 
-No functional findings. The pass is the functional-only verdict; it does not override the failed full gate above.
+No functional findings. The functional verdict is pass, supported by the successful clean-install full gate; the original failed gate is preserved above.
 
 ## Debt candidates
 
