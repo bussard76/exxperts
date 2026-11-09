@@ -116,6 +116,10 @@ try {
 	fs.writeFileSync(path.join(workspaceRoot, "invented.txt"), "invented content");
 	const listing = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-files?conversationId=demo-thread`);
 	assert(listing.status === 200 && listing.body.entries.some((entry: { name: string }) => entry.name === "invented.txt"), "workspace listing exposes an allowed file through the public route");
+	fs.writeFileSync(path.join(workspaceRoot, "invented.png"), Buffer.from([137, 80, 78, 71]));
+	const image = await authedFetch(`${baseUrl}/api/persistent-agents/${encodedAgentId}/workspace-image?conversationId=demo-thread&path=invented.png`);
+	assert(image.status === 200 && image.headers.get("content-type") === "image/png" && image.headers.get("x-content-type-options") === "nosniff", "workspace image route serves guarded image bytes with safe headers");
+	assert(Buffer.from(await image.arrayBuffer()).equals(Buffer.from([137, 80, 78, 71])), "workspace image route returns the invented file bytes");
 	assert(putDefault.body?.storage?.kind === "persistent-agent-runtime-default", "PUT should report room-default storage kind");
 	assert(putDefault.body?.policy?.rootCount === 1, "PUT should return one redacted root");
 	assert(putDefault.body?.policy?.roots?.[0]?.displayLabel === "Smoke Workspace", "PUT should preserve safe display label");

@@ -1,3 +1,5 @@
+import { readWorkspaceImageFile } from "./persistent-room-workspace-image.js";
+import { ARTIFACT_SECURITY_HEADERS } from "./request-checks.js";
 import { listPersistentRoomWorkspaceFiles } from "./persistent-room-workspace-files.js";
 import type { FastifyRequest } from "fastify";
 import { MAINTENANCE_DIAGNOSTICS_KEEP, MAINTENANCE_DIAGNOSTICS_DEFAULT_LIMIT, listMaintenanceDiagnostics, exportMaintenanceDiagnostics } from "./maintenance-diagnostics.js";
@@ -112,6 +114,20 @@ app.get("/api/persistent-agents/:id/workspace-files", async (req, reply) => {
 		const requestedPath = String(query.path ?? "");
 		const effectivePolicy = resolvePersistentRoomEffectiveWorkspacePolicy(status.id, conversationId);
 		return { agentId: status.id, conversationId, ...listPersistentRoomWorkspaceFiles(effectivePolicy.policy, requestedPath) };
+	} catch (e) {
+		const payload = persistentRoomWorkspaceErrorPayload(e);
+		return reply.code(payload.statusCode).send(payload.body);
+	}
+});
+
+app.get("/api/persistent-agents/:id/workspace-image", async (req, reply) => {
+	try {
+		const status = getUsablePersistentAgentStatusForNormalUse(String((req.params as any).id ?? "").trim());
+		const query = (req.query ?? {}) as any;
+		const conversationId = String(query.conversationId ?? "").trim();
+		if (!conversationId) throw new Error("conversationId is required");
+		const image = readWorkspaceImageFile(status.id, conversationId, query.path);
+		return reply.headers(ARTIFACT_SECURITY_HEADERS).type(image.contentType).send(image.bytes);
 	} catch (e) {
 		const payload = persistentRoomWorkspaceErrorPayload(e);
 		return reply.code(payload.statusCode).send(payload.body);
