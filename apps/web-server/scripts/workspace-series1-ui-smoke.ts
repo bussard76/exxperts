@@ -181,6 +181,19 @@ try {
   assert.equal(imageRequests, 2, "reconnect keeps the existing image snapshot");
   await tree.locator(".workspace-file-browser-file", { hasText: "invented.pdf" }).click();
   await page.locator(".workspace-preview-pdf img[alt='Page 1']").waitFor({ timeout: 10000 });
+  const openRequests: Array<{ method: string; intent: string | undefined; body: any }> = [];
+  await page.route("**/workspace-open", route => {
+    const request = route.request();
+    openRequests.push({ method: request.method(), intent: request.headers()["x-exxperts-local-action"], body: request.postDataJSON() });
+    return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ accepted: true }) });
+  });
+  await page.getByRole("button", { name: "Open PDF" }).click();
+  assert.equal(openRequests.length, 1);
+  assert.equal(openRequests[0].method, "POST");
+  assert.equal(openRequests[0].intent, "open-workspace-file");
+  assert.equal(openRequests[0].body.path, "invented.pdf");
+  assert.deepEqual(Object.keys(openRequests[0].body).sort(), ["conversationId", "path"]);
+  await page.unroute("**/workspace-open");
   await tree.locator(".workspace-file-browser-file", { hasText: "invented.docx" }).click();
   await page.locator(".workspace-preview-word iframe").waitFor({ timeout: 10000 });
   await tree.locator(".workspace-file-browser-file", { hasText: "vml.docx" }).click();
