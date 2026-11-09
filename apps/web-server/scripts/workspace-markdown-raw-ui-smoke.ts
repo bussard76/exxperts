@@ -103,7 +103,8 @@ try {
 		// The text field fills the pane: a click anywhere in it puts the cursor there.
 		const box = await raw.boundingBox();
 		const body = await page.locator(".markdown-editor-body").boundingBox();
-		assert(box && body && box.height >= body.height - 60, `RAW fills the pane, got ${box?.height} of ${body?.height}`);
+		// Against the window, not just the pane: the pane itself must fill the space below the tabs (viewport is 900 high).
+		assert(box && body && box.height >= 500 && box.height >= body.height - 60, `RAW fills the window height, got ${box?.height} of ${body?.height}`);
 		await page.getByRole("button", { name: "Edit", exact: true }).click();
 		await page.getByRole("button", { name: "RAW", exact: true }).click();
 		await raw.waitFor();
