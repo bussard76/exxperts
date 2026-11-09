@@ -173,6 +173,21 @@ require("node:module").syncBuiltinESMExports();
 	const image = await authedFetch(`${baseUrl}/api/persistent-agents/${encodedAgentId}/workspace-image?conversationId=demo-thread&path=invented.png`);
 	assert(image.status === 200 && image.headers.get("content-type") === "image/png" && image.headers.get("x-content-type-options") === "nosniff", "workspace image route serves guarded image bytes with safe headers");
 	assert(Buffer.from(await image.arrayBuffer()).equals(Buffer.from([137, 80, 78, 71])), "workspace image route returns the invented file bytes");
+	for (const [name, mime] of [["invented.jpg", "image/jpeg"], ["invented.jpeg", "image/jpeg"], ["invented.gif", "image/gif"], ["invented.webp", "image/webp"], ["invented.svg", "image/svg+xml"]]) {
+		fs.writeFileSync(path.join(workspaceRoot, name), "invented");
+		const response = await authedFetch(`${baseUrl}/api/persistent-agents/${encodedAgentId}/workspace-image?conversationId=demo-thread&path=${name}`);
+		assert(response.status === 200 && response.headers.get("content-type")?.startsWith(mime), `image MIME for ${name}`);
+		assert(response.headers.get("content-security-policy")?.includes("sandbox") && response.headers.get("cache-control") === "no-store" && response.headers.get("referrer-policy") === "no-referrer", `image headers for ${name}`);
+	}
+	fs.symlinkSync(path.join(workspaceRoot, "invented.png"), path.join(workspaceRoot, "link.png"));
+	for (const blocked of ["../invented.png", ".hidden.png", "link.png"]) {
+		const response = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-image?conversationId=demo-thread&path=${encodeURIComponent(blocked)}`);
+		assert(response.status >= 400, `blocked image path ${blocked} is refused`);
+	}
+	fs.writeFileSync(path.join(workspaceRoot, "oversize.png"), "");
+	fs.truncateSync(path.join(workspaceRoot, "oversize.png"), 20 * 1024 * 1024 + 1);
+	const largeImage = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-image?conversationId=demo-thread&path=oversize.png`);
+	assert(largeImage.status === 413 && largeImage.body.code === "file_too_large", "image above 20 MiB is refused");
 	writePersistentAgentThread(agentId, "demo-thread", { state: "standby", origin: "home", model, items: [] });
 	fs.writeFileSync(path.join(workspaceRoot, "invented.md"), Buffer.from([35, 32, 65, 0, 0xff]));
 	const markdown = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=invented.md`);
