@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { authedFetch, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, smokeHomeEnv, stopSmokeServer, freePort, type AuthedFetchInit } from "./smoke-server-process.js";
 import { waitEvery } from "./smoke-wait.js";
-import { smallDocx } from "./workspace-preview-fixtures.js";
+import { smallDocx, vmlDocx } from "./workspace-preview-fixtures.js";
 
 function assert(condition: unknown, message: string): asserts condition {
 	if (!condition) throw new Error(message);
@@ -28,7 +28,9 @@ const crashChild = process.argv.includes("--crash-child");
 const exitRaceChild = process.argv.includes("--exit-race-child");
 const revokeChild = process.argv.includes("--revoke-child");
 const replaceChild = process.argv.includes("--replace-child");
-const diagnosticChild = process.argv.includes("--diagnostic-child");
+const vmlChild = process.argv.includes("--vml-child");
+const diagnosticCase = process.argv.find((arg) => arg.startsWith("--diagnostic-"));
+const diagnosticChild = Boolean(diagnosticCase);
 const badWordChild = process.argv.includes("--bad-word-child");
 const networkChild = process.argv.includes("--network-child");
 const openChild = process.argv.includes("--open-child");
@@ -36,7 +38,7 @@ const excelChild = process.argv.includes("--excel-child");
 const htmlRaceChild = process.argv.includes("--html-race-child");
 const windowsParentChild = process.argv.includes("--windows-parent-child");
 const windowsNativeChild = process.argv.includes("--windows-native-child");
-const fakeChild = diagnosticChild || htmlRaceChild || malformedChild || admissionChild || timeoutChild || extraChild || crashChild || exitRaceChild || revokeChild || replaceChild || badWordChild || networkChild || openChild || excelChild || windowsParentChild || windowsNativeChild;
+const fakeChild = vmlChild || diagnosticChild || htmlRaceChild || malformedChild || admissionChild || timeoutChild || extraChild || crashChild || exitRaceChild || revokeChild || replaceChild || badWordChild || networkChild || openChild || excelChild || windowsParentChild || windowsNativeChild;
 const spawnMarker = path.join(tempRoot, "preview-spawns");
 const releaseMarker = path.join(tempRoot, "preview-release");
 const killMarker = path.join(tempRoot, "dispatcher-killed");
@@ -54,7 +56,7 @@ const { EventEmitter } = require("node:events");
 const { syncBuiltinESMExports } = require("node:module");
 const original = childProcess.fork;
 if (${diagnosticChild} && String(process.argv[1]).endsWith("shelf-parse-worker.mjs")) {
-  Object.defineProperty(globalThis, "getComputedStyle", { configurable: true, set() { throw new TypeError("invented-secret-marker"); } });
+  Object.defineProperty(globalThis, "getComputedStyle", { configurable: true, set() { const error = new TypeError(${JSON.stringify(diagnosticCase === "--diagnostic-known" ? "requestAnimationFrame is not defined" : "invented-secret-marker")}); if (${diagnosticCase === "--diagnostic-unknown"}) error.name = "invented-name"; throw error; } });
 }
 const fs = require("node:fs");
 const realPlatform = process.platform;
@@ -150,6 +152,7 @@ childProcess.spawn = function(file, args, options) {
 };
 let count = 0;
 childProcess.fork = function(file, args, options) {
+  if (${vmlChild} && String(file).endsWith("shelf-parse-worker.mjs")) return original.call(this, file, args, options);
   if (${diagnosticChild} && String(file).endsWith("shelf-parse-worker.mjs")) return original.call(this, file, args, { ...options, execArgv: [...options.execArgv, "--require=${preload}"] });
   if (${windowsNativeChild} && String(file).endsWith("workspace-open-worker.mjs")) {
     const child = original.call(this, file, args, { ...options, execArgv: ["--require=${preload}"] });
@@ -378,6 +381,7 @@ if (excelChild) {
 	fs.writeFileSync(path.join(folder, "actual.xlsx"), Buffer.from(await workbook.xlsx.writeBuffer()));
 }
 fs.writeFileSync(path.join(folder, "report.docx"), await smallDocx());
+fs.writeFileSync(path.join(folder, "vml.docx"), await vmlDocx());
 {
 	const { default: JSZip } = await import("jszip");
 	const zip = await JSZip.loadAsync(await smallDocx());
@@ -448,15 +452,30 @@ try {
 	const agentId = String(created.body?.agent?.id ?? "");
 	const saved = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: folder, workspaceAccessMode: "localFiles" }) });
 	assert(saved.status === 200, `the folder is saved, got ${saved.status} ${JSON.stringify(saved.body)}`);
-	if (diagnosticChild) {
+	if (diagnosticChild || vmlChild) {
 		const seeded = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/threads/demo-thread`, { method: "PUT", body: JSON.stringify({ state: "active", origin: "launcher", model: { provider: "fake-claude", model: "claude-fake" }, items: [] }) });
 		assert(seeded.status === 200, "demo conversation exists");
+		if (vmlChild) {
+		const vml = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=vml.docx`);
+		assert(vml.status === 200, `invented VML document renders as HTML, got ${vml.status}`);
+		const vmlBody = await vml.json();
+		const { JSDOM: VmlDOM } = await import("jsdom");
+		const vmlDom = new VmlDOM(vmlBody.html);
+		assert(vmlDom.window.document.querySelectorAll("section.docx").length === 2, "saved page break creates two sections");
+		assert(vmlDom.window.document.querySelector("header") && vmlDom.window.document.querySelector("footer"), "VML headers and footers survive");
+		assert(!vmlDom.window.document.querySelector("svg, foreignObject, script"), "VML active content is removed");
+		assert([...vmlDom.window.document.querySelectorAll("div")].some((node) => node.style.borderTopStyle === "double"), "VML line becomes a double rule");
+		vmlDom.window.close();
+		} else {
 		const result = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=report.docx`);
 		const body = await result.text();
 		assert(result.status === 422 && JSON.parse(body).code === "damaged_file", "unexpected Word renderer error is a safe refusal");
 		const output = serverOutput.join("");
-		assert(output.includes("TypeError") && output.includes("Unexpected renderer error"), "real child diagnostic reaches server log");
+		const expectedName = diagnosticCase === "--diagnostic-unknown" ? "UnknownError" : "TypeError";
+		const expectedMessage = diagnosticCase === "--diagnostic-known" ? "requestAnimationFrame is not defined" : "Unexpected renderer error";
+		assert(output.includes(`WORD_PREVIEW_DIAGNOSTIC ${expectedName}|${expectedMessage}`), "real child diagnostic reaches server log");
 		assert(!output.includes("invented-secret-marker") && !body.includes("invented-secret-marker"), "renderer error text stays private");
+		}
 	} else {
 	const invalidOpen = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-open`, { method: "POST", headers: { origin: baseUrl, "x-exxperts-local-action": "open-workspace-file" }, body: JSON.stringify({}) });
 	assert(invalidOpen.status === 400 && invalidOpen.body.code === "invalid_request" && invalidOpen.body.error === "This file could not be opened in another program.", "local open rejects an invalid request with the approved safe response");
@@ -818,7 +837,7 @@ try {
 }
 
 if (!fakeChild) {
-	for (const testCase of ["--diagnostic-child", "--html-race-child", "--excel-child", "--malformed-child", "--extra-child", "--bad-word-child", "--admission-child", "--revoke-child", "--replace-child", "--crash-child", "--exit-race-child", "--network-child", "--timeout-child"]) {
+	for (const testCase of ["--vml-child", "--diagnostic-child", "--diagnostic-known", "--diagnostic-unknown", "--html-race-child", "--excel-child", "--malformed-child", "--extra-child", "--bad-word-child", "--admission-child", "--revoke-child", "--replace-child", "--crash-child", "--exit-race-child", "--network-child", "--timeout-child"]) {
 		const check = spawnSync(process.execPath, ["--import", "tsx", fileURLToPath(import.meta.url), testCase], { encoding: "utf8", timeout: 90_000 });
 		assert(check.status === 0, `${testCase} check failed: ${check.stderr || check.stdout}`);
 	}

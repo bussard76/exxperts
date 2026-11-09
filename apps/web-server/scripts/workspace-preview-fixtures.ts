@@ -17,3 +17,21 @@ export async function smallDocx(): Promise<Buffer> {
 	zip.file("word/media/pixel.png", Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==", "base64"));
 	return zip.generateAsync({ type: "nodebuffer" });
 }
+
+export async function vmlDocx(): Promise<Buffer> {
+	const { default: JSZip } = await import("jszip");
+	const zip = await JSZip.loadAsync(await smallDocx());
+	const namespaces = `xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml"`;
+	const shape = `<w:p><w:r><w:pict><v:rect style="width:40pt;height:15pt"><v:textbox><w:txbxContent><w:p><w:r><w:t>Invented box</w:t></w:r></w:p></w:txbxContent></v:textbox></v:rect></w:pict></w:r></w:p>`;
+	const line = `<w:p><w:r><w:pict><v:line style="width:80pt;height:1pt" from="0,0" to="80pt,0"/></w:pict></w:r></w:p>`;
+	let document = await zip.file("word/document.xml")!.async("string");
+	document = document.replace("<w:document ", `<w:document xmlns:v="urn:schemas-microsoft-com:vml" `).replace("</w:body>", `${shape}${line}<w:p><w:r><w:lastRenderedPageBreak/><w:t>Second saved page</w:t></w:r></w:p><w:sectPr><w:headerReference w:type="default" r:id="header"/><w:footerReference w:type="default" r:id="footer"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:bottom="1440" w:left="1440" w:right="1440" w:header="720" w:footer="720"/></w:sectPr></w:body>`);
+	zip.file("word/document.xml", document);
+	const rels = await zip.file("word/_rels/document.xml.rels")!.async("string");
+	zip.file("word/_rels/document.xml.rels", rels.replace("</Relationships>", `<Relationship Id="header" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/><Relationship Id="footer" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/></Relationships>`));
+	const types = await zip.file("[Content_Types].xml")!.async("string");
+	zip.file("[Content_Types].xml", types.replace("</Types>", `<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/></Types>`));
+	zip.file("word/header1.xml", `<w:hdr ${namespaces}>${shape}</w:hdr>`);
+	zip.file("word/footer1.xml", `<w:ftr ${namespaces}>${shape}</w:ftr>`);
+	return zip.generateAsync({ type: "nodebuffer" });
+}
