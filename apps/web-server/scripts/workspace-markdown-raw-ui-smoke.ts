@@ -167,6 +167,12 @@ try {
 		await page.getByRole("button", { name: "Edit", exact: true }).click();
 		const boxes = page.locator('.markdown-editor-tiptap .ProseMirror input[type="checkbox"]');
 		await waitUntil(async () => (await boxes.count()) === 2, "both task items render as checkboxes");
+		const offsets = await boxes.evaluateAll((all) => all.map((box) => {
+			const text = box.closest("li")?.querySelector("p")?.getBoundingClientRect();
+			const mark = box.getBoundingClientRect();
+			return text ? Math.abs((mark.top + mark.height / 2) - (text.top + text.height / 2)) : 99;
+		}));
+		assert(offsets.every((offset) => offset <= 3), `each checkbox sits on its text line, offsets ${JSON.stringify(offsets)}`);
 		await boxes.first().click();
 		await waitUntil(() => fs.readFileSync(todo, "utf8").includes("- [x] first"), "clicking a checkbox saves it as done");
 		assert(fs.readFileSync(todo, "utf8").includes("- [x] second"), "the other task is untouched");
