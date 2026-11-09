@@ -28,7 +28,7 @@ import { undoMemorySave } from "./memory-undo.js";
 import { withRoomSaveLock } from "./memory-commit.js";
 import { isSharedServer } from "./server-hooks.js";
 import { activeRoomLock, REPO_ROOT, roomLockBusyStatus } from "./server-install-root.js";
-import { app, PORT } from "./server-app.js";
+import { app, PORT, WEB_UI_DIST } from "./server-app.js";
 import { getUsablePersistentAgentStatusForNormalUse, persistentAgentNormalUseErrorReply } from "./room-status.js";
 import { parseRoomModelPatch, roomModelsPayload } from "./ai-models.js";
 import { memoryBudgetRaiseRefusal, refuseMemoryBudgetRaise, refuseMemoryModelTooSmall } from "./ai-profile-models.js";
@@ -325,6 +325,15 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 		return reply.code(500).send({ code: "preview_failed", error: "This file could not be previewed." });
 	}
 	const extension = path.extname(relativePath).toLowerCase();
+
+	if (extension === ".pptx" && query.frame === "1") {
+		// The frame's document, with the renderer inline: an opaque origin carries no sign-in, so it could not load the script as a file.
+		const assets = path.join(WEB_UI_DIST, "assets");
+		const file = fs.existsSync(assets) ? fs.readdirSync(assets).find((name) => new RegExp(`^pptx-frame-entry-[\\w-]+\\.js$`).test(name)) : undefined;
+		if (!file) return reply.code(503).send({ code: "renderer_unavailable", error: "Preview rendering is unavailable on this system." });
+		const scripts = `<script>${fs.readFileSync(path.join(assets, file), "utf8").replaceAll("</script", "<\\/script")}</script>`;
+		return reply.header("Content-Security-Policy", `sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'`).type("text/html; charset=utf-8").send(`<!doctype html><html><head><style>html, body { margin: 0; background: #f3f0ea; } #slides { padding: 16px; box-sizing: border-box; }</style></head><body><div id="slides"></div>${scripts}</body></html>`);
+	}
 	if (extension === ".txt" || extension === ".json" || extension === ".md" || extension === ".pptx") {
 		const limit = extension === ".pptx" ? 26_214_400 : 16_777_216;
 		const tooLarge = () => reply.code(413).send({ code: "file_too_large", error: "This file is too large or complex to preview here." });
