@@ -78,6 +78,8 @@ try {
   const dismiss = page.locator(".whats-new-close"); if (await dismiss.count()) await dismiss.click();
   await page.locator(".persistent-agent-card").filter({ hasText: "Invented room" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
   const tree = page.locator(".sidebar-workspace-files");
+  let imageRequests = 0;
+  page.on("request", (request) => { if (request.url().includes("/workspace-image?") && request.url().includes("image.png")) imageRequests++; });
   await tree.locator(".workspace-file-browser-file", { hasText: "notes.md" }).click({ timeout: 10000 });
   await page.locator(".workspace-preview-text").getByText("# Invented note").waitFor();
   assert.equal(await page.locator(".workspace-pane").getByRole("button", { name: /^(edit|save|download|print)$/i }).count(), 0);
@@ -94,6 +96,14 @@ try {
   assert.equal(await composer.inputValue(), "before notes.mdafter", "drag inserts the relative file path at the composer caret");
   await tree.locator(".workspace-file-browser-file", { hasText: "image.png" }).click();
   await page.locator(".workspace-preview-image img[alt='image.png']").waitFor({ timeout: 5000 });
+  assert.equal(imageRequests, 1);
+  fs.appendFileSync(path.join(folder, "image.png"), "invented change");
+  await page.locator(".workspace-tab").filter({ hasText: "notes.md" }).getByRole("tab").click();
+  await page.locator(".workspace-tab").filter({ hasText: "image.png" }).getByRole("tab").click();
+  assert.equal(imageRequests, 1, "reselecting keeps the loaded snapshot");
+  await page.locator(".workspace-tab").filter({ hasText: "image.png" }).getByRole("button", { name: "Close image.png" }).click();
+  await tree.locator(".workspace-file-browser-file", { hasText: "image.png" }).click();
+  await waitUntil(() => imageRequests === 2, "reopening fetches the changed file");
   await tree.locator(".workspace-file-browser-file", { hasText: "invented.pdf" }).click();
   await page.locator(".workspace-preview-pdf img[alt='Page 1']").waitFor({ timeout: 10000 });
   await tree.locator(".workspace-file-browser-file", { hasText: "invented.docx" }).click();
