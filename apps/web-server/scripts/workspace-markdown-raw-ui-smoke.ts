@@ -39,6 +39,9 @@ fs.mkdirSync(folder, { recursive: true });
 // Written with `*` bullets and a double blank line on purpose: the rich editor would normalise both.
 const notes = path.join(folder, "notes.md");
 const NOTES = "# Notes\n\n* first\n* second\n\n\nTail line\n";
+const format = path.join(folder, "format.md");
+const FORMAT = "# Format\n\n* a\n* b\n\n\nEnd\n";
+fs.writeFileSync(format, FORMAT);
 const todo = path.join(folder, "todo.md");
 fs.writeFileSync(todo, "# Todo\n\n- [ ] first\n- [x] second\n");
 fs.writeFileSync(notes, NOTES);
@@ -178,23 +181,55 @@ try {
 		assert(fs.readFileSync(todo, "utf8").includes("- [x] second"), "the other task is untouched");
 		console.log("  ok  Edit: a clicked checkbox is saved as [x]");
 
-		// In RAW the task button works on the text: plain -> open -> done -> plain.
+		// In RAW the task button works on the text, per line: plain -> open -> done -> open.
 		await page.getByRole("button", { name: "RAW", exact: true }).click();
 		await raw.waitFor();
-		await raw.evaluate((el) => { const t = el as HTMLTextAreaElement; t.value; });
 		await raw.click();
 		await raw.evaluate((el) => { const t = el as HTMLTextAreaElement; t.setSelectionRange(t.value.length, t.value.length); });
 		await page.keyboard.type("plain note");
 		await waitUntil(() => fs.readFileSync(todo, "utf8").endsWith("plain note"), "a plain line is typed in RAW");
 		const taskButton = page.getByRole("button", { name: "Task list" });
+		assert((await taskButton.getAttribute("aria-pressed")) === "false", "the task button is not active on a plain line");
 		await taskButton.click();
 		await waitUntil(() => fs.readFileSync(todo, "utf8").endsWith("- [ ] plain note"), "the button turns the line into an open task");
+		assert((await taskButton.getAttribute("aria-pressed")) === "true", "the task button is active on a task line");
 		await taskButton.click();
 		await waitUntil(() => fs.readFileSync(todo, "utf8").endsWith("- [x] plain note"), "the button marks it done");
 		await taskButton.click();
-		await waitUntil(() => fs.readFileSync(todo, "utf8").endsWith("\nplain note"), "the button takes the checkbox off again");
+		await waitUntil(() => fs.readFileSync(todo, "utf8").endsWith("- [ ] plain note"), "a done task goes back to open, its checkbox stays");
 		assert(fs.readFileSync(todo, "utf8").startsWith("# Todo\n\n- [x] first\n- [x] second\n"), "other lines stay as they were");
-		console.log("  ok  RAW: the task button cycles the line");
+		// Selected lines move one by one: done -> open, done -> open, open -> done.
+		await raw.evaluate((el) => { const t = el as HTMLTextAreaElement; t.setSelectionRange(t.value.indexOf("- [x] first"), t.value.length); });
+		await taskButton.click();
+		const taskLines = () => fs.readFileSync(todo, "utf8").split("\n").filter((line) => line !== "");
+		await waitUntil(() => JSON.stringify(taskLines()) === JSON.stringify(["# Todo", "- [ ] first", "- [ ] second", "- [x] plain note"]), `selected lines each take their own step, got ${JSON.stringify(taskLines())}`);
+		// The other toolbar buttons stay visible but are disabled in RAW.
+		const states = await page.locator(".markdown-editor-toolbar .markdown-editor-tool").evaluateAll((all) => all.map((button) => ({ title: button.getAttribute("title") ?? "", disabled: (button as HTMLButtonElement).disabled })));
+		assert(states.length >= 15, `the toolbar stays visible in RAW, got ${states.length} buttons`);
+		const enabled = states.filter((state) => !state.disabled).map((state) => state.title);
+		assert(enabled.join() === "Task list", `only the task button is enabled in RAW, got ${JSON.stringify(enabled)}`);
+		console.log("  ok  RAW: the task button works per line, shows its state, and the rest is disabled");
+
+		// 6b. Switching views never rewrites RAW text that was typed and saved. format.md has `*`
+		// bullets and a double blank line on purpose: the rich editor would normalise both.
+		await tree.locator(".workspace-file-browser-file", { hasText: "format.md" }).click();
+		await page.getByRole("button", { name: "RAW", exact: true }).click();
+		await raw.waitFor();
+		await waitUntil(async () => (await raw.inputValue()) === FORMAT, "format.md is shown in RAW, exactly as on disk");
+		await raw.click();
+		await raw.evaluate((el) => { const t = el as HTMLTextAreaElement; t.setSelectionRange(t.value.length, t.value.length); });
+		await page.keyboard.type("one");
+		await waitUntil(() => fs.readFileSync(format, "utf8") === FORMAT + "one", `the RAW edit is saved exactly, got ${JSON.stringify(fs.readFileSync(format, "utf8"))}`);
+		await page.getByRole("button", { name: "Edit", exact: true }).click();
+		await page.locator(".markdown-editor-tiptap .ProseMirror").waitFor();
+		await page.getByRole("button", { name: "RAW", exact: true }).click();
+		await raw.waitFor();
+		assert((await raw.inputValue()) === FORMAT + "one", `RAW shows the saved text after a round trip, got ${JSON.stringify(await raw.inputValue())}`);
+		await raw.click();
+		await raw.evaluate((el) => { const t = el as HTMLTextAreaElement; t.setSelectionRange(t.value.length, t.value.length); });
+		await page.keyboard.type("two");
+		await waitUntil(() => fs.readFileSync(format, "utf8") === FORMAT + "onetwo", `the next RAW edit keeps the formatting, got ${JSON.stringify(fs.readFileSync(format, "utf8"))}`);
+		console.log("  ok  a RAW to Edit to RAW round trip keeps the typed text exactly");
 
 		// 7. A read-only grant makes the RAW text read-only.
 		const readOnly = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "custom", allowedToolNames: ["ls", "read"] } }) });
