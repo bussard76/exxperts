@@ -109,8 +109,16 @@ fs.readSync = function(fd, ...args) { if (selected.delete(fd) && fs.existsSync($
 const cp = require("node:child_process");
 const realSpawn = cp.spawn;
 const realFork = cp.fork;
+let heldCount = 0;
 cp.fork = function(file, args, options) {
   let request; try { request = JSON.parse(args?.[0] || "{}"); } catch {}
+  if (request?.absolutePath?.endsWith("held.pdf")) {
+   const child = new (require("node:events").EventEmitter)(); child.stderr = new (require("node:events").EventEmitter)();
+   child.kill = () => { setImmediate(() => child.emit("close", 0, null)); return true; };
+   heldCount++; fs.writeFileSync(${JSON.stringify(path.join(tempHome, "held-count"))}, String(heldCount));
+   if (heldCount > 2) setImmediate(() => child.emit("message", { ok:false, schemaVersion:1, code:"renderer_unavailable" }));
+   return child;
+  }
   if (request?.absolutePath?.endsWith("diagnostic-fake.docx")) {
    const child = new (require("node:events").EventEmitter)();
    child.stderr = new (require("node:events").EventEmitter)();
@@ -333,6 +341,22 @@ require("node:module").syncBuiltinESMExports();
 		assert(!output.includes("invented private marker"), "invalid stderr is never relayed");
 		fs.rmSync(diagnosticMarker);
 	}
+	fs.writeFileSync(path.join(workspaceRoot, "held.pdf"), "invented");
+	const heldUrl = `${baseUrl}/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=held.pdf`;
+	const firstAbort = new AbortController(), secondAbort = new AbortController();
+	const pending = [authedFetch(heldUrl, { signal: firstAbort.signal }).catch(() => null), authedFetch(heldUrl, { signal: secondAbort.signal }).catch(() => null)];
+	for (let i = 0; i < 100 && (!fs.existsSync(path.join(tempHome, "held-count")) || fs.readFileSync(path.join(tempHome, "held-count"), "utf8") !== "2"); i++) await new Promise(resolve => setTimeout(resolve, 50));
+	assert(fs.existsSync(path.join(tempHome, "held-count")) && fs.readFileSync(path.join(tempHome, "held-count"), "utf8") === "2", "two preview children started");
+	const busy = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=held.pdf`);
+	assert(busy.status === 503 && busy.body.code === "preview_busy", "third concurrent preview is refused");
+	firstAbort.abort(); secondAbort.abort(); await Promise.all(pending);
+	let released = false;
+	for (let i = 0; i < 100 && !released; i++) {
+		const response = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=held.pdf`);
+		released = response.status === 503 && response.body.code === "renderer_unavailable";
+		if (!released) await new Promise(resolve => setTimeout(resolve, 50));
+	}
+	assert(released, "cancelled previews release their slots");
 	fs.writeFileSync(path.join(workspaceRoot, "invented.xls"), "invented");
 	const openHeaders = { origin: baseUrl, "x-exxperts-local-action": "open-workspace-file" };
 	const rejectedXls = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-open`, { method: "POST", headers: openHeaders, body: JSON.stringify({ conversationId: "demo-thread", path: "invented.xls" }) });
