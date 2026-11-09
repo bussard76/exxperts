@@ -20,6 +20,7 @@ const folder = path.join(tempHome, "workspace");
 for (const dir of [agentsRoot, agentDir, folder]) fs.mkdirSync(dir, { recursive: true });
 fs.writeFileSync(path.join(folder, "notes.md"), "# Invented note\n");
 fs.writeFileSync(path.join(folder, "other.txt"), "Invented second file\n");
+fs.writeFileSync(path.join(folder, "image.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==", "base64"));
 fs.writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({ providers: { "fake-claude": { name: "Fake Claude", baseUrl: "http://127.0.0.1:9", api: "anthropic-messages", models: [{ id: "claude-fake", name: "Claude Fake", input: ["text"], contextWindow: 200000, maxTokens: 32000 }] } } }));
 fs.writeFileSync(path.join(agentDir, "auth.json"), JSON.stringify({ "fake-claude": { type: "api_key", key: "synthetic-claude" } }));
 fs.writeFileSync(path.join(appDir, "custom-ai-profiles.json"), JSON.stringify({ version: 1, profiles: [{ id: "custom-fake-claude", providerId: "fake-claude", label: "Fake Claude", roomModels: ["claude-fake"], learnModel: "claude-fake", reviewMemoryModel: "claude-fake" }] }));
@@ -61,5 +62,7 @@ try {
   await tree.locator(".workspace-file-browser-file", { hasText: "notes.md" }).dispatchEvent("dragstart", { dataTransfer: transfer });
   await composer.dispatchEvent("drop", { dataTransfer: transfer });
   assert.equal(await composer.inputValue(), "before notes.mdafter", "drag inserts the relative file path at the composer caret");
+  await tree.locator(".workspace-file-browser-file", { hasText: "image.png" }).click();
+  await page.locator(".workspace-preview-image img[alt='image.png']").waitFor({ timeout: 5000 });
  } finally { await browser.close(); }
 } finally { if (server) await stopSmokeServer(server); fs.rmSync(tempRoot, { recursive: true, force: true }); }

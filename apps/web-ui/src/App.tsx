@@ -1,3 +1,4 @@
+import { WorkspaceImagePreview } from "./components/WorkspaceImagePreview";
 import { WorkspaceFileBrowser } from "./components/WorkspaceFileBrowser";
 import { WorkspaceFileTabs } from "./components/WorkspaceFileTabs";
 import { WorkspaceTextPreview } from "./components/WorkspaceTextPreview";
@@ -447,6 +448,7 @@ export function App() {
 		// opened from them carries the view it goes back to (backTo).
 		| { kind: "attachments"; view: AttachmentsView }
 		| { kind: "workspaceText"; path: string }
+		| { kind: "workspaceImage"; path: string }
 		// The run view: the live task's stream in the
 		// same pane slot; renders from taskState and swaps to the artifact viewer
 		// in place when the run ends.
@@ -551,7 +553,7 @@ export function App() {
 	// until dismissed — one Escape, one layer.
 	// As an Escape layer it keeps that Escape from the room's own keys too: the
 	// composer's Stop and a waiting question's deny.
-	const paneTakesEscape = rightPane?.kind === "artifactViewer" || rightPane?.kind === "taskRun" || rightPane?.kind === "attachments" || rightPane?.kind === "workspaceText";
+	const paneTakesEscape = rightPane?.kind === "artifactViewer" || rightPane?.kind === "taskRun" || rightPane?.kind === "attachments" || rightPane?.kind === "workspaceText" || rightPane?.kind === "workspaceImage";
 	useEscapeKey(() => {
 		// A dialog that is not in this component's state (the expanded
 		// diagram viewer) owns Escape the same way: one Escape, one layer.
@@ -615,11 +617,14 @@ export function App() {
 	const [persistentThread, setPersistentThread] = useState<PersistentAgentThread | null>(null);
 	const [persistentChat, setPersistentChat] = useState<PersistentChatConfig>(null);
 	function activeWorkspacePath(pane: RightPaneOccupant | null): string | null {
-		return pane?.kind === "workspaceText" ? pane.path : null;
+		return pane?.kind === "workspaceText" || pane?.kind === "workspaceImage" ? pane.path : null;
+	}
+	function workspacePaneFor(path: string): RightPaneOccupant {
+		return /\.(png|jpe?g|gif|webp|svg)$/i.test(path) ? { kind: "workspaceImage", path } : { kind: "workspaceText", path };
 	}
 	function openWorkspaceFile(entry: { relativePath: string; extension: string }): void {
 		const path = entry.relativePath;
-		if (!/\.(md|txt|json)$/i.test(path) || !persistentChat) return;
+		if (!/\.(md|txt|json|png|jpe?g|gif|webp|svg)$/i.test(path) || !persistentChat) return;
 		if (activeWorkspacePath(rightPaneRef.current) === path && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId) return;
 		setArtifactMaximized(false);
 		setWorkspaceTabs((tabs) => {
@@ -627,7 +632,7 @@ export function App() {
 			const paths = same ? tabs.paths : [];
 			return { agentId: persistentChat.agentId, conversationId: persistentChat.conversationId, paths: paths.includes(path) ? paths : [...paths, path] };
 		});
-		setRightPane({ kind: "workspaceText", path });
+		setRightPane(workspacePaneFor(path));
 	}
 	function requestCloseWorkspaceTab(path: string): void {
 		const active = activeWorkspacePath(rightPaneRef.current);
@@ -639,12 +644,12 @@ export function App() {
 		if (active === path) {
 			const next = remaining[index] ?? remaining[index - 1];
 			setArtifactMaximized(false);
-			setRightPane(next ? { kind: "workspaceText", path: next } : null);
+			setRightPane(next ? workspacePaneFor(next) : null);
 		}
 	}
 	useEffect(() => {
 		setWorkspaceTabs(null);
-		setRightPane((pane) => pane?.kind === "workspaceText" ? null : pane);
+		setRightPane((pane) => pane?.kind === "workspaceText" || pane?.kind === "workspaceImage" ? null : pane);
 	}, [persistentChat?.agentId, persistentChat?.conversationId, personChanged]);
 	// Another conversation holds none of this one's edit.
 	useEffect(() => {
@@ -8531,7 +8536,8 @@ export function App() {
 			{persistentChat && !personChanged && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId && (
 				<div className="workspace-pane" hidden={activeWorkspacePath(rightPane) === null}>
 					<WorkspaceFileTabs tabs={workspaceTabs.paths} active={activeWorkspacePath(rightPane)} onSelect={(path) => openWorkspaceFile({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} onReorder={(paths) => setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths } : tabs)} />
-					{workspaceTabs.paths.map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceText" || rightPane.path !== path}><WorkspaceTextPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} /></div>)}
+					{workspaceTabs.paths.filter((path) => /\.(md|txt|json)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceText" || rightPane.path !== path}><WorkspaceTextPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} /></div>)}
+					{workspaceTabs.paths.filter((path) => /\.(png|jpe?g|gif|webp|svg)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceImage" || rightPane.path !== path}><WorkspaceImagePreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} /></div>)}
 				</div>
 			)}
 			{rightPane?.kind === "taskRun" && taskState.phase !== "none" && taskState.taskId === rightPane.taskId && (
