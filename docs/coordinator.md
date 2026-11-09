@@ -44,6 +44,7 @@ New features go from the outside in. Nothing is built until Sascha has signed of
 - The Controller applies this rule by hand and records each case in its report; no mechanism is built to enforce or prove it, and a run without complete evidence stays red (decided by Sascha, 2026-11-06, answering "Wie weit soll der Controller die Testregel „einzeln grün zählt" technisch absichern?": "Keine neue Technik").
 - Workers stay on the OpenAI models; the Claude fallback in `factory.config.json` is not used, even when the Codex limit is reached. Sascha, 2026-11-06, asked whether to switch to Claude or pause: "nein es soll bei den openai modellen geblieben werden". The weekly limit is no reason to save or to wait, because Sascha can reset it (2026-11-06: "ich habe credits um das wochenlimit zurück zu setzen"). When the limit is near or reached, the Controller pushes what exists and puts it under "Needs Sascha" in `status.md`, so he can reset it.
 - A green full gate of the integration wave is enough for the push, even when a Tester's full gate on the task branch was red with outliers that passed alone; the outliers are recorded in the review and rerun alone. A failure that also fails alone still blocks (decided by Sascha, 2026-11-07, asked whether a green integration run suffices for the push: "Grüne Integration reicht").
+- **Slim lane for level-1 bug fixes (ADR-0005, decided by Sascha, 2026-11-09, asked how small fixes should go faster: "Schlanke Spur festhalten"):** the ticket states the diagnosis and the exact change, and the Controller itself checks all of: no new or changed public export, route, dependency, contract, data flow or protocol; no protected file; at most one module. Then there is no separate Architect spec review, the Developer writes the failing test first as always, the independent Tester runs the targeted tests and `ponytail-review` on the full diff and no full smoke run, and the integration wave runs the one full gate. The Controller writes the three checks into `status.md` for the task. A failed check, or a change larger than the ticket says, sends the task back to the normal path with the spec review.
 - Documentation-only changes get no full gate.
 - Every full gate runs through the project-aware `~/.local/bin/gate` shim (fair slots, pooled by unit and browser), as `GATE_SLOTS=1 GATE_E2E_SLOTS=1 gate bash -c '<command>'` because `gate` starts a program without a shell. In this project the shim selects `~/controller-exxperts/gate.mjs` from `factory.config.json`; other projects keep their configured routing (decided by Sascha, 2026-11-07: “yes, this project only”).
 
@@ -120,3 +121,8 @@ Sascha, 2026-11-09: "make all workers and yourself use graphify in this repo but
 ## Decision history
 
 Append dated sections below as decisions are made. Superseded rules stay here with "superseded by …" and are removed from `docs/dev-workflow.md`.
+
+## Additional decisions, 2026-11-09
+
+- **Upstream:** one upstream pull request is intended later, but not now. Do not prepare or send anything to `EXXETA/exxperts` until Sascha resumes that work. Sascha: "einer aber warten".
+- **Excalidraw:** keep it only in the fork and keep its changes separable, so a future upstream port can omit them cleanly. Sascha: "nur im fork".

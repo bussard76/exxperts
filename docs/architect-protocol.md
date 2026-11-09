@@ -2,7 +2,9 @@
 
 A fresh Worker Architect checks fit before implementation, conformance before integrating levels 2 and 3, and architecture health after each merged wave. Read `AGENTS.md`, `ARCHITECTURE.md` (if present), the task, relevant ADRs and connected code. Use `codebase-design` for module and seam vocabulary. The Architect never edits code, implements a feature or decides level 3.
 
-## Before the build: spec review (every task)
+## Before the build: spec review (every task, except the slim lane)
+
+Exception (ADR-0005, decided by Sascha, 2026-11-09): a bug fix whose ticket states the diagnosis and the exact change, and which the Controller itself finds to be level 1 by the checks in `docs/coordinator.md`, takes the slim lane and gets no separate spec review. A failed check, or a Developer who finds the change larger than the ticket says, sends it back here.
 
 1. Read the spec and its `## Architecture impact`. Confirm or raise the level against `AGENTS.md`. Missing or ambiguous impact means `change-spec`.
 2. Trace the affected code: owning modules, public seams, allowed imports, data flow. Compare with the architecture docs and accepted ADRs.
