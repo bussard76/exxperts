@@ -655,6 +655,9 @@ async function previewWord(buffer) {
 	try {
 		for (const name of ["window", "document", "HTMLElement", "Element", "Node", "DOMParser", "XMLSerializer", "FileReader", "Blob"]) globalThis[name] = name === "window" ? window : window[name];
 		globalThis.getComputedStyle = window.getComputedStyle.bind(window);
+		// docx-preview measures legacy drawings (VML) in a frame callback; jsdom has no layout, so the callback never runs.
+		globalThis.requestAnimationFrame = () => 0;
+		globalThis.cancelAnimationFrame = () => {};
 		let createdElements = 0;
 		let createdTextBytes = 0;
 		let encodedImageBytes = 0;
