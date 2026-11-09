@@ -623,6 +623,41 @@ try {
 		}
 		const attempt = await api(fileRoute("workspace-markdown", "docs/guide.md"), { method: "PUT", body: JSON.stringify({ content: "overwrite", revision: beforeSwap.body.revision }) });
 		assert(attempt.status !== 200 && fs.readFileSync(path.join(replacement, "docs", "guide.md"), "utf8") === "replacement private", "retargeted root must not be written");
+		fs.unlinkSync(folder);
+		fs.renameSync(`${folder}-original`, folder);
+		await page.route("**/workspace-markdown?**", async (route) => {
+			if (route.request().method() === "PUT") return route.fulfill({ status: 503, json: { error: "mock save failure" } });
+			await route.continue();
+		});
+		const navigationDraft = page.locator(".markdown-editor-tiptap .ProseMirror");
+		await navigationDraft.click();
+		await page.keyboard.type(" pending conversation draft");
+		await page.getByRole("button", { name: "Forget", exact: true }).first().click();
+		await prompt.getByRole("button", { name: "Cancel" }).click();
+		assert((await navigationDraft.textContent())?.includes("pending conversation draft"), "cancel preserves draft before conversation replacement");
+		await page.getByRole("button", { name: "Forget", exact: true }).first().click();
+		await prompt.getByRole("button", { name: "Discard changes" }).click();
+		await page.getByRole("alertdialog", { name: "Forget this conversation and start fresh?" }).getByRole("button", { name: "Forget", exact: true }).click();
+		await waitUntil(async () => await page.locator(".workspace-tab").count() === 0, "conversation replacement clears old tabs");
+		await page.unroute("**/workspace-markdown?**");
+		await tree.locator(".workspace-file-browser-directory", { hasText: "docs" }).click();
+		await tree.locator(".workspace-file-browser-file", { hasText: "other.md" }).click();
+		const newDraft = page.locator(".markdown-editor-tiptap .ProseMirror");
+		await newDraft.click();
+		await page.route("**/workspace-markdown?**", async (route) => {
+			if (route.request().method() === "PUT") return route.fulfill({ status: 503, json: { error: "mock save failure" } });
+			await route.continue();
+		});
+		await page.keyboard.type(" pending room draft");
+		const home = page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true });
+		await home.click();
+		await prompt.getByRole("button", { name: "Cancel" }).click();
+		assert((await newDraft.textContent())?.includes("pending room draft"), "cancel preserves draft before leaving room");
+		await home.click();
+		await prompt.getByRole("button", { name: "Discard changes" }).click();
+		await card.waitFor();
+		assert(!fs.readFileSync(path.join(folder, "docs", "other.md"), "utf8").includes("pending room draft"), "discard leaves file unchanged");
+		await page.unroute("**/workspace-markdown?**");
 		await context.close();
 	} finally {
 		await browser.close();
