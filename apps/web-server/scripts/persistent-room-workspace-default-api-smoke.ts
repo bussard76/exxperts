@@ -84,6 +84,12 @@ try {
 	fs.writeFileSync(policyRacePreload, `
 const fs = require("node:fs");
 const diagnosticMarker = ${JSON.stringify(path.join(tempHome, "diagnostic-mode"))};
+const rafMarker = ${JSON.stringify(path.join(tempHome, "raf-marker"))};
+if (String(process.argv[1]).endsWith("shelf-parse-worker.mjs") && fs.existsSync(rafMarker)) {
+ Object.defineProperty(globalThis, "requestAnimationFrame", { configurable:true, set(next) {
+  Object.defineProperty(globalThis, "requestAnimationFrame", { configurable:true, value(callback) { fs.appendFileSync(rafMarker, "scheduled\\n"); return next(() => { fs.appendFileSync(rafMarker, "executed\\n"); callback(); }); }});
+ }});
+}
 if (String(process.argv[1]).endsWith("shelf-parse-worker.mjs") && fs.existsSync(diagnosticMarker)) {
  const mode = fs.readFileSync(diagnosticMarker, "utf8");
  Object.defineProperty(globalThis, "getComputedStyle", { configurable: true, set() {
@@ -247,6 +253,8 @@ require("node:module").syncBuiltinESMExports();
 	const sheet = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=invented.xlsx`);
 	assert(word.status === 200 && word.body.kind === "word" && typeof word.body.html === "string", "Word travels through the real child and guarded public route");
 	fs.writeFileSync(path.join(workspaceRoot, "vml.docx"), await vmlDocx());
+	const rafMarker = path.join(tempHome, "raf-marker");
+	fs.writeFileSync(rafMarker, "");
 	const vml = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=vml.docx`);
 	assert(vml.status === 200 && vml.body.kind === "word", "invented VML renders through the guarded route");
 	const { JSDOM } = await import("jsdom");
@@ -261,6 +269,9 @@ require("node:module").syncBuiltinESMExports();
 	assert(!dom.window.document.querySelector("svg,foreignObject,script") && !vml.body.html.includes("example.invalid") && !vml.body.html.includes("inventedHandler") && !vml.body.html.includes("Invented box"), "active VML content is removed");
 	assert([...dom.window.document.querySelectorAll("div")].some(node => node.style.borderTopStyle === "double"), "VML line is a double rule");
 	dom.window.close();
+	const rafOutput = fs.readFileSync(rafMarker, "utf8");
+	assert(rafOutput.includes("scheduled") && !rafOutput.includes("executed"), "Word animation callbacks are scheduled but never run");
+	fs.rmSync(rafMarker);
 	const diagnosticMarker = path.join(tempHome, "diagnostic-mode");
 	for (const [mode, line] of [["normal", "TypeError|Unexpected renderer error"], ["known", "TypeError|requestAnimationFrame is not defined"], ["unknown", "UnknownError|Unexpected renderer error"]]) {
 		fs.writeFileSync(diagnosticMarker, mode);
