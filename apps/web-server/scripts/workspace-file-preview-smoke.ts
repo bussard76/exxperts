@@ -55,6 +55,14 @@ const childProcess = require("node:child_process");
 const { EventEmitter } = require("node:events");
 const { syncBuiltinESMExports } = require("node:module");
 const original = childProcess.fork;
+if (${vmlChild} && String(process.argv[1]).endsWith("shelf-parse-worker.mjs")) {
+  Object.defineProperty(globalThis, "requestAnimationFrame", { configurable: true, set(next) {
+    Object.defineProperty(globalThis, "requestAnimationFrame", { configurable: true, value(callback) {
+      fs.appendFileSync(${JSON.stringify(networkMarker)}, "scheduled\\n");
+      return next(() => { fs.appendFileSync(${JSON.stringify(networkMarker)}, "executed\\n"); callback(); });
+    }});
+  }});
+}
 if (${diagnosticChild} && String(process.argv[1]).endsWith("shelf-parse-worker.mjs")) {
   Object.defineProperty(globalThis, "getComputedStyle", { configurable: true, set() { const error = new TypeError(${JSON.stringify(diagnosticCase === "--diagnostic-known" ? "requestAnimationFrame is not defined" : "invented-secret-marker")}); if (${diagnosticCase === "--diagnostic-unknown"}) error.name = "invented-name"; throw error; } });
 }
@@ -152,7 +160,21 @@ childProcess.spawn = function(file, args, options) {
 };
 let count = 0;
 childProcess.fork = function(file, args, options) {
-  if (${vmlChild} && String(file).endsWith("shelf-parse-worker.mjs")) return original.call(this, file, args, options);
+  if (${Boolean(diagnosticCase?.startsWith("--diagnostic-stderr"))} && String(file).endsWith("shelf-parse-worker.mjs")) {
+    const child = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = () => { setImmediate(() => child.emit("close", 0, null)); return true; };
+    setImmediate(() => {
+      const line = "WORD_PREVIEW_DIAGNOSTIC TypeError|Unexpected renderer error\\n";
+      const scenario = ${JSON.stringify(diagnosticCase)};
+      if (scenario.endsWith("chunked")) { child.stderr.emit("data", Buffer.from(line.slice(0, 20))); child.stderr.emit("data", Buffer.from(line.slice(20))); }
+      else if (scenario.endsWith("duplicate")) child.stderr.emit("data", Buffer.from(line + line));
+      else child.stderr.emit("data", Buffer.from("x".repeat(200) + line + "WORD_PREVIEW_DIAGNOSTIC Error|invented-secret-marker\\n" + line.slice(0, -1)));
+      child.emit("message", { ok: false, schemaVersion: 1, code: "damaged_file" });
+    });
+    return child;
+  }
+  if (${vmlChild} && String(file).endsWith("shelf-parse-worker.mjs")) return original.call(this, file, args, { ...options, execArgv: [...options.execArgv, "--require=${preload}"] });
   if (${diagnosticChild} && String(file).endsWith("shelf-parse-worker.mjs")) return original.call(this, file, args, { ...options, execArgv: [...options.execArgv, "--require=${preload}"] });
   if (${windowsNativeChild} && String(file).endsWith("workspace-open-worker.mjs")) {
     const child = original.call(this, file, args, { ...options, execArgv: ["--require=${preload}"] });
@@ -462,10 +484,22 @@ try {
 		const { JSDOM: VmlDOM } = await import("jsdom");
 		const vmlDom = new VmlDOM(vmlBody.html);
 		assert(vmlDom.window.document.querySelectorAll("section.docx").length === 2, "saved page break creates two sections");
-		assert(vmlDom.window.document.querySelector("header") && vmlDom.window.document.querySelector("footer"), "VML headers and footers survive");
-		assert(!vmlDom.window.document.querySelector("svg, foreignObject, script"), "VML active content is removed");
+		const header = vmlDom.window.document.querySelector("header");
+		const footer = vmlDom.window.document.querySelector("footer");
+		assert(header && footer && header.style.marginTop && header.style.minHeight && footer.style.marginBottom && footer.style.minHeight, `VML headers and footers retain their margin and height: ${header?.outerHTML} ${footer?.outerHTML}`);
+		assert([...header.querySelectorAll<HTMLElement>("[style*='left:']")].some((node) => node.style.left === "72pt"), "header page-relative offset loses its left margin");
+		const anchored = [...vmlDom.window.document.querySelectorAll<HTMLElement>("[style*='left:']")].filter((node) => node.style.top);
+		assert(anchored.some((node) => node.style.left === "72pt" && node.style.top === "72pt") && anchored.some((node) => node.style.left === "144pt" && node.style.top === "144pt"), `anchored offsets differ and the page margin is subtracted: ${anchored.map((node) => node.getAttribute("style")).join("; ")}`);
+		assert([...vmlDom.window.document.querySelectorAll("img")].some((img) => img.style.transform.includes("rotate(270deg)")), "rotated picture keeps its rotation");
+		assert(!vmlDom.window.document.querySelector("svg, foreignObject, script") && !vmlBody.html.includes("example.invalid"), "VML active content and URL styles are removed");
 		assert([...vmlDom.window.document.querySelectorAll("div")].some((node) => node.style.borderTopStyle === "double"), "VML line becomes a double rule");
 		vmlDom.window.close();
+		const ordinary = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=report.docx`);
+		const ordinaryDom = new VmlDOM((await ordinary.json()).html);
+		assert(ordinary.status === 200 && ordinaryDom.window.document.querySelectorAll("section.docx").length === 1, "document without saved breaks remains one long page");
+		ordinaryDom.window.close();
+		const animation = fs.readFileSync(networkMarker, "utf8");
+		assert(animation.includes("scheduled") && !animation.includes("executed"), "VML animation callbacks never execute");
 		} else {
 		const result = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=report.docx`);
 		const body = await result.text();
@@ -473,7 +507,9 @@ try {
 		const output = serverOutput.join("");
 		const expectedName = diagnosticCase === "--diagnostic-unknown" ? "UnknownError" : "TypeError";
 		const expectedMessage = diagnosticCase === "--diagnostic-known" ? "requestAnimationFrame is not defined" : "Unexpected renderer error";
-		assert(output.includes(`WORD_PREVIEW_DIAGNOSTIC ${expectedName}|${expectedMessage}`), "real child diagnostic reaches server log");
+		const expectedLine = `WORD_PREVIEW_DIAGNOSTIC ${expectedName}|${expectedMessage}`;
+		if (diagnosticCase === "--diagnostic-stderr-invalid" || diagnosticCase === "--diagnostic-stderr-duplicate") assert(!output.includes("WORD_PREVIEW_DIAGNOSTIC"), "invalid or duplicate stderr is not logged");
+		else assert(output.includes(expectedLine), "validated diagnostic reaches server log");
 		assert(!output.includes("invented-secret-marker") && !body.includes("invented-secret-marker"), "renderer error text stays private");
 		}
 	} else {
@@ -837,7 +873,7 @@ try {
 }
 
 if (!fakeChild) {
-	for (const testCase of ["--vml-child", "--diagnostic-child", "--diagnostic-known", "--diagnostic-unknown", "--html-race-child", "--excel-child", "--malformed-child", "--extra-child", "--bad-word-child", "--admission-child", "--revoke-child", "--replace-child", "--crash-child", "--exit-race-child", "--network-child", "--timeout-child"]) {
+	for (const testCase of ["--vml-child", "--diagnostic-stderr-chunked", "--diagnostic-stderr-invalid", "--diagnostic-stderr-duplicate", "--diagnostic-child", "--diagnostic-known", "--diagnostic-unknown", "--html-race-child", "--excel-child", "--malformed-child", "--extra-child", "--bad-word-child", "--admission-child", "--revoke-child", "--replace-child", "--crash-child", "--exit-race-child", "--network-child", "--timeout-child"]) {
 		const check = spawnSync(process.execPath, ["--import", "tsx", fileURLToPath(import.meta.url), testCase], { encoding: "utf8", timeout: 90_000 });
 		assert(check.status === 0, `${testCase} check failed: ${check.stderr || check.stdout}`);
 	}
