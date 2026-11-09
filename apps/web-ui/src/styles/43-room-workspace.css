@@ -35,6 +35,7 @@ html.sidebar-collapsed .sidebar-resizer { display: none; }
  border-left: 1px solid var(--border);
  display: flex;
  flex-direction: column;
+ flex: 1 1 auto;
  color: var(--fg);
 }
 .markdown-editor-header {
