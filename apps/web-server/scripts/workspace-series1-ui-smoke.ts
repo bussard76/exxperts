@@ -95,6 +95,12 @@ try {
  try {
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   const page = await context.newPage();
+  await page.addInitScript(() => {
+    const OriginalSocket = window.WebSocket;
+    const sockets: WebSocket[] = [];
+    (window as any).workspaceTestSockets = sockets;
+    window.WebSocket = class extends OriginalSocket { constructor(url: string | URL, protocols?: string | string[]) { super(url, protocols); sockets.push(this); } } as typeof WebSocket;
+  });
   await page.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
   await page.waitForLoadState("networkidle");
   const dismiss = page.locator(".whats-new-close"); if (await dismiss.count()) await dismiss.click();
@@ -140,6 +146,12 @@ try {
   await page.locator(".workspace-tab").filter({ hasText: "image.png" }).getByRole("button", { name: "Close image.png" }).click();
   await tree.locator(".workspace-file-browser-file", { hasText: "image.png" }).click();
   await waitUntil(() => imageRequests === 2, "reopening fetches the changed file");
+  const socketCount = await page.evaluate(() => (window as any).workspaceTestSockets.length as number);
+  assert(socketCount > 0, "room opened a socket");
+  await page.evaluate(() => { const sockets = (window as any).workspaceTestSockets as WebSocket[]; sockets[sockets.length - 1].close(); });
+  await waitUntil(() => page.evaluate(count => { const sockets = (window as any).workspaceTestSockets as WebSocket[]; return sockets.length > count && sockets[sockets.length - 1].readyState === WebSocket.OPEN; }, socketCount), "room reconnects");
+  assert.equal(await page.locator(".workspace-tab[data-active=true] .workspace-tab-select").textContent(), "image.png", "reconnect keeps the active file tab");
+  assert.equal(imageRequests, 2, "reconnect keeps the existing image snapshot");
   await tree.locator(".workspace-file-browser-file", { hasText: "invented.pdf" }).click();
   await page.locator(".workspace-preview-pdf img[alt='Page 1']").waitFor({ timeout: 10000 });
   await tree.locator(".workspace-file-browser-file", { hasText: "invented.docx" }).click();

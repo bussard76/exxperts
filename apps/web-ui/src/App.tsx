@@ -569,7 +569,7 @@ export function App() {
 	const preview = rightPane?.kind === "preview" ? rightPane.data : null;
 	// Clearing keeps the room's Attachments: a dropped connection is no reason to
 	// lose them, and leaving the room closes them itself.
-	const setPreview = (data: ApprovalPreviewData | null) => setRightPane((pane) => (data ? { kind: "preview", data } : pane?.kind === "attachments" || (pane?.kind === "artifactViewer" && pane.backTo) ? pane : null));
+	const setPreview = (data: ApprovalPreviewData | null) => setRightPane((pane) => (data ? { kind: "preview", data } : pane?.kind === "attachments" || activeWorkspacePath(pane) !== null || (pane?.kind === "artifactViewer" && pane.backTo) ? pane : null));
 
 	// The room settings wheel in the topbar opens the same modal the launcher
 	// card's wheel opens. Declared here because the Escape handler below has to
