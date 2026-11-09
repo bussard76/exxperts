@@ -41,6 +41,14 @@ const workbook = new ExcelJS.Workbook();
 workbook.addWorksheet("Invented sheet").getCell("A1").value = "Invented cell";
 fs.writeFileSync(path.join(folder, "invented.xlsx"), Buffer.from(await workbook.xlsx.writeBuffer()));
 fs.writeFileSync(path.join(folder, "invented.html"), "<p>Invented HTML</p>");
+fs.writeFileSync(path.join(folder, "hostile.html"), `<!doctype html><body><script>
+const result = [];
+for (const [name, fn] of [["cookie", () => document.cookie], ["storage", () => localStorage.getItem("invented")], ["parent", () => parent.document.body.innerText]]) { try { fn(); result.push(name + ":accessible"); } catch { result.push(name + ":blocked"); } }
+fetch("/healthz?hostile-fetch").catch(() => {});
+const image = new Image(); image.src = "/healthz?hostile-image"; document.body.append(image);
+const form = document.createElement("form"); form.method = "POST"; form.action = "/healthz?hostile-form"; document.body.append(form); form.submit();
+document.body.dataset.result = result.join(",");
+</script></body>`);
 fs.writeFileSync(path.join(folder, "single.pptx"), "invented presentation bytes".padEnd(500));
 for (const name of ["old.xls", "old.doc", "macro.xlsm", "diagram.drawio"]) fs.writeFileSync(path.join(folder, name), "invented");
 {
@@ -128,6 +136,13 @@ try {
   await page.locator(".workspace-spreadsheet").getByText("Invented cell", { exact: true }).waitFor({ timeout: 10000 });
   await tree.locator(".workspace-file-browser-file", { hasText: "invented.html" }).click();
   await page.frameLocator(".workspace-preview-html iframe").getByText("Invented HTML").waitFor({ timeout: 10000 });
+  const forbiddenRequests: string[] = [];
+  page.on("request", request => { if (/hostile-(fetch|image|form)/.test(request.url())) forbiddenRequests.push(request.url()); });
+  await tree.locator(".workspace-file-browser-file", { hasText: "hostile.html" }).click();
+  const hostileFrame = page.frameLocator(".workspace-preview-content:not([hidden]) .workspace-preview-html iframe");
+  await waitUntil(async () => (await hostileFrame.locator("body").getAttribute("data-result")) !== null, "hostile frame script runs in sandbox");
+  assert.equal(await hostileFrame.locator("body").getAttribute("data-result"), "cookie:blocked,storage:blocked,parent:blocked");
+  assert.deepEqual(forbiddenRequests, [], "HTML preview cannot make network requests");
   await tree.locator(".workspace-file-browser-file", { hasText: "invented.pptx" }).click();
   await page.frameLocator(".workspace-preview-content:not([hidden]) .workspace-preview-html iframe").getByText("Invented slide").waitFor({ timeout: 15000 });
   let singleFileFetches = 0;
