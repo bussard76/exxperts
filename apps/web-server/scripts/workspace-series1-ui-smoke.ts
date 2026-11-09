@@ -9,6 +9,18 @@ import { chromium } from "playwright";
 import { authedFetch, SMOKE_AUTH_TOKEN, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, smokeHomeEnv, stopSmokeServer, freePort, type AuthedFetchInit } from "./smoke-server-process.js";
 import { waitEvery } from "./smoke-wait.js";
 
+function inventedPdf(): Buffer {
+	const stream = "0 0 0 rg 10 10 20 20 re f";
+	const objects = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R >>", `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`];
+	let body = "%PDF-1.4\n";
+	const offsets: number[] = [];
+	objects.forEach((object, index) => { offsets.push(body.length); body += `${index + 1} 0 obj\n${object}\nendobj\n`; });
+	const xref = body.length;
+	body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+	for (const offset of offsets) body += `${String(offset).padStart(10, "0")} 00000 n \n`;
+	return Buffer.from(body + `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`, "latin1");
+}
+
 assert(fs.existsSync(chromium.executablePath()), "Chromium is required for this browser check");
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "exxperts-series1-ui-"));
@@ -20,6 +32,7 @@ const folder = path.join(tempHome, "workspace");
 for (const dir of [agentsRoot, agentDir, folder]) fs.mkdirSync(dir, { recursive: true });
 fs.writeFileSync(path.join(folder, "notes.md"), "# Invented note\n");
 fs.writeFileSync(path.join(folder, "other.txt"), "Invented second file\n");
+fs.writeFileSync(path.join(folder, "invented.pdf"), inventedPdf());
 fs.writeFileSync(path.join(folder, "image.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==", "base64"));
 fs.writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({ providers: { "fake-claude": { name: "Fake Claude", baseUrl: "http://127.0.0.1:9", api: "anthropic-messages", models: [{ id: "claude-fake", name: "Claude Fake", input: ["text"], contextWindow: 200000, maxTokens: 32000 }] } } }));
 fs.writeFileSync(path.join(agentDir, "auth.json"), JSON.stringify({ "fake-claude": { type: "api_key", key: "synthetic-claude" } }));
@@ -64,5 +77,7 @@ try {
   assert.equal(await composer.inputValue(), "before notes.mdafter", "drag inserts the relative file path at the composer caret");
   await tree.locator(".workspace-file-browser-file", { hasText: "image.png" }).click();
   await page.locator(".workspace-preview-image img[alt='image.png']").waitFor({ timeout: 5000 });
+  await tree.locator(".workspace-file-browser-file", { hasText: "invented.pdf" }).click();
+  await page.locator(".workspace-preview-pdf img[alt='Page 1']").waitFor({ timeout: 10000 });
  } finally { await browser.close(); }
 } finally { if (server) await stopSmokeServer(server); fs.rmSync(tempRoot, { recursive: true, force: true }); }
