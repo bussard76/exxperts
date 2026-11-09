@@ -64,7 +64,7 @@ Whoever coordinates work (starts workers, merges, or talks to Sascha) follows `d
 
 ## Change levels
 
-Every task records `## Architecture impact` (level, modules and boundaries; level 3 needs an ADR). A fresh Worker Architect checks every spec before the build and conformance after level 2/3 builds; see `docs/architect-protocol.md`.
+Every task records `## Architecture impact` (level, modules and boundaries; level 3 needs an ADR). A fresh Worker Architect checks every spec before the build and conformance after level 2/3 builds; see `docs/architect-protocol.md`. One exception, ADR-0005: a bug fix whose ticket states the diagnosis and the exact change, and which the Controller itself finds to be level 1, takes the slim lane without a separate spec review.
 
 | Level | Examples | What you do |
 |---|---|---|
