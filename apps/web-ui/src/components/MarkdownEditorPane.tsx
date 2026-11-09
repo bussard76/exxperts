@@ -5,7 +5,7 @@
 // Changes: exxperts keeps the textarea-era workspace API, revision conflicts,
 // room dirty-navigation guard, and adds a read-only TipTap preview.
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type MouseEvent, type Ref } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type Ref } from "react";
 import { mergeAttributes, Node, type Editor } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { StarterKit } from "@tiptap/starter-kit";
@@ -22,6 +22,7 @@ import {
 	type WorkspaceMarkdownFile,
 } from "../workspace-markdown-api";
 import { workspaceImageUrl } from "../workspace-image-src";
+import { cycleTaskLines } from "../markdown-raw-tasks";
 import { useMarkdownEditorSync } from "./useMarkdownEditorSync";
 import { createWorkspaceImageExtension, WorkspaceLink, WorkspaceParagraph } from "./WorkspaceImageExtension";
 import { MarkdownEditorToolbar } from "./MarkdownEditorToolbar";
@@ -368,7 +369,8 @@ function MarkdownEditorSurface({
 		<div className="markdown-editor-rich-surface">
 			{!readOnly && <MarkdownSearchBar editor={editor} stateRef={searchStateRef} open={searchOpen} onClose={() => setSearchOpen(false)} />}
 			{!readOnly && <MarkdownEditorToolbar editor={editor} canEdit={canEdit} onSave={() => { void save(); }} isSaving={isSaving} isDirty={isDirty} saveError={saveError} hasExternalUpdate={hasExternalUpdate} onSearch={() => setSearchOpen((open) => !open)} searchOpen={searchOpen} />}
-			<div className="markdown-editor-rich-scroll" onClick={handlePreviewLinkClick}>
+			{/* A click on a task checkbox is a user edit even when the editor does not hold the focus; otherwise onUpdate takes it for an outside change and never saves it. */}
+			<div className="markdown-editor-rich-scroll" onClick={handlePreviewLinkClick} onClickCapture={(event) => { if (canEdit && !readOnly && event.target instanceof HTMLInputElement && event.target.type === "checkbox") userEditedRef.current = true; }}>
 				<EditorContent editor={editor} className="markdown-editor-tiptap" />
 			</div>
 		</div>
@@ -415,6 +417,8 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 	const [conflictRevision, setConflictRevision] = useState<string | null>(null);
 	const [canEdit, setCanEdit] = useState(false);
 	const surfaceRef = useRef<SurfaceHandle | null>(null);
+	const rawAreaRef = useRef<HTMLTextAreaElement | null>(null);
+	const rawSelectionRef = useRef<[number, number] | null>(null);
 	const contentSetterRef = useRef<((content: string) => void) | null>(null);
 
 	const sync = useMarkdownEditorSync({
@@ -518,6 +522,23 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		draftRef.current = next;
 		setDraft(next);
 	}, []);
+	const toggleRawTask = useCallback(() => {
+		const area = rawAreaRef.current;
+		if (!area || !canEdit) return;
+		const result = cycleTaskLines(area.value, area.selectionStart, area.selectionEnd);
+		if (result.value === area.value) return;
+		rawSelectionRef.current = [result.selectionStart, result.selectionEnd];
+		surfaceRef.current?.setRaw(result.value);
+	}, [canEdit]);
+	// The text changes on the next render; put the selection back once it has.
+	useLayoutEffect(() => {
+		const selection = rawSelectionRef.current;
+		const area = rawAreaRef.current;
+		if (!selection || !area) return;
+		rawSelectionRef.current = null;
+		area.focus();
+		area.setSelectionRange(selection[0], selection[1]);
+	}, [draft]);
 	const save = useCallback(() => surfaceRef.current?.save() ?? Promise.resolve(false), []);
 	const discard = useCallback(() => surfaceRef.current?.discard(), []);
 	const focus = useCallback(() => surfaceRef.current?.focus(), []);
@@ -603,7 +624,14 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			<div className="markdown-editor-body">
 				{phase === "loading" && <p className="markdown-editor-placeholder">Loading file…</p>}
 				{phase !== "loading" && file && <div className={mode === "raw" ? "markdown-editor-surface markdown-editor-surface-hidden" : "markdown-editor-surface"}><MarkdownEditorSurfaceWithRef key={`${conversationId}:${path}:${editorKey}`} ref={surfaceRef} resolveImageSrc={resolveImageSrc} content={draft} revision={file.revision} canEdit={canEdit} isDirty={isDirty} hasExternalUpdate={hasExternalUpdate || phase === "conflict"} isSaving={phase === "saving"} saveError={phase === "error"} readOnly={mode === "preview"} rawActive={mode === "raw"} onPreviewLink={handlePreviewLink} setDirty={setDirty} onDraftChange={handleDraftChange} onSave={persist} discardAndApplyExternal={discardAndApplyExternal} contentSetterRef={contentSetterRef} /></div>}
-				{phase !== "loading" && mode === "raw" && <textarea className="markdown-editor-raw markdown-editor-raw-input" aria-label="Raw Markdown source" spellCheck={false} readOnly={!canEdit} value={draft} onChange={(event) => surfaceRef.current?.setRaw(event.target.value)} />}
+				{phase !== "loading" && mode === "raw" && (
+					<div className="markdown-editor-raw-pane">
+						<div className="markdown-editor-toolbar" role="toolbar" aria-label="RAW tools">
+							<button type="button" className="markdown-editor-tool" title="Task list: plain, open, done" aria-label="Task list" disabled={!canEdit} onMouseDown={(event) => event.preventDefault()} onClick={toggleRawTask}>☑ Tasks</button>
+						</div>
+						<textarea ref={rawAreaRef} className="markdown-editor-raw markdown-editor-raw-input" aria-label="Raw Markdown source" spellCheck={false} readOnly={!canEdit} value={draft} onChange={(event) => surfaceRef.current?.setRaw(event.target.value)} />
+					</div>
+				)}
 			</div>
 			{conflict && <div className="markdown-editor-conflict" role="alert"><strong>This file changed outside the editor.</strong>{conflictRevision ? <span> Reload the latest version or save your draft over it.</span> : <span> Reload the latest version or keep your local draft.</span>}<div className="markdown-editor-conflict-actions"><button type="button" onClick={() => void reloadLatest()}>Reload</button><button type="button" onClick={() => void keepMine()} disabled={!canEdit}>Keep mine</button></div></div>}
 		</aside>

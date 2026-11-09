@@ -39,6 +39,8 @@ fs.mkdirSync(folder, { recursive: true });
 // Written with `*` bullets and a double blank line on purpose: the rich editor would normalise both.
 const notes = path.join(folder, "notes.md");
 const NOTES = "# Notes\n\n* first\n* second\n\n\nTail line\n";
+const todo = path.join(folder, "todo.md");
+fs.writeFileSync(todo, "# Todo\n\n- [ ] first\n- [x] second\n");
 fs.writeFileSync(notes, NOTES);
 
 fs.writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({
@@ -101,7 +103,7 @@ try {
 		// The text field fills the pane: a click anywhere in it puts the cursor there.
 		const box = await raw.boundingBox();
 		const body = await page.locator(".markdown-editor-body").boundingBox();
-		assert(box && body && box.height >= body.height - 4, `RAW fills the pane, got ${box?.height} of ${body?.height}`);
+		assert(box && body && box.height >= body.height - 60, `RAW fills the pane, got ${box?.height} of ${body?.height}`);
 		await page.getByRole("button", { name: "Edit", exact: true }).click();
 		await page.getByRole("button", { name: "RAW", exact: true }).click();
 		await raw.waitFor();
@@ -159,7 +161,35 @@ try {
 		await waitUntil(() => fs.readFileSync(notes, "utf8") === "# Changed outside\nmine", "the next RAW edit is saved on top of the reloaded file");
 		console.log("  ok  RAW saves again after a reload");
 
-		// 6. A read-only grant makes the RAW text read-only.
+		// 6. Task checkmarks. In Edit a rendered checkbox is clickable and saves "[x]".
+		await tree.locator(".workspace-file-browser-file", { hasText: "todo.md" }).click();
+		await page.getByRole("button", { name: "Edit", exact: true }).click();
+		const boxes = page.locator('.markdown-editor-tiptap .ProseMirror input[type="checkbox"]');
+		await waitUntil(async () => (await boxes.count()) === 2, "both task items render as checkboxes");
+		await boxes.first().click();
+		await waitUntil(() => fs.readFileSync(todo, "utf8").includes("- [x] first"), "clicking a checkbox saves it as done");
+		assert(fs.readFileSync(todo, "utf8").includes("- [x] second"), "the other task is untouched");
+		console.log("  ok  Edit: a clicked checkbox is saved as [x]");
+
+		// In RAW the task button works on the text: plain -> open -> done -> plain.
+		await page.getByRole("button", { name: "RAW", exact: true }).click();
+		await raw.waitFor();
+		await raw.evaluate((el) => { const t = el as HTMLTextAreaElement; t.value; });
+		await raw.click();
+		await raw.evaluate((el) => { const t = el as HTMLTextAreaElement; t.setSelectionRange(t.value.length, t.value.length); });
+		await page.keyboard.type("plain note");
+		await waitUntil(() => fs.readFileSync(todo, "utf8").endsWith("plain note"), "a plain line is typed in RAW");
+		const taskButton = page.getByRole("button", { name: "Task list" });
+		await taskButton.click();
+		await waitUntil(() => fs.readFileSync(todo, "utf8").endsWith("- [ ] plain note"), "the button turns the line into an open task");
+		await taskButton.click();
+		await waitUntil(() => fs.readFileSync(todo, "utf8").endsWith("- [x] plain note"), "the button marks it done");
+		await taskButton.click();
+		await waitUntil(() => fs.readFileSync(todo, "utf8").endsWith("\nplain note"), "the button takes the checkbox off again");
+		assert(fs.readFileSync(todo, "utf8").startsWith("# Todo\n\n- [x] first\n- [x] second\n"), "other lines stay as they were");
+		console.log("  ok  RAW: the task button cycles the line");
+
+		// 7. A read-only grant makes the RAW text read-only.
 		const readOnly = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "custom", allowedToolNames: ["ls", "read"] } }) });
 		assert(readOnly.status === 200, "switch the room to read-only tools");
 		await page.reload();
