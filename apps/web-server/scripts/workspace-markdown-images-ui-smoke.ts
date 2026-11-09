@@ -61,9 +61,10 @@ fs.symlinkSync(outside, path.join(folder, "outside-link"));
 fs.symlinkSync(path.join(outside, "outside.md"), path.join(folder, "outside.md"));
 fs.symlinkSync(path.join(outside, "outside.png"), path.join(folder, "outside.png"));
 fs.writeFileSync(path.join(folder, "docs", "other.md"), "# Other\n");
+fs.writeFileSync(path.join(folder, "docs", "third.md"), "# Third\n");
 const guide = path.join(folder, "docs", "guide.md");
 const IMAGE_LINES = ["![near](img/pixel.png \"Near\")", "![above](<../top pixel.png>)", "[![badge](img/pixel.png)](https://example.invalid)", "[text ![mixed](img/pixel.png)](https://example.invalid)", "![encoded](../top%20pixel.png)", "![missing alt](img/missing.png)", "![blocked alt](../node_modules/hidden/secret.png)", "![remote alt](https://images.invalid/remote.png)", "![relative alt](//images.invalid/relative.png)"];
-fs.writeFileSync(guide, `# Guide\n\nFirst line\n\n${IMAGE_LINES.join("\n\n")}\n`);
+fs.writeFileSync(guide, `# Guide\n\nFirst line\n\nFind here and find here\n\n${IMAGE_LINES.join("\n\n")}\n`);
 
 // A provider at an address nobody answers: the room only has to open, never answer.
 fs.writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({
@@ -316,6 +317,27 @@ try {
 		await tree.locator(".workspace-file-browser-directory", { hasText: "docs" }).click({ timeout: 15_000 });
 		await tree.locator(".workspace-file-browser-file", { hasText: "guide.md" }).click({ timeout: 15_000 });
 
+		const tabs = page.getByRole("tablist", { name: "Open files" });
+		const tab = (name: string) => tabs.getByRole("tab", { name, exact: true });
+		await tab("guide.md").waitFor();
+		await tree.locator(".workspace-file-browser-file", { hasText: "other.md" }).click();
+		await tree.locator(".workspace-file-browser-file", { hasText: "third.md" }).click();
+		assert(await tabs.getByRole("tab").count() === 3, "three Markdown files have tabs");
+		await tab("other.md").click();
+		await tabs.getByRole("button", { name: "Close other.md" }).click();
+		await waitUntil(async () => await tab("third.md").getAttribute("aria-selected") === "true", "closing active tab selects right neighbor");
+		await tabs.getByRole("button", { name: "Close third.md" }).click();
+		await waitUntil(async () => await tab("guide.md").getAttribute("aria-selected") === "true", "closing last-position tab selects left neighbor");
+		await tree.locator(".workspace-file-browser-file", { hasText: "other.md" }).click();
+		await tab("guide.md").click();
+		await tabs.getByRole("button", { name: "Close other.md" }).click();
+		assert(await tab("guide.md").getAttribute("aria-selected") === "true", "closing inactive tab preserves selection");
+		await tree.locator(".workspace-file-browser-file", { hasText: "other.md" }).click();
+		await tab("other.md").locator("..").dragTo(tab("guide.md").locator(".."), { targetPosition: { x: 1, y: 5 } });
+		assert((await tabs.getByRole("tab").allTextContents()).join(",") === "other.md,guide.md", "tab dragging reorders open files");
+		await tab("guide.md").click();
+		await tabs.getByRole("button", { name: "Close other.md" }).click();
+
 		const images = page.locator('.markdown-editor-tiptap .ProseMirror img[alt="near"], .markdown-editor-tiptap .ProseMirror img[alt="above"]');
 		await waitUntil(async () => (await images.count()) === 2, "both images are in the editor");
 		await waitUntil(() => images.evaluateAll((all) => all.every((img) => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth > 0)), "both images have loaded");
@@ -338,6 +360,23 @@ try {
 		}
 		assert(externalRequests === 0, `external images made ${externalRequests} requests`);
 		await page.getByRole("button", { name: "Edit", exact: true }).click();
+
+		await page.getByRole("button", { name: /Find in file/ }).click();
+		const find = page.getByPlaceholder("Find in file…");
+		await find.fill("FIRST LINE");
+		await page.getByText("1 / 1", { exact: true }).waitFor();
+		await find.fill("FIND HERE");
+		await page.getByText("1 / 2", { exact: true }).waitFor();
+		await find.press("Enter");
+		await page.getByText("2 / 2", { exact: true }).waitFor();
+		await find.press("Enter");
+		await page.getByText("1 / 2", { exact: true }).waitFor();
+		await find.press("Shift+Enter");
+		await page.getByText("2 / 2", { exact: true }).waitFor();
+		await find.fill("not present in this file");
+		await page.getByText("No results", { exact: true }).waitFor();
+		await find.press("Escape");
+		assert(await find.count() === 0 && fs.readFileSync(guide, "utf8") === originalContent, "search closes without changing file bytes");
 
 		const anonymous = await fetch(`${baseUrl}${new URL(await images.first().evaluate((img) => (img as HTMLImageElement).src)).pathname}?conversationId=x&path=docs/img/pixel.png`);
 		assert(anonymous.status === 401, `images need a session, got ${anonymous.status}`);

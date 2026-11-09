@@ -54,6 +54,7 @@
     "runtime/packages/tui/package.json",
     "docs/*.md",
     "README.md",
+    "NOTICE",
     "CHANGELOG.md"
   ],
   "scripts": {
