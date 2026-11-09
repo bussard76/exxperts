@@ -491,7 +491,7 @@ try {
 		const anchored = [...vmlDom.window.document.querySelectorAll<HTMLElement>("[style*='left:']")].filter((node) => node.style.top);
 		assert(anchored.some((node) => node.style.left === "72pt" && node.style.top === "72pt") && anchored.some((node) => node.style.left === "144pt" && node.style.top === "144pt"), `anchored offsets differ and the page margin is subtracted: ${anchored.map((node) => node.getAttribute("style")).join("; ")}`);
 		assert([...vmlDom.window.document.querySelectorAll("img")].some((img) => img.style.transform.includes("rotate(270deg)")), "rotated picture keeps its rotation");
-		assert(!vmlDom.window.document.querySelector("svg, foreignObject, script") && !vmlBody.html.includes("example.invalid"), "VML active content and URL styles are removed");
+		assert(!vmlDom.window.document.querySelector("svg, foreignObject, script") && !vmlBody.html.includes("example.invalid") && !vmlBody.html.includes("inventedHandler") && !vmlBody.html.includes("Invented box"), "VML active content, foreignObject contents, handlers and URL styles are removed");
 		assert([...vmlDom.window.document.querySelectorAll("div")].some((node) => node.style.borderTopStyle === "double"), "VML line becomes a double rule");
 		vmlDom.window.close();
 		const ordinary = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=report.docx`);

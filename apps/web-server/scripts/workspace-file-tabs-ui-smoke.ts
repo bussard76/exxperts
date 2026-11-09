@@ -840,7 +840,8 @@ try {
 		await vmlFrame.getByText("Second saved page", { exact: true }).waitFor({ timeout: 20_000 });
 		assert(await vmlFrame.locator("section.docx").count() === 2, "saved VML document shows two pages");
 		assert(await vmlFrame.locator("header").count() > 0 && await vmlFrame.locator("footer").count() > 0, "VML header and footer survive in the browser");
-		assert(await vmlFrame.locator("svg, foreignObject, script").count() === 0, "active VML elements are absent in the browser");
+		assert(await vmlFrame.locator("svg, foreignObject, script, [onload]").count() === 0 && await vmlFrame.getByText("Invented box", { exact: true }).count() === 0, "active VML and foreignObject contents are absent in the browser");
+		assert(await vmlFrame.locator("body").evaluate((body) => !body.outerHTML.includes("example.invalid") && !body.outerHTML.includes("inventedHandler")), "hostile VML attributes and URLs are absent in the browser");
 		assert(await vmlFrame.locator("div").evaluateAll((nodes) => nodes.some((node) => (node as HTMLElement).style.borderTopStyle === "double")), "VML line appears as a double rule in the browser");
 		await tab("vml.docx").getByRole("button", { name: /close/i }).click();
 		await treeFile("wide-pages.docx").click();

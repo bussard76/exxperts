@@ -735,7 +735,7 @@ async function previewWord(buffer) {
 		if (error?.previewCode) throw error;
 		const name = ["Error", "TypeError", "ReferenceError", "RangeError", "SyntaxError"].includes(error?.name) ? error.name : "UnknownError";
 		const message = error?.message === "requestAnimationFrame is not defined" ? error.message : "Unexpected renderer error";
-		process.stderr.write(`WORD_PREVIEW_DIAGNOSTIC ${name}|${message}\n`);
+		await new Promise((resolve) => process.stderr.write(`WORD_PREVIEW_DIAGNOSTIC ${name}|${message}\n`, resolve));
 		throw previewError("damaged_file");
 	} finally { window.close(); }
 }

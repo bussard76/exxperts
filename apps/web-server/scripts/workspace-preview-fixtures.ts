@@ -22,7 +22,7 @@ export async function vmlDocx(): Promise<Buffer> {
 	const { default: JSZip } = await import("jszip");
 	const zip = await JSZip.loadAsync(await smallDocx());
 	const namespaces = `xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml"`;
-	const shape = `<w:p><w:r><w:pict><v:rect style="width:40pt;height:15pt"><v:textbox><w:txbxContent><w:p><w:r><w:t>Invented box</w:t></w:r></w:p></w:txbxContent></v:textbox></v:rect></w:pict></w:r></w:p>`;
+	const shape = `<w:p><w:r><w:pict><v:rect onload="inventedHandler()" href="https://example.invalid/active" style="width:40pt;height:15pt"><v:textbox><w:txbxContent><w:p><w:r><w:t>Invented box</w:t></w:r></w:p></w:txbxContent></v:textbox></v:rect></w:pict></w:r></w:p>`;
 	const line = `<w:p><w:r><w:pict><v:line style="width:80pt;height:1pt;transform:url(https://example.invalid/vml)" from="0,0" to="80pt,0"/></w:pict></w:r></w:p>`;
 	let document = await zip.file("word/document.xml")!.async("string");
 	const picture = document.match(/<a:graphic>.*?<\/a:graphic>/)![0].replace("<a:xfrm>", '<a:xfrm rot="16200000">');
