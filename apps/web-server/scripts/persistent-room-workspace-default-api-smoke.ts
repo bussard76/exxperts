@@ -120,6 +120,10 @@ try {
 	const image = await authedFetch(`${baseUrl}/api/persistent-agents/${encodedAgentId}/workspace-image?conversationId=demo-thread&path=invented.png`);
 	assert(image.status === 200 && image.headers.get("content-type") === "image/png" && image.headers.get("x-content-type-options") === "nosniff", "workspace image route serves guarded image bytes with safe headers");
 	assert(Buffer.from(await image.arrayBuffer()).equals(Buffer.from([137, 80, 78, 71])), "workspace image route returns the invented file bytes");
+	writePersistentAgentThread(agentId, "demo-thread", { state: "standby", origin: "home", model, items: [] });
+	fs.writeFileSync(path.join(workspaceRoot, "invented.md"), Buffer.from([35, 32, 65, 0, 0xff]));
+	const markdown = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=invented.md`);
+	assert(markdown.status === 200 && markdown.body.kind === "text" && markdown.body.text === "# A\0\ufffd", "Markdown is read-only text with replacement decoding and NUL preserved");
 	assert(putDefault.body?.storage?.kind === "persistent-agent-runtime-default", "PUT should report room-default storage kind");
 	assert(putDefault.body?.policy?.rootCount === 1, "PUT should return one redacted root");
 	assert(putDefault.body?.policy?.roots?.[0]?.displayLabel === "Smoke Workspace", "PUT should preserve safe display label");

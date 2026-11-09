@@ -1,10 +1,13 @@
+import path from "node:path";
+import fs from "node:fs";
+import { PersistentRoomWorkspaceToolError, resolvePersistentRoomWorkspaceExistingFile, resolvePersistentRoomWorkspacePath } from "./persistent-room-workspace-tools.js";
 import { readWorkspaceImageFile } from "./persistent-room-workspace-image.js";
 import { ARTIFACT_SECURITY_HEADERS } from "./request-checks.js";
 import { listPersistentRoomWorkspaceFiles } from "./persistent-room-workspace-files.js";
 import type { FastifyRequest } from "fastify";
 import { MAINTENANCE_DIAGNOSTICS_KEEP, MAINTENANCE_DIAGNOSTICS_DEFAULT_LIMIT, listMaintenanceDiagnostics, exportMaintenanceDiagnostics } from "./maintenance-diagnostics.js";
-import { createPersistentAgentInstance, saveWithOpenConversationCheck, getPersistentRoomInstructionsView, savePersistentRoomGlobalInstructionsEnabled, savePersistentRoomInstructions } from "./persistent-agents.js";
-import { normalizePersistentRoomWorkspaceToolSelectionInput } from "./persistent-room-tool-policy.js";
+import { createPersistentAgentInstance, getPersistentAgentThread, saveWithOpenConversationCheck, getPersistentRoomInstructionsView, savePersistentRoomGlobalInstructionsEnabled, savePersistentRoomInstructions } from "./persistent-agents.js";
+import { normalizePersistentRoomWorkspaceToolSelectionInput, persistentRoomWorkspaceToolNamesForPolicy } from "./persistent-room-tool-policy.js";
 import { PersistentRoomWorkspacePolicyError, resolvePersistentRoomEffectiveWorkspacePolicy, assertPersistentRoomWorkspaceDefaultMutable, releasePersistentRoomThreadWorkspaceMirror, type PersistentRoomCapabilityPolicy, persistentRoomCapabilityPolicyView, readPersistentRoomCapabilityPolicy, PERSISTENT_ROOM_WORKSPACE_POLICY_STORAGE_SOURCE, deletePersistentRoomCapabilityPolicy, readPersistentRoomDefaultCapabilityPolicy, PERSISTENT_ROOM_WORKSPACE_DEFAULT_STORAGE_SOURCE, missingPersistentRoomWorkspaceRootWarnings, normalizePersistentRoomWorkspaceAccessModeInput, createPersistentRoomDefaultCapabilityPolicy, updatePersistentRoomCapabilityPolicyWorkspaceSettings, writePersistentRoomDefaultCapabilityPolicy, deletePersistentRoomDefaultCapabilityPolicy, createPersistentRoomCapabilityPolicy, writePersistentRoomCapabilityPolicy } from "./persistent-room-workspace-policy.js";
 import { readPersistentRoomMaintenanceSettings, writePersistentRoomMaintenanceSettings } from "./persistent-room-maintenance-settings.js";
 import { settleMemoryBudget } from "./memory-entries-store.js";
@@ -132,6 +135,96 @@ app.get("/api/persistent-agents/:id/workspace-image", async (req, reply) => {
 		const payload = persistentRoomWorkspaceErrorPayload(e);
 		return reply.code(payload.statusCode).send(payload.body);
 	}
+});
+
+app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
+	reply.headers({
+		"Cache-Control": "no-store",
+		"X-Content-Type-Options": "nosniff",
+		"Referrer-Policy": "no-referrer",
+		"Content-Security-Policy": "sandbox; default-src 'none'",
+	});
+	let agentId: string;
+	try {
+		agentId = getUsablePersistentAgentStatusForNormalUse(String((req.params as any).id ?? "").trim()).id;
+	} catch (error) {
+		if ((error as { statusCode?: number }).statusCode !== 404) return persistentAgentNormalUseErrorReply(reply, error);
+		return reply.code(404).send({ code: "room_not_found", error: "This file is no longer available in this workspace." });
+	}
+	const query = (req.query ?? {}) as Record<string, unknown>;
+	if (typeof query.conversationId !== "string" || !query.conversationId || typeof query.path !== "string" || !query.path) {
+		return reply.code(400).send({ code: "invalid_request", error: "Choose a valid workspace file to preview." });
+	}
+	const relativePath = query.path.replaceAll("\\", "/");
+	if (relativePath.includes("\0") || relativePath.startsWith("~") || relativePath.startsWith("/") || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(relativePath)
+		|| relativePath.split("/").some((segment) => !segment || segment.startsWith("."))
+		|| (process.platform === "win32" && relativePath.includes(":"))) {
+		return reply.code(400).send({ code: "invalid_path", error: "Choose a valid workspace file to preview." });
+	}
+	let conversationExists = false;
+	try { conversationExists = getPersistentAgentThread(agentId, query.conversationId) !== null; } catch { /* Invalid thread identifiers are not conversations. */ }
+	if (!conversationExists) return reply.code(404).send({ code: "conversation_not_found", error: "This file is no longer available in this workspace." });
+	const effective = resolvePersistentRoomEffectiveWorkspacePolicy(agentId, query.conversationId);
+	if (!effective.policy) return reply.code(404).send({ code: "workspace_not_found", error: "This file is no longer available in this workspace." });
+	if (!effective.workspaceToolsEnabled || !effective.policy.modes.read || !persistentRoomWorkspaceToolNamesForPolicy(effective.policy).includes("read")) {
+		return reply.code(403).send({ code: "workspace_read_forbidden", error: "This file is not available under the current workspace permissions." });
+	}
+	let guarded: ReturnType<typeof resolvePersistentRoomWorkspaceExistingFile>;
+	try {
+		guarded = resolvePersistentRoomWorkspaceExistingFile(effective.policy, relativePath);
+	} catch (error) {
+		if (error instanceof PersistentRoomWorkspaceToolError) {
+			if (error.code === "file_not_found") return reply.code(404).send({ code: "file_not_found", error: "This file is no longer available in this workspace." });
+			if (error.code === "workspace_unavailable") return reply.code(503).send({ code: "workspace_unavailable", error: "The workspace folder is not readable right now." });
+			if (error.code === "not_file") {
+				try {
+					if (!resolvePersistentRoomWorkspacePath(effective.policy, relativePath, "read").lstat.isSymbolicLink()) {
+						return reply.code(400).send({ code: "not_file", error: "Choose a valid workspace file to preview." });
+					}
+				} catch { /* A changed target remains refused. */ }
+			}
+			return reply.code(403).send({ code: "blocked_by_policy", error: "This file is not available under the current workspace permissions." });
+		}
+		return reply.code(500).send({ code: "preview_failed", error: "This file could not be previewed." });
+	}
+	const extension = path.extname(relativePath).toLowerCase();
+	if (extension === ".txt" || extension === ".json" || extension === ".md") {
+		const limit = 16_777_216;
+		const tooLarge = () => reply.code(413).send({ code: "file_too_large", error: "This file is too large or complex to preview here." });
+		const changed = () => reply.code(409).send({ code: "file_changed", error: "This file changed while the preview was loading; close the tab and open it again." });
+		if (guarded.stat.size > limit) return tooLarge();
+		const expected = guarded.stat;
+		const matches = (stat: fs.Stats) => stat.isFile() && stat.dev === expected.dev && stat.ino === expected.ino
+			&& stat.size === expected.size && stat.mtimeMs === expected.mtimeMs;
+		let bytes: Buffer;
+		try {
+			const fd = fs.openSync(guarded.absolutePath, "r");
+			try {
+				if (!matches(fs.fstatSync(fd))) return changed();
+				bytes = Buffer.alloc(expected.size);
+				let offset = 0;
+				while (offset < bytes.length) {
+					const count = fs.readSync(fd, bytes, offset, bytes.length - offset, offset);
+					if (!count) return changed();
+					offset += count;
+				}
+				const after = fs.fstatSync(fd);
+				if (after.size > limit) return tooLarge();
+				if (!matches(after)) return changed();
+			} finally { fs.closeSync(fd); }
+		} catch { return changed(); }
+		try {
+			const current = resolvePersistentRoomEffectiveWorkspacePolicy(agentId, query.conversationId);
+			if (!current.policy || !current.workspaceToolsEnabled || !current.policy.modes.read || !persistentRoomWorkspaceToolNamesForPolicy(current.policy).includes("read")) throw new Error("permission");
+			const again = resolvePersistentRoomWorkspaceExistingFile(current.policy, relativePath);
+			if (again.absolutePath !== guarded.absolutePath || again.rootRealpath !== guarded.rootRealpath || !matches(again.stat)) return changed();
+		} catch (error) {
+			if (error instanceof PersistentRoomWorkspaceToolError && error.code === "file_not_found") return changed();
+			return reply.code(403).send({ code: "workspace_read_forbidden", error: "This file is not available under the current workspace permissions." });
+		}
+		return reply.send({ schemaVersion: 1, agentId, conversationId: query.conversationId, path: relativePath, kind: "text", text: bytes.toString("utf8"), notices: [] });
+	}
+	return reply.code(415).send({ code: "unsupported_file_type", error: "This file type cannot be previewed here." });
 });
 
 app.delete("/api/persistent-agents/:id/workspace-policy", async (req, reply) => {
