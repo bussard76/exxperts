@@ -1,5 +1,19 @@
 # Series TUI placement probe
 
+## Continuation after Controller clarification
+
+**Result: shield discarded; experiment stopped.** The Controller clarified that the 154 pre-existing gaps remain unresolved for acceptance but do not stop this isolated non-acceptance experiment. Two generations from the same untouched pinned input matched byte-for-byte: SHA-256 `bae7fd301127be0cfff896dbae1ce4df8118a02a1d7849b20b3c55267005d784`. The generator SHA-256 was `a34a691395f224ca2bd5728d3ee57a2fdfde3ad1d4c00f16b3ed73af3227a91c`.
+
+The candidate removes the six original workspace entries for 24.12.2/7.16.0, places one pair at `runtime/node_modules` with only the two previously approved registry URL/SRI pairs added, and copies the unchanged original root 20.19.40/6.21.0 entries to `runtime/packages/tui/node_modules`. The root entries remain in place. The generator asserts expected versions, identical original workspace entries, flags, dependencies, required metadata on the root identities, and absent proposed lock paths and descendants; the clean archive contained no pre-existing runtime node_modules paths. An entry-by-entry audit confirmed all other original package entries, including the 154 metadata gaps, are unchanged. No manifest, dependency, version or tsconfig changed. The exact lock diff SHA-256 is `ba07d964836a7e4817faf2a27ae1917a77b6450f684b2c1901f3091695fabfe9`.
+
+A clean root `npm ci` with Node `v22.23.4`, npm `10.9.9`, Linux x86_64 and glibc 2.39 exited 0, added 822 packages and left the candidate lock hash unchanged. It used a fresh isolated home and npm cache, an empty omit setting, `ignore-scripts=false`, and the pinned `.npmrc` (`allow-remote=root`); normal lifecycle ran, including Chromium downloads, without browser or script suppression. npm uses the locked integrity values for the two approved pairs and the original root pair; this run does not independently establish provenance of every fetched artifact, especially the 154 unchanged missing-metadata entries.
+
+After installation, `runtime/node_modules/@types/node/package.json` and `runtime/node_modules/undici-types/package.json` existed, but **both** `runtime/packages/tui/node_modules/@types/node/package.json` and `runtime/packages/tui/node_modules/undici-types/package.json` were absent. This directly fails the proposed shield materialization; it does not establish why npm discarded the entries. Per the instruction to stop if the shield does not install, `npm ls --all`, actual Node or TypeScript resolution, TUI build, declaration comparison and independent second checkout were not run. No runtime compatibility, R2 closure, supported-platform coverage or acceptance is claimed; a different proposal requires independent review and Controller decision.
+
+The generator, both generated candidate locks, exact diff, entry-audit output and full npm ci log are retained locally under `.build/tui-placement-probe/logs/`; npm ci log SHA-256 `0ba5eb1b3a69d555d7a2287b11ecb5a20cfd7e3191933a61aa9fc4cedac10c74`. They are local experiment artifacts, not committed review evidence. The clean archived checkouts and isolated install/cache were removed after recording the result. The original dirty lock and stashes remain untouched.
+
+## Initial stop before clarification
+
 Result: **stopped before generation**. The pinned base has missing source metadata beyond the two approved pairs; the task requires stopping if metadata is missing. The TUI shield hypothesis remains untested, and this report does not propose an exception or establish that npm would install the shield.
 
 ## Evidence
