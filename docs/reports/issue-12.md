@@ -13,6 +13,7 @@ Level 2: the existing App and sidebar icon export, pane renderers and room CSS r
 - [x] Closing last tab while folded clears toggle and collapsed class; reopening works — `workspace-file-tabs-ui-smoke.ts` (dispatches the mounted tab close control).
 - [x] Toggle works for Markdown, workspace preview, attachments, artifact and task run; maximized artifact hides toggle — `workspace-file-tabs-ui-smoke.ts`, `attachments-panel-ui-smoke.ts`, `right-pane-identity-ui-smoke.ts`.
 - [x] At 1000px, 1600px and phone width with independently clean pane-width storage, controls remain reachable without overlap — `workspace-file-tabs-ui-smoke.ts`.
+- [x] At 1000px and 1600px, toggle right edge is within 12px of the open pane left edge and never overlaps the gear — `workspace-file-tabs-ui-smoke.ts`; Sascha accepted commit `6b7a667`.
 - [x] Tab, Enter and Space operate toggle; pane Escape behavior remains unchanged — `workspace-file-tabs-ui-smoke.ts` and `attachments-panel-ui-smoke.ts`.
 - [x] Unsaved Markdown draft survives folding and unfolding — `workspace-file-tabs-ui-smoke.ts`.
 - [x] While folded, different same-kind workspace file, artifact path and artifact task ID unfold and render selected content; metadata updates and selecting the same occupant do not falsely open — `workspace-file-tabs-ui-smoke.ts` and `right-pane-identity-ui-smoke.ts`. The distinct task-run transition is Controller-classified edge-case debt below.
@@ -27,7 +28,7 @@ Graph: no. Seven tool calls preceded the first edited file; no graph was used, s
 
 The gallery remains visible when its viewer is folded; `attachments-panel-ui-smoke.ts` covers switching to another gallery file and returning to Attachments.
 
-## Current verification and blocker
+## Verification and debt
 
 `npx tsc --noEmit -p apps/web-ui/tsconfig.json && npm run typecheck:scripts` passed after building the runtime prerequisite. `npm run test:scripts` passed 54 tests. The attributed browser gates for `workspace-file-tabs-ui-smoke.ts` and `attachments-panel-ui-smoke.ts` passed. The workspace browser gate passed with fresh storage at all three widths, the guarded save and conflict paths, image position and PDF scroll. The attachment gate passed the gallery switch, selected-row close and maximize checks. Initial browser runs failed because the fresh checkout lacked built runtime output; the runtime was built locally. One exploratory draft test failed because it waited for a conflict message inside the folded pane; the corrected test unfolds before checking the existing visible error. Two viewport test setup attempts timed out while the phone drawer was open; the corrected test closes it through its control. These failures were not classified as load or network flakes. Foreign-host network-failure reruns: 0.
 
@@ -36,3 +37,11 @@ The Controller classified the distinct-task-run-while-folded transition as edge-
 ## Files, tests, assumptions and debt
 
 Changed: `apps/web-ui/src/App.tsx`, `apps/web-ui/src/sidebar-collapse.tsx`, `apps/web-ui/src/styles/43-room-workspace.css`, `apps/web-server/scripts/workspace-file-tabs-ui-smoke.ts`, `apps/web-server/scripts/attachments-panel-ui-smoke.ts`, `apps/web-server/scripts/right-pane-identity-ui-smoke.ts`, `docs/developer.md`, `docs/reviews/T12-R2-architecture-spec.md`, and this report. Added browser assertions to the existing suites and the new identity suite; no new dependency or export beyond the accepted base. Assumption: preserving the gallery when folding its file viewer repairs its existing chat-column role. The pre-existing `package-lock.json` modification remains uncommitted and untouched. No screenshots were captured. Debt candidate: a previously stored wide pane can squeeze the chat and its controls, as recorded in the architecture review; accepted out of scope. Full build and smokes are assigned to the Tester and wave and were not run.
+
+## Self-review
+
+- Visibility, fold, expand, state retention, closing and reopening: `workspace-file-tabs-ui-smoke.ts` checks the empty state, column, hidden mounted tabs, draft, active tab, image position, PDF scroll, reopening and the existing guard paths.
+- Pane kinds, maximized viewer, Escape and keyboard: `workspace-file-tabs-ui-smoke.ts`, `attachments-panel-ui-smoke.ts` and `right-pane-identity-ui-smoke.ts` cover Markdown, workspace preview, Attachments, artifact and task run, including Enter, Space, Tab, Escape and maximize.
+- Selection identity and privacy: `right-pane-identity-ui-smoke.ts` uses real transcript selections, verifies rendered content for changed paths and task IDs, checks same selection and task progress while folded, and checks no repeated artifact fetch from folding. The separate selected-row close and gallery behavior use `attachments-panel-ui-smoke.ts`. No new routes, dependencies, exports, server reads or authorization paths were added.
+- Layout and position: `workspace-file-tabs-ui-smoke.ts` uses separate fresh browser contexts at 1000px, 1600px and phone width, checks the toggle and pane bounds, and verifies the accepted 12px and gear-clearance requirements.
+- The Controller classified the otherwise untestable second live task-run selection as edge-case debt as explained above. The pre-existing lockfile change was preserved. No screenshots were taken; graphify was not run.

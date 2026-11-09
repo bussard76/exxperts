@@ -242,10 +242,13 @@ try {
 			const layout = await layoutPage.evaluate(() => {
 				const button = document.querySelector('[aria-label="Hide right pane"]')!.getBoundingClientRect();
 				const pane = document.querySelector(".workspace-pane")!.getBoundingClientRect();
+				const gear = document.querySelector('[aria-label="Room settings"]')!.getBoundingClientRect();
 				const topbar = document.querySelector(".topbar")!.getBoundingClientRect();
-				return { button: { left: button.left, right: button.right, top: button.top, bottom: button.bottom }, pane: { left: pane.left, right: pane.right, top: pane.top, bottom: pane.bottom }, topbar: { bottom: topbar.bottom }, width: innerWidth };
+				return { button: { left: button.left, right: button.right, top: button.top, bottom: button.bottom }, pane: { left: pane.left, right: pane.right, top: pane.top, bottom: pane.bottom }, gear: { left: gear.left, right: gear.right, top: gear.top, bottom: gear.bottom }, topbar: { bottom: topbar.bottom }, width: innerWidth };
 			});
 			assert(layout.button.left >= 0 && layout.button.right <= layout.width && layout.button.top >= 0 && layout.button.bottom <= 900, `${width}px toggle is reachable: ${JSON.stringify(layout)}`);
+			assert(layout.button.left >= layout.gear.right || layout.button.right <= layout.gear.left || layout.button.top >= layout.gear.bottom || layout.button.bottom <= layout.gear.top, `${width}px toggle does not overlap the gear: ${JSON.stringify(layout)}`);
+			if (width > 760) assert(Math.abs(layout.button.right - layout.pane.left) <= 12, `${width}px toggle stays within 12px of the pane: ${JSON.stringify(layout)}`);
 			assert(layout.pane.left >= 0 && layout.pane.right <= layout.width && (width > 760 || layout.pane.top >= layout.topbar.bottom), `${width}px pane stays on screen without covering the topbar: ${JSON.stringify(layout)}`);
 			await layoutToggle.click();
 			await layoutPage.getByRole("button", { name: "Show right pane" }).click();
