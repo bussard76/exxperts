@@ -526,7 +526,16 @@ export async function bundleServer({ root, mapFile = null, entry = ENTRY, out = 
 			throw new Error(`${asset.file}: ${asset.package} is no longer inlined; drop the entry from BUNDLE_ASSETS in scripts/bundle-server.mjs`);
 		}
 		const from = asset.source ? path.join(root, ...asset.source.split("/")) : path.join(byName.get(asset.package).dir, asset.file);
-		fs.copyFileSync(from, path.join(outDir, asset.file));
+		if (asset.file === "shelf-parse-worker.mjs") {
+			await esbuild.build({
+				absWorkingDir: root, entryPoints: [from], outfile: path.join(outDir, asset.file),
+				bundle: true, packages: "external", platform: "node", format: "esm", target: "node22",
+				banner: { js: `// ExcelJS bundled into shelf worker\n${BANNER}` }, legalComments: "eof",
+				plugins: [{ name: "exceljs-browser", setup(build) {
+					build.onResolve({ filter: /^exceljs$/ }, () => ({ path: path.join(root, "node_modules/exceljs/dist/exceljs.min.js") }));
+				} }],
+			});
+		} else fs.copyFileSync(from, path.join(outDir, asset.file));
 	}
 	fs.writeFileSync(path.join(outDir, LICENCES_FILE), licenceText(packages));
 

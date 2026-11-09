@@ -126,3 +126,51 @@ test("the static gate passes when TypeScript imports point into protected packag
 	const result = pruneNodeModules(dir);
 	assert.deepEqual(findPrunedTypeScriptImports(dir, result.removed), []);
 });
+
+test("release pruning excludes the unused ExcelJS stream chain while keeping shared dependencies", () => {
+	const files = {
+		"exceljs/package.json": JSON.stringify({ name: "exceljs", version: "4.4.0", dependencies: { unzipper: "1" } }),
+		"exceljs/index.js": 'module.exports = require("unzipper");',
+		"unzipper/package.json": JSON.stringify({ name: "unzipper", version: "1", main: "index.js", dependencies: { exclusive: "1", shared: "1", direct: "1" } }),
+		"unzipper/index.js": 'module.exports = require("exclusive");',
+		"unzipper/LICENSE": "license",
+		"exclusive/package.json": JSON.stringify({ name: "exclusive", dependencies: { cycle: "1" } }),
+		"exclusive/index.js": "module.exports = 1;",
+		"cycle/package.json": JSON.stringify({ name: "cycle", dependencies: { exclusive: "1" } }),
+		"cycle/index.js": "module.exports = 1;",
+		"shared/package.json": JSON.stringify({ name: "shared" }),
+		"shared/index.js": "module.exports = 1;",
+		"direct/package.json": JSON.stringify({ name: "direct" }),
+		"other/package.json": JSON.stringify({ name: "other", dependencies: { shared: "1" } }),
+	};
+	const root = makeTree(Object.fromEntries(Object.entries(files).map(([name, value]) => [`node_modules/${name}`, value])));
+	fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ dependencies: { direct: "1" } }));
+	const dir = path.join(root, "node_modules");
+	pruneNodeModules(dir);
+	assert.ok(!has(dir, "exclusive/package.json"));
+	assert.ok(!has(dir, "cycle/package.json"));
+	assert.ok(has(dir, "shared/index.js"));
+	assert.ok(has(dir, "direct/package.json"));
+	assert.ok(has(dir, "unzipper/LICENSE"));
+	assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, "unzipper/package.json"), "utf8")).dependencies, {});
+});
+
+test("a bundled ExcelJS worker removes only the now-unused ExcelJS files and dependencies", () => {
+	const root = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "4.4.0", other: "1" } }),
+		"apps/web-server/dist/shelf-parse-worker.mjs": "// ExcelJS bundled into shelf worker\n",
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", dependencies: { unzipper: "1", unique: "1", shared: "1" } }),
+		"node_modules/exceljs/LICENSE": "license",
+		"node_modules/exceljs/dist/large.js": "unused",
+		"node_modules/unzipper/package.json": JSON.stringify({ name: "unzipper" }),
+		"node_modules/unzipper/index.js": "unused",
+		"node_modules/unique/package.json": JSON.stringify({ name: "unique" }),
+		"node_modules/shared/package.json": JSON.stringify({ name: "shared" }),
+		"node_modules/other/package.json": JSON.stringify({ name: "other", dependencies: { shared: "1" } }),
+	});
+	pruneNodeModules(path.join(root, "node_modules"));
+	assert.ok(!has(root, "node_modules/exceljs/dist/large.js"));
+	assert.ok(!has(root, "node_modules/unique/package.json"));
+	assert.ok(has(root, "node_modules/shared/package.json"));
+	assert.ok(has(root, "node_modules/exceljs/LICENSE"));
+});

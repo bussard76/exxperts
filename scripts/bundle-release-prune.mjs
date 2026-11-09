@@ -59,7 +59,77 @@ function walkFiles(dir, visit, rel = "") {
 	}
 }
 
+// ExcelJS imports its stream reader even though the preview only uses xlsx.load.
+// Replace that reader's unzipper and remove only dependencies nobody else uses.
+function pruneExcelDependencies(nodeModulesDir, bundled = false) {
+	const packages = new Map();
+	function collect(dir) {
+		if (!fs.existsSync(dir)) return;
+		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+			if (!entry.isDirectory()) continue;
+			const full = path.join(dir, entry.name);
+			if (entry.name.startsWith("@")) { collect(full); continue; }
+			const manifest = path.join(full, "package.json");
+			if (fs.existsSync(manifest)) packages.set(full, JSON.parse(fs.readFileSync(manifest, "utf8")));
+			collect(path.join(full, "node_modules"));
+		}
+	}
+	collect(nodeModulesDir);
+	const excel = path.join(nodeModulesDir, "exceljs");
+	if (!packages.has(excel)) return;
+	function resolve(from, name) {
+		for (let dir = from; dir.startsWith(path.dirname(nodeModulesDir)); dir = path.dirname(dir)) {
+			const candidate = path.join(dir, "node_modules", name);
+			if (packages.has(candidate)) return candidate;
+			if (dir === path.dirname(nodeModulesDir)) break;
+		}
+		return null;
+	}
+	function dependencies(dir) {
+		const pkg = packages.get(dir);
+		return [...new Set([...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.optionalDependencies ?? {}), ...Object.keys(pkg.peerDependencies ?? {})])]
+			.map((name) => resolve(dir, name)).filter(Boolean);
+	}
+	const target = bundled ? excel : resolve(excel, "unzipper");
+	if (!target) throw new Error("ExcelJS unzipper is missing from the release payload");
+	const candidate = new Set();
+	function visit(dir, seen) {
+		if (seen.has(dir)) return;
+		seen.add(dir);
+		for (const dep of dependencies(dir)) visit(dep, seen);
+	}
+	visit(target, candidate);
+	const keep = new Set();
+	const root = path.dirname(nodeModulesDir);
+	const rootManifest = path.join(root, "package.json");
+	if (fs.existsSync(rootManifest)) packages.set(root, JSON.parse(fs.readFileSync(rootManifest, "utf8")));
+	for (const dir of packages.keys()) {
+		if (candidate.has(dir)) continue;
+		for (const dep of dependencies(dir)) {
+			if (dep === target && dir !== (bundled ? root : excel)) throw new Error(`${packages.get(target).name} is also needed by ${packages.get(dir).name}`);
+			if (candidate.has(dep) && dep !== target) visit(dep, keep);
+		}
+	}
+	if ([...keep].some((dir) => dir.startsWith(`${target}${path.sep}`))) throw new Error(`a shared dependency is nested inside ${packages.get(target).name}`);
+	for (const dir of candidate) {
+		if (dir !== target && !keep.has(dir)) fs.rmSync(dir, { recursive: true, force: true });
+	}
+	for (const entry of fs.readdirSync(target)) {
+		if (entry !== "package.json" && !LICENCE_FILE.test(entry)) fs.rmSync(path.join(target, entry), { recursive: true, force: true });
+	}
+	const pkg = packages.get(target);
+	delete pkg.optionalDependencies;
+	delete pkg.peerDependencies;
+	pkg.dependencies = {};
+	pkg.main = "index.js";
+	fs.writeFileSync(path.join(target, "package.json"), JSON.stringify(pkg, null, 2));
+	fs.writeFileSync(path.join(target, "index.js"), bundled ? 'throw new Error("ExcelJS is bundled in the shelf worker");\n' : 'module.exports = {};\n');
+}
+
 export function pruneNodeModules(nodeModulesDir) {
+	pruneExcelDependencies(nodeModulesDir);
+	const worker = path.join(path.dirname(nodeModulesDir), "apps/web-server/dist/shelf-parse-worker.mjs");
+	if (fs.existsSync(worker) && fs.readFileSync(worker, "utf8").startsWith("// ExcelJS bundled into shelf worker\n")) pruneExcelDependencies(nodeModulesDir, true);
 	const removed = new Set();
 	const counts = { maps: 0, declarations: 0, typescript: 0, markdown: 0 };
 	let filesBefore = 0;

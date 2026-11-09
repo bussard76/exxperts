@@ -146,6 +146,7 @@ function fixtureTree(overrides = {}) {
 		"node_modules/@silvia-odwyer/photon-node/package.json": JSON.stringify({ name: "@silvia-odwyer/photon-node", version: "0.3.4", license: "Apache-2.0", main: "photon.js" }),
 		"node_modules/@silvia-odwyer/photon-node/photon.js": 'exports.photonName = "photon";\n',
 		"node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm": "wasm",
+		"node_modules/exceljs/dist/exceljs.min.js": "module.exports = {};\n",
 		...overrides,
 	});
 }
@@ -484,4 +485,14 @@ test("another entry bundles into a folder beside dist, never into dist", async (
 	assert.match(checkServerFiles(dir).join("\n"), /apps\/web-server\/dist\/server\.mjs is missing/);
 	const result = JSON.parse(runNode(outFile));
 	assert.equal(result.config, "config-inlined");
+});
+
+test("the packaged shelf worker runs the bundled ExcelJS distribution", async () => {
+	const dir = fixtureTree({
+		"apps/web-server/src/shelf-parse-worker.mjs": 'const { default: excel } = await import("exceljs"); console.log(excel.marker);\n',
+		"node_modules/exceljs/dist/exceljs.min.js": 'module.exports = { marker: "invented-workbook" };\n',
+	});
+	await bundleServer({ root: dir, log: () => {} });
+	fs.rmSync(path.join(dir, "node_modules/exceljs/dist"), { recursive: true });
+	assert.equal(runNode(path.join(dir, "apps/web-server/dist/shelf-parse-worker.mjs")), "invented-workbook");
 });

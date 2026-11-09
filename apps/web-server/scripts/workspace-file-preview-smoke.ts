@@ -1,6 +1,6 @@
 // The preview route rejects invalid requests with safe, inert responses.
 // Offline: the room's model is never asked. Throwaway HOME.
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { fork, spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -16,6 +16,7 @@ function assert(condition: unknown, message: string): asserts condition {
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const webServerDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(webServerDir, "..", "..");
+const packagedApp = process.env.EXXPERTS_SMOKE_PACKAGED_APP;
 const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
 
@@ -353,6 +354,8 @@ if (excelChild) {
 	sheet.getColumn(1).width = 24;
 	sheet.getCell("B2").value = { formula: "SUM(20,34)", result: 54 };
 	sheet.getCell("B2").numFmt = '"$"#,##0.00';
+	sheet.mergeCells("C3:D3");
+	sheet.getCell("C3").value = "Invented merge";
 	sheet.getCell("A3").value = "Theme";
 	sheet.getCell("A3").font = { color: { theme: 4 } };
 	sheet.getCell("A4").value = "Tint";
@@ -370,6 +373,7 @@ if (excelChild) {
 		if (format) cell.numFmt = format;
 	}
 	workbook.addWorksheet("Detail").getCell("A1").value = "Second sheet";
+	for (let index = 1; index <= 8; index++) workbook.addWorksheet(`Extra ${index}`).getCell("A1").value = `Invented ${index}`;
 	fs.writeFileSync(path.join(folder, "actual.xlsx"), Buffer.from(await workbook.xlsx.writeBuffer()));
 }
 fs.writeFileSync(path.join(folder, "report.docx"), await smallDocx());
@@ -428,11 +432,11 @@ async function api(pathname: string, init: AuthedFetchInit = {}): Promise<{ stat
 let server: ChildProcessWithoutNullStreams | undefined;
 const serverOutput: string[] = [];
 try {
-	server = spawn("npx", ["tsx", "src/index.ts"], {
+	server = spawn(packagedApp ? process.execPath : "npx", packagedApp ? [path.join(packagedApp, "apps/web-server/dist/server.mjs")] : ["tsx", "src/index.ts"], {
 		shell: process.platform === "win32",
 		...SMOKE_SERVER_SPAWN_TREE_OPTIONS,
 		cwd: webServerDir,
-		env: smokeHomeEnv(tempHome, { PORT: String(port), ...SMOKE_SERVER_AUTH_ENV, EXXETA_HOME: repoRoot, EXXPERTS_CODING_AGENT_DIR: agentDir, EXXETA_PERSISTENT_AGENTS_ROOT: agentsRoot, ...(openChild ? { DISPLAY: ":987" } : {}), ...(fakeChild ? { NODE_OPTIONS: `--require=${preload}` } : {}) }) as NodeJS.ProcessEnv,
+		env: smokeHomeEnv(tempHome, { PORT: String(port), ...SMOKE_SERVER_AUTH_ENV, EXXETA_HOME: packagedApp ?? repoRoot, EXXPERTS_CODING_AGENT_DIR: agentDir, EXXETA_PERSISTENT_AGENTS_ROOT: agentsRoot, ...(openChild ? { DISPLAY: ":987" } : {}), ...(fakeChild ? { NODE_OPTIONS: `--require=${preload}` } : {}) }) as NodeJS.ProcessEnv,
 	});
 	server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
 	server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
@@ -533,11 +537,16 @@ try {
         assert(renewed.status === 200, "workspace restored after revocation");
     }
 	if (excelChild) {
+		const damaged = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=book.xlsx`);
+		assert(damaged.status === 422 && (await damaged.json()).code === "damaged_file", "a damaged workbook is refused through the real route");
 		const response = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=actual.xlsx`);
 		const body = await response.json();
 		assert(response.status === 200 && body.kind === "spreadsheet", `an invented two-sheet OOXML workbook is rendered through the real route and child: ${response.status} ${JSON.stringify(body)}`);
-		assert(body.workbook.sheets.length === 2 && body.workbook.sheets[0].name === "Summary" && body.workbook.sheets[1].name === "Detail", "every sheet retains its workbook order and name");
+		assert(body.workbook.sheets.length === 10 && body.workbook.sheets[0].name === "Summary" && body.workbook.sheets[1].name === "Detail", "every sheet retains its workbook order and name");
+		for (let index = 1; index <= 8; index++) assert(body.workbook.sheets[index + 1].name === `Extra ${index}` && body.workbook.sheets[index + 1].cells.some((cell: { text: string }) => cell.text === `Invented ${index}`), `extra sheet ${index} retains its name and value`);
 		const first = body.workbook.sheets[0];
+		assert(body.workbook.sheets[1].cells.some((cell: { text: string }) => cell.text === "Second sheet"), "the second sheet retains its value");
+		assert(first.merges.some((merge: { top: number; left: number; bottom: number; right: number }) => merge.top === 3 && merge.left === 3 && merge.bottom === 3 && merge.right === 4), "the merged range survives");
 		assert(first.cells.find((cell: { row: number; column: number }) => cell.row === 2 && cell.column === 2)?.text === "$54.00", "the stored formula result is formatted without exposing its formula");
 		const cell = first.cells.find((item: { row: number; column: number }) => item.row === 1 && item.column === 1);
 		const style = body.workbook.styles[cell.style];
@@ -546,6 +555,29 @@ try {
 		assert(colorAt(3) === "#4F81BD" && colorAt(4) === "#A7C0DE" && colorAt(5) === "#FF0000", `theme, tint and indexed colours resolve: ${[colorAt(3), colorAt(4), colorAt(5)].join(", ")}`);
 		const formattedText = first.cells.filter((item: { row: number; column: number }) => item.row >= 6 && item.column === 1).map((item: { text: string }) => item.text);
 		assert(JSON.stringify(formattedText) === JSON.stringify(["1,234.50 €", "$1,234.50", "(5)", "-", "23.1%", "05.03.2026", "5-Mar-26", "March 2026", "14:07", "2:07 PM", "42.5"]), `Excel formats render as expected: ${JSON.stringify(formattedText)}`);
+		if (packagedApp) {
+			const worker = path.join(packagedApp, "apps/web-server/dist/shelf-parse-worker.mjs");
+			const run = (request: Record<string, unknown>): Promise<any> => new Promise((resolve, reject) => {
+				const child = fork(worker, [JSON.stringify(request)], { execArgv: [], stdio: ["ignore", "ignore", "pipe", "ipc"] });
+				let received = false;
+				const timer = setTimeout(() => { child.kill(); reject(new Error("packaged shelf worker timed out")); }, 30_000);
+				child.once("message", (message) => { received = true; clearTimeout(timer); resolve(message); });
+				child.once("error", (error) => { clearTimeout(timer); reject(error); });
+				child.once("exit", () => { if (!received) { clearTimeout(timer); reject(new Error("packaged shelf worker exited without a result")); } });
+			});
+			const pdf = path.join(folder, "report.pdf"), docx = path.join(folder, "report.docx");
+			const pdfText = await run({ absolutePath: pdf, kind: "pdf", maxPages: 4, maxChars: 10000 });
+			assert(pdfText.ok && pdfText.text.includes("Invented preview"), "packaged shelf worker extracts PDF text");
+			const wordText = await run({ absolutePath: docx, kind: "docx", maxPages: 4, maxChars: 10000 });
+			assert(wordText.ok && wordText.text.length > 0, "packaged shelf worker extracts Word text");
+			const raster = await run({ absolutePath: pdf, kind: "pdf-raster", raster: { firstPage: 1, pageCount: 1, targetWidth: 300, maxPixels: 1000000 } });
+			assert(raster.ok && raster.raster.pages[0].imageBase64.length > 0, "packaged shelf worker rasterizes PDF");
+			const { createCanvas } = await import("@napi-rs/canvas");
+			const imagePath = path.join(folder, "invented.png");
+			fs.writeFileSync(imagePath, createCanvas(2, 2).toBuffer("image/png"));
+			const image = await run({ absolutePath: imagePath, kind: "image", image: { maxDimension: 100, maxPassthroughBytes: 100000, mimeType: "image/png" } });
+			assert(image.ok && image.image.width === 2 && image.image.height === 2, "packaged shelf worker decodes an image");
+		}
 	}
 	const openRequest = (body: unknown) => api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-open`, { method: "POST", headers: { origin: baseUrl, "x-exxperts-local-action": "open-workspace-file" }, body: JSON.stringify(body) });
 	for (const [body, status, code] of [
