@@ -149,6 +149,7 @@ try {
   assert.deepEqual((await page.locator(".workspace-tab-select").allTextContents()).map(name => name.trim()), ["other.txt", "notes.md"], "drag reorders tabs without changing their identity");
   await page.locator(".workspace-tab").filter({ hasText: "other.txt" }).getByRole("button", { name: "Close other.txt" }).click();
   assert.equal(await page.locator(".workspace-tab[data-active=true]").count(), 1);
+  assert.equal((await page.locator(".workspace-tab[data-active=true] .workspace-tab-select").textContent())?.trim(), "notes.md", "closing an active tab chooses its right neighbour");
   const composer = page.locator(".composer-input textarea");
   await composer.fill("before after");
   await composer.evaluate((node: HTMLTextAreaElement) => { node.focus(); node.setSelectionRange(7, 7); });
