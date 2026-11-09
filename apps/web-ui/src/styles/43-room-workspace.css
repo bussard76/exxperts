@@ -304,6 +304,8 @@ html.desktop-app-mac .workspace-tab {
 
 /* Folded away from the toggle in the topbar: the panes stay mounted, so tabs, scroll and zoom survive. */
 .workbench.right-pane-collapsed > :not(.main):not(.attachments-gallery) { display: none; }
+/* The topbar's actions sit on the chat rail's edge, far from the pane in a wide window. The pane toggle moves out to the column's right edge, 8px from the pane. */
+.topbar-actions .right-pane-toggle { transform: translateX(calc(var(--topbar-banner-edge) - 15px)); }
 .workspace-pane { min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; }
 .workspace-pane[hidden], .workspace-pane [hidden] { display: none; }
 .workspace-open-action { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.5rem; padding: 0.5rem 1rem; border-bottom: 1px solid var(--exx-border); background: var(--exx-surface); }
