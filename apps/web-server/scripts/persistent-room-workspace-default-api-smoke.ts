@@ -313,6 +313,8 @@ require("node:module").syncBuiltinESMExports();
 	const word = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=invented.docx`);
 	const sheet = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=invented.xlsx`);
 	assert(word.status === 200 && word.body.kind === "word" && typeof word.body.html === "string", "Word travels through the real child and guarded public route");
+	assert(word.body.html.includes("External image blocked.") && word.body.notices.some((notice: { code: string }) => notice.code === "external_resources_blocked"), "Word external resources become an inert notice");
+	assert(!word.body.html.includes("example.invalid") && !word.body.html.includes("<script>"), "Word preview does not expose active remote resources");
 	const networkProbes = fs.readFileSync(networkMarker, "utf8");
 	for (const name of ["fetch", "websocket", "http", "https", "socket", "tls", "dns", "dns-resolver", "dns-promise-resolver", "udp", "http2"]) assert(networkProbes.includes(`${name}:control:true`), `${name} deny control is active`);
 	assert(!networkProbes.includes(":attempt"), "Word rendering makes no outbound attempts");
