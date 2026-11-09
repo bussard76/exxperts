@@ -233,6 +233,24 @@ require("node:module").syncBuiltinESMExports();
 	assert(tooLarge.status === 413 && tooLarge.body.code === "file_too_large", "Markdown above the size limit is refused");
 	const noWrite = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-markdown?conversationId=demo-thread&path=invented.md`, { method: "PUT", body: JSON.stringify({ content: "replacement", revision: "invented" }) });
 	assert(noWrite.status === 404, "Series 1 has no Markdown write route");
+	const movedRoot = `${workspaceRoot}-moved`;
+	const replacementRoot = `${workspaceRoot}-replacement`;
+	fs.renameSync(workspaceRoot, movedRoot);
+	fs.mkdirSync(replacementRoot);
+	fs.writeFileSync(path.join(replacementRoot, "invented.md"), "replacement secret");
+	fs.symlinkSync(replacementRoot, workspaceRoot);
+	try {
+		for (const endpoint of ["workspace-files", "workspace-preview?path=invented.md", "workspace-image?path=invented.png"]) {
+			const separator = endpoint.includes("?") ? "&" : "?";
+			const response = await requestJson(`/api/persistent-agents/${encodedAgentId}/${endpoint}${separator}conversationId=demo-thread`);
+			assert(!JSON.stringify(response.body).includes("replacement secret"), `retargeted grant never exposes replacement content on ${endpoint}`);
+			assert(response.status >= 400 || response.body.root === null, `retargeted grant refuses ${endpoint}`);
+		}
+	} finally {
+		fs.unlinkSync(workspaceRoot);
+		fs.rmSync(replacementRoot, { recursive: true, force: true });
+		fs.renameSync(movedRoot, workspaceRoot);
+	}
 	fs.writeFileSync(path.join(workspaceRoot, "invented.html"), "<p>Invented page</p>");
 	const html = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=invented.html`);
 	assert(html.status === 200 && html.body.kind === "html" && html.body.html === "<p>Invented page</p>", "HTML preview returns the guarded invented content");
