@@ -48,6 +48,7 @@ inventedSheet.mergeCells("A3:B3");
 inventedSheet.getCell("A3").value = "Invented merge";
 workbook.addWorksheet("Empty sheet");
 fs.writeFileSync(path.join(folder, "invented.xlsx"), Buffer.from(await workbook.xlsx.writeBuffer()));
+fs.writeFileSync(path.join(folder, "malformed-invented.xlsx"), "invented");
 fs.writeFileSync(path.join(folder, "invented.html"), "<p>Invented HTML</p>");
 fs.writeFileSync(path.join(folder, "hostile.html"), `<!doctype html><body><script>
 const result = [];
@@ -73,6 +74,21 @@ fs.writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({ providers:
 fs.writeFileSync(path.join(agentDir, "auth.json"), JSON.stringify({ "fake-claude": { type: "api_key", key: "synthetic-claude" } }));
 fs.writeFileSync(path.join(appDir, "custom-ai-profiles.json"), JSON.stringify({ version: 1, profiles: [{ id: "custom-fake-claude", providerId: "fake-claude", label: "Fake Claude", roomModels: ["claude-fake"], learnModel: "claude-fake", reviewMemoryModel: "claude-fake" }] }));
 fs.writeFileSync(path.join(appDir, "persistent-agent-ai-profile.json"), JSON.stringify({ profileId: "custom-fake-claude" }));
+const malformedPreload = path.join(tempRoot, "malformed-child.cjs");
+fs.writeFileSync(malformedPreload, `
+const cp = require("node:child_process"), EventEmitter = require("node:events").EventEmitter, realFork = cp.fork;
+cp.fork = function(file, args, options) {
+ let request; try { request = JSON.parse(args?.[0] || "{}"); } catch {}
+ if (!request?.absolutePath?.endsWith("malformed-invented.xlsx")) return realFork.apply(this, arguments);
+ const child = new EventEmitter(); child.stderr = new EventEmitter(); child.kill = () => { setImmediate(() => child.emit("close", 0, null)); return true; };
+ const font = { family:"Arial", sizePt:11, color:"#000000", bold:false, italic:false, underline:"none", strike:false };
+ const style = { fill:null, font, borders:{top:null,right:null,bottom:null,left:null}, align:{horizontal:"left",vertical:"top",wrap:false} };
+ const sheet = { id:"1", name:"Invented", visibility:"visible", showGridLines:"invalid", rowCount:0, columnCount:0, defaultRowHeightPx:20, defaultColumnWidthPx:80, rows:[], columns:[], cells:[], merges:[] };
+ setImmediate(() => child.emit("message", { ok:true, schemaVersion:1, notices:[], result:{kind:"spreadsheet",workbook:{dateSystem:"1900",styles:[style],sheets:[sheet]}} }));
+ return child;
+};
+require("node:module").syncBuiltinESMExports();
+`);
 const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
 const waitUntil = waitEvery(150, 20000);
@@ -83,7 +99,7 @@ async function api(pathname: string, init: AuthedFetchInit = {}) {
 let server: ChildProcessWithoutNullStreams | undefined;
 const serverOutput: string[] = [];
 try {
- server = spawn("npx", ["tsx", "src/index.ts"], { ...SMOKE_SERVER_SPAWN_TREE_OPTIONS, cwd: path.join(repoRoot, "apps/web-server"), env: smokeHomeEnv(tempHome, { PORT: String(port), ...SMOKE_SERVER_AUTH_ENV, EXXETA_HOME: repoRoot, EXXPERTS_CODING_AGENT_DIR: agentDir, EXXETA_PERSISTENT_AGENTS_ROOT: agentsRoot }) as NodeJS.ProcessEnv });
+ server = spawn("npx", ["tsx", "src/index.ts"], { ...SMOKE_SERVER_SPAWN_TREE_OPTIONS, cwd: path.join(repoRoot, "apps/web-server"), env: smokeHomeEnv(tempHome, { PORT: String(port), ...SMOKE_SERVER_AUTH_ENV, EXXETA_HOME: repoRoot, EXXPERTS_CODING_AGENT_DIR: agentDir, EXXETA_PERSISTENT_AGENTS_ROOT: agentsRoot, NODE_OPTIONS: `--require=${malformedPreload}` }) as NodeJS.ProcessEnv });
  server.stdout.on("data", chunk => serverOutput.push(String(chunk)));
  server.stderr.on("data", chunk => serverOutput.push(String(chunk)));
  await waitUntil(() => fetch(`${baseUrl}/healthz`).then(r => r.ok).catch(() => false), "server ready", 60000);
@@ -162,7 +178,7 @@ try {
   assert.equal(await vmlFrame.locator("section.docx").count(), 2);
   assert.equal(await vmlFrame.locator("svg, foreignObject, script, [onload]").count(), 0);
   assert.equal(await vmlFrame.getByText("Invented box", { exact: true }).count(), 0);
-  await tree.locator(".workspace-file-browser-file", { hasText: "invented.xlsx" }).click();
+  await tree.getByRole("button", { name: "invented.xlsx", exact: true }).click();
   await page.locator(".workspace-spreadsheet").getByText("Invented cell", { exact: true }).waitFor({ timeout: 10000 });
   const sheetCell = page.locator(".workspace-spreadsheet").getByText("Invented cell", { exact: true });
   const sheetStyle = await sheetCell.evaluate(node => ({ color: getComputedStyle(node).color, fill: getComputedStyle(node).backgroundColor, weight: getComputedStyle(node).fontWeight }));
@@ -174,6 +190,9 @@ try {
   await page.getByRole("button", { name: "Empty sheet" }).click();
   await page.getByText("This sheet is empty.").waitFor();
   await page.getByRole("button", { name: "Invented sheet" }).click();
+  await tree.locator(".workspace-file-browser-file", { hasText: "malformed-invented.xlsx" }).click();
+  await page.locator(".workspace-preview-content:not([hidden])").getByText("This file could not be previewed.").waitFor();
+  assert.equal(await page.locator(".workspace-preview-content:not([hidden]) .workspace-spreadsheet").count(), 0, "malformed child data cannot render a workbook");
   await tree.locator(".workspace-file-browser-file", { hasText: "invented.html" }).click();
   await page.frameLocator(".workspace-preview-html iframe").getByText("Invented HTML").waitFor({ timeout: 10000 });
   const forbiddenRequests: string[] = [];
