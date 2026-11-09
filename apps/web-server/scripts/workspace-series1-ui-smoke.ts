@@ -1,4 +1,4 @@
-import { smallDocx } from "./workspace-preview-fixtures.js";
+import { smallDocx, vmlDocx } from "./workspace-preview-fixtures.js";
 // Browser workspace acceptance with invented files and an offline model profile.
 import assert from "node:assert/strict";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
@@ -35,6 +35,7 @@ fs.writeFileSync(path.join(folder, "notes.md"), "# Invented note\n");
 fs.writeFileSync(path.join(folder, "other.txt"), "Invented second file\n");
 fs.writeFileSync(path.join(folder, "invented.pdf"), inventedPdf());
 fs.writeFileSync(path.join(folder, "invented.docx"), await smallDocx());
+fs.writeFileSync(path.join(folder, "vml.docx"), await vmlDocx());
 const { default: ExcelJS } = await import("exceljs");
 const workbook = new ExcelJS.Workbook();
 workbook.addWorksheet("Invented sheet").getCell("A1").value = "Invented cell";
@@ -108,6 +109,12 @@ try {
   await page.locator(".workspace-preview-pdf img[alt='Page 1']").waitFor({ timeout: 10000 });
   await tree.locator(".workspace-file-browser-file", { hasText: "invented.docx" }).click();
   await page.locator(".workspace-preview-word iframe").waitFor({ timeout: 10000 });
+  await tree.locator(".workspace-file-browser-file", { hasText: "vml.docx" }).click();
+  const vmlFrame = page.frameLocator(".workspace-preview-content:not([hidden]) .workspace-preview-word iframe");
+  await vmlFrame.getByText("Second saved page", { exact: true }).waitFor({ timeout: 20000 });
+  assert.equal(await vmlFrame.locator("section.docx").count(), 2);
+  assert.equal(await vmlFrame.locator("svg, foreignObject, script, [onload]").count(), 0);
+  assert.equal(await vmlFrame.getByText("Invented box", { exact: true }).count(), 0);
   await tree.locator(".workspace-file-browser-file", { hasText: "invented.xlsx" }).click();
   await page.locator(".workspace-spreadsheet").getByText("Invented cell", { exact: true }).waitFor({ timeout: 10000 });
   await tree.locator(".workspace-file-browser-file", { hasText: "invented.html" }).click();
