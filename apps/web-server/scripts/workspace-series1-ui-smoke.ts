@@ -35,6 +35,11 @@ fs.writeFileSync(path.join(folder, "notes.md"), "# Invented note\n");
 fs.writeFileSync(path.join(folder, "other.txt"), "Invented second file\n");
 fs.writeFileSync(path.join(folder, "invented.pdf"), inventedPdf());
 fs.writeFileSync(path.join(folder, "invented.docx"), await smallDocx());
+const { default: ExcelJS } = await import("exceljs");
+const workbook = new ExcelJS.Workbook();
+workbook.addWorksheet("Invented sheet").getCell("A1").value = "Invented cell";
+fs.writeFileSync(path.join(folder, "invented.xlsx"), Buffer.from(await workbook.xlsx.writeBuffer()));
+fs.writeFileSync(path.join(folder, "invented.html"), "<p>Invented HTML</p>");
 fs.writeFileSync(path.join(folder, "image.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==", "base64"));
 fs.writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({ providers: { "fake-claude": { name: "Fake Claude", baseUrl: "http://127.0.0.1:9", api: "anthropic-messages", models: [{ id: "claude-fake", name: "Claude Fake", input: ["text"], contextWindow: 200000, maxTokens: 32000 }] } } }));
 fs.writeFileSync(path.join(agentDir, "auth.json"), JSON.stringify({ "fake-claude": { type: "api_key", key: "synthetic-claude" } }));
@@ -83,5 +88,9 @@ try {
   await page.locator(".workspace-preview-pdf img[alt='Page 1']").waitFor({ timeout: 10000 });
   await tree.locator(".workspace-file-browser-file", { hasText: "invented.docx" }).click();
   await page.locator(".workspace-preview-word iframe").waitFor({ timeout: 10000 });
+  await tree.locator(".workspace-file-browser-file", { hasText: "invented.xlsx" }).click();
+  await page.locator(".workspace-spreadsheet").getByText("Invented cell", { exact: true }).waitFor({ timeout: 10000 });
+  await tree.locator(".workspace-file-browser-file", { hasText: "invented.html" }).click();
+  await page.frameLocator(".workspace-preview-html iframe").getByText("Invented HTML").waitFor({ timeout: 10000 });
  } finally { await browser.close(); }
 } finally { if (server) await stopSmokeServer(server); fs.rmSync(tempRoot, { recursive: true, force: true }); }

@@ -1,3 +1,5 @@
+import { WorkspaceHtmlPreview } from "./components/WorkspaceHtmlPreview";
+import { WorkspaceSpreadsheetPreview } from "./components/WorkspaceSpreadsheetPreview";
 import { WorkspaceWordPreview } from "./components/WorkspaceWordPreview";
 import { WorkspacePdfPreview } from "./components/WorkspacePdfPreview";
 import { WorkspaceImagePreview } from "./components/WorkspaceImagePreview";
@@ -453,6 +455,8 @@ export function App() {
 		| { kind: "workspaceImage"; path: string }
 		| { kind: "workspacePdf"; path: string }
 		| { kind: "workspaceWord"; path: string }
+		| { kind: "workspaceSpreadsheet"; path: string }
+		| { kind: "workspaceHtml"; path: string }
 		// The run view: the live task's stream in the
 		// same pane slot; renders from taskState and swaps to the artifact viewer
 		// in place when the run ends.
@@ -557,7 +561,7 @@ export function App() {
 	// until dismissed — one Escape, one layer.
 	// As an Escape layer it keeps that Escape from the room's own keys too: the
 	// composer's Stop and a waiting question's deny.
-	const paneTakesEscape = rightPane?.kind === "artifactViewer" || rightPane?.kind === "taskRun" || rightPane?.kind === "attachments" || rightPane?.kind === "workspaceText" || rightPane?.kind === "workspaceImage" || rightPane?.kind === "workspacePdf" || rightPane?.kind === "workspaceWord";
+	const paneTakesEscape = rightPane?.kind === "artifactViewer" || rightPane?.kind === "taskRun" || rightPane?.kind === "attachments" || rightPane?.kind === "workspaceText" || rightPane?.kind === "workspaceImage" || rightPane?.kind === "workspacePdf" || rightPane?.kind === "workspaceWord" || rightPane?.kind === "workspaceSpreadsheet" || rightPane?.kind === "workspaceHtml";
 	useEscapeKey(() => {
 		// A dialog that is not in this component's state (the expanded
 		// diagram viewer) owns Escape the same way: one Escape, one layer.
@@ -621,14 +625,14 @@ export function App() {
 	const [persistentThread, setPersistentThread] = useState<PersistentAgentThread | null>(null);
 	const [persistentChat, setPersistentChat] = useState<PersistentChatConfig>(null);
 	function activeWorkspacePath(pane: RightPaneOccupant | null): string | null {
-		return pane?.kind === "workspaceText" || pane?.kind === "workspaceImage" || pane?.kind === "workspacePdf" || pane?.kind === "workspaceWord" ? pane.path : null;
+		return pane?.kind === "workspaceText" || pane?.kind === "workspaceImage" || pane?.kind === "workspacePdf" || pane?.kind === "workspaceWord" || pane?.kind === "workspaceSpreadsheet" || pane?.kind === "workspaceHtml" ? pane.path : null;
 	}
 	function workspacePaneFor(path: string): RightPaneOccupant {
-		return /\.docx$/i.test(path) ? { kind: "workspaceWord", path } : /\.pdf$/i.test(path) ? { kind: "workspacePdf", path } : /\.(png|jpe?g|gif|webp|svg)$/i.test(path) ? { kind: "workspaceImage", path } : { kind: "workspaceText", path };
+		return /\.html?$/i.test(path) ? { kind: "workspaceHtml", path } : /\.xlsx$/i.test(path) ? { kind: "workspaceSpreadsheet", path } : /\.docx$/i.test(path) ? { kind: "workspaceWord", path } : /\.pdf$/i.test(path) ? { kind: "workspacePdf", path } : /\.(png|jpe?g|gif|webp|svg)$/i.test(path) ? { kind: "workspaceImage", path } : { kind: "workspaceText", path };
 	}
 	function openWorkspaceFile(entry: { relativePath: string; extension: string }): void {
 		const path = entry.relativePath;
-		if (!/\.(md|txt|json|png|jpe?g|gif|webp|svg|pdf|docx)$/i.test(path) || !persistentChat) return;
+		if (!/\.(md|txt|json|png|jpe?g|gif|webp|svg|pdf|docx|xlsx|html?)$/i.test(path) || !persistentChat) return;
 		if (activeWorkspacePath(rightPaneRef.current) === path && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId) return;
 		setArtifactMaximized(false);
 		setWorkspaceTabs((tabs) => {
@@ -653,7 +657,7 @@ export function App() {
 	}
 	useEffect(() => {
 		setWorkspaceTabs(null);
-		setRightPane((pane) => pane?.kind === "workspaceText" || pane?.kind === "workspaceImage" || pane?.kind === "workspacePdf" || pane?.kind === "workspaceWord" ? null : pane);
+		setRightPane((pane) => pane?.kind === "workspaceText" || pane?.kind === "workspaceImage" || pane?.kind === "workspacePdf" || pane?.kind === "workspaceWord" || pane?.kind === "workspaceSpreadsheet" || pane?.kind === "workspaceHtml" ? null : pane);
 	}, [persistentChat?.agentId, persistentChat?.conversationId, personChanged]);
 	// Another conversation holds none of this one's edit.
 	useEffect(() => {
@@ -8541,6 +8545,8 @@ export function App() {
 				<div className="workspace-pane" hidden={activeWorkspacePath(rightPane) === null}>
 					<WorkspaceFileTabs tabs={workspaceTabs.paths} active={activeWorkspacePath(rightPane)} onSelect={(path) => openWorkspaceFile({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} onReorder={(paths) => setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths } : tabs)} />
 					{workspaceTabs.paths.filter((path) => /\.(md|txt|json)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceText" || rightPane.path !== path}><WorkspaceTextPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} /></div>)}
+					{workspaceTabs.paths.filter((path) => /\.html?$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceHtml" || rightPane.path !== path}><WorkspaceHtmlPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} /></div>)}
+					{workspaceTabs.paths.filter((path) => /\.xlsx$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceSpreadsheet" || rightPane.path !== path}><WorkspaceSpreadsheetPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} /></div>)}
 					{workspaceTabs.paths.filter((path) => /\.docx$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceWord" || rightPane.path !== path}><WorkspaceWordPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} /></div>)}
 					{workspaceTabs.paths.filter((path) => /\.pdf$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspacePdf" || rightPane.path !== path}><WorkspacePdfPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} /></div>)}
 					{workspaceTabs.paths.filter((path) => /\.(png|jpe?g|gif|webp|svg)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceImage" || rightPane.path !== path}><WorkspaceImagePreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} /></div>)}
