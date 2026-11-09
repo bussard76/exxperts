@@ -1,6 +1,6 @@
-// RAW Markdown: the task button works on the text itself. Each press moves the
-// selected lines one step round plain/bullet -> "[ ]" -> "[x]" -> plain. The
-// first non-empty line decides the step, so a mixed selection ends up uniform.
+// RAW Markdown: the task button works on the text itself. Every selected
+// non-empty line moves on its own: plain or bullet -> "[ ]", "[ ]" -> "[x]",
+// "[x]" -> "[ ]". Indentation, the bullet character and the text are kept.
 
 export interface TaskToggleResult {
 	value: string;
@@ -11,23 +11,24 @@ export interface TaskToggleResult {
 const TASK = /^(\s*(?:[-*+]|\d+[.)])\s+)\[( |x|X)\](?:\s+|$)/;
 const BULLET = /^(\s*(?:[-*+]|\d+[.)])\s+)/;
 
-type Step = "open" | "done" | "plain";
-
-function nextStep(line: string): Step {
-	const task = TASK.exec(line);
-	if (!task) return "open";
-	return task[2] === " " ? "done" : "plain";
+function withMark(prefix: string, mark: string, rest: string): string {
+	return rest === "" ? prefix + mark : `${prefix}${mark} ${rest}`;
 }
 
-function applyStep(line: string, step: Step): string {
+function nextLine(line: string): string {
 	const task = TASK.exec(line);
-	if (step === "plain") return task ? (/^\s*/.exec(line)?.[0] ?? "") + line.slice(task[0].length) : line;
-	const mark = step === "done" ? "[x]" : "[ ]";
-	if (task) return task[1] + mark + " " + line.slice(task[0].length);
+	if (task) return withMark(task[1], task[2] === " " ? "[x]" : "[ ]", line.slice(task[0].length));
 	const bullet = BULLET.exec(line);
-	if (bullet) return bullet[1] + mark + " " + line.slice(bullet[0].length);
+	if (bullet) return withMark(bullet[1], "[ ]", line.slice(bullet[0].length));
 	const indent = /^\s*/.exec(line)?.[0] ?? "";
-	return indent + "- " + mark + " " + line.slice(indent.length);
+	return withMark(`${indent}- `, "[ ]", line.slice(indent.length));
+}
+
+/** True when the line holding `position` is a task item, open or done. */
+export function isTaskLine(value: string, position: number): boolean {
+	const start = value.lastIndexOf("\n", position - 1) + 1;
+	const end = value.indexOf("\n", position);
+	return TASK.test(value.slice(start, end === -1 ? value.length : end));
 }
 
 export function cycleTaskLines(value: string, start: number, end: number): TaskToggleResult {
@@ -39,10 +40,8 @@ export function cycleTaskLines(value: string, start: number, end: number): TaskT
 	const lineEnd = value.indexOf("\n", to);
 	const blockEnd = lineEnd === -1 ? value.length : lineEnd;
 	const lines = value.slice(blockStart, blockEnd).split("\n");
-	const firstLine = lines.find((line) => line.trim() !== "");
-	if (firstLine === undefined) return { value, selectionStart: start, selectionEnd: end };
-	const step = nextStep(firstLine);
-	const changed = lines.map((line) => (line.trim() === "" ? line : applyStep(line, step))).join("\n");
+	if (lines.every((line) => line.trim() === "")) return { value, selectionStart: start, selectionEnd: end };
+	const changed = lines.map((line) => (line.trim() === "" ? line : nextLine(line))).join("\n");
 	const next = value.slice(0, blockStart) + changed + value.slice(blockEnd);
 	if (start === end) {
 		const caret = blockStart + changed.length;
