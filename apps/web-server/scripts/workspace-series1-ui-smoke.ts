@@ -101,7 +101,7 @@ async function api(pathname: string, init: AuthedFetchInit = {}) {
 let server: ChildProcessWithoutNullStreams | undefined;
 const serverOutput: string[] = [];
 try {
- server = spawn("npx", ["tsx", "src/index.ts"], { ...SMOKE_SERVER_SPAWN_TREE_OPTIONS, cwd: path.join(repoRoot, "apps/web-server"), env: smokeHomeEnv(tempHome, { PORT: String(port), ...SMOKE_SERVER_AUTH_ENV, EXXETA_HOME: repoRoot, EXXPERTS_CODING_AGENT_DIR: agentDir, EXXETA_PERSISTENT_AGENTS_ROOT: agentsRoot, NODE_OPTIONS: `--require=${malformedPreload}` }) as NodeJS.ProcessEnv });
+ server = spawn(process.env.SERIES_PACKAGED === "1" ? process.execPath : "npx", process.env.SERIES_PACKAGED === "1" ? ["dist/server.mjs"] : ["tsx", "src/index.ts"], { ...SMOKE_SERVER_SPAWN_TREE_OPTIONS, cwd: path.join(repoRoot, "apps/web-server"), env: smokeHomeEnv(tempHome, { PORT: String(port), ...SMOKE_SERVER_AUTH_ENV, EXXETA_HOME: repoRoot, EXXPERTS_CODING_AGENT_DIR: agentDir, EXXETA_PERSISTENT_AGENTS_ROOT: agentsRoot, NODE_OPTIONS: `--require=${malformedPreload}` }) as NodeJS.ProcessEnv });
  server.stdout.on("data", chunk => serverOutput.push(String(chunk)));
  server.stderr.on("data", chunk => serverOutput.push(String(chunk)));
  await waitUntil(() => fetch(`${baseUrl}/healthz`).then(r => r.ok).catch(() => false), "server ready", 60000);
