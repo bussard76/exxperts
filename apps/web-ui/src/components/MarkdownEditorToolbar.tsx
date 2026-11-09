@@ -20,6 +20,8 @@ interface Props {
 	hasExternalUpdate: boolean;
 	onSearch: () => void;
 	searchOpen: boolean;
+	/** In RAW the toolbar stays visible but only the task button works, on the text itself. */
+	raw?: { taskActive: boolean; onTask: () => void };
 }
 
 function Button({ label, title, active, disabled, onClick }: { label: string; title: string; active?: boolean; disabled?: boolean; onClick: () => void }) {
@@ -30,7 +32,7 @@ function Divider() {
 	return <span className="markdown-editor-toolbar-divider" aria-hidden="true" />;
 }
 
-export function MarkdownEditorToolbar({ editor, canEdit, onSave, isSaving, isDirty, saveError, hasExternalUpdate, onSearch, searchOpen }: Props) {
+export function MarkdownEditorToolbar({ editor, canEdit, onSave, isSaving, isDirty, saveError, hasExternalUpdate, onSearch, searchOpen, raw }: Props) {
 	const [copied, setCopied] = useState(false);
 	const state = useEditorState({
 		editor,
@@ -69,7 +71,7 @@ export function MarkdownEditorToolbar({ editor, canEdit, onSave, isSaving, isDir
 	}, [editor, run]);
 	const saveDisabled = !canEdit || !isDirty || isSaving || hasExternalUpdate;
 	const saveLabel = isSaving ? "Saving…" : saveError && isDirty ? "Retry" : isDirty ? "Save" : "Saved";
-	const editDisabled = !canEdit;
+	const editDisabled = !canEdit || Boolean(raw);
 	return (
 		<div className="markdown-editor-toolbar" role="toolbar" aria-label="Markdown formatting">
 			<Button label="↶" title="Undo (⌘Z)" disabled={editDisabled || !state?.canUndo} onClick={() => run(() => editor?.chain().focus().undo().run())} />
@@ -89,12 +91,12 @@ export function MarkdownEditorToolbar({ editor, canEdit, onSave, isSaving, isDir
 			<Divider />
 			<Button label="• List" title="Bullet list" disabled={editDisabled} onClick={() => run(() => editor?.chain().focus().toggleBulletList().run())} />
 			<Button label="1. List" title="Numbered list" disabled={editDisabled} onClick={() => run(() => editor?.chain().focus().toggleOrderedList().run())} />
-			<Button label="☑ Tasks" title="Task list" active={state?.taskList} disabled={editDisabled} onClick={() => run(() => editor?.chain().focus().toggleTaskList().run())} />
-			<Button label="Find" title="Find in file (⌘F)" active={searchOpen} onClick={onSearch} />
+			<Button label="☑ Tasks" title="Task list" active={raw ? raw.taskActive : state?.taskList} disabled={raw ? !canEdit : editDisabled} onClick={raw ? raw.onTask : () => run(() => editor?.chain().focus().toggleTaskList().run())} />
+			<Button label="Find" title="Find in file (⌘F)" active={searchOpen && !raw} disabled={Boolean(raw)} onClick={onSearch} />
 			<Button label="Table" title="Insert table" disabled={editDisabled} onClick={() => run(() => editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run())} />
-			{state?.inTable && <Button label="Delete table" title="Delete table" disabled={editDisabled} onClick={() => run(() => editor?.chain().focus().deleteTable().run())} />}
+			{state?.inTable && !raw && <Button label="Delete table" title="Delete table" disabled={editDisabled} onClick={() => run(() => editor?.chain().focus().deleteTable().run())} />}
 			<div className="markdown-editor-toolbar-spacer" />
-			<Button label={copied ? "Copied" : "Copy"} title="Copy Markdown source" onClick={copyMarkdown} />
+			<Button label={copied ? "Copied" : "Copy"} title="Copy Markdown source" disabled={Boolean(raw)} onClick={copyMarkdown} />
 			<button type="button" className="markdown-editor-save-status" title={hasExternalUpdate ? "Resolve the external change first" : saveLabel} disabled={saveDisabled} onMouseDown={(event) => event.preventDefault()} onClick={onSave}>{saveLabel}</button>
 		</div>
 	);
