@@ -16,7 +16,7 @@ Level 2: the existing App and sidebar icon export, pane renderers and room CSS r
 - [ ] Tab, Enter and Space operate toggle; pane Escape behavior remains unchanged.
 - [ ] Unsaved Markdown draft survives folding and unfolding.
 - [ ] While folded, different same-kind workspace file, artifact path, artifact task ID and task-run ID unfold and render selected content; metadata updates and selecting the same occupant do not falsely open.
-- [ ] Selected asset-row close preserves back-to-attachments behavior.
+- [x] Selected asset-row close preserves back-to-attachments behavior — `attachments-panel-ui-smoke.ts` opens and closes the selected folded gallery file.
 - [ ] Cancelled or failed guarded switch preserves draft and occupant; successful save or discard proceeds; folding does not trigger the guard.
 - [ ] Fold/unfold introduces no reads, authorization, server behavior or content path changes.
 - [ ] Record item-by-item test evidence, checks, changed files, assumptions and debt; merge origin/main, rerun affected suites and push.
@@ -24,3 +24,5 @@ Level 2: the existing App and sidebar icon export, pane renderers and room CSS r
 ## Measurement
 
 Graph: no. Seven tool calls preceded the first edited file; no graph was used, so it made no difference.
+
+The gallery remains visible when its viewer is folded; `attachments-panel-ui-smoke.ts` covers switching to another gallery file and returning to Attachments.
