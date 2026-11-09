@@ -36,7 +36,7 @@ import { AppearancePane } from "./components/appearance-pane";
 import { isSignInFailure } from "./sign-in-failure";
 import { PaneHeader } from "./components/pane-header";
 import { sharedServerReleases, WhatsNewDialog, type WhatsNewSections } from "./components/whats-new-dialog";
-import { fetchRemoteClientContext, sharedServerRole, knownRemoteClientContext, pagePersonProtocols, personHasChanged, refreshRemoteClientContext, reloadForNewPerson, showsComputerOnlyControls, usePersonChanged, useRemoteClientContext } from "./remote-client-context";
+import { fetchRemoteClientContext, sharedServerRole, knownRemoteClientContext, pagePersonProtocols, personHasChanged, refreshRemoteClientContext, reloadForNewPerson, showsComputerOnlyControls, useConfirmedLocalClientContext, usePersonChanged, useRemoteClientContext } from "./remote-client-context";
 import { RemoteAccessPage } from "./components/remote-access-page";
 import { StateProfileSection } from "./components/state-profile-section";
 import { GlobalInstructionsSection } from "./components/GlobalInstructionsSection";
@@ -138,6 +138,31 @@ const SWITCH_READ_RETRY_MS = 1_000;
 type LastMessageEditState =
 	| { phase: "editing"; id: string; text: string }
 	| { phase: "sent"; replaces: string; oldIds: string[]; newId: string; text: string };
+
+function WorkspaceOpenAction({ agentId, conversationId, path }: { agentId: string; conversationId: string; path: string }) {
+	const local = useConfirmedLocalClientContext();
+	const [pending, setPending] = useState(false);
+	const [failed, setFailed] = useState(false);
+	const pendingRef = useRef(false);
+	if (!local) return null;
+	const label = /\.pdf$/i.test(path) ? "Open PDF" : /\.docx$/i.test(path) ? "Open in Word" : /\.pptx$/i.test(path) ? "Open in PowerPoint" : /\.xls(?:x|m)?$/i.test(path) ? "Open in Excel" : "Open in default app";
+	const open = async () => {
+		if (pendingRef.current) return;
+		pendingRef.current = true;
+		setPending(true);
+		setFailed(false);
+		try {
+			const response = await apiFetch(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-open`, {
+				method: "POST", headers: { "content-type": "application/json", "x-exxperts-local-action": "open-workspace-file" },
+				body: JSON.stringify({ conversationId, path }),
+			});
+			const result: unknown = await response.json();
+			if (response.status !== 202 || !result || typeof result !== "object" || Array.isArray(result) || Object.keys(result).length !== 1 || (result as { accepted?: unknown }).accepted !== true) throw new Error("refused");
+		} catch { setFailed(true); }
+		finally { pendingRef.current = false; setPending(false); }
+	};
+	return <div className="workspace-open-action"><button type="button" disabled={pending} onClick={() => void open()}>{label}</button>{failed && <p role="alert">This file could not be opened in another program.</p>}</div>;
+}
 
 export function App() {
 	const [view, setView] = useState<MainView>("home");
@@ -459,6 +484,7 @@ export function App() {
 		| { kind: "workspaceSpreadsheet"; path: string }
 		| { kind: "workspaceHtml"; path: string }
 		| { kind: "workspaceFramed"; path: string }
+		| { kind: "workspaceLegacyDoc"; path: string }
 		// The run view: the live task's stream in the
 		// same pane slot; renders from taskState and swaps to the artifact viewer
 		// in place when the run ends.
@@ -563,7 +589,7 @@ export function App() {
 	// until dismissed — one Escape, one layer.
 	// As an Escape layer it keeps that Escape from the room's own keys too: the
 	// composer's Stop and a waiting question's deny.
-	const paneTakesEscape = rightPane?.kind === "artifactViewer" || rightPane?.kind === "taskRun" || rightPane?.kind === "attachments" || rightPane?.kind === "workspaceText" || rightPane?.kind === "workspaceImage" || rightPane?.kind === "workspacePdf" || rightPane?.kind === "workspaceWord" || rightPane?.kind === "workspaceSpreadsheet" || rightPane?.kind === "workspaceHtml" || rightPane?.kind === "workspaceFramed";
+	const paneTakesEscape = rightPane?.kind === "artifactViewer" || rightPane?.kind === "taskRun" || rightPane?.kind === "attachments" || rightPane?.kind === "workspaceText" || rightPane?.kind === "workspaceImage" || rightPane?.kind === "workspacePdf" || rightPane?.kind === "workspaceWord" || rightPane?.kind === "workspaceSpreadsheet" || rightPane?.kind === "workspaceHtml" || rightPane?.kind === "workspaceFramed" || rightPane?.kind === "workspaceLegacyDoc";
 	useEscapeKey(() => {
 		// A dialog that is not in this component's state (the expanded
 		// diagram viewer) owns Escape the same way: one Escape, one layer.
@@ -627,14 +653,14 @@ export function App() {
 	const [persistentThread, setPersistentThread] = useState<PersistentAgentThread | null>(null);
 	const [persistentChat, setPersistentChat] = useState<PersistentChatConfig>(null);
 	function activeWorkspacePath(pane: RightPaneOccupant | null): string | null {
-		return pane?.kind === "workspaceText" || pane?.kind === "workspaceImage" || pane?.kind === "workspacePdf" || pane?.kind === "workspaceWord" || pane?.kind === "workspaceSpreadsheet" || pane?.kind === "workspaceHtml" || pane?.kind === "workspaceFramed" ? pane.path : null;
+		return pane?.kind === "workspaceText" || pane?.kind === "workspaceImage" || pane?.kind === "workspacePdf" || pane?.kind === "workspaceWord" || pane?.kind === "workspaceSpreadsheet" || pane?.kind === "workspaceHtml" || pane?.kind === "workspaceFramed" || pane?.kind === "workspaceLegacyDoc" ? pane.path : null;
 	}
 	function workspacePaneFor(path: string): RightPaneOccupant {
-		return /\.pptx$/i.test(path) ? { kind: "workspaceFramed", path } : /\.html?$/i.test(path) ? { kind: "workspaceHtml", path } : /\.xlsx$/i.test(path) ? { kind: "workspaceSpreadsheet", path } : /\.docx$/i.test(path) ? { kind: "workspaceWord", path } : /\.pdf$/i.test(path) ? { kind: "workspacePdf", path } : /\.(png|jpe?g|gif|webp|svg)$/i.test(path) ? { kind: "workspaceImage", path } : { kind: "workspaceText", path };
+		return /\.(doc|xls|xlsm|drawio|dio)$/i.test(path) ? { kind: "workspaceLegacyDoc", path } : /\.pptx$/i.test(path) ? { kind: "workspaceFramed", path } : /\.html?$/i.test(path) ? { kind: "workspaceHtml", path } : /\.xlsx$/i.test(path) ? { kind: "workspaceSpreadsheet", path } : /\.docx$/i.test(path) ? { kind: "workspaceWord", path } : /\.pdf$/i.test(path) ? { kind: "workspacePdf", path } : /\.(png|jpe?g|gif|webp|svg)$/i.test(path) ? { kind: "workspaceImage", path } : { kind: "workspaceText", path };
 	}
 	function openWorkspaceFile(entry: { relativePath: string; extension: string }): void {
 		const path = entry.relativePath;
-		if (!/\.(md|txt|json|png|jpe?g|gif|webp|svg|pdf|docx|xlsx|html?|pptx)$/i.test(path) || !persistentChat) return;
+		if (!/\.(md|txt|json|png|jpe?g|gif|webp|svg|pdf|docx|xlsx|html?|pptx|doc|xls|xlsm|drawio|dio)$/i.test(path) || !persistentChat) return;
 		if (activeWorkspacePath(rightPaneRef.current) === path && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId) return;
 		setArtifactMaximized(false);
 		setWorkspaceTabs((tabs) => {
@@ -659,7 +685,7 @@ export function App() {
 	}
 	useEffect(() => {
 		setWorkspaceTabs(null);
-		setRightPane((pane) => pane?.kind === "workspaceText" || pane?.kind === "workspaceImage" || pane?.kind === "workspacePdf" || pane?.kind === "workspaceWord" || pane?.kind === "workspaceSpreadsheet" || pane?.kind === "workspaceHtml" || pane?.kind === "workspaceFramed" ? null : pane);
+		setRightPane((pane) => pane?.kind === "workspaceText" || pane?.kind === "workspaceImage" || pane?.kind === "workspacePdf" || pane?.kind === "workspaceWord" || pane?.kind === "workspaceSpreadsheet" || pane?.kind === "workspaceHtml" || pane?.kind === "workspaceFramed" || pane?.kind === "workspaceLegacyDoc" ? null : pane);
 	}, [persistentChat?.agentId, persistentChat?.conversationId, personChanged]);
 	// Another conversation holds none of this one's edit.
 	useEffect(() => {
@@ -8546,6 +8572,8 @@ export function App() {
 			{persistentChat && !personChanged && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId && (
 				<div className="workspace-pane" hidden={activeWorkspacePath(rightPane) === null}>
 					<WorkspaceFileTabs tabs={workspaceTabs.paths} active={activeWorkspacePath(rightPane)} onSelect={(path) => openWorkspaceFile({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} onReorder={(paths) => setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths } : tabs)} />
+					{rightPane && "path" in rightPane && !/\.(md|doc|xls)$/i.test(rightPane.path) && <WorkspaceOpenAction key={JSON.stringify([persistentChat.agentId, persistentChat.conversationId, rightPane.path])} agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={rightPane.path} />}
+					{rightPane?.kind === "workspaceLegacyDoc" && <p className="workspace-preview-error">{/\.doc$/i.test(rightPane.path) ? "Save this old .doc file as .docx to preview it here." : "This file type cannot be previewed here."}</p>}
 					{workspaceTabs.paths.filter((path) => /\.(md|txt|json)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceText" || rightPane.path !== path}><WorkspaceTextPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} /></div>)}
 					{workspaceTabs.paths.filter((path) => /\.pptx$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceFramed" || rightPane.path !== path}><WorkspaceFramedPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} /></div>)}
 					{workspaceTabs.paths.filter((path) => /\.html?$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceHtml" || rightPane.path !== path}><WorkspaceHtmlPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} /></div>)}

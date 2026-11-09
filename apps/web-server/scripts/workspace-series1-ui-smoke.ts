@@ -40,6 +40,7 @@ const workbook = new ExcelJS.Workbook();
 workbook.addWorksheet("Invented sheet").getCell("A1").value = "Invented cell";
 fs.writeFileSync(path.join(folder, "invented.xlsx"), Buffer.from(await workbook.xlsx.writeBuffer()));
 fs.writeFileSync(path.join(folder, "invented.html"), "<p>Invented HTML</p>");
+for (const name of ["old.xls", "old.doc", "macro.xlsm", "diagram.drawio"]) fs.writeFileSync(path.join(folder, name), "invented");
 {
 	const { default: JSZip } = await import("jszip");
 	const zip = new JSZip();
@@ -103,5 +104,14 @@ try {
   await page.frameLocator(".workspace-preview-html iframe").getByText("Invented HTML").waitFor({ timeout: 10000 });
   await tree.locator(".workspace-file-browser-file", { hasText: "invented.pptx" }).click();
   await page.frameLocator(".workspace-preview-content:not([hidden]) .workspace-preview-html iframe").getByText("Invented slide").waitFor({ timeout: 15000 });
+  await page.getByRole("button", { name: "Open in PowerPoint" }).waitFor({ timeout: 5000 });
+  await tree.locator(".workspace-file-browser-file", { hasText: "old.xls" }).click();
+  await page.getByText("This file type cannot be previewed here.").waitFor();
+  assert.equal(await page.getByRole("button", { name: /Open in Excel/ }).count(), 0, "unsupported XLS never offers Open");
+  await tree.locator(".workspace-file-browser-file", { hasText: "macro.xlsm" }).click();
+  await page.getByRole("button", { name: "Open in Excel" }).waitFor();
+  await tree.locator(".workspace-file-browser-file", { hasText: "old.doc" }).click();
+  await page.getByText("Save this old .doc file as .docx to preview it here.").waitFor();
+  assert.equal(await page.getByRole("button", { name: /Open in/ }).count(), 0);
  } finally { await browser.close(); }
 } finally { if (server) await stopSmokeServer(server); fs.rmSync(tempRoot, { recursive: true, force: true }); }
