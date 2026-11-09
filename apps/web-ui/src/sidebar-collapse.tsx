@@ -84,11 +84,13 @@ export function usePhoneWidth(): boolean {
 	return useSyncExternalStore(subscribePhone, () => phoneQuery.matches);
 }
 
-function PanelIcon() {
+// The right pane's toggle uses the same symbol, mirrored: the divider on the right.
+export function PanelIcon({ side = "left" }: { side?: "left" | "right" }) {
+	const divider = side === "left" ? 6 : 10;
 	return (
 		<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
 			<rect x="1.5" y="2.5" width="13" height="11" rx="2" />
-			<line x1="6" y1="2.5" x2="6" y2="13.5" />
+			<line x1={divider} y1="2.5" x2={divider} y2="13.5" />
 		</svg>
 	);
 }
