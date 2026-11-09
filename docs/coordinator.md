@@ -78,6 +78,15 @@ Close finished workers' terminals, release or abandon their dispatches, remove w
 
 Work on the cleanup script itself is parked (decided by Sascha, 2026-11-06, answering "Das Aufräumskript wird seit Runde 12 nachgebessert ... Wie weiter?": "Parken, von Hand aufräumen"). Until the factory ships a fixed script, the Controller cleans by hand every cycle: for finished workers, discard a change that is only the lockfile rewritten by the install, remove worktrees that are clean and merged or pushed, delete `agents/` branches merged into `main`, and keep running workers, the integration worktree and anything unpushed.
 
+## Code graph (decided by Sascha, 2026-11-09)
+
+Sascha, 2026-11-09: "make all workers and yourself use graphify in this repo but do not check it into the upstream repo".
+
+- **Use:** at the start of a task, run `graphify update .` in the worktree (code only, no model, no key; about two minutes for this repo). Then orient with `graphify explain "<symbol>"`, `graphify path "<A>" "<B>"` and `graphify query "<question>"` before reading broad swaths of code.
+- **Limit, measured 2026-11-09:** the graph lists what a function calls, but misses callers that sit in functions handed to components in JSX (`openWorkspaceMarkdown` showed only itself). The graph is a map, never proof that something has no other callers: confirm with a search before a change or review states that.
+- **Never committed, never upstream:** `graphify-out/`, `.graphify*` and `CLAUDE.md` stay untracked (`.git/info/exclude` of the clone; worktrees share it). The pre-push guard rejects them on any branch bound for EXXETA. Do not run `graphify claude install`, `graphify codex install` or `graphify hook install`: they write `CLAUDE.md`/`AGENTS.md` and git hooks, and `AGENTS.md` is a protected file.
+- **Install:** graphify is installed per user (`pip install --user graphifyy`); on the shared host only in this user's home.
+
 ## Audit and improvement workflow (decided by Sascha, 2026-11-04)
 
 - **Journal:** one JSON line per event in `journal.ndjson` (`node journal.mjs <type> <task> k=v…`).
