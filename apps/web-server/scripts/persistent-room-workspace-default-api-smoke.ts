@@ -85,6 +85,12 @@ try {
 const fs = require("node:fs");
 const diagnosticMarker = ${JSON.stringify(path.join(tempHome, "diagnostic-mode"))};
 const rafMarker = ${JSON.stringify(path.join(tempHome, "raf-marker"))};
+const networkMarker = ${JSON.stringify(path.join(tempHome, "network-marker"))};
+if (String(process.argv[1]).endsWith("shelf-parse-worker.mjs") && fs.existsSync(networkMarker)) {
+ const install = (owner, key, label) => { let value = owner[key]; Object.defineProperty(owner, key, { configurable: true, get: () => value, set: next => { let denied = false; try { next(); } catch { denied = true; } fs.appendFileSync(networkMarker, label + ":control:" + denied + "\\n"); value = function(...args) { fs.appendFileSync(networkMarker, label + ":attempt\\n"); return next.apply(this, args); }; } }); };
+ const http = require("node:http"), https = require("node:https"), net = require("node:net"), tls = require("node:tls"), dns = require("node:dns"), dgram = require("node:dgram"), http2 = require("node:http2");
+ install(globalThis, "fetch", "fetch"); install(globalThis, "WebSocket", "websocket"); install(http, "request", "http"); install(https, "request", "https"); install(net, "connect", "socket"); install(tls, "connect", "tls"); install(dns, "lookup", "dns"); install(dns.Resolver.prototype, "resolve4", "dns-resolver"); install(dns.promises.Resolver.prototype, "resolve4", "dns-promise-resolver"); install(dgram, "createSocket", "udp"); install(http2, "connect", "http2");
+}
 if (String(process.argv[1]).endsWith("shelf-parse-worker.mjs") && fs.existsSync(rafMarker)) {
  Object.defineProperty(globalThis, "requestAnimationFrame", { configurable:true, set(next) {
   Object.defineProperty(globalThis, "requestAnimationFrame", { configurable:true, value(callback) { fs.appendFileSync(rafMarker, "scheduled\\n"); return next(() => { fs.appendFileSync(rafMarker, "executed\\n"); callback(); }); }});
@@ -291,9 +297,15 @@ require("node:module").syncBuiltinESMExports();
 	const workbook = new ExcelJS.Workbook();
 	workbook.addWorksheet("Invented").getCell("A1").value = "Invented cell";
 	fs.writeFileSync(path.join(workspaceRoot, "invented.xlsx"), Buffer.from(await workbook.xlsx.writeBuffer()));
+	const networkMarker = path.join(tempHome, "network-marker");
+	fs.writeFileSync(networkMarker, "");
 	const word = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=invented.docx`);
 	const sheet = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=invented.xlsx`);
 	assert(word.status === 200 && word.body.kind === "word" && typeof word.body.html === "string", "Word travels through the real child and guarded public route");
+	const networkProbes = fs.readFileSync(networkMarker, "utf8");
+	for (const name of ["fetch", "websocket", "http", "https", "socket", "tls", "dns", "dns-resolver", "dns-promise-resolver", "udp", "http2"]) assert(networkProbes.includes(`${name}:control:true`), `${name} deny control is active`);
+	assert(!networkProbes.includes(":attempt"), "Word rendering makes no outbound attempts");
+	fs.rmSync(networkMarker);
 	fs.writeFileSync(path.join(workspaceRoot, "vml.docx"), await vmlDocx());
 	const rafMarker = path.join(tempHome, "raf-marker");
 	fs.writeFileSync(rafMarker, "");
