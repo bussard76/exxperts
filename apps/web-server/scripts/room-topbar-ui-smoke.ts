@@ -1,6 +1,7 @@
 // The room's top bar lines up with the chat column, in the page against a real
 // server: the room name starts where the answers' text starts, the last
-// action's glyph ends on the workspace banner's right edge, and no "Talking
+// action's glyph ends on the workspace banner's right edge (11px beyond it
+// when the pane toggle is present), and no "Talking
 // to" label sits in the bar. Checked at 1280 and 1600 wide, with the sidebar
 // open and collapsed, the file viewer closed and open beside the chat, in the
 // browser and in the mac app's look. In the mac app's look the window buttons'
@@ -71,6 +72,7 @@ interface Layout {
 	answerLeft: number;
 	lastGlyphRight: number;
 	bannerRight: number;
+	paneToggle: boolean;
 	barText: string;
 }
 
@@ -84,7 +86,7 @@ async function layout(page: Page): Promise<Layout | string> {
 	const missing = Object.keys(parts).filter((_, at) => !boxes[at]);
 	if (missing.length > 0) return `not on screen: ${missing.join(", ")}`;
 	const [title, lastGlyph, banner, answer] = boxes as DOMRect[];
-	return { titleLeft: title.left, answerLeft: answer.left, lastGlyphRight: lastGlyph.right, bannerRight: banner.right, barText: await page.locator(".topbar").first().innerText() };
+	return { titleLeft: title.left, answerLeft: answer.left, lastGlyphRight: lastGlyph.right, bannerRight: banner.right, paneToggle: await page.locator(".topbar-actions .right-pane-toggle").count() > 0, barText: await page.locator(".topbar").first().innerText() };
 }
 
 // Where the ink of a region runs top to bottom, in CSS px: the page is
@@ -132,7 +134,7 @@ function layoutProblems(measured: Layout | string, clearance: number): string[] 
 	const problems: string[] = [];
 	const nameEdge = Math.max(measured.answerLeft, clearance);
 	if (Math.abs(measured.titleLeft - nameEdge) > 1) problems.push(`the room name starts at ${measured.titleLeft.toFixed(1)}, the answer's text at ${measured.answerLeft.toFixed(1)}${clearance > 0 ? `, the collapsed sidebar's clearance at ${clearance}` : ""}`);
-	if (Math.abs(measured.lastGlyphRight - measured.bannerRight) > 1) problems.push(`the last action's glyph ends at ${measured.lastGlyphRight.toFixed(1)}, the workspace banner at ${measured.bannerRight.toFixed(1)}`);
+	if (Math.abs(measured.lastGlyphRight - measured.bannerRight - (measured.paneToggle ? 11 : 0)) > 1) problems.push(`the last action's glyph ends at ${measured.lastGlyphRight.toFixed(1)}, the workspace banner at ${measured.bannerRight.toFixed(1)}`);
 	if (measured.barText.includes("Talking to")) problems.push(`the bar says "Talking to": ${JSON.stringify(measured.barText)}`);
 	return problems;
 }
@@ -458,7 +460,7 @@ try {
 	}
 
 	assert(failures.length === 0, `the room's top bar:\n  ${failures.join("\n  ")}`);
-	console.log(`  ok the room name starts where the answers do and the last action's glyph ends on the workspace banner's edge, with no "Talking to", at 1280 and 1600 wide, sidebar open and collapsed, viewer closed and open, browser and mac look`);
+	console.log(`  ok the room name starts where the answers do and the last action's glyph aligns with the workspace banner for each pane state, with no "Talking to", at 1280 and 1600 wide, sidebar open and collapsed, viewer closed and open, browser and mac look`);
 	console.log("  ok in the mac app's look the room name, trash, gear, the file's name and icons, and the approval preview's head centre on the window buttons' row, at 1x, 2x and 125% zoom, sidebar open and hidden; a long name beside the file pane is one line ending in \"…\"; the row drags, its buttons click, and the sidebar's wordmark stays");
 	console.log(`  ok at 2x the sidebar button's glyph centres on the wordmark's small letters`);
 	console.log("  ok the collapsed sidebar's button is only its glyph at rest; hover and keyboard focus show its square, focus with a ring");
