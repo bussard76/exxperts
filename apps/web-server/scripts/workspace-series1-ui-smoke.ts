@@ -86,6 +86,14 @@ try {
   assert.equal(await page.locator(".workspace-pane").getByRole("button", { name: /^(edit|save|download|print)$/i }).count(), 0);
   await tree.locator(".workspace-file-browser-file", { hasText: "other.txt" }).click();
   assert.equal(await page.locator(".workspace-tab").count(), 2);
+  const tabs = page.locator(".workspace-tab");
+  const tabTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await tabs.filter({ hasText: "other.txt" }).dispatchEvent("dragstart", { dataTransfer: tabTransfer });
+  const firstBox = await tabs.filter({ hasText: "notes.md" }).boundingBox();
+  assert(firstBox);
+  await tabs.filter({ hasText: "notes.md" }).dispatchEvent("dragover", { dataTransfer: tabTransfer, clientX: firstBox.x + 1, clientY: firstBox.y + 1 });
+  await page.locator(".workspace-tabs").dispatchEvent("drop", { dataTransfer: tabTransfer });
+  assert.deepEqual((await page.locator(".workspace-tab-select").allTextContents()).map(name => name.trim()), ["other.txt", "notes.md"], "drag reorders tabs without changing their identity");
   await page.locator(".workspace-tab").filter({ hasText: "other.txt" }).getByRole("button", { name: "Close other.txt" }).click();
   assert.equal(await page.locator(".workspace-tab[data-active=true]").count(), 1);
   const composer = page.locator(".composer-input textarea");
