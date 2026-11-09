@@ -1,5 +1,4 @@
-/* The room's workspace: the resizable sidebar, the file tree in it, and the
-   Markdown editor pane. */
+/* The room's workspace tree, tabs and read-only previews. */
 .app.sidebar-resizable {
 	grid-template-columns: var(--sidebar-width, 260px) 1px minmax(0, 1fr);
 }
