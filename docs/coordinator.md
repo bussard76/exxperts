@@ -144,6 +144,10 @@ For each series at Node 20.6 and 22, a failure in the same smoke with the same e
 
 Before escalating, apply the ticket's abort criteria and Sascha's recorded decisions. Escalate only an unsettled question and state which decisions were checked and why they do not fit. For every `NEEDS-SASCHA` or `BLOCKED` event, retain the append-only `front-events.log` line and immediately send the question or blocker with `orca orchestration send --to term_6eae3083-5398-4d94-85e5-57a8f00d7065` to wake the Front agent. Keep the existing status and fallback records.
 
+### Series 1 buffers decision (decided by Sascha, 2026-11-10)
+
+The earlier licence-source and replacement choices for `buffers@0.1.1` are superseded. Stop the prerelease replacement trial and alternative/licence-source research. Series 1 retains stable `exceljs@4.4.0` and the `exceljs → unzipper → binary → buffers@0.1.1` chain on the candidate with the PPTX fix (`cc36c88` line). The Series 1 PR description must state that `buffers@0.1.1` has no licence field in its registry metadata; upstream decides whether to accept the contribution. This records no conclusion about legal sufficiency and changes none of the existing integrity, artifact, test, review or Node-comparison requirements.
+
 ## Additional decisions, 2026-11-09
 
 - **Upstream:** one upstream pull request is intended later, but not now. Do not prepare or send anything to `EXXETA/exxperts` until Sascha resumes that work. Sascha: "einer aber warten".
