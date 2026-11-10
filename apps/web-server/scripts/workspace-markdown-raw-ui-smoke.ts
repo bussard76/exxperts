@@ -151,8 +151,25 @@ try {
 		assert(await guard.count() === 0, "navigation after autosave has no guard");
 		await reopenNotes(NOTES);
 
-		// Hold an actual PUT on either side of the server write, then discard.
-		for (const afterWrite of [false, true]) {
+		await raw.fill(NOTES + "escape draft");
+		await openGuard();
+		assert(await guard.getByRole("button", { name: "Cancel" }).isEnabled(), "Cancel is enabled before choosing Save or Discard");
+		await page.keyboard.press("Escape");
+		await guard.waitFor({ state: "hidden" });
+		assert(await page.getByRole("tab", { name: "notes.md", exact: true }).getAttribute("aria-selected") === "true", "nonbusy Escape cancels the pending navigation");
+		assert(await raw.inputValue() === NOTES + "escape draft", "nonbusy Escape retains the draft");
+		await waitUntil(() => fs.readFileSync(notes, "utf8") === NOTES + "escape draft", "nonbusy Escape resumes autosave");
+		await waitUntil(async () => (await status.textContent())?.trim() === "Saved", "escaped draft is saved");
+		await raw.fill(NOTES);
+		await waitUntil(async () => (await status.textContent())?.trim() === "Saved" && fs.readFileSync(notes, "utf8") === NOTES, "restore notes after nonbusy Escape");
+
+		// Busy Save and Discard retain the navigation despite Escape, on either side of a real write.
+		for (const { afterWrite, choice } of [
+			{ afterWrite: false, choice: "Save and continue" },
+			{ afterWrite: true, choice: "Save and continue" },
+			{ afterWrite: false, choice: "Discard changes" },
+			{ afterWrite: true, choice: "Discard changes" },
+		]) {
 			let release!: () => void;
 			let started!: () => void;
 			const held = new Promise<void>((resolve) => { release = resolve; });
@@ -175,13 +192,29 @@ try {
 			await raw.fill(NOTES + "in flight");
 			await startedPut;
 			await openGuard();
-			await guard.getByRole("button", { name: "Discard changes" }).click();
-			release();
+			await guard.getByRole("button", { name: choice }).click();
+			try {
+				assert(await guard.getByRole("button", { name: "Cancel" }).isDisabled(), `Cancel is disabled during ${choice}`);
+				await page.keyboard.press("Escape");
+				assert(await guard.isVisible(), `Escape keeps the busy ${choice} dialog open`);
+				assert(await guard.getByRole("button", { name: "Cancel" }).isDisabled(), "Escape does not re-enable Cancel while busy");
+				assert(await page.getByRole("tab", { name: "notes.md", exact: true }).getAttribute("aria-selected") === "true", `${choice} retains the current file while busy`);
+			} finally {
+				release();
+			}
 			await guard.waitFor({ state: "hidden" });
+			await waitUntil(async () => await page.getByRole("tab", { name: "todo.md", exact: true }).getAttribute("aria-selected") === "true", `${choice} completes the intended navigation after Escape`);
 			await page.unroute("**/workspace-markdown?**");
-			await reopenNotes(NOTES);
-			assert(fs.readFileSync(notes, "utf8") === NOTES, `discard restores bytes with PUT held ${afterWrite ? "after" : "before"} the write`);
+			const expected = choice === "Discard changes" ? NOTES : NOTES + "in flight";
+			await reopenNotes(expected);
+			await page.waitForTimeout(1500);
+			assert(fs.readFileSync(notes, "utf8") === expected, `${choice} keeps intended bytes with PUT held ${afterWrite ? "after" : "before"} the write`);
+			if (choice === "Save and continue") {
+				await raw.fill(NOTES);
+				await waitUntil(async () => (await status.textContent())?.trim() === "Saved" && fs.readFileSync(notes, "utf8") === NOTES, "restore notes after Save and continue");
+			}
 		}
+		console.log("  ok  busy Save and Discard ignore Escape; nonbusy Escape retains the draft and cancels navigation");
 		let releaseConflict!: () => void;
 		let conflictWritten!: () => void;
 		const conflictHeld = new Promise<void>((resolve) => { releaseConflict = resolve; });
