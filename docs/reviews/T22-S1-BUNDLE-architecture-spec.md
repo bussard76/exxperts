@@ -1,5 +1,20 @@
 # T22-S1-BUNDLE architecture spec
 Verdict: change-spec
+
+## Second review — revised spec
+
+Spec: `/home/developer/controller-exxperts/specs/t22-s1-bundle-revised.md`, SHA-256 `25e0dfec3954bf8d475059e7daaed20491676904de7a977f5ca94548b5ba6a11`; original review commit `6dadf2d6785c635e9ba342fdf436bb76c8a6449b` and candidate `6b4516bcb6278ed2e8a6a72a4398d8e6664a76e6`.
+
+Level: 1 conditionally confirmed. The revision binds all requirements in the original review, identifies the retained package closure and notice inventory, requires real parent-to-staged-child-to-browser comparison and security cases on both Node versions, and stops on changes to the contract, security, responsibilities or data flow. Dependencies and public interfaces must also remain unchanged. No additional design-relevant spec gap or level-3 decision was identified.
+
+**Remaining gate:** the fresh Node 22 one-pass production-staging measurement is still running and its result was not supplied to this review. The revised spec makes a successful measurement a condition before product implementation; 1,738 after a second prune does not satisfy it. Keep the overall verdict `change-spec` pending this evidence, not because another wording change has been identified. Record the actual count, complete logs, unchanged 2,500 ceiling, one release and one desktop prune using the same corrected roots, and successful `checkServerFiles`; stop and report if the count exceeds 2,500 or the check fails. Reassess the verdict after the result rather than treating this review as permission to build.
+
+**Binding precision:** Before implementation, supply or link the outside-in design, interface and logic-flow evidence required by the revised spec and reconcile it against the existing review; the exact existing child schemas and the real staged producer/consumer path in the original review remain authoritative. Inventory the prebundled ExcelJS distribution separately from the esbuild metafile, and do not declare notice coverage from package names or file existence alone. Compare against a built runtime and comparable upstream baseline as described in issue #22; missing platform evidence must be explicitly reported, and missing notice evidence blocks shipping. These are execution and evidence requirements, not assertions that parity, notices or platform support have already passed.
+
+No product code or test suite was run or changed during this review. The pre-existing `package-lock.json` edit remains outside this review commit.
+
+## First review — retained for binding requirements and history
+
 Spec: issue #22, decision comment 6768953199, and dispatched task; candidate 6b4516bcb6278ed2e8a6a72a4398d8e6664a76e6.
 Level: 1 conditionally confirmed for the specified implementation: a change to the existing packaging implementation, with the existing child interface and responsibilities preserved. Bundling the child makes the bundler and both pruners cooperate, but does not by itself introduce a new module, technology, dependency, public interface, or runtime data flow. The ExcelJS browser distribution is an alternative artifact of the same pinned package, not evidence of equivalent behavior. Escalate if equivalence requires changing the child contract, security behavior, dependencies, or responsibilities.
 Decision: Sascha's 2026-11-10 issue comment selects bundling subject to measurement, preservation, notices and tests; it does not establish the missing evidence below or authorize an interface change. No new level-3 decision is identified.
