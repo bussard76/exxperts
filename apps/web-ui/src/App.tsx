@@ -1,8 +1,10 @@
+import { createPortal } from "react-dom";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { AttachmentsBrowser, AttachmentsEntry, type AttachmentsView } from "./components/attachments-panel";
 import { WorkspaceFileBrowser } from "./components/WorkspaceFileBrowser";
 import { WorkspaceFileTabs } from "./components/WorkspaceFileTabs";
+import { useDocsWindow } from "./docs-window";
 import { PanelIcon } from "./sidebar-collapse";
 import { WorkspaceHtmlPreview } from "./components/WorkspaceHtmlPreview";
 import { WorkspaceImagePreview } from "./components/WorkspaceImagePreview";
@@ -761,6 +763,7 @@ export function App() {
 	const [backgroundDoneToast, setBackgroundDoneToast] = useState<{ agentId: PersistentAgentId; displayName: string } | null>(null);
 	const [persistentThread, setPersistentThread] = useState<PersistentAgentThread | null>(null);
 	const [persistentChat, setPersistentChat] = useState<PersistentChatConfig>(null);
+	const docsWindow = useDocsWindow(persistentChat?.agentId ?? null, persistentChat?.displayName ?? "Room");
 	useEffect(() => {
 		setWorkspaceTabs(null);
 		setRightPane((pane) => pane?.kind === "markdownEditor" || pane?.kind === "workspaceImage" || pane?.kind === "workspaceLegacyDoc" || pane?.kind === "workspacePdf" || pane?.kind === "workspaceWord" || pane?.kind === "workspaceHtml" || pane?.kind === "workspaceFramed" || pane?.kind === "workspaceText" || pane?.kind === "workspaceSpreadsheet" ? null : pane);
@@ -8675,9 +8678,17 @@ export function App() {
 			)}
 			{rightPane?.kind === "attachments" && !galleryShown && attachmentsBrowser("panel")}
 			{preview && <Preview content={preview.content} title={preview.title} type={preview.type} onClose={() => setPreview(null)} />}
-			{persistentChat && !personChanged && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId && (
+			<div className="docs-slot" ref={docsWindow.mountInline} />
+			{docsWindow.detached && (
+				<div className="docs-detached-strip" role="status">
+					<strong>{persistentChat?.displayName ?? "Room"} · Documents</strong>
+					<button type="button" onClick={() => { docsWindow.detach(); }}>Show documents</button>
+					<button type="button" onClick={docsWindow.returnToChat}>Return</button>
+				</div>
+			)}
+			{persistentChat && !personChanged && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId && createPortal(
 				<div className="workspace-pane" hidden={activeWorkspacePath(rightPane) === null}>
-					<WorkspaceFileTabs tabs={workspaceTabs.paths} active={activeWorkspacePath(rightPane)} onSelect={(path) => openWorkspaceMarkdown({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} onReorder={(paths) => setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths } : tabs)} />
+					<WorkspaceFileTabs tabs={workspaceTabs.paths} active={activeWorkspacePath(rightPane)} onSelect={(path) => openWorkspaceMarkdown({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} onReorder={(paths) => setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths } : tabs)} {...(docsWindow.detached ? { onReturn: docsWindow.returnToChat } : { onDetach: () => { docsWindow.detach(); } })} />
 					{rightPane && (rightPane.kind === "workspaceImage" || rightPane.kind === "workspacePdf" || rightPane.kind === "workspaceWord" || rightPane.kind === "workspaceHtml" || rightPane.kind === "workspaceFramed" || rightPane.kind === "workspaceText" || rightPane.kind === "workspaceSpreadsheet" || (rightPane.kind === "workspaceLegacyDoc" && !/\.doc$/i.test(rightPane.path))) && <WorkspaceOpenAction key={JSON.stringify([persistentChat.agentId, persistentChat.conversationId, rightPane.path])} agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={rightPane.path} />}
 					{rightPane?.kind === "markdownEditor" && <MarkdownEditorPane
 						ref={markdownEditorRef}
@@ -8711,7 +8722,7 @@ export function App() {
 						<WorkspaceImagePreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />
 					</div>)}
 				</div>
-			)}
+			, docsWindow.host)}
 			{rightPane?.kind === "taskRun" && taskState.phase !== "none" && taskState.taskId === rightPane.taskId && (
 				<TaskRunView
 					state={taskState}

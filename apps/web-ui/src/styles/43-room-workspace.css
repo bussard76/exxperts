@@ -290,7 +290,8 @@ html.desktop-app-mac .markdown-editor-header input {
 }
 /* The file tabs share the window's top row: above the drag strip, the bar drags
    and the tabs click, as in the headers above. */
-html.desktop-app-mac .workbench > .workspace-pane {
+html.desktop-app-mac .workbench > .workspace-pane,
+html.desktop-app-mac .workbench > .docs-slot > .docs-host > .workspace-pane {
 	position: relative;
 	z-index: 21;
 }
@@ -368,3 +369,12 @@ html.desktop-app-mac .workspace-tab {
 .workspace-preview-pptx-loading { position: absolute; top: 16px; left: 16px; margin: 0; }
 .workspace-preview-html iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
 .markdown-editor-raw-input { display: block; flex: 1 1 0; min-height: 0; width: 100%; box-sizing: border-box; border: 0; outline: none; resize: none; tab-size: 4; }
+
+/* T20 design lane: the documents window. The slot and host add no box of their own while the pane sits beside the chat. */
+.docs-slot, .docs-host { display: contents; }
+.docs-host.docs-host-window { display: block; height: 100vh; background: var(--exx-bg, inherit); }
+.workspace-tabs-window { margin-left: auto; flex: none; align-self: center; padding: 3px 10px; border: 1px solid var(--exx-border); border-radius: 6px; background: transparent; color: inherit; font-size: 12px; cursor: pointer; }
+.workspace-tabs-window:hover { background: var(--exx-surface-hover); }
+.docs-detached-strip { display: flex; flex-direction: column; align-items: flex-start; gap: 0.6rem; padding: 1rem; border-left: 1px solid var(--exx-border); background: var(--exx-surface); }
+.docs-detached-strip button { padding: 5px 12px; border: 1px solid var(--exx-border); border-radius: 6px; background: transparent; color: inherit; font-size: 13px; cursor: pointer; }
+.docs-detached-strip button:hover { background: var(--exx-surface-hover); }
