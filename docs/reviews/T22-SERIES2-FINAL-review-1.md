@@ -62,3 +62,9 @@ The actual retained npm tarball includes root `NOTICE` and `LICENSE`, but its NO
 | tests | minor | `persistent-room-localfiles-secret-floor-smoke.ts` | Run fd, case-insensitive filesystem and platform-specific cases on suitable hosts. |
 | style | minor | `apps/web-ui/src/components/MarkdownEditorToolbar.tsx` | Include Delete table visibility in human preview acceptance. |
 | style | minor | `apps/web-server/src/persistent-room-workspace-image.ts:117` | Remove the extra blank line at EOF; `git diff --check` reports it. |
+
+## Adjudication — 2026-11-10
+
+Sascha's no-worse decision recorded in `cad3d431cd93015c7ac1d178fcb86ef483f41d9a:docs/coordinator.md` applies to the two matching Node 22 smoke failures above. The **Series 2 gate assessment is pass under that rule**: each candidate failure was reproduced alone on the reviewed commit and matched the same smoke and diagnostic on pinned upstream `461e6485bf932f5cba85ac3dde8e0104e47d5dec`. This adjudication leaves the actual full-run result at **375/377 failed overall**, the two isolated failures, the skips, and all unresolved evidence unchanged; it is not a claim that the raw gate run was green.
+
+A future Series 2 PR must disclose the pre-existing upstream failures of `room-topbar-ui-smoke.ts` (top-bar ink alignment) and `consult-mention-smoke.ts` (picked-name text alignment) on Node 22, and the matching Node 20 `room-workspace-path-reach-smoke.ts` `tsx` `e.split is not a function` startup failure. The notice change at `a9d1b8b` is reviewed separately; this adjudication gives it no pass.
