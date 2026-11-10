@@ -98,3 +98,13 @@ Baseline `461e6485bf932f5cba85ac3dde8e0104e47d5dec`; immutable tested product/lo
 Files changed relative to the Series 2 base: `package-lock.json`, `apps/web-ui/src/components/MarkdownEditorPane.tsx`, `MarkdownEditorToolbar.tsx`, `apps/web-ui/src/markdown-raw-tasks.ts`, `apps/web-ui/src/styles/43-room-workspace.css`, `apps/web-server/scripts/markdown-raw-tasks-smoke.ts`, `workspace-markdown-raw-ui-smoke.ts`, and this report. The two smoke files contain the reviewed targeted tests. No new dependency beyond the reviewed lock, route, public export, store or data flow was introduced by this port. Assumptions: the Controller's pinned lock and reviewed product commits are authoritative; same-smoke exception applies only to the exact diagnostic above. Preserved the unowned starting lock change as stash `T22-LOCK2-RESUME preserve unowned lockfile change`.
 
 Debt candidates: minor tests for nested tasks through the browser and same-mounted discard; minor UI visibility of Delete table, as the preliminary review records. Distribution/licence review of the pre-existing missing runtime notice files remains open. Independent full gate, review and Series 1+2 composition remain Controller/Tester-owned; no main merge or full gate was run. Graph: no; exact reviewed composition, no graph assignment. Six tool calls before first report edit; no graph affected the work.
+
+## T22-S2-NOTICE-FIX checklist (npm only)
+
+- [ ] Extend the existing notice smoke to pack an actual unique temporary tarball, retain all prior checks, assert root LICENSE, compare exact bytes for NOTICE and both runtime references, and reject missing or duplicate entries and pack/extraction failures; demonstrate red before the fix.
+- [ ] Add only `runtime/LICENSE` and `runtime/NOTICE.md` to the root package allowlist; preserve notice text, all prior entries and the lock byte-for-byte; pass the targeted artifact smoke.
+- [ ] Run normal-lifecycle `EXXETA_SKIP_BROWSER_INSTALL=1 npm ci`, compare lock hashes before and after, and record any unrelated rewrite outside the branch.
+- [ ] Record the exact packed artifact SHA and contents, checks, files, assumptions, debt, and self-review; push the product/test branch.
+- [ ] Leave independent review, conformance, the new full gate, release archive and platform desktop verification to their assigned owners; do not claim coverage or legal sufficiency.
+
+Architecture impact: level 1, root package metadata and existing packaging smoke; no new interface, dependency, module or data flow. Graph: no; exact files and seam were specified, so the graph would not affect the change.
