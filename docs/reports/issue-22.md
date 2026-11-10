@@ -33,3 +33,13 @@ Graph: no; the task specified an exact source port and no graph assignment. Five
 
 ## Preserved work
 Before switching, HEAD was `fb2ac7aaa5287659ea0da0ec306b60ab60126ac0` and status was `## bussard76/t22-s2-port` with ` M package-lock.json`. At Controller direction the existing lock rewrite was preserved as stash object `3b07619e3a0484a05b55bc1c813f179182efbecf` (named `T22-S2-PORT preserve unowned lock rewrite`); it was not popped, discarded or applied to this branch.
+
+## T22-S2-PORT-R2 rework checklist
+
+- [x] Reproduce clean external replacement with noncanonical Markdown through workspace GET/PUT; save without editing, switch modes and check exact bytes.
+- [ ] Preserve the adopted source until a real rich edit; a clean save must not write it.
+- [ ] Discard a draft, save and verify exact source.
+- [ ] Run targeted browser and helper checks and both typechecks; report the tested SHA and product-only scope.
+- [ ] Self-review, sign and push the branch without merging main or changing lockfiles.
+
+Red evidence: attributed RAW browser smoke at product head `ad43a3727f90675523152aecd2b3d5c1427bae6d` failed at `clean save and mode switches retain the exact external source` after real workspace GET/PUT.
