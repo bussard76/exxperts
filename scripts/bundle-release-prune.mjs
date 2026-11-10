@@ -212,7 +212,11 @@ function workerOnlyPackages(app, nodeModulesDir) {
 		const nodes = [source];
 		for (let i = 0; i < nodes.length; i++) ts.forEachChild(nodes[i], (child) => { nodes.push(child); });
 		for (const node of nodes) {
-			if ((ts.isBindingElement(node) || ts.isImportSpecifier(node)) && ts.isIdentifier(node.name) && (node.propertyName?.getText(source) ?? node.name.text) === "createRequire") factories.add(node.name.text);
+			if ((ts.isBindingElement(node) || ts.isImportSpecifier(node)) && ts.isIdentifier(node.name)) {
+				const original = node.propertyName?.getText(source) ?? node.name.text;
+				if (original === "createRequire") factories.add(node.name.text);
+				if (original === "require") aliases.add(node.name.text);
+			}
 		}
 		for (const node of nodes) {
 			if (!ts.isVariableDeclaration(node) || !ts.isIdentifier(node.name) || !node.initializer) continue;
@@ -244,7 +248,8 @@ function workerOnlyPackages(app, nodeModulesDir) {
 				const callee = node.expression;
 				const direct = callee.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(callee) && aliases.has(callee.text));
 				const property = ts.isPropertyAccessExpression(callee) && (callee.name.text === "import" || callee.name.text === "require" || (callee.name.text === "resolve" && ts.isIdentifier(callee.expression) && aliases.has(callee.expression.text)));
-				if (direct || property) load(node.arguments[0]);
+				const element = ts.isElementAccessExpression(callee) && ts.isStringLiteralLike(callee.argumentExpression) && (callee.argumentExpression.text === "require" || callee.argumentExpression.text === "import");
+				if (direct || property || element) load(node.arguments[0]);
 			}
 		}
 	}
