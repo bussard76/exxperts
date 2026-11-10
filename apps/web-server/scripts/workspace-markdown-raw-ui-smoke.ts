@@ -97,7 +97,10 @@ try {
 		const openNotes = async () => { await tree.locator(".workspace-file-browser-file", { hasText: "notes.md" }).click({ timeout: 15_000 }); };
 		const raw = page.getByRole("textbox", { name: "Raw Markdown source" });
 		const status = page.locator(".markdown-editor-status");
+		const initialRead = page.waitForResponse((response) => response.url().includes("/workspace-markdown?") && response.request().method() === "GET");
 		await openNotes();
+		const markdownUrl = new URL((await initialRead).url());
+		const markdownRoute = markdownUrl.pathname + markdownUrl.search;
 		await page.locator(".markdown-editor-tiptap .ProseMirror").waitFor();
 
 		// 1. Switching modes without typing changes nothing on disk and leaves the file clean.
@@ -217,9 +220,35 @@ try {
 		assert((await raw.inputValue()) === "# Later edit\n", "later edit survives mode switches");
 		console.log("  ok  later RAW edits survive an in-flight save");
 		await waitUntil(async () => (await status.textContent())?.trim() === "Saved", "later edit is clean");
-		fs.writeFileSync(notes, "# External clean update\n");
-		await waitUntil(async () => (await raw.inputValue()) === "# External clean update\n", "clean RAW adopts an external replacement", 15_000);
-		console.log("  ok  clean RAW adopts an external replacement");
+		const external = "# External clean update\n\n* one\n* two\n\n\nTail\n";
+		const read = await api(markdownRoute);
+		assert(read.status === 200, "read the workspace Markdown through its API");
+		const replacement = await api(markdownRoute, { method: "PUT", body: JSON.stringify({ content: external, revision: read.body.revision }) });
+		assert(replacement.status === 200, "replace the workspace Markdown through its API");
+		await waitUntil(async () => (await raw.inputValue()) === external, "clean RAW adopts an external replacement", 15_000);
+		await page.keyboard.press("Control+s");
+		await page.getByRole("button", { name: "Edit", exact: true }).click();
+		await page.getByRole("button", { name: "RAW", exact: true }).click();
+		assert((await raw.inputValue()) === external, "clean save and mode switches retain the exact external source");
+		assert(fs.readFileSync(notes, "utf8") === external, "clean save does not rewrite the external source");
+
+		await page.route("**/workspace-markdown?**", async (route) => {
+			if (route.request().method() === "PUT") await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "mock save failure" }) });
+			else await route.continue();
+		});
+		await raw.fill(external + "draft");
+		await page.locator(".markdown-editor-error").waitFor({ state: "visible" });
+		await tree.locator(".workspace-file-browser-file", { hasText: "todo.md" }).click();
+		await page.getByRole("dialog", { name: "Unsaved Markdown changes" }).getByRole("button", { name: "Discard changes" }).click();
+		await page.unroute("**/workspace-markdown?**");
+		await openNotes();
+		await page.getByRole("button", { name: "RAW", exact: true }).click();
+		await waitUntil(async () => (await raw.inputValue()) === external, "discard restores the exact source");
+		await page.keyboard.press("Control+s");
+		await page.getByRole("button", { name: "Edit", exact: true }).click();
+		await page.getByRole("button", { name: "RAW", exact: true }).click();
+		assert((await raw.inputValue()) === external && fs.readFileSync(notes, "utf8") === external, "discard and save retain exact source");
+		console.log("  ok  clean replacement and discard preserve source on save");
 
 
 		// 6. Task checkmarks. In Edit a rendered checkbox is clickable and saves "[x]".
