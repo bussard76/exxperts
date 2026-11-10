@@ -172,6 +172,8 @@ const POLICY: Record<string, RemoteRouteClass> = {
 	"GET /api/persistent-agents/:id/workspace-image": "read",
 	"GET /api/persistent-agents/:id/workspace-preview": "read",
 	"POST /api/persistent-agents/:id/workspace-open": "local",
+	"GET /api/persistent-agents/:id/workspace-markdown": "read",
+	"PUT /api/persistent-agents/:id/workspace-markdown": "write",
 	"GET /api/persistent-agents/:id/prompt-diagnostics": "local",
 
 	// Rooms: interaction (full-capability devices).
