@@ -156,6 +156,12 @@ The earlier licence-source and replacement choices for `buffers@0.1.1` are super
 
 Each final upstream series path check rejects `docs/reports/`, reviews, specs, ADRs and factory files. Preserve the `docs/reports/issue-22.md` report from Series 2 `a9d1b8b` on the fork, and remove it from the final contribution tree before handing the series to Front.
 
+### Release archive worker reuse (decided by Sascha, 2026-11-10)
+
+[Option C](https://github.com/bussard76/exxperts/issues/22#issuecomment-6774520776) reuses the existing bundled shelf worker; the 15,000-file ceiling stays unchanged. First measure the complete real staged archive on the combined candidate. Omit only packages proven exclusive to that worker by the actual import graph and existing unknown/dynamic-import checks, with no CLI, server or other runtime consumer. Report the actual count to Front before build-out; approximately 14,600 is an estimate, not a measurement.
+
+If it fits, Series 1 owns the implementation and the same fix is folded into the combined state. Preserve every existing check and notice; rerun the real release build, actual desktop-prune, checksum, bare-machine and staged parity checks. If it remains over 15,000, stop and report the measured count to Front; a smaller ceiling increase requires a further Sascha decision. No threshold increase or source-package or runtime-contract deletion based on package-name guesses is authorized. The failed combined release at `b9c1e25` produced 18,028 staged files and no archive; independent failure review `c9a145d` and the raw evidence remain historical evidence.
+
 ## Additional decisions, 2026-11-09
 
 - **Upstream:** one upstream pull request is intended later, but not now. Do not prepare or send anything to `EXXETA/exxperts` until Sascha resumes that work. Sascha: "einer aber warten".
