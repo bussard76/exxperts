@@ -222,6 +222,8 @@ function workerOnlyPackages(app, nodeModulesDir) {
 			if (!ts.isVariableDeclaration(node) || !ts.isIdentifier(node.name) || !node.initializer) continue;
 			const value = node.initializer;
 			if ((ts.isIdentifier(value) && value.text === "require") ||
+				(ts.isPropertyAccessExpression(value) && value.name.text === "require" && value.expression.getText(source) === "module") ||
+				(ts.isElementAccessExpression(value) && ts.isStringLiteralLike(value.argumentExpression) && value.argumentExpression.text === "require" && value.expression.getText(source) === "module") ||
 				(ts.isCallExpression(value) && ts.isIdentifier(value.expression) && factories.has(value.expression.text)) ||
 				(ts.isCallExpression(value) && ts.isPropertyAccessExpression(value.expression) && value.expression.name.text === "bind" && value.expression.expression.getText(source) === "module.require")) aliases.add(node.name.text);
 		}
@@ -246,7 +248,7 @@ function workerOnlyPackages(app, nodeModulesDir) {
 			else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) load(node.moduleReference.expression);
 			else if (ts.isCallExpression(node)) {
 				const callee = node.expression;
-				const direct = callee.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(callee) && aliases.has(callee.text));
+				const direct = callee.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(callee) && aliases.has(callee.text)) || (ts.isCallExpression(callee) && ts.isIdentifier(callee.expression) && factories.has(callee.expression.text));
 				const property = ts.isPropertyAccessExpression(callee) && (callee.name.text === "import" || callee.name.text === "require" || (callee.name.text === "resolve" && ts.isIdentifier(callee.expression) && aliases.has(callee.expression.text)));
 				const element = ts.isElementAccessExpression(callee) && ts.isStringLiteralLike(callee.argumentExpression) && (callee.argumentExpression.text === "require" || callee.argumentExpression.text === "import");
 				if (direct || property || element) load(node.arguments[0]);
