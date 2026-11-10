@@ -8,6 +8,8 @@ Level 3: document ownership and lifecycle cross the chat-window/document-window 
 
 ## Authority and assumptions
 
+Sascha authorized option A as a bounded native/forced-close feasibility investigation on 2026-11-10. This authorizes evidence gathering only; it neither selects an architecture nor changes the no-loss requirement. Implementation remains blocked, and options B/C/D return to Front if the evidence fails or is inconclusive.
+
 - Sascha's idea: [issue #20](https://github.com/bussard76/exxperts/issues/20), including its 2026-11-10 comment: a separate later upstream series 3 depending on document-pane series 1 and editor series 2.
 - Both latest entries in `~/controller-exxperts/inbox-done.md`, read 2026-11-10, order logic first, proposed ADR second, then Front questions. They prohibit building and keep series cuts parked. They do not decide the options below.
 - Subsequent Sascha decision, 2026-11-10, relayed by Front in that inbox and this follow-up dispatch: the document window closes when chat closes and when leaving the room; it must not work independently. Both paths use the existing Save/Discard/Cancel protection; Cancel keeps both windows open. Unsaved Markdown must never be lost. These are product requirements, not evidence that a native termination mechanism can meet them.

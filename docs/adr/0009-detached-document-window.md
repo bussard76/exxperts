@@ -44,6 +44,8 @@ ADR-0002's room/workspace protections, ADR-0003's local-only explicit OS-open ac
 
 ## Decision
 
+Sascha authorized option A for bounded native/forced-close feasibility work on 2026-11-10, without changing the no-loss requirement. This is not acceptance of option A or this ADR; failed or inconclusive evidence returns options B/C/D to Front for a decision.
+
 Architecture pending. No option is accepted. Recommendation A and the correlated close mechanism are agent proposals conditioned on feasibility evidence, not Sascha's selection of a technical design. The record must remain `Status: proposed` and `Decided by: Sascha pending` until the architecture decision is explicitly accepted under the project protocol.
 
 Recorded product constraints: dependent closure with chat and on room exit, Save/Discard/Cancel on both paths, Cancel retaining both windows, no accidental draft loss, and later separate upstream series 3. Explicit Discard is a deliberate user choice, never a fallback for failure. Tab strip, cardinality, placement and the technical solution/fallback remain open in [Front's question set](../../design/t20-detach-window/front-options.md). This partial product decision is not implementation authorization or full outside-in sign-off.
