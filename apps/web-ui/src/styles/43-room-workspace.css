@@ -36,6 +36,7 @@ html.sidebar-collapsed .sidebar-resizer { display: none; }
  border-left: 1px solid var(--border);
  display: flex;
  flex-direction: column;
+ flex: 1 1 auto;
  color: var(--fg);
 }
 .markdown-editor-header {
@@ -71,7 +72,9 @@ html.sidebar-collapsed .sidebar-resizer { display: none; }
 .markdown-editor-textarea { min-height: 0; flex: 1 1 auto; width: 100%; resize: none; border: 0; outline: 0; padding: 16px; background: transparent; color: var(--fg); font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; tab-size: 2; }
 .markdown-editor-textarea:focus-visible { outline: 2px solid var(--exx-focus); outline-offset: -2px; }
 .markdown-editor-surface { min-width: 0; min-height: 0; flex: 1 1 auto; display: flex; }
-.markdown-editor-surface-hidden { display: none; }
+.markdown-editor-surface-raw { flex: 0 0 auto; }
+.markdown-editor-surface-raw .markdown-editor-rich-scroll { display: none; }
+.markdown-editor-body-raw { flex-direction: column; }
 .markdown-editor-rich-surface { min-width: 0; min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column; }
 .markdown-editor-toolbar { min-height: 34px; flex: 0 0 auto; display: flex; align-items: center; gap: 2px; overflow-x: auto; padding: 4px 8px; border-bottom: 1px solid var(--border); background: var(--panel, var(--bg)); }
 .markdown-editor-search { min-height: 34px; flex: 0 0 auto; display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--panel, var(--bg)) 92%, var(--accent, #6ea8fe)); }
@@ -111,7 +114,10 @@ html.sidebar-collapsed .sidebar-resizer { display: none; }
 .markdown-editor-tiptap .ProseMirror .selectedCell:after { position: absolute; inset: 0; z-index: 2; pointer-events: none; background: color-mix(in srgb, var(--accent, #6ea8fe) 18%, transparent); content: ""; }
 .markdown-editor-tiptap .ProseMirror ul[data-type="taskList"] { padding: 0; list-style: none; }
 .markdown-editor-tiptap .ProseMirror ul[data-type="taskList"] li { display: flex; gap: 8px; align-items: flex-start; }
-.markdown-editor-tiptap .ProseMirror ul[data-type="taskList"] li > label { margin-top: 5px; }
+.markdown-editor-tiptap .ProseMirror ul[data-type="taskList"] li > label { display: flex; align-items: center; height: 1lh; margin: 0; }
+.markdown-editor-tiptap .ProseMirror ul[data-type="taskList"] li > label input { margin: 0; }
+.markdown-editor-tiptap .ProseMirror ul[data-type="taskList"] li > div > p:first-child { margin-top: 0; }
+.markdown-editor-tiptap .ProseMirror ul[data-type="taskList"] li > div > p:last-child { margin-bottom: 0; }
 .markdown-editor-tiptap .ProseMirror ul[data-type="taskList"] li > div { flex: 1; }
 .markdown-editor-preview { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 16px; }
 .markdown-editor-raw { min-width: 0; min-height: 0; flex: 1 1 auto; margin: 0; overflow: auto; padding: 16px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg); background: transparent; font: 13px/1.55 var(--exx-font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace); }
@@ -361,3 +367,4 @@ html.desktop-app-mac .workspace-tab {
 .workspace-preview-html { height: 100%; position: relative; }
 .workspace-preview-pptx-loading { position: absolute; top: 16px; left: 16px; margin: 0; }
 .workspace-preview-html iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+.markdown-editor-raw-input { display: block; flex: 1 1 0; min-height: 0; width: 100%; box-sizing: border-box; border: 0; outline: none; resize: none; tab-size: 4; }
