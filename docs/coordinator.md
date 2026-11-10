@@ -12,7 +12,7 @@ These rules bind whichever agent coordinates work in this repo: the Front agent 
 
 ## Roles
 
-- **Front agent:** runs on the server in the pilot; talks to Sascha; tickets and specs; the outside-in stages; one question at a time with the recommended option first; status as one table; morning handover. Does not steer workers.
+- **Front agent:** runs on the server; talks to Sascha; tickets and specs; the outside-in stages; one question at a time with the recommended option first; status as one table; morning handover. Does not steer workers. Writes product code only in a design lane that Sascha opened: on its own branch, for one named surface, handed to the Controller as a hardening ticket when Sascha says it is right. In the lane, tests follow in the hardening ticket. Fixture data may gain a new field. No assertion is changed, skipped or deleted; a broken test is reported to Sascha and listed as a shortcut. That branch passes the same review gate as any other.
 - **Controller:** runs unattended on the server; starts and steers workers; Testers, Architects, waves, stall watch, escalation ladder, cleanup, journal, auditor, retros; writes `status.md` after every cycle. Never talks to Sascha directly; questions go into `status.md` under "Needs Sascha".
 - **Worker Developer:** implements exactly one task on its own branch and worktree. Never pushes to `main`.
 - **Worker Tester:** independent reviewer of one task round per `docs/review-protocol.md`. Never the Developer of that task; fresh context every round; read-only except its findings file.
@@ -21,13 +21,13 @@ These rules bind whichever agent coordinates work in this repo: the Front agent 
 
 ## Front agent and Controller on the server (decided by Sascha, 2026-11-10)
 
-Sascha chose a server pilot: “auf dem Server alles im Baum” with a Front agent above the Controller and workers below it ([decision and pilot source](https://github.com/bussard76/agentic-factory/pull/36)). The Front and Controller run in the same server Orca, in the tree Front → Controller → Integration and workers. The Controller still starts and steers factory workers; the Front speaks to Sascha and prepares work.
+Sascha chose the server Front: “auf dem Server alles im Baum” with a Front agent above the Controller and workers below it ([decision and pilot source](https://github.com/bussard76/agentic-factory/pull/36)). The Front and Controller run in the same server Orca, in the tree Front → Controller → Integration and workers. The Controller still starts and steers factory workers; the Front speaks to Sascha and prepares work.
 
 Front and Controller send orders and answers both ways with native `orca orchestration send` to the recipient terminal. The Controller appends events to `front-events.log` for the Front to read; the log is append-only and never archived. `inbox.md` and `status.md` remain fallback and record if messaging is unavailable.
 
 For work available only on the Mac, the Front appends a task to `~/front-exxperts/mac-tasks.log` for a Mac worker, which returns its result to the server Front via native Orca messaging. Tasks wait while the Mac is off. Do not pair the server to the Mac; keep private work data off the build server.
 
-This is a manual pilot. Factory startup, status watch, doctor, automatic worktree creation or re-parenting, and a Mac task watcher do not yet implement this setup. An empty log does not prove delivery.
+The setup is currently manual. Factory startup, status watch, doctor, automatic worktree creation or re-parenting, and a Mac task watcher do not yet implement this setup. An empty log does not prove delivery.
 
 ## Outside-in development (decided by Sascha, 2026-11-04)
 
@@ -138,3 +138,7 @@ Append dated sections below as decisions are made. Superseded rules stay here wi
 
 - **Upstream:** one upstream pull request is intended later, but not now. Do not prepare or send anything to `EXXETA/exxperts` until Sascha resumes that work. Sascha: "einer aber warten".
 - **Excalidraw:** keep it only in the fork and keep its changes separable, so a future upstream port can omit them cleanly. Sascha: "nur im fork".
+
+## Additional decisions, 2026-11-10
+
+- **No Mac Front agent (decided by Sascha, 2026-11-10):** There is one Front agent, on the server. Mac-only work goes to a **Mac worker** that the Front agent defines per case, mainly where changes must iterate fast (front-end and UI changes) or something must be built on the Mac with Mac prerequisites (app, DMG, native checks). The Mac worker follows `AGENTS.md` like any worker; its output goes through the same review gate. Until a Mac host is configured in `factory.config.json`, the Front agent records such work as `MAC-TASK <date> <what>` in `~/front-exxperts/mac-tasks.log` and tells Sascha.

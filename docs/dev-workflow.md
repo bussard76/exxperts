@@ -15,7 +15,7 @@ Ein Projekt wird von einer kleinen **agentischen Fabrik** gebaut:
 
 ```mermaid
 flowchart LR
-  S[Mensch] <--> F[Front-Agent<br/>Server, Pilot]
+  S[Mensch] <--> F[Front-Agent<br/>Server]
   F <-->|Orca-Nachrichten| C[Controller<br/>Server]
   C --> I[Integration]
   C --> W1[Developer]
@@ -32,7 +32,7 @@ flowchart LR
 | Rolle | Wer / wo | Macht | Macht nie |
 |---|---|---|---|
 | **Mensch** | der Eigentümer | Ziele und Prioritäten, nimmt auf dem Preview ab (eigener Rechner, eigene Umgebung; automatisierte Tests nutzen nie echte Daten), entscheidet Architektur auf Stufe 3 und alles, was echte externe Systeme oder echte Daten berührt | – |
-| **Front-Agent** | Agenten-Sitzung auf dem Server im Pilot | Einzige Ansprechstelle. Nimmt Wünsche und Testbefunde auf, macht daraus Tickets und Specs, führt die Stufen von außen nach innen, holt Entscheidungen ein, berichtet den Stand als Tabelle, schreibt die Morgen-Übergabe | Worker selbst steuern; den Menschen mit dem Hin und Her der Worker belasten |
+| **Front-Agent** | Agenten-Sitzung auf dem Server | Einzige Ansprechstelle. Nimmt Wünsche und Testbefunde auf, macht daraus Tickets und Specs, führt die Stufen von außen nach innen, holt Entscheidungen ein, berichtet den Stand als Tabelle, schreibt die Morgen-Übergabe | Worker selbst steuern; den Menschen mit dem Hin und Her der Worker belasten |
 | **Controller** | Agenten-Sitzung auf dem Server, unbeaufsichtigt | Startet und steuert alle Worker, taktet Tests, Reviews und Waves, erkennt hängende Worker, räumt auf, schreibt nach jedem Zyklus einen Status | Mit dem Menschen direkt sprechen; Stufe-3-Architektur, ADRs oder Produktentscheidungen treffen |
 | **Developer** | Worker (Codex, Claude Code oder Pi) | Baut genau einen Auftrag, testgetrieben, auf eigenem Branch | Nach `main` pushen, Tests abschwächen |
 | **Tester** | Worker, nie derselbe wie der Developer | Prüft unabhängig gegen die Spec, führt die vollen Testläufe aus, schreibt einen Befund mit Urteil | Code ändern |
@@ -57,6 +57,7 @@ Neue Funktionen entstehen **von außen nach innen**. Gebaut wird erst, wenn Ober
 - **Design-Export ins Repo:** Das Design-Werkzeug läuft nur auf dem Rechner des Menschen. Bei der Freigabe von Stufe 1 exportiert der Front-Agent Ebenenbaum, Design-Variablen, generierten Code und Screenshots nach `design/<feature>/`. Worker lesen den Entwurf aus Git und brauchen keinen Zugang zum Design-Werkzeug.
 - **`wayfinder`** plant ein großes Vorhaben als Karte von Entscheidungstickets und löst sie Sitzung für Sitzung. Er plant nur, er baut nicht.
 - **Grund:** Die Live-Fehler, die zu dieser Regel führten, waren fast alle Missverständnisse über Daten und Logik. Sie wären in Stufe 2 oder 3 vor dem Bau aufgefallen.
+- **Design-Spur:** Wenn der Mensch darum bittet, formt der Front-Agent eine Oberfläche direkt auf einem Branch, während der Mensch auf einem eigenen Port prüft. Erst das Aussehen; Tests, Review und Gate folgen als Härtungs-Ticket für den Controller, und nur über sie kommt der Branch nach `main`. Details: [outside-in.md](https://github.com/bussard76/agentic-factory/blob/main/docs/outside-in.md#the-design-lane-shaping-the-real-surface-together).
 
 ## Der Ablauf einer Aufgabe
 
@@ -101,7 +102,7 @@ Jedes Ticket, ob GitHub-Issue oder Task-Datei, wird zu genau einem Branch und ei
 | 5b. `pass` | Architekt (nur Stufe 2/3) | `agents/t12-conformance` vom bestandenen SHA | grobe Grenzprüfung, `T12-architecture-conformance.md` |
 | 6. Wave | Controller | Worktree `<workspaces>/<projekt>/coordinator-integration/`, Branch `integration` auf `origin/main` zurückgesetzt | führt jeden bestandenen Task-Branch **zusammen mit dem Review-Branch seiner bestandenen Runde** zusammen (`agents/t12` und `agents/t12-review-2`, bei Stufe 2/3 auch den Konformitäts-Branch), einen Branch nach dem anderen (einen Octopus-Merge lehnt die Push-Sperre ab), übernimmt die ADR-Verweise der gemergten Commits in die Merge-Nachricht, lässt die vollen Gates einmal laufen (außer bei reinen Dokumentationsänderungen), **pusht `integration` nach `main`**; der Pre-Push-Hook prüft, dass jeder Commit Vorfahre eines `Verdict: pass`-Review-SHA ist, dessen Befunddatei im gepushten Stand liegt |
 | 7. Preview und Abnahme | Mensch | der Preview-Klon auf dem eigenen Rechner | folgt `main` automatisch; Befunde werden neue Tickets |
-| 8. Aufräumen | Controller, jeder Zyklus | alle Worker-Hosts | schließt das Terminal des Workers, gibt den Dispatch frei, entfernt den Worktree `t12/`, sobald sein Branch gemergt oder sicher auf origin ist, löscht gemergte `agents/t12*`-Branches, schließt das Issue oder setzt `Status: integrated` |
+| 8. Aufräumen | Controller, jeder Zyklus | alle Worker-Hosts | schließt das Terminal des Workers, gibt den Dispatch frei, entfernt den Worktree `t12/`, sobald sein Branch gemergt oder sicher auf origin ist, löscht gemergte `agents/t12*`-Branches. Den Ticket-Status setzt die Welle: Ihr letzter Branch setzt `Status: integrated`, oder der Controller schließt das Issue nach dem Push |
 
 ```mermaid
 gitGraph
@@ -157,7 +158,7 @@ Der Controller setzt für jeden vollen Gate-Aufruf `GATE_SLOTS=1`, auch für Bro
 | Ort | Was |
 |---|---|
 | **Worker-Hosts** | null bis viele Server oder der eigene Rechner: Worker, Testläufe, Waves. Ein Remote-Server ist eine Option, kein Muss; mehrere sind möglich |
-| **Controller-Host** | einer der Worker-Hosts oder der Rechner des Menschen; im Pilot auch der Front-Agent |
+| **Controller-Host** | Server; also hosts the Front agent |
 | **Rechner des Menschen** | der **Preview**: der aktuelle `main` mit der echten Umgebung, nur lesend, auf einer privaten Kopie der Daten, wo Daten im Spiel sind; Mac-Worker für Mac-only-Arbeit |
 | **Git-Host** | das Repository; alle Worker-Branches landen dort, nie direkt auf `main` |
 
@@ -186,7 +187,7 @@ Der Rhythmus ist eine Einstellung (`rhythm.mode`), keine Regel:
 - **Eigener Zeitplan:** Ruhezeiten legen fest, wann der Controller neue Arbeit starten darf.
 - **Status auf Nachfrage:** eine Tabelle mit Aufgabe, wer daran arbeitet (Rolle, Modell), Stand, nächster Schritt und ob der Mensch gebraucht wird. Darunter, was neu auf `main` ist, und offene Abnahmen.
 - **Fragen an den Menschen:** immer eine auf einmal, mit Optionen und Empfehlung.
-- **Schnittstelle Front-Agent ↔ Controller:** Im manuellen Server-Pilot (entschieden von Sascha am 10.11.2026) laufen beide im selben Orca und senden Aufträge und Antworten in beide Richtungen mit `orca orchestration send`. Der Controller schreibt Ereignisse für den Front-Agent in `front-events.log`: nur anhängen, nie archivieren. `inbox.md` und `status.md` bleiben Rückfallweg und Dokumentation; `CONTROLLER.md` ist das Betriebshandbuch. Der Baum ist Front → Controller → Integration und Worker; der Controller steuert die Worker. Mac-only-Arbeit trägt der Front-Agent in `~/front-exxperts/mac-tasks.log` für einen Mac-Worker ein, der das Ergebnis per Orca an den Server-Front-Agent zurücksendet. Ist der Mac aus, wartet die Aufgabe. Der Server wird nicht mit dem Mac gekoppelt; private Arbeitsdaten bleiben vom Build-Server fern. Automatischer Start, Baumaufbau und Mac-Task-Watcher sind noch nicht implementiert; ein leeres Log belegt keine Zustellung.
+- **Front agent ↔ Controller interface:** Both run in the same server Orca and send orders and answers in both directions with `orca orchestration send`. The Controller appends events for the Front agent to `front-events.log`, never archiving it. `inbox.md` and `status.md` remain the fallback and record; `CONTROLLER.md` is the operating handbook. The tree is Front → Controller → Integration and workers; the Controller steers workers. For Mac-only work the Front defines a Mac worker per case. Until a Mac host is configured, the Front records `MAC-TASK <date> <what>` in `~/front-exxperts/mac-tasks.log` and tells Sascha; tasks wait while the Mac is off. The worker returns its result to the server Front via Orca. There is no Mac Front agent, the server is not paired with the Mac, and private work data stays off the build server. Automatic startup, tree creation and the Mac task watcher are not yet implemented; an empty log does not prove delivery.
 
 ## Der Zyklus des Controllers
 
