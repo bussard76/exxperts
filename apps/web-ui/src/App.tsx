@@ -626,6 +626,7 @@ export function App() {
 	}
 
 	function cancelMarkdownEditorPrompt(): void {
+		if (markdownEditorPromptBusy) return;
 		markdownEditorPendingActionRef.current = null;
 		setMarkdownEditorPrompt(null);
 		setMarkdownEditorPromptBusy(false);
@@ -645,7 +646,7 @@ export function App() {
 		};
 		document.addEventListener("keydown", onKeyDown);
 		return () => document.removeEventListener("keydown", onKeyDown);
-	}, [markdownEditorPrompt]);
+	}, [markdownEditorPrompt, markdownEditorPromptBusy]);
 
 	// The room settings wheel in the topbar opens the same modal the launcher
 	// card's wheel opens. Declared here because the Escape handler below has to
