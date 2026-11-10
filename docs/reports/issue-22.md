@@ -37,9 +37,22 @@ Before switching, HEAD was `fb2ac7aaa5287659ea0da0ec306b60ab60126ac0` and status
 ## T22-S2-PORT-R2 rework checklist
 
 - [x] Reproduce clean external replacement with noncanonical Markdown through workspace GET/PUT; save without editing, switch modes and check exact bytes.
-- [ ] Preserve the adopted source until a real rich edit; a clean save must not write it.
-- [ ] Discard a draft, save and verify exact source.
-- [ ] Run targeted browser and helper checks and both typechecks; report the tested SHA and product-only scope.
-- [ ] Self-review, sign and push the branch without merging main or changing lockfiles.
+- [x] Preserve the adopted source until a real rich edit; a clean save must not write it.
+- [x] Discard a draft, save and verify exact source.
+- [x] Run targeted browser and helper checks and both typechecks; report the tested SHA and product-only scope.
+- [x] Self-review, sign and push the branch without merging main or changing lockfiles.
 
 Red evidence: attributed RAW browser smoke at product head `ad43a3727f90675523152aecd2b3d5c1427bae6d` failed at `clean save and mode switches retain the exact external source` after real workspace GET/PUT.
+
+
+### R2 self-review and evidence
+
+Architecture impact: level 1; the existing Markdown editor surface retains the exact baseline in its existing source reference. No new exports, dependencies, routes, stores, data flows, manifests or lock changes. The Controller's override limits this work to the review blocker; product-only checks do not establish final combined issue #22 or Series 2 acceptance.
+
+- Clean external replacement, save and mode switches: `workspace-markdown-raw-ui-smoke.ts` uses the real workspace GET/PUT with invented noncanonical source and checks the exact source and disk bytes, and observes zero PUTs on Ctrl+S. The same smoke checks that a real rich edit remains visible and saves.
+- Discard and save: the same smoke fails a draft save, discards through the navigation dialog, reopens the file, presses Ctrl+S, switches modes and checks exact source and bytes and zero PUTs.
+- Existing editing, conflicts, failed and in-flight saves, navigation, image and permission paths: `workspace-markdown-raw-ui-smoke.ts` and `workspace-markdown-images-ui-smoke.ts` passed. No existing tests were removed or weakened.
+- On Node 22.23.4, `EXXETA_SKIP_BROWSER_INSTALL=1 npm ci` with lifecycle scripts, runtime build and UI build passed. `npx tsc --noEmit -p apps/web-ui/tsconfig.json`, `npm run typecheck:scripts`, `node --import tsx apps/web-server/scripts/markdown-raw-tasks-smoke.ts`, and both attributed browser gate commands passed. Chromium ran in both browser checks. Browser RAW was rerun after the final test assertion; its tested product/test tree is `4323d9a3be76b9306ad31590b519cded4fb4cddd`. Other checks ran on the same product code at `2a0ee04` before the final test-only assertion. `git diff --check` passed. The red reproduction was the expected failure, not an environment flake; no unrelated test failures occurred.
+- Files changed in R2: `apps/web-ui/src/components/MarkdownEditorPane.tsx`, `apps/web-server/scripts/workspace-markdown-raw-ui-smoke.ts`, and this report. Tests added: clean adoption, exact source, no clean PUT, and discard/save byte and no-PUT assertions in the existing browser smoke. No screenshots captured.
+- Assumptions: discard through navigation is the public user flow; the Controller assembles and tests the final combined candidate. Debt candidates: existing nested-task browser coverage and Delete table visibility already recorded in the review; no new debt identified. No full gate, main merge or Node matrix was run per override.
+- Preserved pre-existing lock rewrite in stash `preserve pre-existing t22-s2-port-r2 lockfile change`; it was not applied to this branch. Graph: no; no graph assignment was provided for this rework. Eight tool calls preceded the first edit; graph did not affect the work.
