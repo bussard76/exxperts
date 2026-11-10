@@ -128,3 +128,7 @@ Append dated sections below as decisions are made. Superseded rules stay here wi
 
 - **Upstream:** one upstream pull request is intended later, but not now. Do not prepare or send anything to `EXXETA/exxperts` until Sascha resumes that work. Sascha: "einer aber warten".
 - **Excalidraw:** keep it only in the fork and keep its changes separable, so a future upstream port can omit them cleanly. Sascha: "nur im fork".
+
+## Additional decisions, 2026-11-10
+
+- **No Mac Front agent (decided by Sascha, 2026-11-10):** There is one Front agent, on the server. Mac-only work goes to a **Mac worker** that the Front agent defines per case, mainly where changes must iterate fast (front-end and UI changes) or something must be built on the Mac with Mac prerequisites (app, DMG, native checks). The Mac worker follows `AGENTS.md` like any worker; its output goes through the same review gate. Until a Mac host is configured in `factory.config.json`, the Front agent records such work as `MAC-TASK <date> <what>` in `~/front-exxperts/mac-tasks.log` and tells Sascha.
