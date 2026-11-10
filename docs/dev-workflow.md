@@ -77,6 +77,8 @@ flowchart TD
 
 1. **Ticket und Spec:** Ziel, Grenzen, Abnahmekriterien und **Architekturstufe**. Größere Vorhaben werden vorher in kleine, einzeln vorführbare Teile geschnitten.
 2. **Architektur vor dem Bau:** Stufe 1 ist innerhalb eines Moduls. Stufe 2 ist eine neue Schnittstelle, der Controller entscheidet. Stufe 3 sind neue Verträge, Zuständigkeiten, Datenflüsse oder Technik, der **Mensch entscheidet** über einen ADR-Vorschlag mit Optionen und Empfehlung. Ein Architekt bestätigt die Stufe. Erst nach seinem „pass“ wird gebaut.
+
+   Eine neue Datei allein ist kein neues Modul. Ein neues Modul ist ein logisch oder technisch völlig neues Thema, das neue Abhängigkeiten mitbringt (entschieden von Sascha am 10.11.2026). Die übrigen Stufenkriterien werden gesondert geprüft.
 3. **Bauen:** Ein Developer baut testgetrieben, führt eine Checkliste aller Anforderungen, pusht nach jedem Punkt und prüft am Ende seine Arbeit selbst gegen die Spec.
 4. **Unabhängiger Test:** Ein anderer Worker prüft gegen die Spec und lässt die vollen Testläufe laufen (außer bei reinen Dokumentationsänderungen). Befunde gehen an den Developer zurück, danach prüft ein neuer Tester.
 5. **Konformität:** Bei Stufe 2 und 3 prüft ein Architekt grob, ob der Code die entschiedene Architektur umsetzt.
