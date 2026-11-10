@@ -381,3 +381,19 @@ test("release pruning follows a renamed createRequire factory", () => {
 	assert.throws(() => pruneNodeModules(path.join(app, "node_modules")), /exceljs.*import|import.*exceljs/i);
 	assert.ok(has(app, "node_modules/exceljs/index.js"));
 });
+
+test("release pruning resolves escaped imports of retained packages", () => {
+	const app = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "1", shared: "1" } }),
+		"bin/exxperts.cjs": String.raw`import("sh\u0061red");`,
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1" }),
+		"node_modules/exceljs/index.js": "module.exports = {};",
+		"node_modules/shared/package.json": JSON.stringify({ name: "shared", version: "1" }),
+		"node_modules/shared/index.js": "module.exports = {};",
+		"apps/web-server/dist/shelf-parse-worker.mjs": "export {};",
+		"apps/web-server/src/shelf-parse-worker.mjs": "export {};",
+	});
+	pruneNodeModules(path.join(app, "node_modules"));
+	assert.ok(has(app, "node_modules/shared/index.js"));
+	assert.ok(!has(app, "node_modules/exceljs/index.js"));
+});
