@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { execFileSync } from "node:child_process";
 
 const notice = fs.readFileSync("NOTICE", "utf8");
@@ -51,4 +53,19 @@ for (const file of licences) {
 }
 const packed = JSON.parse(execFileSync("npm", ["pack", "--dry-run", "--json"], { encoding: "utf8" }))[0];
 assert.ok(packed.files.some((file: { path: string }) => file.path === "NOTICE"), "NOTICE must be included in the published package");
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "workspace-markdown-notices-"));
+try {
+  const artifact = JSON.parse(execFileSync("npm", ["pack", "--json", "--pack-destination", tempDir], { encoding: "utf8" }))[0];
+  const tarball = path.join(tempDir, artifact.filename);
+  const entries = execFileSync("tar", ["-tzf", tarball], { encoding: "utf8" }).trimEnd().split("\n");
+  for (const file of ["LICENSE", "NOTICE", "runtime/LICENSE", "runtime/NOTICE.md"]) {
+    const entry = `package/${file}`;
+    assert.equal(entries.filter((name) => name === entry).length, 1, `${entry} must appear exactly once`);
+    if (file !== "LICENSE") {
+      assert.deepEqual(execFileSync("tar", ["-xOzf", tarball, entry]), fs.readFileSync(file), `${entry} must match source bytes`);
+    }
+  }
+} finally {
+  fs.rmSync(tempDir, { recursive: true, force: true });
+}
 console.log("workspace Markdown notices smoke passed");
