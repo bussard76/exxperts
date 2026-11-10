@@ -23,7 +23,7 @@ function inventedPdf(): Buffer {
 }
 
 assert(fs.existsSync(chromium.executablePath()), "Chromium is required for this browser check");
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const repoRoot = process.env.SERIES_PACKAGED_ROOT ? path.resolve(process.env.SERIES_PACKAGED_ROOT) : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "exxperts-series1-ui-"));
 const tempHome = path.join(tempRoot, "home");
 const agentsRoot = path.join(tempHome, ".exxperts", "app", "personalized-agents");
@@ -40,6 +40,7 @@ fs.writeFileSync(path.join(folder, "invented.docx"), await smallDocx());
 fs.writeFileSync(path.join(folder, "vml.docx"), await vmlDocx());
 const { default: ExcelJS } = await import("exceljs");
 const workbook = new ExcelJS.Workbook();
+workbook.properties.date1904 = true;
 const inventedSheet = workbook.addWorksheet("Invented sheet");
 inventedSheet.getCell("A1").value = "Invented cell";
 inventedSheet.getCell("A1").font = { bold: true, color: { argb: "FFCC2200" } };
@@ -48,8 +49,16 @@ inventedSheet.getCell("B2").value = { formula: "SUM(20,34)", result: 54 };
 inventedSheet.getCell("B2").numFmt = '"$"#,##0.00';
 inventedSheet.mergeCells("A3:B3");
 inventedSheet.getCell("A3").value = "Invented merge";
+inventedSheet.getCell("C1").value = { richText: [{ text: "Invented " }, { text: "rich", font: { bold: true } }] };
+inventedSheet.getCell("D1").value = { formula: "1+1" };
+inventedSheet.getCell("E1").value = true;
+inventedSheet.getCell("F1").value = new Date("2020-01-02T00:00:00.000Z");
+inventedSheet.getCell("F1").numFmt = "yyyy-mm-dd";
+inventedSheet.getColumn("C").width = 20;
+inventedSheet.getRow(2).height = 30;
 workbook.addWorksheet("Empty sheet");
-fs.writeFileSync(path.join(folder, "invented.xlsx"), Buffer.from(await workbook.xlsx.writeBuffer()));
+workbook.addWorksheet("Hidden sheet", { state: "hidden" });
+fs.writeFileSync(path.join(folder, "invented.xlsx"), Buffer.from(await workbook.xlsx.writeBuffer({ useSharedStrings: true })));
 fs.writeFileSync(path.join(folder, "malformed-invented.xlsx"), "invented");
 fs.writeFileSync(path.join(folder, "invented.html"), "<p>Invented HTML</p>");
 fs.writeFileSync(path.join(folder, "hostile.html"), `<!doctype html><body><script>
@@ -202,8 +211,20 @@ try {
   assert.equal(await vmlFrame.locator("section.docx").count(), 2);
   assert.equal(await vmlFrame.locator("svg, foreignObject, script, [onload]").count(), 0);
   assert.equal(await vmlFrame.getByText("Invented box", { exact: true }).count(), 0);
+  const workbookResponse = page.waitForResponse(response => response.url().includes("/workspace-preview?") && new URL(response.url()).searchParams.get("path") === "invented.xlsx");
   await tree.getByRole("button", { name: "invented.xlsx", exact: true }).click();
+  const workbookBody = await (await workbookResponse).json();
+  assert.equal(workbookBody.workbook.dateSystem, "1904");
+  assert.equal(workbookBody.workbook.sheets.find((sheet: any) => sheet.name === "Hidden sheet")?.visibility, "hidden");
+  const firstSheet = workbookBody.workbook.sheets[0];
+  assert.equal(firstSheet.cells.find((cell: any) => cell.row === 1 && cell.column === 3)?.text, "Invented rich");
+  assert.equal(firstSheet.cells.find((cell: any) => cell.row === 1 && cell.column === 4)?.valueKind, "formula-result-unavailable");
+  assert.equal(firstSheet.cells.find((cell: any) => cell.row === 1 && cell.column === 5)?.text, "true");
+  assert.equal(firstSheet.cells.find((cell: any) => cell.row === 1 && cell.column === 6)?.valueKind, "date");
+  assert.equal(firstSheet.columns.find((column: any) => column.index === 3)?.widthPx, 145);
+  assert.equal(firstSheet.rows.find((row: any) => row.index === 2)?.heightPx, 40);
   await page.locator(".workspace-spreadsheet").getByText("Invented cell", { exact: true }).waitFor({ timeout: 10000 });
+  await page.locator(".workspace-spreadsheet").getByText("Invented rich", { exact: true }).waitFor();
   const sheetCell = page.locator(".workspace-spreadsheet").getByText("Invented cell", { exact: true });
   const sheetStyle = await sheetCell.evaluate(node => ({ color: getComputedStyle(node).color, fill: getComputedStyle(node).backgroundColor, weight: getComputedStyle(node).fontWeight }));
   assert.equal(sheetStyle.color, "rgb(204, 34, 0)");
