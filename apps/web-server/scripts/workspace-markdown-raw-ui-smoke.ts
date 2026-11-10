@@ -136,6 +136,18 @@ try {
 		await page.getByRole("button", { name: "Edit", exact: true }).click();
 		await page.locator(".markdown-editor-tiptap .ProseMirror h2", { hasText: "From RAW" }).waitFor();
 		console.log("  ok  Edit shows what RAW typed");
+		await page.getByRole("button", { name: "Preview", exact: true }).click();
+		await page.locator(".markdown-editor-tiptap .ProseMirror h2", { hasText: "From RAW" }).waitFor();
+		await page.getByRole("button", { name: "Edit", exact: true }).click();
+		const rich = page.locator(".markdown-editor-tiptap .ProseMirror");
+		await rich.click();
+		await page.keyboard.press("Control+End");
+		await page.keyboard.type(" rich edit");
+		await page.getByRole("button", { name: "RAW", exact: true }).click();
+		assert((await raw.inputValue()).includes("rich edit"), "RAW shows the current rich edit");
+		await waitUntil(() => fs.readFileSync(notes, "utf8").includes("rich edit"), "the rich edit is saved");
+		console.log("  ok  Preview shows RAW text and RAW shows rich edits");
+
 
 		// 4. A change made on disk while RAW is dirty gives the conflict choice, and Reload wins.
 		await page.getByRole("button", { name: "RAW", exact: true }).click();
