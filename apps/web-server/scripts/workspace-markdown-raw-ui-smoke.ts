@@ -252,9 +252,14 @@ try {
 		await openNotes();
 		await page.getByRole("button", { name: "RAW", exact: true }).click();
 		await waitUntil(async () => (await raw.inputValue()) === external, "discard restores the exact source");
+		cleanPuts = 0;
+		page.on("request", countCleanPut);
 		await page.keyboard.press("Control+s");
 		await page.getByRole("button", { name: "Edit", exact: true }).click();
 		await page.getByRole("button", { name: "RAW", exact: true }).click();
+		await page.waitForTimeout(1500);
+		page.off("request", countCleanPut);
+		assert(cleanPuts === 0, "save after discard sends no workspace PUT");
 		assert((await raw.inputValue()) === external && fs.readFileSync(notes, "utf8") === external, "discard and save retain exact source");
 		console.log("  ok  clean replacement and discard preserve source on save");
 
