@@ -613,8 +613,15 @@ export function App() {
 		completeMarkdownEditorPrompt(markdownEditorPendingActionRef.current);
 	}
 
-	function discardMarkdownEditorAndContinue(): void {
-		markdownEditorRef.current?.discard();
+	async function discardMarkdownEditorAndContinue(): Promise<void> {
+		if (markdownEditorPromptBusy) return;
+		setMarkdownEditorPromptBusy(true);
+		if (!await markdownEditorRef.current?.discard()) {
+			setMarkdownEditorPromptBusy(false);
+			setMarkdownEditorPrompt(null);
+			markdownEditorPendingActionRef.current = null;
+			return;
+		}
 		completeMarkdownEditorPrompt(markdownEditorPendingActionRef.current);
 	}
 
@@ -8682,6 +8689,7 @@ export function App() {
 						path={rightPane.path}
 						onClose={requestCloseMarkdownEditor}
 						onDirtyChange={onMarkdownEditorDirtyChange}
+						guardOpen={markdownEditorPrompt !== null}
 						onOpenMarkdown={(path) => openWorkspaceFile({ relativePath: path, extension: ".md" })}
 					/>}
 				</div>
@@ -9026,7 +9034,7 @@ export function App() {
 								<h2>Unsaved Markdown changes</h2>
 								<p>{markdownEditorPrompt === "switch" ? "Save this file before opening another Markdown file?" : "Save this file before leaving the editor?"}</p>
 								<div className="checkpoint-preview-actions">
-									<button type="button" className="landing-action secondary" autoFocus onClick={cancelMarkdownEditorPrompt}>Cancel</button>
+									<button type="button" className="landing-action secondary" autoFocus onClick={cancelMarkdownEditorPrompt} disabled={markdownEditorPromptBusy}>Cancel</button>
 									<button type="button" className="landing-action secondary" onClick={discardMarkdownEditorAndContinue} disabled={markdownEditorPromptBusy}>Discard changes</button>
 									<button type="button" className="landing-action" onClick={() => void saveMarkdownEditorAndContinue()} disabled={markdownEditorPromptBusy}>{markdownEditorPromptBusy ? "Saving…" : "Save and continue"}</button>
 								</div>
