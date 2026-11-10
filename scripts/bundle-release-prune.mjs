@@ -108,6 +108,9 @@ function workerOnlyPackages(app, nodeModulesDir) {
 	// Computed product imports are pinned to reviewed source bytes; a change
 	// requires a fresh review before dependencies can be removed.
 	const reviewed = [
+		{ file: "apps/web-server/src/persistent-agent-store.ts", hash: "60542efcc3eb2e1370fe1eab7e5c4c9fa05eb2942daa53f1fd9457b4e67de7c7" },
+		{ file: "apps/web-server/src/server-install-root.ts", hash: "4b9b6729aba6b9ef57602129578b838d08b8fcbd77242f7ddefb4eb316817862" },
+		{ file: "apps/web-server/src/scheduled-prompt-background-execution.ts", hash: "4c1a97c6bcc071f0803de7d8f5de1e315fa7e3cb2b20acb3a0fa3822998b2da0" },
 		{ file: "scripts/doctor.mjs", hash: "0f80abd5e2efa8db4eac27b5f3944de598b7fd823589cb05d7e2d6bb1146c84e" },
 		{ file: "apps/web-server/src/mcp-admin.ts", hash: "5da82c76e4f18e3caa0efa5447f25ca757084dbfe6e3c919417e83e01d6e3192" },
 		{ file: "apps/web-server/src/mcp-status.ts", hash: "53060b0ba9063c5fbddd0fefc8167745515514a5a9dc5ab21bbd34f7920cc8c8" },
