@@ -49,7 +49,7 @@ stateDiagram-v2
     Opening --> Detached: host ready and safe transfer completed
     Detached --> Detached: open path from chat selects and focuses document host
     Detached --> Returning: Return or approved child close
-    Returning --> Detached: Cancel, save failure or unresolved conflict
+    Returning --> Detached: transfer cancelled or state cannot be captured safely
     Returning --> Attached: old host inert and session restored in attached host
     Detached --> Recovering: child gone, navigated or inaccessible
     Opening --> Recovering: host identity lost during transfer
