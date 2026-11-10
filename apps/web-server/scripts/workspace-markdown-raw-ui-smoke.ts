@@ -226,10 +226,18 @@ try {
 		const replacement = await api(markdownRoute, { method: "PUT", body: JSON.stringify({ content: external, revision: read.body.revision }) });
 		assert(replacement.status === 200, "replace the workspace Markdown through its API");
 		await waitUntil(async () => (await raw.inputValue()) === external, "clean RAW adopts an external replacement", 15_000);
+		let cleanPuts = 0;
+		const countCleanPut = (request: import("playwright").Request) => {
+			if (request.url().includes("/workspace-markdown?") && request.method() === "PUT") cleanPuts++;
+		};
+		page.on("request", countCleanPut);
 		await page.keyboard.press("Control+s");
 		await page.getByRole("button", { name: "Edit", exact: true }).click();
 		await page.getByRole("button", { name: "RAW", exact: true }).click();
 		assert((await raw.inputValue()) === external, "clean save and mode switches retain the exact external source");
+		await page.waitForTimeout(1500);
+		page.off("request", countCleanPut);
+		assert(cleanPuts === 0, "clean save sends no workspace PUT");
 		assert(fs.readFileSync(notes, "utf8") === external, "clean save does not rewrite the external source");
 
 		await page.route("**/workspace-markdown?**", async (route) => {
