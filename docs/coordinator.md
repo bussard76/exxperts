@@ -1,6 +1,6 @@
 # Coordinator handbook
 
-These rules bind whichever agent coordinates work in this repo: the Front agent on Sascha's machine and the Controller on the server. Workers follow `AGENTS.md`. Sascha owns every decision that is not delegated here.
+These rules bind whichever agent coordinates work in this repo: the Front agent and the Controller, both on the server since ADR-0010. Workers follow `AGENTS.md`. Sascha owns every decision that is not delegated here.
 
 `docs/dev-workflow.md` explains this workflow to people. Whenever a rule here, in `AGENTS.md`, `docs/review-protocol.md` or `docs/architect-protocol.md` changes, update it in the same change.
 
@@ -12,12 +12,24 @@ These rules bind whichever agent coordinates work in this repo: the Front agent 
 
 ## Roles
 
-- **Front agent:** talks to Sascha; tickets and specs; the outside-in stages; one question at a time with the recommended option first; status as one table; morning handover. Does not steer workers.
+- **Front agent:** talks to Sascha; tickets and specs; the outside-in stages; one question at a time with the recommended option first; status as one table; morning handover. Does not steer workers. Runs on the server beside the Controller (see "Front agent and Controller on the server" below).
 - **Controller:** runs unattended on the server; starts and steers workers; Testers, Architects, waves, stall watch, escalation ladder, cleanup, journal, auditor, retros; writes `status.md` after every cycle. Never talks to Sascha directly; questions go into `status.md` under "Needs Sascha".
 - **Worker Developer:** implements exactly one task on its own branch and worktree. Never pushes to `main`.
 - **Worker Tester:** independent reviewer of one task round per `docs/review-protocol.md`. Never the Developer of that task; fresh context every round; read-only except its findings file.
 - **Worker Architect:** spec review before every build, coarse conformance for level 2/3 after the build, architecture health after each merged wave (`docs/architect-protocol.md`).
 - **Worker Auditor / Retro:** read-only; audits the factory, not the product.
+
+## Front agent and Controller on the server (ADR-0010, decided by Sascha, 2026-11-10)
+
+Why: orders and results travelled through files and a nudging script between two Orcas, and Sascha saw them get out of step (a swallowed order, no wake for the Front agent). Both agents now run in the same Orca on the build server.
+
+- **Where:** the Front agent runs in an Orca terminal on the server (worktree `front-pilot`, handover file `~/front-exxperts/FRONT.md`). Sascha reaches it through the Orca client on his Mac. It starts from `FRONT.md`, this handbook and `~/controller-exxperts`; there is no carried-over context.
+- **Structure in Orca:** Front agent (root) → Controller → Integration and all workers; workers the Front agent starts hang under it. Never start factory work with `--no-parent`.
+- **Orders and answers, native both ways:** `orca orchestration send --to <terminal handle> --subject … --body …`. Orca queues the message and wakes the recipient at the end of its turn (measured 18 s). Nobody polls and nobody runs watch scripts on Orca mail; a worker or the Controller ends its turn and Orca wakes it.
+- **Events from the Controller to the Front agent:** one line per event in `~/controller-exxperts/front-events.log` and a `send` to the Front agent's terminal. Format `<date> FRONT-EVENT <KIND>: <one sentence>`, kinds DONE, PUSHED, GATE-GREEN, GATE-RED, REVIEW, NEEDS-SASCHA, BLOCKED, IDLE, ANSWER. The line is written when the event happens, not at the end of a batch. The file is append-only and is never archived, rotated or truncated; the inbox archival must not touch it.
+- **Fallback:** `inbox.md` and `status.md` stay, but an order that matters is also sent natively.
+- **Mac-only work** (the Mac app and its packaging, the preview on the Mac, native Mac checks, the design tools, files that only exist on the Mac) goes to a Mac worker: the Front agent appends `MAC-TASK <date> <what>` to `~/front-exxperts/mac-tasks.log`; the Mac session answers with `orca orchestration send` to the Front agent's terminal. The server is not paired to the Mac and cannot start anything there.
+- **Pilot rule, until Sascha ends it:** the Front agent gives the Controller no orders on its own initiative, only on Sascha's word in its chat. Unchanged: nothing goes to EXXETA without Sascha, no features unless Sascha says so for a named ticket, level 3 stays Sascha's.
 
 ## Outside-in development (decided by Sascha, 2026-11-04)
 

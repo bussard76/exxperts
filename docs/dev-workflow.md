@@ -15,7 +15,7 @@ Ein Projekt wird von einer kleinen **agentischen Fabrik** gebaut:
 
 ```mermaid
 flowchart LR
-  S[Mensch] <--> F[Front-Agent<br/>eigener Rechner]
+  S[Mensch] <--> F[Front-Agent<br/>Server, neben dem Controller]
   F -- Aufträge, Antworten<br/>inbox.md --> C[Controller<br/>Server]
   C -- Status<br/>status.md --> F
   C --> W1[Developer]
@@ -32,7 +32,7 @@ flowchart LR
 | Rolle | Wer / wo | Macht | Macht nie |
 |---|---|---|---|
 | **Mensch** | der Eigentümer | Ziele und Prioritäten, nimmt auf dem Preview ab (eigener Rechner, eigene Umgebung; automatisierte Tests nutzen nie echte Daten), entscheidet Architektur auf Stufe 3 und alles, was echte externe Systeme oder echte Daten berührt | – |
-| **Front-Agent** | Agenten-Sitzung auf dem Rechner des Menschen | Einzige Ansprechstelle. Nimmt Wünsche und Testbefunde auf, macht daraus Tickets und Specs, führt die Stufen von außen nach innen, holt Entscheidungen ein, berichtet den Stand als Tabelle, schreibt die Morgen-Übergabe | Worker selbst steuern; den Menschen mit dem Hin und Her der Worker belasten |
+| **Front-Agent** | Agenten-Sitzung auf dem Server, im selben Orca wie der Controller (ADR-0010) | Einzige Ansprechstelle. Nimmt Wünsche und Testbefunde auf, macht daraus Tickets und Specs, führt die Stufen von außen nach innen, holt Entscheidungen ein, berichtet den Stand als Tabelle, schreibt die Morgen-Übergabe | Worker selbst steuern; den Menschen mit dem Hin und Her der Worker belasten |
 | **Controller** | Agenten-Sitzung auf dem Server, unbeaufsichtigt | Startet und steuert alle Worker, taktet Tests, Reviews und Waves, erkennt hängende Worker, räumt auf, schreibt nach jedem Zyklus einen Status | Mit dem Menschen direkt sprechen; Stufe-3-Architektur, ADRs oder Produktentscheidungen treffen |
 | **Developer** | Worker (Codex, Claude Code oder Pi) | Baut genau einen Auftrag, testgetrieben, auf eigenem Branch | Nach `main` pushen, Tests abschwächen |
 | **Tester** | Worker, nie derselbe wie der Developer | Prüft unabhängig gegen die Spec, führt die vollen Testläufe aus, schreibt einen Befund mit Urteil | Code ändern |
@@ -186,7 +186,7 @@ Der Rhythmus ist eine Einstellung (`rhythm.mode`), keine Regel:
 - **Eigener Zeitplan:** Ruhezeiten legen fest, wann der Controller neue Arbeit starten darf.
 - **Status auf Nachfrage:** eine Tabelle mit Aufgabe, wer daran arbeitet (Rolle, Modell), Stand, nächster Schritt und ob der Mensch gebraucht wird. Darunter, was neu auf `main` ist, und offene Abnahmen.
 - **Fragen an den Menschen:** immer eine auf einmal, mit Optionen und Empfehlung.
-- **Schnittstelle Front-Agent ↔ Controller:** das Controller-Verzeichnis auf dem Server. `status.md` schreibt der Controller, `inbox.md` der Front-Agent, `CONTROLLER.md` ist das Betriebshandbuch.
+- **Schnittstelle Front-Agent ↔ Controller (ADR-0010, entschieden vom Menschen, 2026-11-10):** Beide laufen im selben Orca auf dem Server, im Orca-Client als Baum: Front-Agent oben, darunter der Controller, darunter Integration und Worker. Aufträge und Antworten gehen nativ mit `orca orchestration send`; Orca stellt sie in die Warteschlange und weckt den Empfänger am Ende seines Zugs (gemessen: 18 s). Ereignisse des Controllers stehen zusätzlich als eine Zeile je Ereignis in `front-events.log` (nur anhängen, nie archiviert). `status.md` und `inbox.md` bleiben als Rückfallebene, `CONTROLLER.md` ist das Betriebshandbuch. Was nur auf dem Rechner des Menschen geht (Mac-App, Vorschau dort, native Prüfungen, Design-Werkzeuge), erledigt ein Mac-Worker über `mac-tasks.log`; der Server ist nicht mit dem Mac gekoppelt.
 
 ## Der Zyklus des Controllers
 
