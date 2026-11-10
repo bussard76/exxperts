@@ -6,6 +6,8 @@ A fresh Worker Architect checks fit before implementation, conformance before in
 
 Exception (ADR-0005, decided by Sascha, 2026-11-09): a bug fix whose ticket states the diagnosis and the exact change, and which the Controller itself finds to be level 1 by the checks in `docs/coordinator.md`, takes the slim lane and gets no separate spec review. A failed check, or a Developer who finds the change larger than the ticket says, sends it back here.
 
+Module clarification (decided by Sascha, 2026-11-10): A new file alone is not a new module. A new module is a logically or technically wholly new topic that brings new dependencies. Assess the other level criteria separately.
+
 1. Read the spec and its `## Architecture impact`. Confirm or raise the level against `AGENTS.md`. Missing or ambiguous impact means `change-spec`.
 2. Trace the affected code: owning modules, public seams, allowed imports, data flow. Compare with the architecture docs and accepted ADRs.
 3. Name the smallest prefactoring that makes the change fit, or state why none is needed. Do not broaden the task into a rewrite.
