@@ -126,3 +126,225 @@ test("the static gate passes when TypeScript imports point into protected packag
 	const result = pruneNodeModules(dir);
 	assert.deepEqual(findPrunedTypeScriptImports(dir, result.removed), []);
 });
+
+test("release pruning refuses to remove a dependency newly imported by the CLI", () => {
+	const app = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "1" } }),
+		"bin/exxperts.cjs": 'import("exceljs");\n',
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1" }),
+		"node_modules/exceljs/index.js": "module.exports = {};\n",
+		"node_modules/bluebird/package.json": JSON.stringify({ name: "bluebird", version: "1" }),
+		"node_modules/lie/package.json": JSON.stringify({ name: "lie", version: "1" }),
+	});
+	assert.throws(() => pruneNodeModules(path.join(app, "node_modules")), /exceljs.*import|import.*exceljs/i);
+	assert.ok(has(app, "node_modules/exceljs/index.js"));
+});
+
+test("release pruning refuses an unreviewed computed import in the CLI", () => {
+	const app = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "1" } }),
+		"bin/exxperts.cjs": 'const name = process.argv[2]; import(name);\n',
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1" }),
+		"node_modules/exceljs/index.js": "module.exports = {};\n",
+	});
+	assert.throws(() => pruneNodeModules(path.join(app, "node_modules")), /computed|dynamic/i);
+	assert.ok(has(app, "node_modules/exceljs/index.js"));
+});
+
+test("release pruning keeps shared and selectable dependencies and their notices", () => {
+	const app = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "1", shared: "1" } }),
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1", dependencies: { shared: "1", worker: "1" } }),
+		"node_modules/exceljs/index.js": "module.exports = {};",
+		"node_modules/exceljs/NOTICE": "invented notice",
+		"apps/web-server/dist/shelf-parse-worker.mjs": "export {};",
+		"apps/web-server/src/shelf-parse-worker.mjs": "export {};",
+		"node_modules/shared/package.json": JSON.stringify({ name: "shared", version: "1" }),
+		"node_modules/shared/index.js": "module.exports = {};",
+		"node_modules/worker/package.json": JSON.stringify({ name: "worker", version: "1" }),
+		"node_modules/worker/index.js": "module.exports = {};",
+		"node_modules/worker/LICENSE": "invented licence",
+		"node_modules/bluebird/package.json": JSON.stringify({ name: "bluebird", version: "1" }),
+		"node_modules/bluebird/index.js": "module.exports = {};",
+		"node_modules/lie/package.json": JSON.stringify({ name: "lie", version: "1" }),
+		"node_modules/lie/index.js": "module.exports = {};",
+	});
+	pruneNodeModules(path.join(app, "node_modules"));
+	assert.ok(!has(app, "node_modules/exceljs/index.js"));
+	assert.ok(!has(app, "node_modules/worker/index.js"));
+	for (const file of ["node_modules/exceljs/NOTICE", "node_modules/worker/LICENSE", "node_modules/shared/index.js", "node_modules/bluebird/index.js", "node_modules/lie/index.js"]) assert.ok(has(app, file), file);
+});
+
+test("release pruning resolves same-name dependencies from each caller", () => {
+	const app = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "1", uuid: "1" } }),
+		"bin/exxperts.cjs": 'require("uuid");',
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1", dependencies: { uuid: "2" } }),
+		"node_modules/exceljs/index.js": 'require("uuid");',
+		"node_modules/exceljs/node_modules/uuid/package.json": JSON.stringify({ name: "uuid", version: "2" }),
+		"node_modules/exceljs/node_modules/uuid/index.js": "module.exports = 2;",
+		"apps/web-server/dist/shelf-parse-worker.mjs": "export {};",
+		"apps/web-server/src/shelf-parse-worker.mjs": "export {};",
+		"node_modules/uuid/package.json": JSON.stringify({ name: "uuid", version: "1" }),
+		"node_modules/uuid/index.js": "module.exports = 1;",
+	});
+	pruneNodeModules(path.join(app, "node_modules"));
+	assert.ok(has(app, "node_modules/uuid/index.js"));
+	assert.ok(!has(app, "node_modules/exceljs/node_modules/uuid/index.js"));
+});
+
+test("release pruning rejects changes at reviewed computed import sites", () => {
+	const app = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "1" } }),
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1" }),
+		"node_modules/exceljs/index.js": "module.exports = {};",
+		"runtime/packages/ai/dist/env-api-keys.js": 'const dynamicImport = (specifier) => import(specifier); dynamicImport("exceljs");',
+	});
+	assert.throws(() => pruneNodeModules(path.join(app, "node_modules")), /review|computed|dynamic/i);
+	assert.ok(has(app, "node_modules/exceljs/index.js"));
+});
+
+test("release pruning rejects an unknown computed load in a retained dependency", () => {
+	const app = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "1", shared: "1" } }),
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1" }),
+		"node_modules/exceljs/index.js": "module.exports = {};",
+		"node_modules/shared/package.json": JSON.stringify({ name: "shared", version: "1" }),
+		"node_modules/shared/index.js": 'const name = process.env.APP_MODULE; import(name);',
+	});
+	assert.throws(() => pruneNodeModules(path.join(app, "node_modules")), /computed|dynamic/i);
+	assert.ok(has(app, "node_modules/exceljs/index.js"));
+});
+
+test("release pruning rejects template and commented computed imports", () => {
+	for (const source of ['import(`exceljs`);', 'import(/* computed */ target);']) {
+		const app = makeTree({
+			"package.json": JSON.stringify({ dependencies: { exceljs: "1" } }),
+			"bin/exxperts.cjs": source,
+			"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1" }),
+			"node_modules/exceljs/index.js": "module.exports = {};",
+		});
+		assert.throws(() => pruneNodeModules(path.join(app, "node_modules")), /computed|dynamic/i, source);
+		assert.ok(has(app, "node_modules/exceljs/index.js"));
+	}
+});
+
+test("release pruning runs the bundled worker through the shipped source path", async () => {
+	const { fork } = await import("node:child_process");
+	const app = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "1" } }),
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1" }),
+		"node_modules/exceljs/index.js": "module.exports = {};",
+		"apps/web-server/dist/shelf-parse-worker.mjs": 'process.send("bundled", () => process.exit(0));',
+		"apps/web-server/src/shelf-parse-worker.mjs": 'process.send("source", () => process.exit(0));',
+	});
+	pruneNodeModules(path.join(app, "node_modules"));
+	const message = await new Promise((resolve, reject) => {
+		const child = fork(path.join(app, "apps/web-server/src/shelf-parse-worker.mjs"), [], { stdio: ["ignore", "ignore", "ignore", "ipc"] });
+		child.once("message", resolve);
+		child.once("error", reject);
+	});
+	assert.equal(message, "bundled");
+});
+
+test("release pruning permits absent optional platform dependencies", () => {
+	const app = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "1" }, optionalDependencies: { "platform-addon": "1" } }),
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1" }),
+		"node_modules/exceljs/index.js": "module.exports = {};",
+		"apps/web-server/dist/shelf-parse-worker.mjs": "export {};",
+		"apps/web-server/src/shelf-parse-worker.mjs": "export {};",
+	});
+	assert.doesNotThrow(() => pruneNodeModules(path.join(app, "node_modules")));
+	assert.ok(!has(app, "node_modules/exceljs/index.js"));
+});
+
+test("release pruning rejects a comment between import and its argument", () => {
+	const app = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "1" } }),
+		"bin/exxperts.cjs": 'import /* computed */ (target);',
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1" }),
+		"node_modules/exceljs/index.js": "module.exports = {};",
+	});
+	assert.throws(() => pruneNodeModules(path.join(app, "node_modules")), /computed|dynamic/i);
+	assert.ok(has(app, "node_modules/exceljs/index.js"));
+});
+
+test("release pruning rejects omitted dependencies imported by retained packages", () => {
+	const app = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "1", shared: "1" } }),
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1" }),
+		"node_modules/exceljs/index.js": "module.exports = {};",
+		"node_modules/shared/package.json": JSON.stringify({ name: "shared", version: "1" }),
+		"node_modules/shared/index.js": 'require("exceljs");',
+	});
+	assert.throws(() => pruneNodeModules(path.join(app, "node_modules")), /exceljs.*import|import.*exceljs/i);
+	assert.ok(has(app, "node_modules/exceljs/index.js"));
+});
+
+test("release pruning rejects a commented literal import of an omitted package", () => {
+	const app = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "1" } }),
+		"bin/exxperts.cjs": 'import /* loaded later */ ("exceljs");',
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1" }),
+		"node_modules/exceljs/index.js": "module.exports = {};",
+	});
+	assert.throws(() => pruneNodeModules(path.join(app, "node_modules")), /exceljs.*import|import.*exceljs/i);
+	assert.ok(has(app, "node_modules/exceljs/index.js"));
+});
+
+test("release pruning rejects omitted imports through createRequire", () => {
+	const app = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "1" } }),
+		"bin/exxperts.cjs": 'const { createRequire } = require("node:module"); const load = createRequire(__filename); load("exceljs");',
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1" }),
+		"node_modules/exceljs/index.js": "module.exports = {};",
+	});
+	assert.throws(() => pruneNodeModules(path.join(app, "node_modules")), /exceljs.*import|import.*exceljs/i);
+	assert.ok(has(app, "node_modules/exceljs/index.js"));
+});
+
+test("release pruning rejects an unreviewed computed createRequire load", () => {
+	const app = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "1" } }),
+		"bin/exxperts.cjs": 'const load = createRequire(__filename); load(process.argv[2]);',
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1" }),
+		"node_modules/exceljs/index.js": "module.exports = {};",
+	});
+	assert.throws(() => pruneNodeModules(path.join(app, "node_modules")), /computed|dynamic/i);
+	assert.ok(has(app, "node_modules/exceljs/index.js"));
+});
+
+test("release pruning rejects omitted imports through a require alias", () => {
+	const app = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "1" } }),
+		"bin/exxperts.cjs": 'const load = require; load("exceljs");',
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1" }),
+		"node_modules/exceljs/index.js": "module.exports = {};",
+	});
+	assert.throws(() => pruneNodeModules(path.join(app, "node_modules")), /exceljs.*import|import.*exceljs/i);
+	assert.ok(has(app, "node_modules/exceljs/index.js"));
+});
+
+test("release pruning rejects omitted imports through module.require bindings", () => {
+	const app = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "1" } }),
+		"bin/exxperts.cjs": 'const load = module.require.bind(module); load("exceljs");',
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1" }),
+		"node_modules/exceljs/index.js": "module.exports = {};",
+	});
+	assert.throws(() => pruneNodeModules(path.join(app, "node_modules")), /exceljs.*import|import.*exceljs/i);
+	assert.ok(has(app, "node_modules/exceljs/index.js"));
+});
+
+test("release pruning retains a worker dependency required by another package", () => {
+	const app = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "1", consumer: "1" } }),
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1" }),
+		"node_modules/exceljs/index.js": "module.exports = {};",
+		"node_modules/consumer/package.json": JSON.stringify({ name: "consumer", version: "1", dependencies: { exceljs: "1" } }),
+		"node_modules/consumer/index.js": 'require("exceljs");',
+	});
+	pruneNodeModules(path.join(app, "node_modules"));
+	assert.ok(has(app, "node_modules/exceljs/index.js"));
+});
