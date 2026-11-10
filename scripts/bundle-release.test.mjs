@@ -438,3 +438,16 @@ test("release pruning follows direct createRequire calls", () => {
 	assert.throws(() => pruneNodeModules(path.join(app, "node_modules")), /exceljs.*import|import.*exceljs/i);
 	assert.ok(has(app, "node_modules/exceljs/index.js"));
 });
+
+test("release pruning follows string-named createRequire imports", () => {
+	const app = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "1" } }),
+		"bin/exxperts.cjs": 'import { "createRequire" as factory } from "node:module"; const load = factory(import.meta.url); load("exceljs");',
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1" }),
+		"node_modules/exceljs/index.js": "module.exports = {};",
+		"apps/web-server/dist/shelf-parse-worker.mjs": "export {};",
+		"apps/web-server/src/shelf-parse-worker.mjs": "export {};",
+	});
+	assert.throws(() => pruneNodeModules(path.join(app, "node_modules")), /exceljs.*import|import.*exceljs/i);
+	assert.ok(has(app, "node_modules/exceljs/index.js"));
+});

@@ -213,7 +213,7 @@ function workerOnlyPackages(app, nodeModulesDir) {
 		for (let i = 0; i < nodes.length; i++) ts.forEachChild(nodes[i], (child) => { nodes.push(child); });
 		for (const node of nodes) {
 			if ((ts.isBindingElement(node) || ts.isImportSpecifier(node)) && ts.isIdentifier(node.name)) {
-				const original = node.propertyName?.getText(source) ?? node.name.text;
+				const original = node.propertyName && (ts.isIdentifier(node.propertyName) || ts.isStringLiteralLike(node.propertyName)) ? node.propertyName.text : node.name.text;
 				if (original === "createRequire") factories.add(node.name.text);
 				if (original === "require") aliases.add(node.name.text);
 			}
