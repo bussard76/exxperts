@@ -217,6 +217,8 @@ function isAppOrigin(url: string): boolean {
 function wireNavigation(win: BrowserWindow): void {
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (isAppOrigin(url)) return { action: "allow" };
+    // The documents window (T20 design lane) opens blank and is filled by the app.
+    if (url === "about:blank") return { action: "allow" };
     if (url.startsWith("exxperts:")) {
       handleDeepLink(url);
       return { action: "deny" };
