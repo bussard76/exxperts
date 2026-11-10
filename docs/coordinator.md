@@ -144,9 +144,17 @@ For each series at Node 20.6 and 22, a failure in the same smoke with the same e
 
 Before escalating, apply the ticket's abort criteria and Sascha's recorded decisions. Escalate only an unsettled question and state which decisions were checked and why they do not fit. For every `NEEDS-SASCHA` or `BLOCKED` event, retain the append-only `front-events.log` line and immediately send the question or blocker with `orca orchestration send --to term_6eae3083-5398-4d94-85e5-57a8f00d7065` to wake the Front agent. Keep the existing status and fallback records.
 
-### Series 1 buffers decision (decided by Sascha, 2026-11-10)
+### Series 1 buffers decision (decided by Sascha, 2026-11-10; PR disclosure superseded below)
 
 The earlier licence-source and replacement choices for `buffers@0.1.1` are superseded. Stop the prerelease replacement trial and alternative/licence-source research. Series 1 retains stable `exceljs@4.4.0` and the `exceljs → unzipper → binary → buffers@0.1.1` chain on the candidate with the PPTX fix (`cc36c88` line). The Series 1 PR description must state that `buffers@0.1.1` has no licence field in its registry metadata; upstream decides whether to accept the contribution. This records no conclusion about legal sufficiency and changes none of the existing integrity, artifact, test, review or Node-comparison requirements.
+
+### Series platforms, licences and contribution paths (decided by Sascha, 2026-11-10)
+
+[Platform decision](https://github.com/bussard76/exxperts/issues/22#issuecomment-6771263421): No native Windows host or check is required; existing tests alone cover Windows-specific paths. Each series PR discloses Linux verification on workhorse, macOS native build and human acceptance only when both are complete, and the absence of native Windows verification. The final combined SHA goes to Front for the Mac build; pending Mac work is not verified.
+
+[Licence and path decision](https://github.com/bussard76/exxperts/issues/22#issuecomment-6771317883): Superseding the earlier disclosure instructions, omit both `buffers@0.1.1` and incomplete ExcelJS bundle prefix exact-version mapping from both series PR notes. Ship the directly added packages' own supplied LICENSE/NOTICE texts, including PPTX renderer, PDF, ExcelJS and docx-preview; do no separate transitive licence work. Preserve upstream notices and all existing tests and checks without weakening them.
+
+Each final upstream series path check rejects `docs/reports/`, reviews, specs, ADRs and factory files. Preserve the `docs/reports/issue-22.md` report from Series 2 `a9d1b8b` on the fork, and remove it from the final contribution tree before handing the series to Front.
 
 ## Additional decisions, 2026-11-09
 
