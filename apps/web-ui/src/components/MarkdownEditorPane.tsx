@@ -266,7 +266,7 @@ function MarkdownEditorSurface({
 		const current = editorRef.current;
 		if (!current) return;
 		const next = baselineRef.current;
-		rawRef.current = null;
+		rawRef.current = next;
 		current.commands.setContent(next, { emitUpdate: false, contentType: "markdown" });
 		draftRef.current = next;
 		onDraftChange(next);
@@ -317,7 +317,7 @@ function MarkdownEditorSurface({
 		editor.setEditable(canEdit && !readOnly);
 		contentSetterRef.current = (next: string) => {
 			if (editor.isDestroyed) return;
-			rawRef.current = null;
+			rawRef.current = next;
 			trailingNewlinesRef.current = next.match(/(?:\r?\n)+$/)?.[0] ?? "";
 			editor.commands.setContent(next, { emitUpdate: false, contentType: "markdown" });
 			baselineRef.current = next;
