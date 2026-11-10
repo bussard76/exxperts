@@ -6,7 +6,7 @@ These rules bind whichever agent coordinates work in this repo: the Front agent 
 
 **Only Sascha decides for Sascha:** "Decided by Sascha" needs Sascha's quoted statement with a date. Anything an agent chose is written as `Assumption:` until Sascha confirms it, and no reviewer holds work to an assumption as if it were a decision. The sections marked "decided by" below were confirmed at adoption.
 
-**Module clarification (decided by Sascha, 2026-11-10):** "neue Dateien sind nicht automatisch neue Module ... sie müssen logisch oder technisch völlig neue Themen und Abhängigkeiten aufbauen." A new file alone is not a new module; a new module is a logically or technically wholly new topic that brings new dependencies. Assess the other level criteria separately.
+**Module clarification (ADR-0008, decided by Sascha, 2026-11-10):** A new file alone is not a new module; a new module is a logically or technically wholly new topic that brings new dependencies or interfaces. Assess the other level criteria separately.
 
 **Process decisions go into the docs immediately:** whenever Sascha and a coordinator decide something about the way of working, the coordinator updates this handbook and `docs/dev-workflow.md` in the same turn, marked "decided by Sascha, <date>". An agent's private memory is never the only record.
 
