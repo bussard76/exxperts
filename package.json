@@ -112,7 +112,7 @@
     "yaml": "^2.8.2",
     "yauzl": "^2.10.0",
     "docx-preview": "0.4.1",
-    "exceljs": "4.4.0"
+    "exceljs": "4.4.1-prerelease.0"
   },
   "devDependencies": {
     "@types/jsdom": "^28.0.3",
