@@ -260,3 +260,18 @@ Die Skills liegen fest versioniert unter `.agents/skills/`. Fremde Skills werden
 ## Woher die Regeln kommen
 
 **Diese Datei wird immer nachgehalten:** Jede neue Entscheidung zur Arbeitsweise kommt sofort hier hinein, verständlich für Dritte, und zusätzlich mit Details in `docs/coordinator.md`. Jede Regel geht auf eine Entscheidung mit Datum und Begründung zurück.
+
+## T20 product decisions, 2026-11-10
+
+Decided by: Sascha (2026-11-10), relayed in the Front/Controller dispatch. This records product choices; ADR-0009 remains proposed with `Decided by: Sascha pending` until separate ADR acceptance. No implementation, independent child lifetime or upstream submission is authorized by this record.
+
+- **Q5=B:** Save/Discard/Cancel protects normal chat close and leaving room; forced process loss, OS kill, and browser close/reload that bypasses async guard are explicit documented exceptions; child never independent. Cancel keeps both windows open on the protected paths. This supersedes the earlier absolute no-loss requirement for those exception paths; C/D are not chosen and durable recovery is not approved.
+- **Q4, accepted recommendation:** Guard and close the current child, with explicit Detach to reopen in the new context; avoids stale draft/context routing. Leaving the room itself is already decided to close it.
+- **Q6, accepted recommendation:** Preserve the exact unsaved draft/conflict through in-memory transfer, contingent on proof; movement does not save.
+- **Q7, accepted recommendation:** Return the document session, retaining tabs and any recoverable draft; explicit tab × uses its existing guard.
+- **Q8, accepted recommendation:** Tree, tabs, previews, Markdown Edit/Preview/RAW, save/conflict/dirty guards and active document. Keep preview snapshot semantics.
+- **Q9, accepted recommendation:** Preserve workspace-relative path insertion where the existing browser drag path works; provide click/selection without implying clipboard side effects. This records cross-window drag intent only; it is still untested.
+- **Q10, accepted recommendation:** Establish platform/entry-point evidence before promising desktop or browser support; preserve read-only/paired permissions. Native chat × must guard and close the child even if chat then hides to tray. Mac proof is still required.
+- **Unchanged:** Q1=A room-labelled Show documents/Return strip; Q2=A one document window per chat session/room; Q3=B remembered Electron position with visible-bounds validation/fallback, browser best effort (supersedes earlier Q3=A).
+
+Product decisions are not passing evidence. The Controller's later hardening ticket must cover the actual normal owner-close/room-exit guard, correlated refusal/timeout/race handling, one-writer/draft/conflict preservation, bounds, popup/security and real Q9/Q10 evidence, followed by independent review/conformance/gates. Series 3 still depends on reconciled series 1+2; nothing is sent to EXXETA by agents.
