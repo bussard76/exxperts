@@ -348,3 +348,12 @@ test("release pruning retains a worker dependency required by another package", 
 	pruneNodeModules(path.join(app, "node_modules"));
 	assert.ok(has(app, "node_modules/exceljs/index.js"));
 });
+
+test("release pruning rejects missing required dependencies even if also peers", () => {
+	const app = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "1", consumer: "1" } }),
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1" }),
+		"node_modules/consumer/package.json": JSON.stringify({ name: "consumer", version: "1", dependencies: { missing: "1" }, peerDependencies: { missing: "1" } }),
+	});
+	assert.throws(() => pruneNodeModules(path.join(app, "node_modules")), /missing required package missing/);
+});

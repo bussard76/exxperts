@@ -83,7 +83,8 @@ function packageClosure(app, roots) {
 		const pkg = JSON.parse(fs.readFileSync(path.join(found, "package.json"), "utf8"));
 		const optionalNames = new Set(Object.keys({ ...pkg.optionalDependencies, ...pkg.peerDependencies }));
 		for (const name of new Set([...Object.keys(pkg.dependencies || {}), ...optionalNames])) {
-			queue.push({ name, from: found, optional: optionalNames.has(name) });
+			const required = Object.hasOwn(pkg.dependencies || {}, name) && !Object.hasOwn(pkg.optionalDependencies || {}, name);
+			queue.push({ name, from: found, optional: !required });
 		}
 	}
 	return seen;
