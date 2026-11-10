@@ -1,7 +1,8 @@
 # ADR-0007: Retain the internal RAW Markdown task helper
 
-Status: proposed
+Status: accepted
 Date: 2026-11-10
+Decided by: Sascha (2026-11-10), option B
 Architecture impact: level 3 — retains the internal web UI task-line module and its editor seam for issues #17 and #18; no new external contract or data flow.
 
 ## Context
@@ -28,7 +29,7 @@ The T17-18-ADR dispatch records Sascha's 2026-11-10 choice of option B: "retain 
 
 ## Decision
 
-Option B, as supplied in the T17-18-ADR dispatch for Sascha's decision of 2026-11-10, is to be recorded as accepted in the follow-up acceptance commit. Retain the existing internal helper rather than folding its operations into the editor. The tradeoff is retaining the small text-operation seam and its focused checks while explicitly accepting the additional module identified by the review.
+Option B, as supplied in the T17-18-ADR dispatch for Sascha's decision of 2026-11-10, is accepted. Retain the existing internal helper rather than folding its operations into the editor. The tradeoff is retaining the small text-operation seam and its focused checks while explicitly accepting the additional module identified by the review.
 
 The helper's scope is limited to `cycleTaskLines(value, start, end)`, returning `{value, selectionStart, selectionEnd}`, and `isTaskLine(value, position)`, reporting whether the caret line is a task. The existing `TaskToggleResult` type describes that result; it does not establish a new external contract. Do not expand the helper into a general Markdown service or add further public exports.
 
