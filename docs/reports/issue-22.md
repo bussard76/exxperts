@@ -5,7 +5,7 @@ Level 1: reviewed Markdown editor and targeted tests plus approved lock metadata
 
 ## Acceptance checklist
 
-- [ ] Compose the reviewed RAW/Tasks product and targeted tests onto the Series 2 lock candidate, preserving exact approved code and CSS.
+- [x] Compose the reviewed RAW/Tasks product and targeted tests onto the Series 2 lock candidate, preserving exact approved code and CSS. `git diff 4323d9a` over the six approved product/test paths is empty; product/lock test candidate is `1962d656a057a223d751f3ead11a9e44c7210c00`.
 - [ ] List every changed lock path and reason; preserve unrelated upstream lock fields.
 - [ ] At Node 20.6.0 and 22.23.4, compare pinned upstream and final candidate: normal npm ci, same-Node runtime build, UI prerequisites and both typechecks, with process provenance.
 - [ ] Run common smokes separately on both refs and both Nodes; compare complete diagnostics under Sascha's same-smoke rule.
