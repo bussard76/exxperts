@@ -101,7 +101,7 @@ Jedes Ticket, ob GitHub-Issue oder Task-Datei, wird zu genau einem Branch und ei
 | 5b. `pass` | Architekt (nur Stufe 2/3) | `agents/t12-conformance` vom bestandenen SHA | grobe Grenzprüfung, `T12-architecture-conformance.md` |
 | 6. Wave | Controller | Worktree `<workspaces>/<projekt>/coordinator-integration/`, Branch `integration` auf `origin/main` zurückgesetzt | führt jeden bestandenen Task-Branch **zusammen mit dem Review-Branch seiner bestandenen Runde** zusammen (`agents/t12` und `agents/t12-review-2`, bei Stufe 2/3 auch den Konformitäts-Branch), einen Branch nach dem anderen (einen Octopus-Merge lehnt die Push-Sperre ab), übernimmt die ADR-Verweise der gemergten Commits in die Merge-Nachricht, lässt die vollen Gates einmal laufen (außer bei reinen Dokumentationsänderungen), **pusht `integration` nach `main`**; der Pre-Push-Hook prüft, dass jeder Commit Vorfahre eines `Verdict: pass`-Review-SHA ist, dessen Befunddatei im gepushten Stand liegt |
 | 7. Preview und Abnahme | Mensch | der Preview-Klon auf dem eigenen Rechner | folgt `main` automatisch; Befunde werden neue Tickets |
-| 8. Aufräumen | Controller, jeder Zyklus | alle Worker-Hosts | schließt das Terminal des Workers, gibt den Dispatch frei, entfernt den Worktree `t12/`, sobald sein Branch gemergt oder sicher auf origin ist, löscht gemergte `agents/t12*`-Branches, schließt das Issue oder setzt `Status: integrated` |
+| 8. Aufräumen | Controller, jeder Zyklus | alle Worker-Hosts | schließt das Terminal des Workers, gibt den Dispatch frei, entfernt den Worktree `t12/`, sobald sein Branch gemergt oder sicher auf origin ist, löscht gemergte `agents/t12*`-Branches. Den Ticket-Status setzt die Welle: Ihr letzter Branch setzt `Status: integrated`, oder der Controller schließt das Issue nach dem Push |
 
 ```mermaid
 gitGraph
@@ -186,7 +186,7 @@ Der Rhythmus ist eine Einstellung (`rhythm.mode`), keine Regel:
 - **Eigener Zeitplan:** Ruhezeiten legen fest, wann der Controller neue Arbeit starten darf.
 - **Status auf Nachfrage:** eine Tabelle mit Aufgabe, wer daran arbeitet (Rolle, Modell), Stand, nächster Schritt und ob der Mensch gebraucht wird. Darunter, was neu auf `main` ist, und offene Abnahmen.
 - **Fragen an den Menschen:** immer eine auf einmal, mit Optionen und Empfehlung.
-- **Schnittstelle Front-Agent ↔ Controller:** das Controller-Verzeichnis auf dem Server. `status.md` schreibt der Controller, `inbox.md` der Front-Agent, `CONTROLLER.md` ist das Betriebshandbuch.
+- **Schnittstelle Front-Agent ↔ Controller:** das Controller-Verzeichnis auf dem Server. `status.md` schreibt der Controller, `inbox.md` der Front-Agent, `CONTROLLER.md` ist das Betriebshandbuch. **Alternative (in einem Projekt erprobt; von `start`, `statuswatch` und `doctor` noch nicht unterstützt):** Der Front-Agent läuft ebenfalls auf dem Server, im selben Orca wie der Controller. Im Orca-Client entsteht ein Baum: Front-Agent oben, darunter der Controller, darunter Integration und Worker. Aufträge und Antworten gehen direkt über `orca orchestration send` (Orca stellt sie in die Warteschlange und weckt den Empfänger), Ereignisse stehen zusätzlich als eine Zeile je Ereignis in `front-events.log` (nur anhängen, nie archiviert). Was nur auf dem Rechner des Menschen geht, erledigt ein Client-Worker über `client-tasks.log`; der Server wird nicht mit dem Rechner des Menschen gekoppelt.
 
 ## Der Zyklus des Controllers
 
