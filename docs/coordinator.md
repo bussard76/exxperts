@@ -134,6 +134,10 @@ Sascha, 2026-11-09: "make all workers and yourself use graphify in this repo but
 
 Append dated sections below as decisions are made. Superseded rules stay here with "superseded by …" and are removed from `docs/dev-workflow.md`.
 
+## Series priority (decided by Sascha, 2026-11-10)
+
+Upstream Series 1 and 2 are the first priority; #20 detached-document-window is secondary. Do not start T20 hardening or use T20 documentation slots that series work can use; current T20 work may finish its present step then park. Prioritize #22 lock delta, Node floor and licences, Series 1 consult-mention and notice/artifact evidence, Series 2 #17/#18 addendum and CSS, composition, gates and sendable state for Sascha. This decision does not grant permission to write to EXXETA.
+
 ## Additional decisions, 2026-11-09
 
 - **Upstream:** one upstream pull request is intended later, but not now. Do not prepare or send anything to `EXXETA/exxperts` until Sascha resumes that work. Sascha: "einer aber warten".

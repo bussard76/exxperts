@@ -217,6 +217,7 @@ Bei jedem Ereignis eines Workers, sonst alle 10 Minuten:
 
 ## Die Fabrik verbessert sich selbst
 
+- **Series priority (decided by Sascha, 2026-11-10):** Upstream Series 1 and 2 are the first priority; #20 detached-document-window is secondary. Do not start T20 hardening or use T20 documentation slots that series work can use; current T20 work may finish its present step then park. Prioritize #22 lock delta, Node floor and licences, Series 1 consult-mention and notice/artifact evidence, Series 2 #17/#18 addendum and CSS, composition, gates and sendable state for Sascha. This decision does not grant permission to write to EXXETA.
 - **Ereignisjournal:** jedes Ereignis mit Ursache: Start, Ergebnis, Review-Runde, Wiederholung, Hänger, Wave, Gate-Wartezeit.
 - **Tester- und Integrations-Gates:** Eine grüne Integration reicht für den Push, auch wenn parallele Smoke-Ausreißer aus dem Tester-Lauf einzeln bestanden haben. Jeder Ausreißer und beide Ergebnisse stehen im Review. Ein einzeln fehlschlagender Smoke oder ein rotes Integrations-Gate bleibt ein Blocker (entschieden von Sascha am 07.11.2026, am 09.11.2026 bestätigt: „Grüne Integration reicht“).
 - **Upstream und Excalidraw:** Ein Upstream-Pull-Request ist später vorgesehen, wird jetzt aber weder vorbereitet noch an `EXXETA/exxperts` gesendet. Excalidraw bleibt ausschließlich im Fork und muss so getrennt bleiben, dass es bei einem späteren Upstream-Port entfallen kann (entschieden von Sascha am 09.11.2026).
