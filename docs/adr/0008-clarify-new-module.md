@@ -1,9 +1,9 @@
 # ADR-0008: Clarify new modules in the change levels
 
-Status: proposed
+Status: accepted
 Date: 2026-11-10
-Decided by: Sascha (2026-11-10), module distinction; acceptance of this proposal pending
-Architecture impact: level 3 — proposed wording for the protected change-level table; no product modules, contracts or data flows change
+Decided by: Sascha (2026-11-10), option A with the extension "or interfaces"
+Architecture impact: level 3 — clarifies wording for the protected change-level table; no product modules, contracts or data flows change
 
 ## Context
 
@@ -21,12 +21,22 @@ Keep the clarification only in the Architect protocol; readers of the table alon
 
 ## Decision
 
-Sascha decided the module distinction quoted above. His acceptance of option A and the proposed change to `AGENTS.md` is pending.
+Option A with the extension "or interfaces", accepted by Sascha on 2026-11-10: "Du kannst A auch mit deiner vorgeschlagenen Ergänzung annehmen".
+
+A new file alone is not a new module; a new module is a logically or technically wholly new topic that brings new dependencies or interfaces.
 
 ## Consequences
 
-If accepted, the protected table will reflect the distinction. Other triggers for levels 2 and 3 remain unchanged; no product change or reclassification of a specific task is part of this proposal.
+The protected table and the Architect, coordinator and developer workflow documents will use the accepted wording:
+
+A new file alone is not a new module; a new module is a logically or technically wholly new topic that brings new dependencies or interfaces.
+
+Other triggers for levels 2 and 3 remain unchanged; no product change or reclassification of a specific task is part of this decision.
 
 ## Slicing
 
-After Sascha accepts this ADR, update the level 3 table wording in `AGENTS.md` and check it against the accepted decision and the Architect protocol.
+1. Record this accepted ADR and preserve the options text.
+2. Add the accepted wording to the level 3 table in `AGENTS.md`, citing ADR-0008 in the commit.
+3. Apply the same accepted wording in `docs/architect-protocol.md`, `docs/coordinator.md` and `docs/dev-workflow.md`, marked decided by Sascha, 2026-11-10.
+
+Validate the exact wording, preserved options, commit ordering and DCO sign-offs; independent review and integration follow.

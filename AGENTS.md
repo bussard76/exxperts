@@ -70,7 +70,7 @@ Every task records `## Architecture impact` (level, modules and boundaries; leve
 |---|---|---|
 | 1 | anything inside one module that keeps its public API | just do it |
 | 2 | new or changed public export, new dependency, new route | checked by the Architect; ask the coordinator with a one-paragraph rationale; continue only after the answer |
-| 3 | new module, changed responsibilities or allowed imports, different data flow, new technology, contract or protocol change | escalate; the coordinator gets Sascha's decision; do not implement until the accepted ADR says `Decided by: Sascha` |
+| 3 | new module, changed responsibilities or allowed imports, different data flow, new technology, contract or protocol change. A new file alone is not a new module; a new module is a logically or technically wholly new topic that brings new dependencies or interfaces. | escalate; the coordinator gets Sascha's decision; do not implement until the accepted ADR says `Decided by: Sascha` |
 
 **Protected files** (the commit hook blocks changes unless the message references `ADR-NNNN` of an accepted ADR that carries a `Decided by:` line): `ARCHITECTURE.md`, `AGENTS.md`, `docs/adr/**`, `.githooks/**`, `tools/factory-guardrails.mjs`. A **new or proposed ADR** is itself under `docs/adr/`: commit it by citing the adoption ADR (ADR-0001) in the message; once Sascha has accepted it, cite it directly. ADRs follow `docs/adr/0000-template.md` (Status, Date, Decided by, options, decision), not the shorter form in the vendored `domain-modeling` skill. New dependencies are not hook-protected; they are a level-2 change that the Architect's spec review decides, and the Tester checks that every new dependency is named in the task.
 
