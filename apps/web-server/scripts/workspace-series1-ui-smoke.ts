@@ -149,8 +149,23 @@ try {
   let imageRequests = 0;
   page.on("request", (request) => { if (request.url().includes("/workspace-image?") && request.url().includes("image.png")) imageRequests++; });
   await tree.locator(".workspace-file-browser-file", { hasText: "notes.md" }).click({ timeout: 10000 });
-  await page.locator(".workspace-preview-text").getByText("# Invented note").waitFor();
-  assert.equal(await page.locator(".workspace-pane").getByRole("button", { name: /^(edit|save|download|print)$/i }).count(), 0);
+  if (process.env.SERIES_COMBINED === "1") {
+    await page.locator(".markdown-editor-tiptap").getByRole("heading", { name: "Invented note" }).waitFor();
+    assert.equal(await page.locator(".workspace-pane").getByRole("button", { name: /^(download|print)$/i }).count(), 0);
+    await page.getByRole("button", { name: "RAW", exact: true }).click();
+    await page.locator(".markdown-editor-raw").fill("# Invented note\n\nCombined edit\n");
+    await tree.locator(".workspace-file-browser-file", { hasText: "other.txt" }).click();
+    const prompt = page.getByRole("dialog", { name: "Unsaved Markdown changes" });
+    await prompt.getByRole("button", { name: "Cancel" }).click();
+    assert.equal(await page.locator(".workspace-tab[data-active=true] .workspace-tab-select").textContent(), "notes.md");
+    await tree.locator(".workspace-file-browser-file", { hasText: "other.txt" }).click();
+    await prompt.getByRole("button", { name: "Save and continue" }).click();
+    await page.locator(".workspace-preview-text").getByText("Invented second file").waitFor();
+    assert.equal(fs.readFileSync(path.join(folder, "notes.md"), "utf8"), "# Invented note\n\nCombined edit\n");
+  } else {
+    await page.locator(".workspace-preview-text").getByText("# Invented note").waitFor();
+    assert.equal(await page.locator(".workspace-pane").getByRole("button", { name: /^(edit|save|download|print)$/i }).count(), 0);
+  }
   await tree.locator(".workspace-file-browser-file", { hasText: "other.txt" }).click();
   assert.equal(await page.locator(".workspace-tab").count(), 2);
   const tabs = page.locator(".workspace-tab");

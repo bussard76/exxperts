@@ -281,8 +281,14 @@ require("node:module").syncBuiltinESMExports();
 	fs.truncateSync(path.join(workspaceRoot, "boundary.md"), 16_777_217);
 	const tooLarge = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=boundary.md`);
 	assert(tooLarge.status === 413 && tooLarge.body.code === "file_too_large", "Markdown above the size limit is refused");
+	const originalMarkdownBytes = fs.readFileSync(path.join(workspaceRoot, "invented.md"));
 	const noWrite = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-markdown?conversationId=demo-thread&path=invented.md`, { method: "PUT", body: JSON.stringify({ content: "replacement", revision: "invented" }) });
-	assert(noWrite.status === 404, "Series 1 has no Markdown write route");
+	if (process.env.SERIES_COMBINED === "1") {
+		assert(noWrite.status === 400 && noWrite.body.code === "invalid_body", "combined Markdown route rejects invalid revision");
+		assert(fs.readFileSync(path.join(workspaceRoot, "invented.md")).equals(originalMarkdownBytes), "invalid revision leaves original bytes intact");
+	} else {
+		assert(noWrite.status === 404, "Series 1 has no Markdown write route");
+	}
 	const movedRoot = `${workspaceRoot}-moved`;
 	const replacementRoot = `${workspaceRoot}-replacement`;
 	fs.renameSync(workspaceRoot, movedRoot);
