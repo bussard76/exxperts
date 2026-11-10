@@ -138,3 +138,7 @@ Append dated sections below as decisions are made. Superseded rules stay here wi
 
 - **Upstream:** one upstream pull request is intended later, but not now. Do not prepare or send anything to `EXXETA/exxperts` until Sascha resumes that work. Sascha: "einer aber warten".
 - **Excalidraw:** keep it only in the fork and keep its changes separable, so a future upstream port can omit them cleanly. Sascha: "nur im fork".
+
+## Additional decisions, 2026-11-10 (lockfile in upstream pull requests)
+
+- **Lockfile changes belong to the pull request (decided by Sascha, 2026-11-10):** "Wenn wir neue Lockfile-Diffs brauchen, weil wir hinzugefügte Abhängigkeiten haben, dann ist das Teil des PRs und muss vom Upstream-Repo akzeptiert werden." A series that adds dependencies carries the resulting `package-lock.json` change in its own pull request, and upstream accepts or rejects it with the series. There is no separate lockfile-hygiene PR 0, and no series waits for one. Lockfile changes that no added dependency causes (a rewrite by the install) stay out of every series. The provenance and Node-floor blockers are unaffected.
