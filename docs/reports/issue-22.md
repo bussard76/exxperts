@@ -1,19 +1,16 @@
-# T22 desktop notices — work checklist
+# T22 desktop notices
 
 ## Architecture impact
 
-Level 1: the existing desktop payload pruning module and its test; no new export, dependency, route, store, or data flow.
+Level 1: the existing desktop payload pruning module and its test; no new export, dependency, route, store, or data flow. The independent Series 2 contribution remains separate.
 
-## Result and observable acceptance
+## Result and observable acceptance self-review
 
-- [x] Preserve `NOTICE`, `runtime/LICENSE`, and `runtime/NOTICE.md` in the existing desktop keep list, retaining all existing keeps and the 2,500 file ceiling.
-- [x] Test the public `pruneDesktopPayload` seam against exact source bytes and verify missing required inputs fail, preserving all existing tests.
-- [ ] Build a real Linux release from exact Series 2 candidate `a9d1b8b` plus only the desktop product fix in a temporary composition; never merge Series 2 into this branch.
-- [ ] Inspect and retain evidence for the pre-prune archive and actual post-prune payload: exact notice bytes, renderer, server and Node notices, required modules, lock and file checks and unchanged ceiling.
-- [ ] Run the specified typechecks and affected suites; run applicable browser specs through the attributed gate, and record any retries.
-- [ ] Review every binding item and name the proving test or evidence; record files, tests, assumptions, debt and unavailable native macOS and Windows package evidence.
-- [ ] Merge current `origin/main`, rerun affected suites and push this branch; do not run the full Developer-stage smoke gate.
-
-## Resolved instruction conflict
-
-`origin/agents/t22-s2-notice-specreview` contains Series 2 product and lock history, not just its review. The requested merge would violate the explicit instruction never to merge Series 2 into this contribution branch. The Controller directed cherry-picking only review commit `1486f8d`; this was done. The pre-existing worktree modification to `package-lock.json` remains untouched and is excluded from commits.
+- [x] `NOTICE`, `runtime/LICENSE`, and `runtime/NOTICE.md` are in the existing desktop keep list. The `keeps only the listed paths outside node_modules` test verifies all existing keeps plus these paths, and `fails when the trimmed payload holds more files than the ceiling` preserves the existing ceiling check.
+- [x] `retains the exact notice bytes and rejects missing notice inputs` exercises public `pruneDesktopPayload`, compares each staged result with the source bytes and separately checks that each missing notice fails. Before the fix, the same test failed on the removed `NOTICE`; after the fix all eight desktop tests pass.
+- [x] A temporary composition based on exact Series 2 `a9d1b8b9e28c09bab08fb89ac80426fedc941e29` contained only the three-line desktop product change. Normal-lifecycle `EXXETA_SKIP_BROWSER_INSTALL=1 npm ci`, runtime build, and the unmodified real Linux x64 release builder succeeded; the input lock's before/after hashes matched. Release log records 423 installed packages matched the lock, pinned Node SHA verification, and 13,747 files against the existing 15,000 release ceiling.
+- [x] The actual release archive was extracted and the public desktop pruner run on it. `cmp` verified `LICENSE`, `NOTICE`, `runtime/LICENSE`, and `runtime/NOTICE.md` against their exact source bytes both before and after pruning. Root `NOTICE` contains the Series 2 renderer attribution; the server-generated licences file, UI dist files and vendored Node licence were retained and hashed, with server and Node hashes unchanged. `checkServerFiles` passed and the post-prune dependency closure contained 63 package directories; app files fell from 13,744 to 2,232 against the unchanged 2,500 ceiling. Evidence and logs are under `~/controller-exxperts/evidence/t22-desktop-notices-2026-11-10/`; release archive SHA-256 is `5ab8363e6309f5b778b173d9a5783a14ac3d8dbda7242de3e4446f03c3f9c2d1`.
+- [x] UI and scripts typechecks passed in the active commit hook after normal npm ci and runtime build. `npm run test:scripts` passed 55/55, including the desktop tests, and passed again after merging current `origin/main` (already up to date). No browser spec covers this packaging-only change. No gate, full build/smoke gate, Docker, real data, or paid API was used; no retries were needed.
+- [x] Product files changed: `apps/desktop/scripts/prune-payload.mjs` and `apps/desktop/scripts/prune-payload.test.mjs`. The latter adds the exact-byte and missing-input regression test and updates the existing fixture and expected paths. The review document and this report are task documentation. No screenshots were captured.
+- [x] The pre-existing local `package-lock.json` modification was preserved byte-for-byte across npm ci and excluded from commits. Assumption: the approved three paths are required inputs, consistent with the existing pruner's missing-keep failure. The separate-desktop architecture instructions remain binding; review commit `1486f8d` alone was cherry-picked per Controller correction, without merging Series 2.
+- [x] Native macOS arm64 and Windows x64 final release and desktop package inspection is unavailable on this Linux host and remains for Front on matching hosts. Linux pruned payload evidence is not native installer evidence. Broader attribution inventory and legal sufficiency remain open for the appropriate decision maker; no conclusion is claimed here. No additional debt candidate was identified for this bounded change.
