@@ -19,7 +19,7 @@ fs.writeFileSync(
 fs.writeFileSync(path.join(smokeAppDir, "persistent-agent-ai-profile.json"), JSON.stringify({ profileId: "openai-compatible" }, null, 2));
 process.env.EXXETA_PERSISTENT_AGENTS_ROOT = tempAgentsRoot;
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-const webServerDir = path.resolve(scriptDir, "..");
+const webServerDir = process.env.SERIES_PACKAGED_ROOT ? path.resolve(process.env.SERIES_PACKAGED_ROOT, "apps/web-server") : path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(webServerDir, "..", "..");
 const port = await freePort();
 const baseUrl = `http://127.0.0.1:${port}`;
@@ -174,7 +174,7 @@ cp.spawn = function(file, args, options) {
 };
 require("node:module").syncBuiltinESMExports();
 `);
-	server = spawn("npx", ["tsx", "src/index.ts"], {
+	server = spawn(process.env.SERIES_PACKAGED_ROOT ? process.execPath : "npx", process.env.SERIES_PACKAGED_ROOT ? ["dist/server.mjs"] : ["tsx", "src/index.ts"], {
 		shell: process.platform === "win32",
 		...SMOKE_SERVER_SPAWN_TREE_OPTIONS,
 		cwd: webServerDir,
@@ -374,6 +374,15 @@ require("node:module").syncBuiltinESMExports();
 	const oversizePdf = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=oversize.pdf`);
 	assert(oversizePdf.status === 413 && oversizePdf.body.code === "file_too_large", "PDF input over the child limit is refused");
 	const { default: JSZip } = await import("jszip");
+	const encryptedZip = new JSZip();
+	encryptedZip.file("invented.txt", "invented");
+	const encrypted = Buffer.from(await encryptedZip.generateAsync({ type: "nodebuffer" }));
+	const central = encrypted.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+	assert(central >= 0, "invented ZIP contains a central directory entry");
+	encrypted.writeUInt16LE(encrypted.readUInt16LE(central + 8) | 1, central + 8);
+	fs.writeFileSync(path.join(workspaceRoot, "encrypted-invented.xlsx"), encrypted);
+	const encryptedPreview = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=encrypted-invented.xlsx`);
+	assert(encryptedPreview.status === 422 && encryptedPreview.body.code === "encrypted_file", "encrypted spreadsheet is refused by the real child");
 	const expansionZip = new JSZip();
 	expansionZip.file("word/document.xml", "x".repeat(1_000_000));
 	fs.writeFileSync(path.join(workspaceRoot, "expansion.docx"), await expansionZip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }));

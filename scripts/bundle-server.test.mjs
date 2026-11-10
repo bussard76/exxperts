@@ -103,9 +103,9 @@ test("the bundled OAuth page finds the exxperts logo under EXXETA_HOME", async (
 // Every package that must ship as files is present as an empty package; an
 // override set to null leaves a file out.
 const SHIPPED_PACKAGE_STUBS = Object.fromEntries(
-	[...EXTERNAL_PACKAGES.filter((pkg) => pkg.ships), ...FILE_PACKAGES].map(({ name }) => [
-		`node_modules/${name}/package.json`,
-		JSON.stringify({ name, version: "1.0.0", license: "MIT" }),
+	[...EXTERNAL_PACKAGES.filter((pkg) => pkg.ships), ...FILE_PACKAGES].flatMap(({ name }) => [
+		[`node_modules/${name}/package.json`, JSON.stringify({ name, version: "1.0.0", license: "MIT" })],
+		[`node_modules/${name}/index.js`, "module.exports = {};\n"],
 	]),
 );
 
@@ -342,6 +342,13 @@ test("a payload missing a bundled child's external subpath fails its file check"
 	assert.match(checkServerFiles(dir).join("\n"), /pdfjs-dist\/legacy\/build\/pdf\.mjs/);
 });
 
+test("a payload missing a bundled child's external entry file fails its file check", async () => {
+	const dir = fixtureTree({ "apps/web-server/src/shelf-parse-worker.mjs": 'await import("jszip");\n' });
+	await bundleServer({ root: dir, log: () => {} });
+	fs.rmSync(path.join(dir, "node_modules/jszip/index.js"));
+	assert.match(checkServerFiles(dir).join("\n"), /jszip/);
+});
+
 test("a child import of Koffi retains the package", async () => {
 	const dir = fixtureTree({
 		"apps/web-server/src/shelf-parse-worker.mjs": 'await import("koffi");\n',
@@ -376,6 +383,15 @@ test("the bundled shelf child executes ExcelJS without its package files", async
 	fs.rmSync(path.join(dir, "node_modules/exceljs"), { recursive: true });
 	assert.equal(runNode(path.join(dir, "apps/web-server/dist/shelf-parse-worker.mjs")), "42");
 	assert.deepEqual(checkServerFiles(dir), []);
+});
+
+test("the ExcelJS browser bundle requires its source inventory", async () => {
+	const dir = fixtureTree({
+		"apps/web-server/src/shelf-parse-worker.mjs": 'await import("exceljs");\n',
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "4.4.0", license: "MIT" }),
+		"node_modules/exceljs/dist/exceljs.min.js": 'module.exports = {};\n//# sourceMappingURL=exceljs.min.js.map\n',
+	});
+	await assert.rejects(bundleServer({ root: dir, log: () => {} }), /exceljs\.min\.js\.map/);
 });
 
 test("the bundled shelf child executes the Word renderer and still checks native files", async () => {

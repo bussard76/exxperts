@@ -446,13 +446,14 @@ export function checkServerFiles(root, out = DEFAULT_OUT) {
 	for (const file of ["server.mjs", LICENCES_FILE, ...BUNDLE_ASSETS.map((asset) => asset.file)]) {
 		if (!fs.existsSync(path.join(outDir, file))) problems.push(`${out}/${file} is missing`);
 	}
-	const child = path.join(outDir, "shelf-parse-worker.mjs");
-	if (fs.existsSync(child)) {
+	for (const worker of ["shelf-parse-worker.mjs", "workspace-open-worker.mjs"]) {
+		const child = path.join(outDir, worker);
+		if (!fs.existsSync(child)) continue;
 		try {
 			const result = esbuild.buildSync({ absWorkingDir: root, entryPoints: [child], bundle: true, packages: "external", platform: "node", format: "esm", write: false, metafile: true, logLevel: "silent" });
 			const childRequire = createRequire(child);
 			for (const { path: specifier, external } of Object.values(result.metafile.outputs).flatMap((output) => output.imports)) {
-				if (!external || isBuiltin(specifier) || specifier === packageName(specifier)) continue;
+				if (!external || isBuiltin(specifier)) continue;
 				try {
 					const resolved = fs.realpathSync(childRequire.resolve(specifier));
 					const relative = path.relative(fs.realpathSync(root), resolved);
@@ -460,7 +461,7 @@ export function checkServerFiles(root, out = DEFAULT_OUT) {
 				} catch { problems.push(`a private worker imports ${specifier}, but that external module is missing from the payload`); }
 			}
 		} catch (error) {
-			problems.push(`the shelf worker could not be inspected: ${error.message}`);
+			problems.push(`${worker} could not be inspected: ${error.message}`);
 		}
 	}
 	return [...problems, ...shippedPackageDirs(root).missing];

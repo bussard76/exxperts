@@ -59,6 +59,9 @@ inventedSheet.getRow(2).height = 30;
 workbook.addWorksheet("Empty sheet");
 workbook.addWorksheet("Hidden sheet", { state: "hidden" });
 fs.writeFileSync(path.join(folder, "invented.xlsx"), Buffer.from(await workbook.xlsx.writeBuffer({ useSharedStrings: true })));
+const classicWorkbook = new ExcelJS.Workbook();
+classicWorkbook.addWorksheet("Classic date").getCell("A1").value = new Date("2020-01-02T00:00:00.000Z");
+fs.writeFileSync(path.join(folder, "classic.xlsx"), Buffer.from(await classicWorkbook.xlsx.writeBuffer()));
 fs.writeFileSync(path.join(folder, "malformed-invented.xlsx"), "invented");
 fs.writeFileSync(path.join(folder, "invented.html"), "<p>Invented HTML</p>");
 fs.writeFileSync(path.join(folder, "hostile.html"), `<!doctype html><body><script>
@@ -235,6 +238,13 @@ try {
   await page.getByRole("button", { name: "Empty sheet" }).click();
   await page.getByText("This sheet is empty.").waitFor();
   await page.getByRole("button", { name: "Invented sheet" }).click();
+  const classicResponse = page.waitForResponse(response => response.url().includes("/workspace-preview?") && new URL(response.url()).searchParams.get("path") === "classic.xlsx");
+  await tree.getByRole("button", { name: "classic.xlsx", exact: true }).click();
+  const classicBody = await (await classicResponse).json();
+  assert.equal(classicBody.workbook.dateSystem, "1900");
+  assert.equal(classicBody.workbook.sheets[0].cells[0].valueKind, "date");
+  if (process.env.SERIES_PARITY_OUTPUT) fs.writeFileSync(process.env.SERIES_PARITY_OUTPUT, JSON.stringify({ workbook: workbookBody.workbook, classic: classicBody.workbook }, null, 2));
+  await page.getByRole("button", { name: "Classic date" }).waitFor();
   await tree.locator(".workspace-file-browser-file", { hasText: "malformed-invented.xlsx" }).click();
   await page.locator(".workspace-preview-content:not([hidden])").getByText("This file could not be previewed.").waitFor();
   assert.equal(await page.locator(".workspace-preview-content:not([hidden]) .workspace-spreadsheet").count(), 0, "malformed child data cannot render a workbook");
