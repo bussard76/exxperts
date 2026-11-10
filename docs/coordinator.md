@@ -142,3 +142,7 @@ Append dated sections below as decisions are made. Superseded rules stay here wi
 ## Additional decisions, 2026-11-10
 
 - **No Mac Front agent (decided by Sascha, 2026-11-10):** There is one Front agent, on the server. Mac-only work goes to a **Mac worker** that the Front agent defines per case, mainly where changes must iterate fast (front-end and UI changes) or something must be built on the Mac with Mac prerequisites (app, DMG, native checks). The Mac worker follows `AGENTS.md` like any worker; its output goes through the same review gate. Until a Mac host is configured in `factory.config.json`, the Front agent records such work as `MAC-TASK <date> <what>` in `~/front-exxperts/mac-tasks.log` and tells Sascha.
+
+## Additional decisions, 2026-11-10 (lockfile in upstream pull requests)
+
+- **Lockfile changes belong to the pull request (decided by Sascha, 2026-11-10):** "Wenn wir neue Lockfile-Diffs brauchen, weil wir hinzugefügte Abhängigkeiten haben, dann ist das Teil des PRs und muss vom Upstream-Repo akzeptiert werden." A series that adds dependencies carries the resulting `package-lock.json` change in its own pull request, and upstream accepts or rejects it with the series. There is no separate lockfile-hygiene PR 0, and no series waits for one. Lockfile changes that no added dependency causes (a rewrite by the install) stay out of every series. The provenance and Node-floor blockers are unaffected.
