@@ -12,6 +12,7 @@ import fs from "node:fs";
 import { createHash } from "node:crypto";
 import { builtinModules } from "node:module";
 import path from "node:path";
+import ts from "typescript";
 
 // Packages the prune never touches, as path prefixes relative to
 // app/node_modules. Everything inside them ships as installed.
@@ -104,23 +105,23 @@ function workerOnlyPackages(app, nodeModulesDir) {
 	const omitted = [...packageClosure(app, roots)].filter((dir) => !kept.has(dir));
 	if (!omitted.length) return omitted;
 	const omittedDirs = new Set(omitted);
-	const literal = /(?:\b(?:require(?:\.resolve)?|import)\s*(?:(?:\/\*[\s\S]*?\*\/|\/\/[^\n]*)\s*)*\(\s*|\bfrom\s*|\bimport\s+)(?:(?:\/\*[\s\S]*?\*\/|\/\/[^\n]*)\s*)*["']([^"']+)["']/g;
-	// The remaining computed product imports are reviewed by file, name and
-	// count; a new dynamic load must be reviewed before it can ship.
+	// Computed product imports are pinned to reviewed source bytes; a change
+	// requires a fresh review before dependencies can be removed.
 	const reviewed = [
-		{ file: "scripts/doctor.mjs", hash: "0f80abd5e2efa8db4eac27b5f3944de598b7fd823589cb05d7e2d6bb1146c84e", name: /^(path|name)$/, max: 2 },
-		{ file: "apps/web-server/src/mcp-admin.ts", hash: "5da82c76e4f18e3caa0efa5447f25ca757084dbfe6e3c919417e83e01d6e3192", name: /^ADAPTER_/, max: 12 },
-		{ file: "apps/web-server/src/mcp-status.ts", hash: "53060b0ba9063c5fbddd0fefc8167745515514a5a9dc5ab21bbd34f7920cc8c8", name: /^ADAPTER_/, max: 4 },
-		{ file: "pi-package/extensions/mcp/room-scope.ts", hash: "4a9d933a9a9ceb5805c40e8fe668297da7ce2a3fc6340c7c37de1900ef38617a", name: /^ADAPTER_/, max: 15 },
-		{ file: "pi-package/extensions/mcp/index.ts", hash: "281391d255821cfdc3dee05b1b26ff7ddfb2bc6153339af3eba0959c8b8f1962", name: /^PI_MCP_ADAPTER_SPECIFIER$/, max: 1 },
-		{ file: "runtime/packages/ai/dist/env-api-keys.js", hash: "b09853d5e91b01cec5397a585205427c040eec332f1a1c659b255a01ad27d948", name: /^specifier$/, max: 1 },
-		{ file: "runtime/packages/ai/dist/providers/openai-codex-responses.js", hash: "2f257a176ae10bd80328e50f52f7c08d354334595884374c428f65d30fe36579", name: /^specifier$/, max: 1 },
-		{ file: "runtime/packages/ai/dist/providers/register-builtins.js", hash: "2a30aae71359bd3b05989f2d0dfd4e029fc5c8d76dcbde9e60d81153445ce21b", name: /^specifier$/, max: 1 },
-		{ file: "runtime/packages/coding-agent/dist/core/extensions/loader.js", hash: "33750f5a1f93c0aac6c8cc0a67a4c7847b8b05e4b4be6104b99fbf4e48b280bf", name: /^extensionPath$/, max: 1 },
+		{ file: "scripts/doctor.mjs", hash: "0f80abd5e2efa8db4eac27b5f3944de598b7fd823589cb05d7e2d6bb1146c84e" },
+		{ file: "apps/web-server/src/mcp-admin.ts", hash: "5da82c76e4f18e3caa0efa5447f25ca757084dbfe6e3c919417e83e01d6e3192" },
+		{ file: "apps/web-server/src/mcp-status.ts", hash: "53060b0ba9063c5fbddd0fefc8167745515514a5a9dc5ab21bbd34f7920cc8c8" },
+		{ file: "pi-package/extensions/mcp/room-scope.ts", hash: "4a9d933a9a9ceb5805c40e8fe668297da7ce2a3fc6340c7c37de1900ef38617a" },
+		{ file: "pi-package/extensions/mcp/index.ts", hash: "281391d255821cfdc3dee05b1b26ff7ddfb2bc6153339af3eba0959c8b8f1962" },
+		{ file: "runtime/packages/ai/dist/env-api-keys.js", hash: "b09853d5e91b01cec5397a585205427c040eec332f1a1c659b255a01ad27d948" },
+		{ file: "runtime/packages/ai/dist/providers/openai-codex-responses.js", hash: "2f257a176ae10bd80328e50f52f7c08d354334595884374c428f65d30fe36579" },
+		{ file: "runtime/packages/ai/dist/providers/register-builtins.js", hash: "2a30aae71359bd3b05989f2d0dfd4e029fc5c8d76dcbde9e60d81153445ce21b" },
+		{ file: "runtime/packages/coding-agent/dist/core/extensions/loader.js", hash: "33750f5a1f93c0aac6c8cc0a67a4c7847b8b05e4b4be6104b99fbf4e48b280bf" },
 	];
 	const dynamic = /\b(?:import|require(?:\.resolve)?)\s*(?:(?:\/\*[\s\S]*?\*\/|\/\/[^\n]*)\s*)*\(\s*(?:(?:\/\*[\s\S]*?\*\/|\/\/[^\n]*)\s*)*(?!["'])([A-Za-z_$][\w$]*|`|\()/g;
 	// Computed loads in the installed dependency tree, reviewed at this lock.
 	const reviewedDependencies = new Map([
+		["qrcode-terminal/lib/main.js", "fa88a331a51dd411f8f0f068cfb8d88280cafa65554fb18bf8aee1f4325ef699"],
 		["recheck/lib/main.js", "c5b742b670ccc64c77edeaeaf92e995d48098d8bacc80e7d391d8ddd90d88b1d"],
 		["pi-mcp-adapter/glimpse-ui.ts", "0bbc94fd4218426b227a499e8f245b3fccfacb4593a90855d8c9466a84c55779"],
 		["any-promise/register.js", "003a1f7a8075b4d6e3f84adb9c1f0a1c3c41d133c03bd7e24ab6d0d336f612a9"],
@@ -195,68 +196,70 @@ function workerOnlyPackages(app, nodeModulesDir) {
 		["yargs/build/lib/utils/apply-extends.js", "64640dce92669705abead3bdbe2c46c8318c8623843a55e4726fb3c55ff9dd1d"],
 		["koffi/src/cnoke/src/builder.js", "53a48af14d00256f3f60d6265d8bc637fe1fe50e0cbebb3ecc610bd9cc46b199"],
 	]);
-	function checkRequireAliases(full, text) {
-		const aliases = [...text.matchAll(/\b([A-Za-z_$][\w$]*)\s*=\s*(?:createRequire\s*\((?:[^()]|\([^()]*\))*\)(?!\s*\.)|(?:module\.)?require(?:\.bind\s*\([^()]*\))?\s*(?=[;,]))/g)].map((match) => match[1]);
-		for (const alias of aliases) {
-			const escaped = alias.replaceAll("$", "\\$");
-			const calls = new RegExp(`\\b${escaped}(?:\\.resolve)?\\s*\\(\\s*(["'])([^"']+)\\1`, "g");
-			const computed = new RegExp(`\\b${escaped}(?:\\.resolve)?\\s*\\(\\s*(?!["'])([A-Za-z_$][\\w$]*|\u0060|\\()`, "g");
-			if ([...text.matchAll(computed)].length) {
-				const relative = path.relative(app, full).split(path.sep).join("/");
-				const hash = createHash("sha256").update(text.replaceAll("\r\n", "\n")).digest("hex");
-				const known = reviewed.find((entry) => entry.file === relative)?.hash ?? reviewedDependencies.get(path.relative(nodeModulesDir, full).split(path.sep).join("/"));
-				if (known !== hash) throw new Error(`${relative} has an unreviewed computed import`);
+	// Parse module loads so escaped specifiers are resolved as JavaScript sees
+	// them. Existing computed sites are pinned to their reviewed source bytes.
+	function inspect(full, dependency = false) {
+		if (!/\.[cm]?[jt]s$/.test(full) || DECLARATION_FILE.test(full) || full.endsWith("shelf-parse-worker.mjs")) return;
+		const text = fs.readFileSync(full, "utf8");
+		const relative = path.relative(app, full).split(path.sep).join("/");
+		const source = ts.createSourceFile(full, text, ts.ScriptTarget.Latest, true);
+		if (source.parseDiagnostics.length) {
+			const knownOctal = dependency && path.relative(nodeModulesDir, full).split(path.sep).join("/") === "qrcode-terminal/lib/main.js" && source.parseDiagnostics.every((item) => item.code === 1487) && createHash("sha256").update(text.replaceAll("\r\n", "\n")).digest("hex") === reviewedDependencies.get("qrcode-terminal/lib/main.js");
+			if (!knownOctal) throw new Error(`${relative} could not be parsed for imports`);
+		}
+		const aliases = new Set(["require"]);
+		const factories = new Set(["createRequire"]);
+		const nodes = [source];
+		for (let i = 0; i < nodes.length; i++) ts.forEachChild(nodes[i], (child) => { nodes.push(child); });
+		for (const node of nodes) {
+			if ((ts.isBindingElement(node) || ts.isImportSpecifier(node)) && ts.isIdentifier(node.name) && (node.propertyName?.getText(source) ?? node.name.text) === "createRequire") factories.add(node.name.text);
+		}
+		for (const node of nodes) {
+			if (!ts.isVariableDeclaration(node) || !ts.isIdentifier(node.name) || !node.initializer) continue;
+			const value = node.initializer;
+			if ((ts.isIdentifier(value) && value.text === "require") ||
+				(ts.isCallExpression(value) && ts.isIdentifier(value.expression) && factories.has(value.expression.text)) ||
+				(ts.isCallExpression(value) && ts.isPropertyAccessExpression(value.expression) && value.expression.name.text === "bind" && value.expression.expression.getText(source) === "module.require")) aliases.add(node.name.text);
+		}
+		let checkedDynamic = false;
+		function load(argument) {
+			// Generated browser bundles use numeric local module IDs.
+			if (argument && ts.isNumericLiteral(argument)) return;
+			if (argument && ts.isStringLiteralLike(argument)) {
+				const specifier = argument.text;
+				const name = specifier.startsWith("@") ? specifier.split("/").slice(0, 2).join("/") : specifier.split("/")[0];
+				if (!builtinModules.includes(name) && !name.startsWith("node:") && omittedDirs.has(resolvePackageDir(app, path.dirname(full), name))) throw new Error(`${relative} imports worker-only package ${name}${ts.isNoSubstitutionTemplateLiteral(argument) ? " in a computed import" : ""}`);
+				return;
 			}
-
-			for (const match of text.matchAll(calls)) {
-				const name = match[2].startsWith("@") ? match[2].split("/").slice(0, 2).join("/") : match[2].split("/")[0];
-				if (!builtinModules.includes(name) && !name.startsWith("node:") && omittedDirs.has(resolvePackageDir(app, path.dirname(full), name))) throw new Error(`${path.relative(app, full)} imports worker-only package ${name}`);
+			if (checkedDynamic) return;
+			checkedDynamic = true;
+			const hash = createHash("sha256").update(text.replaceAll("\r\n", "\n")).digest("hex");
+			const known = dependency ? reviewedDependencies.get(path.relative(nodeModulesDir, full).split(path.sep).join("/")) : reviewed.find((item) => item.file === relative)?.hash;
+			if (known !== hash) throw new Error(`${relative} has an unreviewed computed import`);
+		}
+		for (const node of nodes) {
+			if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) load(node.moduleSpecifier);
+			else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) load(node.moduleReference.expression);
+			else if (ts.isCallExpression(node)) {
+				const callee = node.expression;
+				const direct = callee.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(callee) && aliases.has(callee.text));
+				const property = ts.isPropertyAccessExpression(callee) && (callee.name.text === "import" || callee.name.text === "require" || (callee.name.text === "resolve" && ts.isIdentifier(callee.expression) && aliases.has(callee.expression.text)));
+				if (direct || property) load(node.arguments[0]);
 			}
 		}
 	}
-	const dynamicCounts = new Map();
 	for (const rel of ["bin", "pi-package", "runtime/packages", "apps/web-server/src", "scripts/doctor.mjs", "scripts/searxng.mjs"]) {
 		const file = path.join(app, ...rel.split("/"));
 		if (!fs.existsSync(file)) continue;
-		const inspect = (full, _relative, _name, checkComputed = true) => {
-			if (!/\.[cm]?[jt]s$/.test(full) || full.endsWith("shelf-parse-worker.mjs")) return;
-			const text = fs.readFileSync(full, "utf8");
-			checkRequireAliases(full, text);
-			const relative = path.relative(app, full).split(path.sep).join("/");
-			for (const match of checkComputed ? text.matchAll(dynamic) : []) {
-				const entry = reviewed.find((item) => item.file === relative && item.name.test(match[1]));
-				if (!entry) throw new Error(`${relative} has an unreviewed computed import ${match[1]}`);
-				if (createHash("sha256").update(text.replaceAll("\r\n", "\n")).digest("hex") !== entry.hash) throw new Error(`${relative} changed since its computed imports were reviewed`);
-				const count = (dynamicCounts.get(entry) || 0) + 1;
-				dynamicCounts.set(entry, count);
-				if (count > entry.max) throw new Error(`${relative} has a new computed import`);
-			}
-			for (const match of text.matchAll(literal)) {
-				const specifier = match[1];
-				const name = specifier.startsWith("@") ? specifier.split("/").slice(0, 2).join("/") : specifier.split("/")[0];
-				if (!builtinModules.includes(name) && !name.startsWith("node:") && omittedDirs.has(resolvePackageDir(app, path.dirname(full), name))) throw new Error(`${path.relative(app, full)} imports worker-only package ${name}`);
-			}
-		};
-		if (fs.statSync(file).isDirectory()) walkFiles(file, inspect);
+		if (fs.statSync(file).isDirectory()) walkFiles(file, (full) => inspect(full));
 		else inspect(file);
 	}
 	for (const dir of kept) {
 		walkFiles(dir, (full, rel) => {
-			if (rel.split("/").includes("node_modules") || /(?:^|\/)(?:test|tests|__tests__|examples?)(?:\/|\.|$)/i.test(rel) || (dir.endsWith(`${path.sep}fastq`) && rel === "bench.js")) return;
-			if (!/\.[cm]?[jt]s$/.test(full) || DECLARATION_FILE.test(full)) return;
+			if (rel.split("/").includes("node_modules") || /(?:^|\/)(?:test|tests|__tests__|examples?)(?:\/|\.|$)/i.test(rel) || (dir.endsWith(`${path.sep}fastq`) && rel === "bench.js") || (dir.endsWith(`${path.sep}node-domexception`) && rel.startsWith(".history/"))) return;
 			const packageRel = path.relative(nodeModulesDir, full).split(path.sep).join("/");
 			if (!isProtected(packageRel) && pruneKind(path.basename(full)) === "typescript") return;
-			const text = fs.readFileSync(full, "utf8");
-			checkRequireAliases(full, text);
-			if ([...text.matchAll(dynamic)].length) {
-				const relative = path.relative(nodeModulesDir, full).split(path.sep).join("/");
-				const hash = createHash("sha256").update(text.replaceAll("\r\n", "\n")).digest("hex");
-				if (reviewedDependencies.get(relative) !== hash) throw new Error(`${relative} has an unreviewed computed import`);
-			}
-			for (const match of text.matchAll(literal)) {
-				const name = match[1].startsWith("@") ? match[1].split("/").slice(0, 2).join("/") : match[1].split("/")[0];
-				if (!builtinModules.includes(name) && !name.startsWith("node:") && omittedDirs.has(resolvePackageDir(app, path.dirname(full), name))) throw new Error(`${path.relative(app, full)} imports worker-only package ${name}`);
-			}
+			inspect(full, true);
 		});
 	}
 	return omitted;

@@ -357,3 +357,27 @@ test("release pruning rejects missing required dependencies even if also peers",
 	});
 	assert.throws(() => pruneNodeModules(path.join(app, "node_modules")), /missing required package missing/);
 });
+
+test("release pruning rejects escaped package names in imports", () => {
+	const app = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "1" } }),
+		"bin/exxperts.cjs": String.raw`import("excel\u006as");`,
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1" }),
+		"node_modules/exceljs/index.js": "module.exports = {};",
+	});
+	assert.throws(() => pruneNodeModules(path.join(app, "node_modules")), /escaped|import/i);
+	assert.ok(has(app, "node_modules/exceljs/index.js"));
+});
+
+test("release pruning follows a renamed createRequire factory", () => {
+	const app = makeTree({
+		"package.json": JSON.stringify({ dependencies: { exceljs: "1" } }),
+		"bin/exxperts.cjs": 'const { createRequire: factory } = require("node:module"); const load = factory(__filename); load("exceljs");',
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "1" }),
+		"node_modules/exceljs/index.js": "module.exports = {};",
+		"apps/web-server/dist/shelf-parse-worker.mjs": "export {};",
+		"apps/web-server/src/shelf-parse-worker.mjs": "export {};",
+	});
+	assert.throws(() => pruneNodeModules(path.join(app, "node_modules")), /exceljs.*import|import.*exceljs/i);
+	assert.ok(has(app, "node_modules/exceljs/index.js"));
+});
