@@ -15,9 +15,9 @@ Ein Projekt wird von einer kleinen **agentischen Fabrik** gebaut:
 
 ```mermaid
 flowchart LR
-  S[Mensch] <--> F[Front-Agent<br/>eigener Rechner]
-  F -- Aufträge, Antworten<br/>inbox.md --> C[Controller<br/>Server]
-  C -- Status<br/>status.md --> F
+  S[Mensch] <--> F[Front-Agent<br/>Server, Pilot]
+  F <-->|Orca-Nachrichten| C[Controller<br/>Server]
+  C --> I[Integration]
   C --> W1[Developer]
   C --> W2[Tester]
   C --> W3[Architekt]
@@ -32,7 +32,7 @@ flowchart LR
 | Rolle | Wer / wo | Macht | Macht nie |
 |---|---|---|---|
 | **Mensch** | der Eigentümer | Ziele und Prioritäten, nimmt auf dem Preview ab (eigener Rechner, eigene Umgebung; automatisierte Tests nutzen nie echte Daten), entscheidet Architektur auf Stufe 3 und alles, was echte externe Systeme oder echte Daten berührt | – |
-| **Front-Agent** | Agenten-Sitzung auf dem Rechner des Menschen | Einzige Ansprechstelle. Nimmt Wünsche und Testbefunde auf, macht daraus Tickets und Specs, führt die Stufen von außen nach innen, holt Entscheidungen ein, berichtet den Stand als Tabelle, schreibt die Morgen-Übergabe | Worker selbst steuern; den Menschen mit dem Hin und Her der Worker belasten |
+| **Front-Agent** | Agenten-Sitzung auf dem Server im Pilot | Einzige Ansprechstelle. Nimmt Wünsche und Testbefunde auf, macht daraus Tickets und Specs, führt die Stufen von außen nach innen, holt Entscheidungen ein, berichtet den Stand als Tabelle, schreibt die Morgen-Übergabe | Worker selbst steuern; den Menschen mit dem Hin und Her der Worker belasten |
 | **Controller** | Agenten-Sitzung auf dem Server, unbeaufsichtigt | Startet und steuert alle Worker, taktet Tests, Reviews und Waves, erkennt hängende Worker, räumt auf, schreibt nach jedem Zyklus einen Status | Mit dem Menschen direkt sprechen; Stufe-3-Architektur, ADRs oder Produktentscheidungen treffen |
 | **Developer** | Worker (Codex, Claude Code oder Pi) | Baut genau einen Auftrag, testgetrieben, auf eigenem Branch | Nach `main` pushen, Tests abschwächen |
 | **Tester** | Worker, nie derselbe wie der Developer | Prüft unabhängig gegen die Spec, führt die vollen Testläufe aus, schreibt einen Befund mit Urteil | Code ändern |
@@ -157,8 +157,8 @@ Der Controller setzt für jeden vollen Gate-Aufruf `GATE_SLOTS=1`, auch für Bro
 | Ort | Was |
 |---|---|
 | **Worker-Hosts** | null bis viele Server oder der eigene Rechner: Worker, Testläufe, Waves. Ein Remote-Server ist eine Option, kein Muss; mehrere sind möglich |
-| **Controller-Host** | einer der Worker-Hosts oder der Rechner des Menschen |
-| **Rechner des Menschen** | Front-Agent; der **Preview**: der aktuelle `main` mit der echten Umgebung, nur lesend, auf einer privaten Kopie der Daten, wo Daten im Spiel sind |
+| **Controller-Host** | einer der Worker-Hosts oder der Rechner des Menschen; im Pilot auch der Front-Agent |
+| **Rechner des Menschen** | der **Preview**: der aktuelle `main` mit der echten Umgebung, nur lesend, auf einer privaten Kopie der Daten, wo Daten im Spiel sind; Mac-Worker für Mac-only-Arbeit |
 | **Git-Host** | das Repository; alle Worker-Branches landen dort, nie direkt auf `main` |
 
 - **Kapazität nach Messung und Kalibrierung:** Der Controller startet Worker nach gemessener Last (CPU-, Speicher- und I/O-Wartezeit, verfügbarer RAM, Gate-Warteschlange, fremde Last, Kontingente), nicht nach fester Anzahl. Die Obergrenzen pro Host sind Startwerte: Sie steigen schrittweise, solange der Host ruhig bleibt, und sinken bei Druck; der Audit prüft die Schritte. Die Gate-Plätze passen sich an. Bei Engpass gilt: kritischer Pfad, fast fertige Aufgaben, Waves, neue Entwicklung, Schuldenabbau.
@@ -186,7 +186,7 @@ Der Rhythmus ist eine Einstellung (`rhythm.mode`), keine Regel:
 - **Eigener Zeitplan:** Ruhezeiten legen fest, wann der Controller neue Arbeit starten darf.
 - **Status auf Nachfrage:** eine Tabelle mit Aufgabe, wer daran arbeitet (Rolle, Modell), Stand, nächster Schritt und ob der Mensch gebraucht wird. Darunter, was neu auf `main` ist, und offene Abnahmen.
 - **Fragen an den Menschen:** immer eine auf einmal, mit Optionen und Empfehlung.
-- **Schnittstelle Front-Agent ↔ Controller:** das Controller-Verzeichnis auf dem Server. `status.md` schreibt der Controller, `inbox.md` der Front-Agent, `CONTROLLER.md` ist das Betriebshandbuch.
+- **Schnittstelle Front-Agent ↔ Controller:** Im manuellen Server-Pilot (entschieden von Sascha am 10.11.2026) laufen beide im selben Orca und senden Aufträge und Antworten in beide Richtungen mit `orca orchestration send`. Der Controller schreibt Ereignisse für den Front-Agent in `front-events.log`: nur anhängen, nie archivieren. `inbox.md` und `status.md` bleiben Rückfallweg und Dokumentation; `CONTROLLER.md` ist das Betriebshandbuch. Der Baum ist Front → Controller → Integration und Worker; der Controller steuert die Worker. Mac-only-Arbeit trägt der Front-Agent in `~/front-exxperts/mac-tasks.log` für einen Mac-Worker ein, der das Ergebnis per Orca an den Server-Front-Agent zurücksendet. Ist der Mac aus, wartet die Aufgabe. Der Server wird nicht mit dem Mac gekoppelt; private Arbeitsdaten bleiben vom Build-Server fern. Automatischer Start, Baumaufbau und Mac-Task-Watcher sind noch nicht implementiert; ein leeres Log belegt keine Zustellung.
 
 ## Der Zyklus des Controllers
 

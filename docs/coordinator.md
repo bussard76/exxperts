@@ -1,6 +1,6 @@
 # Coordinator handbook
 
-These rules bind whichever agent coordinates work in this repo: the Front agent on Sascha's machine and the Controller on the server. Workers follow `AGENTS.md`. Sascha owns every decision that is not delegated here.
+These rules bind whichever agent coordinates work in this repo: the Front agent and the Controller on the server. Workers follow `AGENTS.md`. Sascha owns every decision that is not delegated here.
 
 `docs/dev-workflow.md` explains this workflow to people. Whenever a rule here, in `AGENTS.md`, `docs/review-protocol.md` or `docs/architect-protocol.md` changes, update it in the same change.
 
@@ -12,12 +12,22 @@ These rules bind whichever agent coordinates work in this repo: the Front agent 
 
 ## Roles
 
-- **Front agent:** talks to Sascha; tickets and specs; the outside-in stages; one question at a time with the recommended option first; status as one table; morning handover. Does not steer workers.
+- **Front agent:** runs on the server in the pilot; talks to Sascha; tickets and specs; the outside-in stages; one question at a time with the recommended option first; status as one table; morning handover. Does not steer workers.
 - **Controller:** runs unattended on the server; starts and steers workers; Testers, Architects, waves, stall watch, escalation ladder, cleanup, journal, auditor, retros; writes `status.md` after every cycle. Never talks to Sascha directly; questions go into `status.md` under "Needs Sascha".
 - **Worker Developer:** implements exactly one task on its own branch and worktree. Never pushes to `main`.
 - **Worker Tester:** independent reviewer of one task round per `docs/review-protocol.md`. Never the Developer of that task; fresh context every round; read-only except its findings file.
 - **Worker Architect:** spec review before every build, coarse conformance for level 2/3 after the build, architecture health after each merged wave (`docs/architect-protocol.md`).
 - **Worker Auditor / Retro:** read-only; audits the factory, not the product.
+
+## Front agent and Controller on the server (decided by Sascha, 2026-11-10)
+
+Sascha chose a server pilot: “auf dem Server alles im Baum” with a Front agent above the Controller and workers below it ([decision and pilot source](https://github.com/bussard76/agentic-factory/pull/36)). The Front and Controller run in the same server Orca, in the tree Front → Controller → Integration and workers. The Controller still starts and steers factory workers; the Front speaks to Sascha and prepares work.
+
+Front and Controller send orders and answers both ways with native `orca orchestration send` to the recipient terminal. The Controller appends events to `front-events.log` for the Front to read; the log is append-only and never archived. `inbox.md` and `status.md` remain fallback and record if messaging is unavailable.
+
+For work available only on the Mac, the Front appends a task to `~/front-exxperts/mac-tasks.log` for a Mac worker, which returns its result to the server Front via native Orca messaging. Tasks wait while the Mac is off. Do not pair the server to the Mac; keep private work data off the build server.
+
+This is a manual pilot. Factory startup, status watch, doctor, automatic worktree creation or re-parenting, and a Mac task watcher do not yet implement this setup. An empty log does not prove delivery.
 
 ## Outside-in development (decided by Sascha, 2026-11-04)
 
