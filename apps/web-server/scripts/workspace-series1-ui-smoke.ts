@@ -149,8 +149,13 @@ try {
   let imageRequests = 0;
   page.on("request", (request) => { if (request.url().includes("/workspace-image?") && request.url().includes("image.png")) imageRequests++; });
   await tree.locator(".workspace-file-browser-file", { hasText: "notes.md" }).click({ timeout: 10000 });
-  await page.locator(".workspace-preview-text").getByText("# Invented note").waitFor();
-  assert.equal(await page.locator(".workspace-pane").getByRole("button", { name: /^(edit|save|download|print)$/i }).count(), 0);
+  if (process.env.SERIES_COMBINED === "1") {
+    await page.locator(".markdown-editor-tiptap").getByRole("heading", { name: "Invented note" }).waitFor();
+    assert.equal(await page.locator(".workspace-pane").getByRole("button", { name: /^(download|print)$/i }).count(), 0);
+  } else {
+    await page.locator(".workspace-preview-text").getByText("# Invented note").waitFor();
+    assert.equal(await page.locator(".workspace-pane").getByRole("button", { name: /^(edit|save|download|print)$/i }).count(), 0);
+  }
   await tree.locator(".workspace-file-browser-file", { hasText: "other.txt" }).click();
   assert.equal(await page.locator(".workspace-tab").count(), 2);
   const tabs = page.locator(".workspace-tab");
