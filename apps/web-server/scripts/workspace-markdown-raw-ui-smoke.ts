@@ -165,6 +165,51 @@ try {
 		await waitUntil(() => fs.readFileSync(notes, "utf8") === "# Changed outside\nmine", "the next RAW edit is saved on top of the reloaded file");
 		console.log("  ok  RAW saves again after a reload");
 
+		// A conflicting disk edit must retain the draft until Keep mine saves it.
+		await page.route("**/workspace-markdown?**", async (route) => {
+			if (route.request().method() === "PUT") await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "mock save failure" }) });
+			else await route.continue();
+		});
+		await raw.fill("# Local draft\n");
+		await page.locator(".markdown-editor-error").waitFor({ state: "visible" });
+		assert((await raw.inputValue()) === "# Local draft\n", "failed save retains the draft");
+		await page.unroute("**/workspace-markdown?**");
+		fs.writeFileSync(notes, "# Outside revision\n");
+		await page.locator(".markdown-editor-save").click();
+		await page.locator(".markdown-editor-conflict").waitFor({ state: "visible" });
+		await page.getByRole("button", { name: "Keep mine" }).click();
+		await waitUntil(() => fs.readFileSync(notes, "utf8") === "# Local draft\n", "Keep mine saves the draft");
+		await page.getByRole("button", { name: "Edit", exact: true }).click();
+		await page.getByRole("button", { name: "RAW", exact: true }).click();
+		assert((await raw.inputValue()) === "# Local draft\n", "Keep mine survives mode switches");
+		console.log("  ok  failed save retains draft and Keep mine resolves conflict");
+
+		// A later edit made while a PUT is held must also reach disk.
+		let releasePut!: () => void;
+		let signalPut!: () => void;
+		const putStarted = new Promise<void>((resolve) => { signalPut = resolve; });
+		const heldPut = new Promise<void>((resolve) => { releasePut = resolve; });
+		let held = false;
+		await page.route("**/workspace-markdown?**", async (route) => {
+			if (route.request().method() === "PUT" && !held) { held = true; signalPut(); await heldPut; }
+			await route.continue();
+		});
+		await raw.fill("# First save\n");
+		await putStarted;
+		await raw.fill("# Later edit\n");
+		releasePut();
+		await waitUntil(() => fs.readFileSync(notes, "utf8") === "# Later edit\n", "later edit saves after the held PUT");
+		await page.unroute("**/workspace-markdown?**");
+		await page.getByRole("button", { name: "Edit", exact: true }).click();
+		await page.getByRole("button", { name: "RAW", exact: true }).click();
+		assert((await raw.inputValue()) === "# Later edit\n", "later edit survives mode switches");
+		console.log("  ok  later RAW edits survive an in-flight save");
+		await waitUntil(async () => (await status.textContent())?.trim() === "Saved", "later edit is clean");
+		fs.writeFileSync(notes, "# External clean update\n");
+		await waitUntil(async () => (await raw.inputValue()) === "# External clean update\n", "clean RAW adopts an external replacement", 15_000);
+		console.log("  ok  clean RAW adopts an external replacement");
+
+
 		// 6. Task checkmarks. In Edit a rendered checkbox is clickable and saves "[x]".
 		await tree.locator(".workspace-file-browser-file", { hasText: "todo.md" }).click();
 		await page.getByRole("button", { name: "Edit", exact: true }).click();
@@ -179,7 +224,9 @@ try {
 		await boxes.first().click();
 		await waitUntil(() => fs.readFileSync(todo, "utf8").includes("- [x] first"), "clicking a checkbox saves it as done");
 		assert(fs.readFileSync(todo, "utf8").includes("- [x] second"), "the other task is untouched");
-		console.log("  ok  Edit: a clicked checkbox is saved as [x]");
+		await boxes.last().click();
+		await waitUntil(() => fs.readFileSync(todo, "utf8").includes("- [ ] second"), "clicking a checked checkbox saves it as open");
+		console.log("  ok  Edit: checkboxes save in both directions");
 
 		// In RAW the task button works on the text, per line: plain -> open -> done -> open.
 		await page.getByRole("button", { name: "RAW", exact: true }).click();
@@ -197,12 +244,12 @@ try {
 		await waitUntil(() => fs.readFileSync(todo, "utf8").endsWith("- [x] plain note"), "the button marks it done");
 		await taskButton.click();
 		await waitUntil(() => fs.readFileSync(todo, "utf8").endsWith("- [ ] plain note"), "a done task goes back to open, its checkbox stays");
-		assert(fs.readFileSync(todo, "utf8").startsWith("# Todo\n\n- [x] first\n- [x] second\n"), "other lines stay as they were");
-		// Selected lines move one by one: done -> open, done -> open, open -> done.
+		assert(fs.readFileSync(todo, "utf8").startsWith("# Todo\n\n- [x] first\n- [ ] second\n"), "other lines stay as they were");
+		// Selected lines move one by one: done -> open, open -> done, open -> done.
 		await raw.evaluate((el) => { const t = el as HTMLTextAreaElement; t.setSelectionRange(t.value.indexOf("- [x] first"), t.value.length); });
 		await taskButton.click();
 		const taskLines = () => fs.readFileSync(todo, "utf8").split("\n").filter((line) => line !== "");
-		await waitUntil(() => JSON.stringify(taskLines()) === JSON.stringify(["# Todo", "- [ ] first", "- [ ] second", "- [x] plain note"]), `selected lines each take their own step, got ${JSON.stringify(taskLines())}`);
+		await waitUntil(() => JSON.stringify(taskLines()) === JSON.stringify(["# Todo", "- [ ] first", "- [x] second", "- [x] plain note"]), `selected lines each take their own step, got ${JSON.stringify(taskLines())}`);
 		// The other toolbar buttons stay visible but are disabled in RAW.
 		const states = await page.locator(".markdown-editor-toolbar .markdown-editor-tool").evaluateAll((all) => all.map((button) => ({ title: button.getAttribute("title") ?? "", disabled: (button as HTMLButtonElement).disabled })));
 		assert(states.length >= 15, `the toolbar stays visible in RAW, got ${states.length} buttons`);
