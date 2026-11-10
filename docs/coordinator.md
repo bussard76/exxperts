@@ -138,6 +138,12 @@ Append dated sections below as decisions are made. Superseded rules stay here wi
 
 Upstream Series 1 and 2 are the first priority; #20 detached-document-window is secondary. Do not start T20 hardening or use T20 documentation slots that series work can use; current T20 work may finish its present step then park. Prioritize #22 lock delta, Node floor and licences, Series 1 consult-mention and notice/artifact evidence, Series 2 #17/#18 addendum and CSS, composition, gates and sendable state for Sascha. This decision does not grant permission to write to EXXETA.
 
+### Node comparisons and Front escalations (decided by Sascha, 2026-11-10)
+
+For each series at Node 20.6 and 22, a failure in the same smoke with the same error on pinned upstream baseline `461e6485bf932f5cba85ac3dde8e0104e47d5dec` and the series counts as passed for that series. Name the failure as pre-existing upstream behavior in that series' PR description. A failure only the series shows is a real defect; missing, skipped, incomplete or incomparable evidence remains unresolved. Other gate rules remain in force.
+
+Before escalating, apply the ticket's abort criteria and Sascha's recorded decisions. Escalate only an unsettled question and state which decisions were checked and why they do not fit. For every `NEEDS-SASCHA` or `BLOCKED` event, retain the append-only `front-events.log` line and immediately send the question or blocker with `orca orchestration send --to term_6eae3083-5398-4d94-85e5-57a8f00d7065` to wake the Front agent. Keep the existing status and fallback records.
+
 ## Additional decisions, 2026-11-09
 
 - **Upstream:** one upstream pull request is intended later, but not now. Do not prepare or send anything to `EXXETA/exxperts` until Sascha resumes that work. Sascha: "einer aber warten".
