@@ -945,7 +945,7 @@ export function ComposerInput({
 		el.style.height = `${el.scrollHeight}px`;
 	}, [draft]);
 
-	// Restore the caret after a mention completion rewrote the draft.
+	// Restore the caret after a programmatic draft update.
 	useLayoutEffect(() => {
 		const el = textareaNodeRef.current;
 		if (!el || pendingCaretRef.current == null) return;
@@ -1340,7 +1340,6 @@ export function InRoomChatShellView({
 		"composer-layout",
 		composerRightActions ? "with-actions" : "",
 	].filter(Boolean).join(" ");
-
 	const clampSidebarWidth = (width: number): number => Math.min(SIDEBAR_MAX_WIDTH, Math.max(220, width));
 	const startSidebarResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
 		if (event.pointerType === "mouse" && event.button !== 0) return;

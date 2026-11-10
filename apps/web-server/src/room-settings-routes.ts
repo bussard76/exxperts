@@ -12,6 +12,7 @@ import { MAINTENANCE_DIAGNOSTICS_KEEP, MAINTENANCE_DIAGNOSTICS_DEFAULT_LIMIT, li
 import { createPersistentAgentInstance, getPersistentAgentThread, saveWithOpenConversationCheck, getPersistentRoomInstructionsView, savePersistentRoomGlobalInstructionsEnabled, savePersistentRoomInstructions } from "./persistent-agents.js";
 import { normalizePersistentRoomWorkspaceToolSelectionInput, persistentRoomWorkspaceToolNamesForPolicy } from "./persistent-room-tool-policy.js";
 import { PersistentRoomWorkspacePolicyError, resolvePersistentRoomEffectiveWorkspacePolicy, assertPersistentRoomWorkspaceDefaultMutable, releasePersistentRoomThreadWorkspaceMirror, type PersistentRoomCapabilityPolicy, persistentRoomCapabilityPolicyView, readPersistentRoomCapabilityPolicy, PERSISTENT_ROOM_WORKSPACE_POLICY_STORAGE_SOURCE, deletePersistentRoomCapabilityPolicy, readPersistentRoomDefaultCapabilityPolicy, PERSISTENT_ROOM_WORKSPACE_DEFAULT_STORAGE_SOURCE, missingPersistentRoomWorkspaceRootWarnings, normalizePersistentRoomWorkspaceAccessModeInput, createPersistentRoomDefaultCapabilityPolicy, updatePersistentRoomCapabilityPolicyWorkspaceSettings, writePersistentRoomDefaultCapabilityPolicy, deletePersistentRoomDefaultCapabilityPolicy, createPersistentRoomCapabilityPolicy, writePersistentRoomCapabilityPolicy } from "./persistent-room-workspace-policy.js";
+import { PersistentRoomWorkspaceMarkdownError, readWorkspaceMarkdownFile, writeWorkspaceMarkdownFile } from "./persistent-room-workspace-markdown-files.js";
 import { readPersistentRoomMaintenanceSettings, writePersistentRoomMaintenanceSettings } from "./persistent-room-maintenance-settings.js";
 import { settleMemoryBudget } from "./memory-entries-store.js";
 import { readPersistentRoomBashSettings, writePersistentRoomBashSettings } from "./persistent-room-bash-settings.js";
@@ -191,6 +192,22 @@ app.get("/api/persistent-agents/:id/workspace-files", async (req, reply) => {
 		return { agentId: status.id, conversationId, ...listPersistentRoomWorkspaceFiles(effectivePolicy.policy, requestedPath) };
 	} catch (e) {
 		const payload = persistentRoomWorkspaceErrorPayload(e);
+		return reply.code(payload.statusCode).send(payload.body);
+	}
+});
+
+app.get("/api/persistent-agents/:id/workspace-markdown", async (req, reply) => {
+	const idRaw = String((req.params as any).id ?? "").trim();
+	try {
+		const status = getUsablePersistentAgentStatusForNormalUse(idRaw);
+		const query = (req.query ?? {}) as any;
+		const conversationId = String(query.conversationId ?? "").trim();
+		if (!conversationId) throw new Error("conversationId is required");
+		const filePath = String(query.path ?? "");
+		return { agentId: status.id, conversationId, ...readWorkspaceMarkdownFile(status.id, conversationId, filePath) };
+	} catch (e) {
+		const payload = persistentRoomWorkspaceErrorPayload(e);
+		if (e instanceof PersistentRoomWorkspaceMarkdownError && e.currentRevision) payload.body.currentRevision = e.currentRevision;
 		return reply.code(payload.statusCode).send(payload.body);
 	}
 });
@@ -457,6 +474,22 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 		return reply.code(403).send({ code: "workspace_read_forbidden", error: "This file is not available under the current workspace permissions." });
 	}
 	return { schemaVersion: 1, agentId, conversationId: query.conversationId, path: relativePath, notices: result.notices, ...(result.result as object) };
+});
+
+app.put("/api/persistent-agents/:id/workspace-markdown", async (req, reply) => {
+	const idRaw = String((req.params as any).id ?? "").trim();
+	try {
+		const status = getUsablePersistentAgentStatusForNormalUse(idRaw);
+		const query = (req.query ?? {}) as any;
+		const conversationId = String(query.conversationId ?? "").trim();
+		if (!conversationId) throw new Error("conversationId is required");
+		const body = (req.body ?? {}) as any;
+		return { agentId: status.id, conversationId, ...writeWorkspaceMarkdownFile(status.id, conversationId, query.path, body.content, body.revision) };
+	} catch (e) {
+		const payload = persistentRoomWorkspaceErrorPayload(e);
+		if (e instanceof PersistentRoomWorkspaceMarkdownError && e.currentRevision) payload.body.currentRevision = e.currentRevision;
+		return reply.code(payload.statusCode).send(payload.body);
+	}
 });
 
 app.delete("/api/persistent-agents/:id/workspace-policy", async (req, reply) => {
