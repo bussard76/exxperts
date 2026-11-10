@@ -20,7 +20,8 @@
 // never shipped; without it the map stays next to the bundle for local runs.
 // Tested by scripts/bundle-server.test.mjs.
 import fs from "node:fs";
-import { builtinModules } from "node:module";
+import { createHash } from "node:crypto";
+import { builtinModules, createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -59,8 +60,6 @@ export const EXTERNAL_PACKAGES = [
 export const FILE_PACKAGES = [
 	{ name: "qrcode-terminal", reason: "remote-qr.ts loads it through createRequire, which esbuild cannot follow" },
 	{ name: "jszip", reason: "the shelf worker, a separate forked file, opens docx and xlsx with it" },
-	{ name: "docx-preview", reason: "the shelf worker renders workspace Word previews with it" },
-	{ name: "exceljs", reason: "the shelf worker renders workspace OOXML spreadsheets with it" },
 ];
 
 // A file of one of our runtime packages, whether esbuild reached it through
@@ -290,6 +289,28 @@ function licenceText(packages) {
 	return `${parts.join("\n")}\n`;
 }
 
+function excelBrowserNotices(root) {
+	const dir = path.join(root, "node_modules/exceljs/dist");
+	const bundle = fs.readFileSync(path.join(dir, "exceljs.min.js"));
+	const mapBytes = fs.readFileSync(path.join(dir, "exceljs.min.js.map"));
+	const map = JSON.parse(mapBytes.toString("utf8"));
+	if (!Array.isArray(map.sources) || !Array.isArray(map.sourcesContent) || map.sources.length !== map.sourcesContent.length || !map.sources.length || !bundle.toString("utf8").includes("sourceMappingURL=exceljs.min.js.map")) {
+		throw new Error("ExcelJS browser distribution source inventory is incomplete");
+	}
+	const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
+	const parts = ["", "========================================================================", "ExcelJS 4.4.0 browser distribution: embedded source inventory and available notices", `Distribution SHA-256: ${hash(bundle)}`, `Source map SHA-256: ${hash(mapBytes)}`, "Exact versions of all embedded third-party components are not established."];
+	for (let i = 0; i < map.sources.length; i++) {
+		const source = map.sources[i], content = map.sourcesContent[i];
+		if (typeof source !== "string" || typeof content !== "string") throw new Error("ExcelJS browser distribution source inventory is incomplete");
+		if (!source.includes("node_modules/")) continue;
+		parts.push("", `--- ${source} (source SHA-256: ${hash(content)})`);
+		for (const comment of content.match(/\/\*[\s\S]*?\*\/|(?:^|\n)(?:[ \t]*\/\/[^\n]*(?:\n|$))+/g) ?? []) {
+			if (/\b(?:licen[cs]e|copyright|@preserve)\b/i.test(comment)) parts.push(comment.trim());
+		}
+	}
+	return `${parts.join("\n")}\n`;
+}
+
 const isBuiltin = (specifier) =>
 	specifier.startsWith("node:") || builtinModules.includes(specifier) || builtinModules.includes(specifier.split("/")[0]);
 const packageName = (specifier) => specifier.match(/^(@[^/]+\/[^/]+|[^/]+)/)[1];
@@ -397,6 +418,15 @@ export function shippedPackageDirs(root, { exclude = [] } = {}) {
 		if (dirs.has(dir)) continue;
 		dirs.add(dir);
 		const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+		if (typeof pkg.main === "string" && pkg.main.endsWith(".node") && !fs.existsSync(path.join(dir, pkg.main))) {
+			missing.push(`${pkg.name}/${pkg.main} is missing`);
+		}
+		if (pkg.name === "@napi-rs/canvas") {
+			const native = Object.keys(pkg.optionalDependencies ?? {}).filter((name) => name.startsWith("@napi-rs/canvas-"));
+			if (native.length && !native.some((name) => resolvePackageDir(name, dir, base)) && !fs.readdirSync(dir).some((name) => /^skia\..*\.node$/.test(name))) {
+				missing.push("@napi-rs/canvas native addon is missing");
+			}
+		}
 		const optionalNames = new Set([...Object.keys(pkg.optionalDependencies ?? {}), ...Object.keys(pkg.peerDependencies ?? {})]);
 		for (const dep of new Set([...Object.keys(pkg.dependencies ?? {}), ...optionalNames])) {
 			const optional = optionalNames.has(dep);
@@ -416,16 +446,33 @@ export function checkServerFiles(root, out = DEFAULT_OUT) {
 	for (const file of ["server.mjs", LICENCES_FILE, ...BUNDLE_ASSETS.map((asset) => asset.file)]) {
 		if (!fs.existsSync(path.join(outDir, file))) problems.push(`${out}/${file} is missing`);
 	}
+	const child = path.join(outDir, "shelf-parse-worker.mjs");
+	if (fs.existsSync(child)) {
+		try {
+			const result = esbuild.buildSync({ absWorkingDir: root, entryPoints: [child], bundle: true, packages: "external", platform: "node", format: "esm", write: false, metafile: true, logLevel: "silent" });
+			const childRequire = createRequire(child);
+			for (const { path: specifier, external } of Object.values(result.metafile.outputs).flatMap((output) => output.imports)) {
+				if (!external || isBuiltin(specifier) || specifier === packageName(specifier)) continue;
+				try {
+					const resolved = fs.realpathSync(childRequire.resolve(specifier));
+					const relative = path.relative(fs.realpathSync(root), resolved);
+					if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error("outside payload");
+				} catch { problems.push(`a private worker imports ${specifier}, but that external module is missing from the payload`); }
+			}
+		} catch (error) {
+			problems.push(`the shelf worker could not be inspected: ${error.message}`);
+		}
+	}
 	return [...problems, ...shippedPackageDirs(root).missing];
 }
 
 // Packages the forked private workers import; each runs as its own file, so each
 // must ship as files.
-async function workerPackages(root) {
+async function workerPackages(root, out) {
 	const workers = BUNDLE_ASSETS.filter((asset) => asset.file === "shelf-parse-worker.mjs" || asset.file === "workspace-open-worker.mjs");
 	const results = await Promise.all(workers.map((worker) => esbuild.build({
 		absWorkingDir: root,
-		entryPoints: [worker.source],
+		entryPoints: [worker.file === "shelf-parse-worker.mjs" ? path.join(root, ...out.split("/"), worker.file) : worker.source],
 		bundle: true,
 		packages: "external",
 		platform: "node",
@@ -461,9 +508,12 @@ async function bundleProblems(root, text, metafile, packages, out) {
 	}
 
 	const shipped = new Set([...EXTERNAL_PACKAGES.filter((pkg) => pkg.ships), ...FILE_PACKAGES].map((pkg) => pkg.name));
-	for (const specifier of await workerPackages(root)) {
+	const childRequire = createRequire(path.join(root, ...out.split("/"), "shelf-parse-worker.mjs"));
+	for (const specifier of await workerPackages(root, out)) {
 		if (!shipped.has(packageName(specifier))) {
 			problems.push(`a private worker imports ${specifier}, but ${packageName(specifier)} does not ship as files; add it to FILE_PACKAGES with the reason`);
+		} else if (specifier !== packageName(specifier)) {
+			try { childRequire.resolve(specifier); } catch { problems.push(`a private worker imports ${specifier}, but that external module is missing`); }
 		}
 	}
 
@@ -519,6 +569,7 @@ export async function bundleServer({ root, mapFile = null, entry = ENTRY, out = 
 	const result = await esbuild.build({ ...options, minifyWhitespace: true, legalComments: "eof", sourcemap: "external" });
 	const outFile = path.join(outDir, "server.mjs");
 	const packages = inlinedPackages(root, result.metafile);
+	let bundledExcel = false;
 
 	const byName = new Map([...packages.values()].map((pkg) => [pkg.name, pkg]));
 	for (const asset of BUNDLE_ASSETS) {
@@ -526,9 +577,21 @@ export async function bundleServer({ root, mapFile = null, entry = ENTRY, out = 
 			throw new Error(`${asset.file}: ${asset.package} is no longer inlined; drop the entry from BUNDLE_ASSETS in scripts/bundle-server.mjs`);
 		}
 		const from = asset.source ? path.join(root, ...asset.source.split("/")) : path.join(byName.get(asset.package).dir, asset.file);
-		fs.copyFileSync(from, path.join(outDir, asset.file));
+		if (asset.file === "shelf-parse-worker.mjs") {
+			const child = await esbuild.build({
+				absWorkingDir: root, entryPoints: [from], outfile: path.join(outDir, asset.file),
+				bundle: true, packages: "external", platform: "node", format: "esm", target: "node20",
+				banner: { js: BANNER }, metafile: true, legalComments: "eof",
+				plugins: [{ name: "exceljs-browser", setup(build) {
+					build.onResolve({ filter: /^exceljs$/ }, () => ({ path: path.join(root, "node_modules/exceljs/dist/exceljs.min.js") }));
+					build.onResolve({ filter: /^docx-preview$/ }, () => ({ path: path.join(root, "node_modules/docx-preview/dist/docx-preview.mjs") }));
+				} }],
+			});
+			for (const [key, value] of inlinedPackages(root, child.metafile)) packages.set(key, value);
+			bundledExcel = Object.keys(child.metafile.inputs).some((input) => input.endsWith("node_modules/exceljs/dist/exceljs.min.js"));
+		} else fs.copyFileSync(from, path.join(outDir, asset.file));
 	}
-	fs.writeFileSync(path.join(outDir, LICENCES_FILE), licenceText(packages));
+	fs.writeFileSync(path.join(outDir, LICENCES_FILE), licenceText(packages) + (bundledExcel ? excelBrowserNotices(root) : ""));
 
 	const inspectedText = inspected.outputFiles.find((file) => file.path.endsWith("server.mjs")).text;
 	const problems = await bundleProblems(root, inspectedText, result.metafile, packages, out);

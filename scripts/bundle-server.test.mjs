@@ -325,6 +325,23 @@ test("the shelf worker may import only packages that ship as files", async () =>
 	await assert.rejects(bundleServer({ root: dir, log: () => {} }), /left-pad/);
 });
 
+test("the shelf worker rejects a missing external module subpath", async () => {
+	const dir = fixtureTree({
+		"apps/web-server/src/shelf-parse-worker.mjs": 'await import("pdfjs-dist/legacy/build/pdf.mjs");\n',
+	});
+	await assert.rejects(bundleServer({ root: dir, log: () => {} }), /pdfjs-dist\/legacy\/build\/pdf\.mjs/);
+});
+
+test("a payload missing a bundled child's external subpath fails its file check", async () => {
+	const dir = fixtureTree({
+		"apps/web-server/src/shelf-parse-worker.mjs": 'await import("pdfjs-dist/legacy/build/pdf.mjs");\n',
+		"node_modules/pdfjs-dist/legacy/build/pdf.mjs": "export const invented = true;\n",
+	});
+	await bundleServer({ root: dir, log: () => {} });
+	fs.rmSync(path.join(dir, "node_modules/pdfjs-dist/legacy/build/pdf.mjs"));
+	assert.match(checkServerFiles(dir).join("\n"), /pdfjs-dist\/legacy\/build\/pdf\.mjs/);
+});
+
 test("a child import of Koffi retains the package", async () => {
 	const dir = fixtureTree({
 		"apps/web-server/src/shelf-parse-worker.mjs": 'await import("koffi");\n',
@@ -344,26 +361,43 @@ test("the Windows opener is a packaged child whose imports must ship", async () 
 	await assert.rejects(bundleServer({ root: bad, log: () => {} }), /tsx.*does not ship|tsx.*not ship/);
 });
 
-test("a child import of ExcelJS retains the package", async () => {
+test("the bundled shelf child executes ExcelJS without its package files", async () => {
 	const dir = fixtureTree({
-		"apps/web-server/src/shelf-parse-worker.mjs": 'await import("exceljs");\n',
+		"apps/web-server/src/shelf-parse-worker.mjs": 'const { default: ExcelJS } = await import("exceljs"); const book = new ExcelJS.Workbook(); book.addWorksheet("Invented").getCell("A1").value = 42; console.log(book.worksheets[0].getCell("A1").value);\n',
 		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "4.4.0", license: "MIT" }),
 	});
+	fs.mkdirSync(path.join(dir, "node_modules/exceljs/dist"), { recursive: true });
+	fs.copyFileSync(path.join(repoRoot, "node_modules/exceljs/dist/exceljs.min.js"), path.join(dir, "node_modules/exceljs/dist/exceljs.min.js"));
+	fs.copyFileSync(path.join(repoRoot, "node_modules/exceljs/dist/exceljs.min.js.map"), path.join(dir, "node_modules/exceljs/dist/exceljs.min.js.map"));
 	await bundleServer({ root: dir, log: () => {} });
-	assert.deepEqual(checkServerFiles(dir), []);
+	const notices = fs.readFileSync(path.join(dir, "apps/web-server/dist/server.mjs.licenses.txt"), "utf8");
+	assert.match(notices, /node_modules\/ieee754\/index\.js/);
+	assert.match(notices, /BSD-3-Clause License/);
 	fs.rmSync(path.join(dir, "node_modules/exceljs"), { recursive: true });
-	assert.match(checkServerFiles(dir).join("\n"), /exceljs/);
+	assert.equal(runNode(path.join(dir, "apps/web-server/dist/shelf-parse-worker.mjs")), "42");
+	assert.deepEqual(checkServerFiles(dir), []);
 });
 
-test("the shelf child retains the Word renderer package", async () => {
+test("the bundled shelf child executes the Word renderer and still checks native files", async () => {
 	const dir = fixtureTree({
-		"apps/web-server/src/shelf-parse-worker.mjs": 'await import("docx-preview");\n',
-		"node_modules/docx-preview/package.json": JSON.stringify({ name: "docx-preview", version: "0.4.1", license: "Apache-2.0" }),
+		"apps/web-server/src/shelf-parse-worker.mjs": 'const { parseAsync } = await import("docx-preview"); try { await parseAsync(Buffer.from("invented")); } catch (error) { console.log(error.message); }\n',
+		"node_modules/docx-preview/package.json": JSON.stringify({ name: "docx-preview", version: "0.4.1", license: "Apache-2.0", exports: { ".": { import: "./dist/docx-preview.mjs" } } }),
+		"node_modules/jszip/package.json": JSON.stringify({ name: "jszip", version: "3.10.1", license: "MIT", main: "index.js" }),
+		"node_modules/jszip/index.js": 'module.exports = { loadAsync: async () => { throw new Error("invented bad zip"); } };\n',
+		"node_modules/@napi-rs/canvas/package.json": JSON.stringify({ name: "@napi-rs/canvas", version: "1.0.0", license: "MIT", optionalDependencies: { "@napi-rs/canvas-linux-x64-gnu": "1.0.0" } }),
+		"node_modules/@napi-rs/canvas-linux-x64-gnu/package.json": JSON.stringify({ name: "@napi-rs/canvas-linux-x64-gnu", version: "1.0.0", license: "MIT", main: "skia.node" }),
+		"node_modules/@napi-rs/canvas-linux-x64-gnu/skia.node": "invented native addon",
 	});
+	fs.mkdirSync(path.join(dir, "node_modules/docx-preview/dist"), { recursive: true });
+	fs.copyFileSync(path.join(repoRoot, "node_modules/docx-preview/dist/docx-preview.mjs"), path.join(dir, "node_modules/docx-preview/dist/docx-preview.mjs"));
 	await bundleServer({ root: dir, log: () => {} });
-	assert.deepEqual(checkServerFiles(dir), []);
 	fs.rmSync(path.join(dir, "node_modules/docx-preview"), { recursive: true });
-	assert.match(checkServerFiles(dir).join("\n"), /docx-preview/);
+	assert.equal(runNode(path.join(dir, "apps/web-server/dist/shelf-parse-worker.mjs")), "invented bad zip");
+	assert.deepEqual(checkServerFiles(dir), []);
+	fs.rmSync(path.join(dir, "node_modules/@napi-rs/canvas-linux-x64-gnu/skia.node"));
+	assert.match(checkServerFiles(dir).join("\n"), /skia\.node/);
+	fs.rmSync(path.join(dir, "node_modules/@napi-rs/canvas-linux-x64-gnu"), { recursive: true });
+	assert.match(checkServerFiles(dir).join("\n"), /canvas.*native/i);
 });
 
 test("a package with neither a licence file nor a license field fails the bundle", async () => {
