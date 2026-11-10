@@ -375,6 +375,6 @@ html.desktop-app-mac .workspace-tab {
 .docs-host.docs-host-window { display: block; height: 100vh; background: var(--exx-bg, inherit); }
 .workspace-tabs-window { margin-left: auto; flex: none; align-self: center; padding: 3px 10px; border: 1px solid var(--exx-border); border-radius: 6px; background: transparent; color: inherit; font-size: 12px; cursor: pointer; }
 .workspace-tabs-window:hover { background: var(--exx-surface-hover); }
-.docs-detached-strip { display: flex; flex-direction: column; align-items: flex-start; gap: 0.6rem; padding: 1rem; border-left: 1px solid var(--exx-border); background: var(--exx-surface); }
-.docs-detached-strip button { padding: 5px 12px; border: 1px solid var(--exx-border); border-radius: 6px; background: transparent; color: inherit; font-size: 13px; cursor: pointer; }
-.docs-detached-strip button:hover { background: var(--exx-surface-hover); }
+.docs-window-actions { display: inline-flex; gap: 6px; align-items: center; }
+.docs-window-actions button { padding: 3px 10px; border: 1px solid var(--exx-border); border-radius: 6px; background: transparent; color: inherit; font-size: 12px; cursor: pointer; }
+.docs-window-actions button:hover { background: var(--exx-surface-hover); }

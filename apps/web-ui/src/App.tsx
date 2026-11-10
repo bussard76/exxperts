@@ -8627,7 +8627,9 @@ export function App() {
 		);
 	}
 
-	const rightPaneVisible = Boolean(rightPane) && !(rightPane?.kind === "attachments" && galleryShown);
+	// While the documents sit in their own window, nothing is left beside the chat.
+	const docsInOwnWindow = docsWindow.detached && activeWorkspacePath(rightPane) !== null;
+	const rightPaneVisible = Boolean(rightPane) && !docsInOwnWindow && !(rightPane?.kind === "attachments" && galleryShown);
 	const artifactPaneMaximized = artifactMaximized && rightPane?.kind === "artifactViewer";
 	const rightCollapsed = rightPaneVisible && !artifactPaneMaximized && rightPaneCollapsed;
 	// Maximized: no inline style — the .artifact-pane-maximized class drives a
@@ -8679,13 +8681,6 @@ export function App() {
 			{rightPane?.kind === "attachments" && !galleryShown && attachmentsBrowser("panel")}
 			{preview && <Preview content={preview.content} title={preview.title} type={preview.type} onClose={() => setPreview(null)} />}
 			<div className="docs-slot" ref={docsWindow.mountInline} />
-			{docsWindow.detached && (
-				<div className="docs-detached-strip" role="status">
-					<strong>{persistentChat?.displayName ?? "Room"} · Documents</strong>
-					<button type="button" onClick={() => { docsWindow.detach(); }}>Show documents</button>
-					<button type="button" onClick={docsWindow.returnToChat}>Return</button>
-				</div>
-			)}
 			{persistentChat && !personChanged && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId && createPortal(
 				<div className="workspace-pane" hidden={activeWorkspacePath(rightPane) === null}>
 					<WorkspaceFileTabs tabs={workspaceTabs.paths} active={activeWorkspacePath(rightPane)} onSelect={(path) => openWorkspaceMarkdown({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} onReorder={(paths) => setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths } : tabs)} {...(docsWindow.detached ? { onReturn: docsWindow.returnToChat } : { onDetach: () => { docsWindow.detach(); } })} />
@@ -8832,6 +8827,7 @@ export function App() {
 							    would be the worst possible moment to lose it. */}
 							<button className="icon-btn icon-btn-square icon-btn-danger" aria-label="Forget" title="Forget this conversation and start fresh. Nothing is saved to memory" onClick={() => void mementoPersistentThread()}><TrashIcon /></button>
 							{currentPersistentStatus?.exists && <button className="icon-btn icon-btn-square" aria-label="Room settings" title={`Room settings — ${roomSettingsChordHint()}`} onClick={() => openRoomSettings()}><GearIcon /></button>}
+							{docsWindow.detached && <span className="docs-window-actions"><button type="button" onClick={() => { docsWindow.detach(); }} title="Bring the documents window to the front">Show documents</button><button type="button" onClick={docsWindow.returnToChat} title="Put the documents back beside the chat">Return</button></span>}
 							{rightPaneVisible && !artifactPaneMaximized && <button className="icon-btn icon-btn-square right-pane-toggle" aria-label={rightCollapsed ? "Show right pane" : "Hide right pane"} aria-expanded={!rightCollapsed} title={rightCollapsed ? "Show right pane" : "Hide right pane"} onClick={() => setRightPaneCollapsed((collapsed) => !collapsed)}><PanelIcon side="right" /></button>}
 						</>
 					)
