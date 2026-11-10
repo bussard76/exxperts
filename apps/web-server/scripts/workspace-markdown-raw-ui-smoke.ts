@@ -103,6 +103,127 @@ try {
 		const markdownRoute = markdownUrl.pathname + markdownUrl.search;
 		await page.locator(".markdown-editor-tiptap .ProseMirror").waitFor();
 
+		// A navigation choice held beyond the autosave delay must still discard the draft.
+		await page.getByRole("button", { name: "RAW", exact: true }).click();
+		await raw.fill(NOTES + "abandoned draft");
+		await tree.locator(".workspace-file-browser-file", { hasText: "todo.md" }).click();
+		const guard = page.getByRole("dialog", { name: "Unsaved Markdown changes" });
+		await guard.waitFor();
+		await page.waitForTimeout(1500);
+		await guard.getByRole("button", { name: "Discard changes" }).click();
+		await openNotes();
+		await page.getByRole("button", { name: "RAW", exact: true }).click();
+		await waitUntil(async () => (await raw.inputValue()) === NOTES, "discarded draft is absent after reopening");
+		assert(fs.readFileSync(notes, "utf8") === NOTES, "discard keeps original disk bytes");
+		const openGuard = async () => {
+			await tree.locator(".workspace-file-browser-file", { hasText: "todo.md" }).click();
+			await guard.waitFor();
+		};
+		const reopenNotes = async (expected: string) => {
+			await openNotes();
+			await page.getByRole("button", { name: "RAW", exact: true }).click();
+			await waitUntil(async () => (await raw.inputValue()) === expected, "reopened notes match disk");
+		};
+		// Quick discard, cancel, save, and navigation after the normal idle save.
+		await raw.fill(NOTES + "quick");
+		await openGuard();
+		await guard.getByRole("button", { name: "Discard changes" }).click();
+		await page.waitForTimeout(1500);
+		assert(fs.readFileSync(notes, "utf8") === NOTES, "quick discard cancels the pending timer");
+		await reopenNotes(NOTES);
+		await raw.fill(NOTES + "cancel");
+		await openGuard();
+		await page.waitForTimeout(1500);
+		assert(fs.readFileSync(notes, "utf8") === NOTES, "guard pauses autosave before cancel");
+		await guard.getByRole("button", { name: "Cancel" }).click();
+		await waitUntil(() => fs.readFileSync(notes, "utf8") === NOTES + "cancel", "cancel resumes autosave");
+		await waitUntil(async () => (await status.textContent())?.trim() === "Saved", "cancelled draft becomes saved");
+		await raw.fill(NOTES + "save");
+		await openGuard();
+		await page.waitForTimeout(1500);
+		await guard.getByRole("button", { name: "Save and continue" }).click();
+		await reopenNotes(NOTES + "save");
+		assert(fs.readFileSync(notes, "utf8") === NOTES + "save", "save and continue persists the draft");
+		await raw.fill(NOTES);
+		await waitUntil(() => fs.readFileSync(notes, "utf8") === NOTES, "idle save persists normally");
+		await waitUntil(async () => (await status.textContent())?.trim() === "Saved", "idle save completes");
+		await tree.locator(".workspace-file-browser-file", { hasText: "todo.md" }).click();
+		assert(await guard.count() === 0, "navigation after autosave has no guard");
+		await reopenNotes(NOTES);
+
+		// Hold an actual PUT on either side of the server write, then discard.
+		for (const afterWrite of [false, true]) {
+			let release!: () => void;
+			let started!: () => void;
+			const held = new Promise<void>((resolve) => { release = resolve; });
+			const startedPut = new Promise<void>((resolve) => { started = resolve; });
+			let intercepted = false;
+			await page.route("**/workspace-markdown?**", async (route) => {
+				if (route.request().method() !== "PUT" || intercepted) return route.continue();
+				intercepted = true;
+				if (afterWrite) {
+					const response = await route.fetch();
+					started();
+					await held;
+					await route.fulfill({ response });
+				} else {
+					started();
+					await held;
+					await route.continue();
+				}
+			});
+			await raw.fill(NOTES + "in flight");
+			await startedPut;
+			await openGuard();
+			await guard.getByRole("button", { name: "Discard changes" }).click();
+			release();
+			await guard.waitFor({ state: "hidden" });
+			await page.unroute("**/workspace-markdown?**");
+			await reopenNotes(NOTES);
+			assert(fs.readFileSync(notes, "utf8") === NOTES, `discard restores bytes with PUT held ${afterWrite ? "after" : "before"} the write`);
+		}
+		let releaseConflict!: () => void;
+		let conflictWritten!: () => void;
+		const conflictHeld = new Promise<void>((resolve) => { releaseConflict = resolve; });
+		const conflictStarted = new Promise<void>((resolve) => { conflictWritten = resolve; });
+		let conflictIntercepted = false;
+		await page.route("**/workspace-markdown?**", async (route) => {
+			if (route.request().method() !== "PUT" || conflictIntercepted) return route.continue();
+			conflictIntercepted = true;
+			const response = await route.fetch();
+			conflictWritten();
+			await conflictHeld;
+			await route.fulfill({ response });
+		});
+		await raw.fill(NOTES + "conflicting draft");
+		await conflictStarted;
+		await openGuard();
+		releaseConflict();
+		await waitUntil(async () => (await status.textContent())?.trim() === "Saved", "in-flight save settles while guard is open");
+		fs.writeFileSync(notes, "# Independent change\n");
+		await page.waitForTimeout(5500);
+		await guard.getByRole("button", { name: "Discard changes" }).click();
+		await page.locator(".markdown-editor-conflict").waitFor();
+		assert(fs.readFileSync(notes, "utf8") === "# Independent change\n", "discard never overwrites an independent revision");
+		await page.unroute("**/workspace-markdown?**");
+		await page.getByRole("button", { name: "Reload" }).click();
+		await waitUntil(async () => (await raw.inputValue()) === "# Independent change\n", "reload keeps external change");
+		await raw.fill(NOTES);
+		await waitUntil(() => fs.readFileSync(notes, "utf8") === NOTES, "restore demo file for remaining checks");
+		await waitUntil(async () => (await status.textContent())?.trim() === "Saved", "demo file is saved");
+		await tree.locator(".workspace-file-browser-file", { hasText: "todo.md" }).click();
+		await page.getByRole("button", { name: "Edit", exact: true }).click();
+		await page.locator('.markdown-editor-tiptap .ProseMirror input[type="checkbox"]').first().click();
+		await openNotes();
+		await guard.waitFor();
+		await page.waitForTimeout(1500);
+		await guard.getByRole("button", { name: "Discard changes" }).click();
+		assert(fs.readFileSync(todo, "utf8") === "# Todo\n\n- [ ] first\n- [x] second\n", "checkbox discard preserves original bytes");
+		await tree.locator(".workspace-file-browser-file", { hasText: "todo.md" }).click();
+		assert(!(await page.locator('.markdown-editor-tiptap .ProseMirror input[type="checkbox"]').first().isChecked()), "discarded checkbox remains unchecked on reopen");
+		await reopenNotes(NOTES);
+		console.log("  ok  navigation choices preserve disk bytes across autosave and external conflicts");
+
 		// 1. Switching modes without typing changes nothing on disk and leaves the file clean.
 		await page.getByRole("button", { name: "RAW", exact: true }).click();
 		await raw.waitFor();
