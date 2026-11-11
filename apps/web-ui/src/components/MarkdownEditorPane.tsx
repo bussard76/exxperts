@@ -831,6 +831,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 				else setPhase("conflict");
 				return Boolean(saved);
 			} catch (cause) {
+				if (cause instanceof WorkspaceMarkdownApiError && cause.status === 403) setCanEdit(false);
 				setPhase("conflict");
 				setError(errorMessage(cause));
 				return false;
