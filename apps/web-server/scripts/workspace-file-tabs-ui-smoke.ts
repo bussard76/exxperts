@@ -770,6 +770,13 @@ try {
 		await waitUntil(() => unknownReads >= 2, "the first clean switch checks the unresolved write");
 		assert((await activeName()) === "clean-unknown.md" && unknownWrites === 1, "an inconclusive clean write cannot be abandoned or retried");
 		await waitUntil(async () => !(await cleanUnknownRaw.evaluate((node) => (node as HTMLTextAreaElement).readOnly)), "the refused clean action releases its fence");
+		let unknownUnloadAsked = false;
+		const onUnknownUnload = (dialog: import("playwright").Dialog) => { if (dialog.type() === "beforeunload") unknownUnloadAsked = true; void dialog.dismiss(); };
+		page.on("dialog", onUnknownUnload);
+		await page.close({ runBeforeUnload: true });
+		await waitUntil(() => unknownUnloadAsked || page.isClosed(), "browser close responds to an unresolved clean write", 5_000);
+		page.off("dialog", onUnknownUnload);
+		assert(unknownUnloadAsked && !page.isClosed() && await cleanUnknownRaw.inputValue() === "# Invented unknown\n", "browser close warns about an unresolved write even when the source looks clean");
 		staleUnknown = false;
 		await treeFile("photo.png").click();
 		await waitUntil(async () => (await activeName()) === "photo.png", "a later real read settles the clean write before switching");
