@@ -122,3 +122,5 @@ The dirty-file dialog now sits above Room settings, and the room-settings Mement
 ## Checkpoint: guard decision deadline
 
 The attached dirty-action guard now expires after the specified 120-second decision window without executing its continuation; a save already settling remains fenced until settlement. The controlled-timer `workspace-file-tabs-ui-smoke.ts` case failed before the timer existed and passed afterward with the filtered smoke 1/1. This does not establish the native exchange, abort acknowledgement or child-closure deadlines.
+
+The decision-deadline regression now also holds a real PUT past expiry, checks that a competing file selection is refused, and verifies the late response cannot execute the expired action. The full filtered `workspace-file-tabs-ui` smoke passed 1/1 with this additional case; native abort acknowledgement remains untested and unimplemented.

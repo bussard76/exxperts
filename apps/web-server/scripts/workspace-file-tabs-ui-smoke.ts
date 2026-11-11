@@ -172,6 +172,7 @@ fs.writeFileSync(path.join(folder, "guard-fence.md"), "# Invented guard\n");
 fs.writeFileSync(path.join(folder, "lost-permission.md"), "# Invented permission\n");
 fs.writeFileSync(path.join(folder, "saved-permission.md"), "# Invented saved permission\n");
 fs.writeFileSync(path.join(folder, "raw-permission.md"), "# Invented raw permission\n");
+fs.writeFileSync(path.join(folder, "guard-deadline.md"), "# Invented deadline\n");
 fs.writeFileSync(path.join(folder, "conflict-real.md"), "# Original invented draft\n");
 fs.writeFileSync(path.join(folder, "old.doc"), "legacy");
 fs.writeFileSync(path.join(folder, "old.xls"), "invented old workbook");
@@ -737,6 +738,40 @@ try {
 		await prompt.getByRole("button", { name: "Discard changes" }).click();
 		await page.unroute("**/workspace-markdown?*");
 		await tab("guard-fence.md").locator(".workspace-tab-close").click();
+		await treeFile("guard-deadline.md").click();
+		await page.locator(".markdown-editor-tiptap .ProseMirror").waitFor();
+		await page.evaluate(() => {
+			const original = window.setTimeout;
+			(window as any).__testOriginalTimeout = original;
+			window.setTimeout = ((handler: TimerHandler, delay?: number, ...args: any[]) => original(handler, delay === 120_000 ? 500 : delay, ...args)) as typeof window.setTimeout;
+		});
+		let releaseDeadlineSave!: () => void, startDeadlineSave!: () => void;
+		const deadlineSaveReleased = new Promise<void>((resolve) => { releaseDeadlineSave = resolve; });
+		const deadlineSaveStarted = new Promise<void>((resolve) => { startDeadlineSave = resolve; });
+		await page.route("**/workspace-markdown?*", async (route) => {
+			if (route.request().method() !== "PUT") return route.continue();
+			startDeadlineSave();
+			await deadlineSaveReleased;
+			await route.continue().catch(() => {});
+		});
+		try {
+			await page.locator(".markdown-editor-tiptap .ProseMirror").click();
+			await page.keyboard.type(" deadline draft");
+			await treeFile("photo.png").click();
+			await prompt.getByRole("button", { name: "Save and continue" }).click();
+			await deadlineSaveStarted;
+			await prompt.waitFor({ state: "hidden", timeout: 3000 });
+			await treeFile("draft.md").click();
+			assert((await activeName()) === "guard-deadline.md" && await prompt.count() === 0, "expiry reserves the action while its save is still in flight");
+			const deadlineResponse = page.waitForResponse((response) => response.url().includes("guard-deadline.md") && response.request().method() === "PUT");
+			releaseDeadlineSave();
+			await deadlineResponse;
+			await waitUntil(async () => await page.locator(".markdown-editor-status").textContent() === "Saved", "expired save settles");
+			assert((await activeName()) === "guard-deadline.md", "a late save cannot revive the expired action");
+		} finally { releaseDeadlineSave(); }
+		await page.unroute("**/workspace-markdown?*");
+		await page.evaluate(() => { window.setTimeout = (window as any).__testOriginalTimeout; delete (window as any).__testOriginalTimeout; });
+		await tab("guard-deadline.md").locator(".workspace-tab-close").click();
 		await treeFile("notes.md").click();
 		let refusedSaves = 0;
 		await page.route("**/workspace-markdown?*", async (route) => {
