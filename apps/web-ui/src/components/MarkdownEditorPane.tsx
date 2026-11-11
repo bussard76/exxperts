@@ -765,7 +765,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 	const status = phase === "loading" ? "Loading…" : phase === "saving" ? "Saving…" : conflict ? "Conflict" : phase === "error" ? "Error" : isDirty ? "Unsaved" : canEdit ? "Saved" : "Read-only";
 
 	return (
-		<aside className="markdown-editor-pane" aria-label={`Markdown editor: ${filename}`}>
+		<aside className="markdown-editor-pane" aria-label={`Markdown editor: ${filename}`} onClickCapture={(event) => { if (immediateFenceRef.current) { event.preventDefault(); event.stopPropagation(); } }}>
 			<header className="markdown-editor-header" tabIndex={-1}>
 				<h2 className="sr-only">{filename}</h2>
 				<div className="markdown-editor-actions">

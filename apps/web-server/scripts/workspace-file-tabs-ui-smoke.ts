@@ -902,8 +902,13 @@ try {
 		const fencedEditor = page.locator(".markdown-editor-tiptap .ProseMirror");
 		await fencedEditor.click();
 		await page.keyboard.type(" admitted draft");
-		await treeFile("photo.png").click();
+		const originalRichHtml = await fencedEditor.innerHTML();
+		const richPhotoTarget = await treeFile("photo.png").elementHandle();
+		const headingTarget = await page.getByRole("button", { name: "Heading 2", exact: true }).elementHandle();
+		assert(richPhotoTarget && headingTarget, "the real file and formatting controls exist for the synchronous guard test");
+		await page.evaluate(({ select, heading }) => { (select as HTMLElement).click(); (heading as HTMLElement).click(); }, { select: richPhotoTarget, heading: headingTarget });
 		await prompt.waitFor();
+		assert(await fencedEditor.innerHTML() === originalRichHtml, "a queued formatting command cannot change the admitted draft");
 		const fencedContent = await fencedEditor.textContent();
 		await fencedEditor.focus();
 		await page.keyboard.type("forbidden-edit");

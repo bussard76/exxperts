@@ -260,3 +260,5 @@ The clean admission path now has its own controlled invalidation test in `two-wi
 ## Checkpoint: synchronous editor fence
 
 The editor now fences rich input, RAW input and scheduled autosave synchronously when an attached action is admitted, before the React render that disables controls. `workspace-file-tabs-ui-smoke.ts` dispatches a controlled RAW input in the same turn as the real file-selection callback; it changed the admitted draft before the fix and is rejected after it. UI and scripts typechecks, the UI-only build, and the attributed two-window and file-tabs smokes passed (2/2). The test proves the RAW same-turn case; complete draft-generation stamping, transfer, native safeguards and their acceptance tests remain open.
+
+A second same-turn case now checks the real formatting toolbar: a controlled Heading 2 click immediately after selecting another file changed the admitted rich draft before the fix. Editor click capture now blocks that queued command while fenced. UI and scripts typechecks, the UI-only build and the attributed file-tabs smoke passed (1/1). This does not substitute for full draft stamps or child-host event evidence.
