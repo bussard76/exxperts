@@ -133,6 +133,12 @@ try {
 
 	startServer();
 	await waitUntil(() => fetch(`${baseUrl}/healthz`).then((r) => r.ok).catch(() => false), "server ready");
+	const workspace = path.join(tempRoot, "workspace");
+	fs.mkdirSync(workspace);
+	fs.writeFileSync(path.join(workspace, "first.md"), "# Invented first file\n");
+	fs.writeFileSync(path.join(workspace, "second.md"), "# Invented second file\n");
+	const workspaceResponse = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ root: workspace, workspaceAccessMode: "localFiles" }) });
+	assert(workspaceResponse.ok, "the invented checkpoint workspace is granted");
 
 	const browser = await chromium.launch();
 	try {
@@ -488,11 +494,23 @@ try {
 		await composer.press("Enter");
 		await waitUntil(async () => (await page.getByText("Answer from claude-fake.").count()) >= 1, "the answer before the 19th save");
 		await answerSaved(shownBeforeVenue);
+		await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "first.md" }).click();
+		await page.locator(".markdown-editor-tiptap .ProseMirror").waitFor();
 		await openDialog();
 		await dialog.getByRole("button", { name: "Generate memory proposal" }).click();
 		await dialog.getByText(nineteenHeadsUp, { exact: true }).waitFor({ timeout: 20000 });
+		let releaseCheckpoint!: () => void, startCheckpoint!: () => void;
+		const checkpointReleased = new Promise<void>((resolve) => { releaseCheckpoint = resolve; });
+		const checkpointStarted = new Promise<void>((resolve) => { startCheckpoint = resolve; });
+		await page.route("**/checkpoint/approve", async (route) => { startCheckpoint(); await checkpointReleased; await route.continue(); });
 		await dialog.getByRole("button", { name: "Save to memory" }).click();
+		try {
+			await checkpointStarted;
+			await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "second.md" }).evaluate((node) => (node as HTMLElement).click());
+			assert(await page.locator(".workspace-tab", { hasText: "second.md" }).count() === 0, "a clean checkpoint action reserves the document session until its real callback finishes");
+		} finally { releaseCheckpoint(); }
 		await dialog.getByText("Memory updated", { exact: true }).waitFor({ timeout: 20000 });
+		await page.unroute("**/checkpoint/approve");
 		assert(await dialog.getByText(nineteenHeadsUp, { exact: true }).count() === 0, "the saved page does not repeat the heads-up the review showed");
 		await dialog.getByRole("button", { name: "Return Home" }).click();
 		await dialog.waitFor({ state: "detached", timeout: 10000 });

@@ -5513,6 +5513,8 @@ export function App() {
 			setCheckpointApprovalError(REMEMBER_OTHER_CONVERSATION_OPEN);
 			return;
 		}
+		const cleanAction = admitCleanMarkdownEditorAction(() => approveCheckpointProposal(approvedFields));
+		if (cleanAction) { await cleanAction; return; }
 		if (!guardMarkdownEditorAction(() => approveCheckpointProposal(approvedFields), "navigate")) return;
 		setCheckpointApprovalLoading(true);
 		setCheckpointApprovalError(null);
