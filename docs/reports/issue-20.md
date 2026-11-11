@@ -238,3 +238,5 @@ The browser-close test now also exercises an unresolved write after the visible 
 ## Checkpoint: pending write through the real Home exit
 
 The existing `two-window-room-ui-smoke.ts` now holds a real PUT, reverts RAW to its original source, and invokes the actual Home callback. Temporarily removing the pending-write join made Home leave early; with it restored, Home waits, the latest reverted source is confirmed through the existing pipeline, and then the room closes. The attributed filtered two-window smoke passed 1/1 and the UI-only build passed. This is attached exit evidence and does not establish child closure or native behavior.
+
+The affected `workspace-markdown-images-ui-smoke.ts` entrypoint, including its existing Keep mine scenarios, passed 1/1 through the attributed filtered gate after the editor changes. This is attached browser coverage, not transfer or native evidence.
