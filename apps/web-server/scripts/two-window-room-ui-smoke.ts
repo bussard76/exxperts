@@ -355,6 +355,25 @@ try {
 			await e.waitForTimeout(500);
 			assert((await e.evaluate(() => window.location.hash)) === originalHash, "a late save cannot execute Home after the page identity changes");
 		} finally { releaseInvalidatedSave(); }
+		const f = await ctx.newPage();
+		await f.goto(`${baseUrl}/#/room/${agentId}`);
+		const cleanHome = await f.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).elementHandle();
+		assert(cleanHome, "the clean-action Home control is present");
+		await f.getByRole("button", { name: "Room settings" }).click();
+		await f.locator(".settings-dialog-nav-item").filter({ hasText: /^Folder$/ }).first().click();
+		const folderPane = f.locator(".room-settings-section:not([hidden])");
+		await folderPane.getByRole("button", { name: "Edit", exact: true }).click();
+		await folderPane.getByLabel("Folder path").fill(path.join(workspace, "invented-folder"));
+		const cleanOriginalHash = await f.evaluate(() => window.location.hash);
+		let settingsUnloadAsked = false;
+		f.on("dialog", (dialog) => { if (dialog.type() === "beforeunload") settingsUnloadAsked = true; void dialog.dismiss(); });
+		await f.route("**/workspace-files?*", (route) => route.fulfill({ status: 409, json: { code: "person_changed", error: "Invented identity change" } }));
+		await f.evaluate(() => window.dispatchEvent(new Event("focus")));
+		await f.getByText("Someone else is now signed in on this server.", { exact: true }).waitFor();
+		assert(settingsUnloadAsked, "the browser held the invalidated page because Room settings had an unsaved change");
+		await cleanHome.evaluate((button) => (button as HTMLButtonElement).click());
+		await f.waitForTimeout(500);
+		assert((await f.evaluate(() => window.location.hash)) === cleanOriginalHash, "a stale clean Home action cannot run after the page identity changes");
 		await ctx.close();
 	} finally {
 		await browser.close();
