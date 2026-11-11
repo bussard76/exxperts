@@ -623,8 +623,8 @@ export function App() {
 		const action = markdownEditorPendingActionRef.current;
 		const editor = markdownEditorRef.current;
 		setMarkdownEditorPromptBusy(true);
-		await editor?.settle();
-		if (markdownEditorCanceledSaveRef.current || !editor?.discard()) {
+		const settled = await editor?.settle();
+		if (markdownEditorCanceledSaveRef.current || !settled || !editor?.discard()) {
 			markdownEditorCanceledSaveRef.current = false;
 			markdownEditorPendingActionRef.current = null;
 			setMarkdownEditorPrompt(null);

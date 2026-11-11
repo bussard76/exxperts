@@ -82,3 +82,7 @@ When reconciliation observes a different revision and different content, the exi
 ## Checkpoint: later reconciliation
 
 The editor retains the submitted content and revision after an inconclusive GET and can reconcile a later confirmed result without resending the original PUT. A fresh guarded Save is required to run its own continuation; the `workspace-file-tabs-ui-smoke.ts` case uses one controlled stale GET followed by the real current route and passed after an intentional red run, with the filtered smoke 1/1. Write timeout, permission revalidation, complete draft retention and C4/native action correlation remain pending.
+
+## Checkpoint: discard after later confirmation
+
+A fresh Discard now rechecks an unknown write before acting; it proceeds only after the submitted write is observed, and a changed competing revision refuses the current action and enters conflict. The controlled stale-read `workspace-file-tabs-ui-smoke.ts` case failed before the change and passed afterward; the complete filtered smoke passed 1/1 and verified that Discard neither resends nor undoes the sent write. Remaining C2/C4, host, native, geometry, platform and integration requirements are still open.

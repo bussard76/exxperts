@@ -166,6 +166,7 @@ fs.writeFileSync(path.join(folder, "unknown-write.md"), "# Invented unknown writ
 fs.writeFileSync(path.join(folder, "pending-discard.md"), "# Invented pending write\n");
 fs.writeFileSync(path.join(folder, "lost-conflict.md"), "# Invented conflict\n");
 fs.writeFileSync(path.join(folder, "late-response.md"), "# Invented late response\n");
+fs.writeFileSync(path.join(folder, "late-discard.md"), "# Invented late discard\n");
 fs.writeFileSync(path.join(folder, "conflict-real.md"), "# Original invented draft\n");
 fs.writeFileSync(path.join(folder, "old.doc"), "legacy");
 fs.writeFileSync(path.join(folder, "old.xls"), "invented old workbook");
@@ -1263,6 +1264,34 @@ try {
 			await latePrompt.getByRole("button", { name: "Save and continue" }).click();
 			await waitUntil(async () => await roomPage.locator(".workspace-tab[data-active='true']", { hasText: "photo.png" }).count() === 1, "a later GET confirms the uncertain write");
 			assert(lateWrites === 1, "later reconciliation does not resend the original write");
+			await roomPage.unroute("**/workspace-markdown?*");
+			const initialDiscardResponse = roomPage.waitForResponse((response) => response.url().includes("/workspace-markdown?") && response.url().includes("late-discard.md") && response.request().method() === "GET");
+			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "late-discard.md" }).click();
+			const initialDiscardFile = await (await initialDiscardResponse).json();
+			await roomPage.locator(".markdown-editor-tiptap .ProseMirror").waitFor();
+			let discardWrites = 0, staleDiscardReconciliation = true;
+			await roomPage.route("**/workspace-markdown?*", async (route) => {
+				if (route.request().method() === "PUT") {
+					discardWrites++;
+					await route.fetch();
+					return route.abort();
+				}
+				if (staleDiscardReconciliation) {
+					staleDiscardReconciliation = false;
+					return route.fulfill({ status: 200, json: initialDiscardFile });
+				}
+				return route.continue();
+			});
+			await roomPage.locator(".markdown-editor-tiptap .ProseMirror").click();
+			await roomPage.keyboard.type(" already written");
+			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "photo.png" }).click();
+			const lateDiscardPrompt = roomPage.getByRole("dialog", { name: "Unsaved Markdown changes" });
+			await lateDiscardPrompt.getByRole("button", { name: "Save and continue" }).click();
+			await roomPage.locator(".markdown-editor-error").waitFor();
+			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "photo.png" }).click();
+			await lateDiscardPrompt.getByRole("button", { name: "Discard changes" }).click();
+			await waitUntil(async () => await roomPage.locator(".workspace-tab[data-active='true']", { hasText: "photo.png" }).count() === 1, "discard reconciles the previously uncertain write");
+			assert(discardWrites === 1 && fs.readFileSync(path.join(folder, "late-discard.md"), "utf8").includes("already written"), "discard does not resend or undo the confirmed write");
 			await roomPage.unroute("**/workspace-markdown?*");
 			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "unknown-write.md" }).click();
 			await roomPage.locator(".markdown-editor-tiptap .ProseMirror").waitFor();

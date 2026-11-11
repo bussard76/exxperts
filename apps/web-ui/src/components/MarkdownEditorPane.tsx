@@ -31,7 +31,7 @@ import { createSearchDecorationExtension, type SearchDecorationState } from "./T
 
 export interface MarkdownEditorHandle {
 	save: () => Promise<boolean>;
-	settle: () => Promise<void>;
+	settle: () => Promise<boolean>;
 	discard: () => boolean;
 	focus: () => void;
 }
@@ -600,7 +600,32 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		syncRawTaskActive();
 	}, [draft, syncRawTaskActive]);
 	const save = useCallback(() => surfaceRef.current?.save() ?? Promise.resolve(false), []);
-	const settle = useCallback(async () => { await surfaceRef.current?.settle(); }, []);
+	const settle = useCallback(async () => {
+		await surfaceRef.current?.settle();
+		const unknown = unknownWriteRef.current;
+		if (!unknown) return true;
+		try {
+			const latest = await getWorkspaceMarkdownFile(agentId, conversationId, path);
+			if (latest.revision === unknown.revision) return false;
+			unknownWriteRef.current = null;
+			fileRef.current = latest;
+			setFile(latest);
+			setCanEdit(!latest.readOnly);
+			if (latest.content !== unknown.content) {
+				reconcileServerContent(latest.content);
+				setConflictRevision(latest.revision);
+				setPhase("conflict");
+				return false;
+			}
+			markSaved(latest.content);
+			surfaceRef.current?.markSaved(latest.content);
+			setError(null);
+			setPhase("ready");
+			return true;
+		} catch {
+			return false;
+		}
+	}, [agentId, conversationId, markSaved, path, reconcileServerContent]);
 	const discard = useCallback(() => {
 		if (unknownWriteRef.current || !surfaceRef.current) return false;
 		surfaceRef.current.discard();
