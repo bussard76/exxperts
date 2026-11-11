@@ -598,6 +598,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 					}
 					if (latest.revision !== revision) {
 						unknownWriteRef.current = null;
+						setDirty(true);
 						reconcileServerContent(latest.content);
 						fileRef.current = latest;
 						setFile(latest);
@@ -620,7 +621,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			}
 			return null;
 		}
-	}, [agentId, canEdit, conversationId, path, reconcileServerContent, recordConfirmedWrite]);
+	}, [agentId, canEdit, conversationId, path, reconcileServerContent, recordConfirmedWrite, setDirty]);
 
 	const handleDraftChange = useCallback((next: string) => {
 		draftRef.current = next;

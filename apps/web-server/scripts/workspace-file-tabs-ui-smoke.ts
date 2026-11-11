@@ -166,6 +166,7 @@ fs.writeFileSync(path.join(folder, "unknown-write.md"), "# Invented unknown writ
 fs.writeFileSync(path.join(folder, "pending-discard.md"), "# Invented pending write\n");
 fs.writeFileSync(path.join(folder, "clean-pending.md"), "# Invented original\n");
 fs.writeFileSync(path.join(folder, "clean-unknown.md"), "# Invented unknown\n");
+fs.writeFileSync(path.join(folder, "clean-unknown-conflict.md"), "# Invented local original\n");
 fs.writeFileSync(path.join(folder, "external-clean.md"), "# Invented before\n");
 fs.writeFileSync(path.join(folder, "discard-exact.md"), "# Invented exact baseline\r\n\r\n");
 fs.writeFileSync(path.join(folder, "lost-conflict.md"), "# Invented conflict\n");
@@ -773,6 +774,36 @@ try {
 		assert(Number(unknownWrites) === 2 && fs.readFileSync(path.join(folder, "clean-unknown.md"), "utf8") === "# Invented unknown\n", "the newer reverted source is saved only after reconciling the first write");
 		await page.unroute("**/workspace-markdown?*");
 		await tab("clean-unknown.md").locator(".workspace-tab-close").click();
+		await treeFile("clean-unknown-conflict.md").click();
+		await page.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented local original").waitFor();
+		await page.locator(".markdown-editor-status").getByText("Saved").waitFor();
+		await page.getByRole("button", { name: "RAW", exact: true }).click();
+		const cleanConflictRaw = page.getByRole("textbox", { name: "Raw Markdown source" });
+		await waitUntil(async () => await cleanConflictRaw.inputValue() === "# Invented local original\n", "the clean-conflict test loads its original source");
+		let releaseCleanConflict!: () => void, startCleanConflict!: () => void, cleanConflictWrites = 0;
+		const cleanConflictReleased = new Promise<void>((resolve) => { releaseCleanConflict = resolve; });
+		const cleanConflictStarted = new Promise<void>((resolve) => { startCleanConflict = resolve; });
+		await page.route("**/workspace-markdown?*", async (route) => {
+			if (route.request().method() !== "PUT") return route.continue();
+			cleanConflictWrites++;
+			await route.fetch();
+			fs.writeFileSync(path.join(folder, "clean-unknown-conflict.md"), "# Invented competing source\n");
+			startCleanConflict();
+			await cleanConflictReleased;
+			await route.abort();
+		});
+		await cleanConflictRaw.fill("# Invented sent source\n");
+		await page.locator(".markdown-editor-save").click();
+		try {
+			await cleanConflictStarted;
+			await cleanConflictRaw.fill("# Invented local original\n");
+		} finally { releaseCleanConflict(); }
+		await page.locator(".markdown-editor-conflict").waitFor();
+		assert(await cleanConflictRaw.inputValue() === "# Invented local original\n" && cleanConflictWrites === 1 && fs.readFileSync(path.join(folder, "clean-unknown-conflict.md"), "utf8") === "# Invented competing source\n", "a conflicting unknown write retains the clean-looking local source without retrying");
+		await page.unroute("**/workspace-markdown?*");
+		await treeFile("photo.png").click();
+		await prompt.getByRole("button", { name: "Discard changes" }).click();
+		await tab("clean-unknown-conflict.md").locator(".workspace-tab-close").click();
 		await treeFile("external-clean.md").click();
 		await page.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented before").waitFor();
 		let cleanExternalWrites = 0;

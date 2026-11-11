@@ -45,6 +45,7 @@ export function useMarkdownEditorSync({
 	const pendingRemountRef = useRef(false);
 
 	const setDirty = useCallback((value: boolean) => {
+		isDirtyRef.current = value;
 		setIsDirty(value);
 		onDirtyChange?.(value);
 	}, [onDirtyChange]);
