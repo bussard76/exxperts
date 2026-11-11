@@ -132,3 +132,7 @@ A clean topbar Memento now reserves the document action through its existing cal
 ## Checkpoint: clean Home admission
 
 A clean Home action now retains the document reservation until its existing leave callback settles and preserves its return value for callers. The held real leave in `workspace-file-tabs-ui-smoke.ts` admitted a competing file before the change and blocked it afterward; the filtered smoke passed 1/1. Other clean exits, context identity and dependent child/native arbitration remain pending.
+
+## Checkpoint: clean Room settings Memento
+
+A clean Room settings Memento now retains the document reservation through the component's existing confirmation and request. The controlled real-request `workspace-file-tabs-ui-smoke.ts` case selected a competing file before the change and withheld it afterward; the file-tabs and settings smokes passed 2/2. Other clean exits and the complete host/native contract remain pending.

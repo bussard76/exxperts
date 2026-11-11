@@ -9141,7 +9141,11 @@ export function App() {
 						</div>
 					)}
 					{roomSettingsOpen && currentPersistentStatus && (
-						<RoomSettingsModal status={currentPersistentStatus} answering={persistentRoomInFlight} initialPane={roomSettingsPane} onClose={() => setRoomSettingsOpen(false)} onArchive={archivePersistentAgentRoom} onPurge={purgePersistentAgentRoom} onRefresh={refreshPersistentAgentStatus} onMementoApplied={() => leaveRoomAfterMemento(true)} onBeforeMemento={(continueAction) => guardMarkdownEditorAction(continueAction, "navigate")} onOpenSkillsLibrary={() => openSettings("skills")} onOpenConnectors={() => openSettings("connectors")} />
+						<RoomSettingsModal status={currentPersistentStatus} answering={persistentRoomInFlight} initialPane={roomSettingsPane} onClose={() => setRoomSettingsOpen(false)} onArchive={archivePersistentAgentRoom} onPurge={purgePersistentAgentRoom} onRefresh={refreshPersistentAgentStatus} onMementoApplied={() => leaveRoomAfterMemento(true)} onBeforeMemento={(continueAction) => {
+							const cleanAction = admitCleanMarkdownEditorAction(async () => { await continueAction(); });
+							if (cleanAction) return false;
+							return guardMarkdownEditorAction(continueAction, "navigate");
+						}} onOpenSkillsLibrary={() => openSettings("skills")} onOpenConnectors={() => openSettings("connectors")} />
 					)}
 					{modelSwitchAsk && persistentChat && modelSwitchAsk.agentId === persistentChat.agentId && modelSwitchAsk.conversationId === persistentChat.conversationId && (
 						<ModelSwitchWindow

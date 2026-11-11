@@ -1331,6 +1331,23 @@ try {
 			await archive.waitFor();
 			await roomPage.unroute("**/api/persistent-agents/**");
 			await archive.getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "photo.png" }).click();
+			await roomPage.getByRole("button", { name: "Room settings" }).click();
+			await roomPage.locator(".settings-dialog-nav-item").filter({ hasText: /^Conversation$/ }).first().click();
+			await roomPage.locator(".room-session-section").getByRole("button", { name: "Forget…" }).click();
+			let releaseCleanSettingsMemento!: () => void, startCleanSettingsMemento!: () => void;
+			const cleanSettingsMementoReleased = new Promise<void>((resolve) => { releaseCleanSettingsMemento = resolve; });
+			const cleanSettingsMementoStarted = new Promise<void>((resolve) => { startCleanSettingsMemento = resolve; });
+			await roomPage.route("**/memento", async (route) => { startCleanSettingsMemento(); await cleanSettingsMementoReleased; await route.continue(); });
+			await roomPage.getByRole("alertdialog", { name: "Forget this conversation and start fresh?" }).getByRole("button", { name: "Forget", exact: true }).click();
+			try {
+				await cleanSettingsMementoStarted;
+				await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "notes.md" }).evaluate((node) => (node as HTMLElement).click());
+				assert(await roomPage.locator(".workspace-tab", { hasText: "notes.md" }).count() === 0, "a clean room-settings Memento reserves the session against file selection");
+			} finally { releaseCleanSettingsMemento(); }
+			await archive.waitFor();
+			await roomPage.unroute("**/memento");
+			await archive.getByRole("button", { name: /^(Enter|Resume)$/ }).click();
 			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "notes.md" }).click();
 			await roomPage.locator(".markdown-editor-tiptap .ProseMirror").click();
 			await roomPage.keyboard.type(" settings memento draft");
