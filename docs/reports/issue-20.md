@@ -202,3 +202,7 @@ The existing history route handler now refuses a competing Back or Forward while
 ## Checkpoint: clean external source remains exact
 
 An external update of a clean Markdown file now remains the editor's exact source until a real rich edit. The `workspace-file-tabs-ui-smoke.ts` case updates an invented file to CRLF source through the existing poll and presses the real Save shortcut: before the change it sent a PUT and normalized the file; afterward it sends none and the bytes remain exact. The attributed file-tabs and RAW smokes passed 2/2 and the UI-only build passed. This proves an attached source-retention case, not transfer or native behavior.
+
+## Checkpoint: exact discarded baseline
+
+Discard now retains the exact baseline as the clean source if a later confirmation cancels the intended exit. In `workspace-file-tabs-ui-smoke.ts`, a real Forget action is canceled after Discard of an invented CRLF file; the subsequent Save shortcut sent a normalizing PUT before the change and sends none afterward, preserving the exact file bytes. An initial LF-only check passed without exposing the defect; the independent CRLF case was added without changing the existing Forget assertions. The attributed file-tabs and RAW smokes passed 2/2 and the UI-only build passed. This is attached editor evidence only.

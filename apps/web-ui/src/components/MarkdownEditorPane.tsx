@@ -276,7 +276,7 @@ function MarkdownEditorSurface({
 		const current = editorRef.current;
 		if (!current) return;
 		const next = baselineRef.current;
-		rawRef.current = null;
+		rawRef.current = next;
 		current.commands.setContent(next, { emitUpdate: false, contentType: "markdown" });
 		draftRef.current = next;
 		onDraftChange(next);
