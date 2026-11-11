@@ -503,11 +503,15 @@ export function App() {
 	const markdownEditorPendingActionRef = useRef<(() => void | Promise<unknown>) | null>(null);
 	const markdownEditorCommitBypassRef = useRef(false);
 	const markdownEditorCommittingRef = useRef(false);
+	const markdownEditorPromptTimerRef = useRef<number | null>(null);
 	const markdownEditorCanceledSaveRef = useRef(false);
 	const [markdownEditorPrompt, setMarkdownEditorPrompt] = useState<"close" | "switch" | "navigate" | null>(null);
 	const [markdownEditorPromptBusy, setMarkdownEditorPromptBusy] = useState(false);
 	const markdownEditorPromptBusyRef = useRef(false);
 	const [markdownEditorFenced, setMarkdownEditorFenced] = useState(false);
+	useEffect(() => () => {
+		if (markdownEditorPromptTimerRef.current !== null) window.clearTimeout(markdownEditorPromptTimerRef.current);
+	}, []);
 	const [artifactMaximized, setArtifactMaximized] = useState(false);
 	const attachmentsScrollRef = useRef(0);
 	// Bumped when a finished revise rewrote the bytes behind the OPEN viewer's
@@ -598,6 +602,10 @@ export function App() {
 		if (markdownEditorPendingActionRef.current) return false;
 		if (!markdownEditorDirtyRef.current) return true;
 		markdownEditorPendingActionRef.current = action;
+		const timer = window.setTimeout(() => {
+			if (markdownEditorPromptTimerRef.current === timer) cancelMarkdownEditorPrompt();
+		}, 120_000);
+		markdownEditorPromptTimerRef.current = timer;
 		setMarkdownEditorFenced(true);
 		setMarkdownEditorPrompt(prompt);
 		setMarkdownEditorPromptBusy(false);
@@ -605,6 +613,8 @@ export function App() {
 	}
 
 	function completeMarkdownEditorPrompt(action: (() => void | Promise<unknown>) | null): void {
+		if (markdownEditorPromptTimerRef.current !== null) window.clearTimeout(markdownEditorPromptTimerRef.current);
+		markdownEditorPromptTimerRef.current = null;
 		markdownEditorCommittingRef.current = true;
 		setMarkdownEditorPrompt(null);
 		setMarkdownEditorPromptBusy(false);
@@ -634,6 +644,8 @@ export function App() {
 		setMarkdownEditorPromptBusy(true);
 		const saved = await markdownEditorRef.current?.save();
 		if (!saved || markdownEditorCanceledSaveRef.current) {
+			if (markdownEditorPromptTimerRef.current !== null) window.clearTimeout(markdownEditorPromptTimerRef.current);
+			markdownEditorPromptTimerRef.current = null;
 			markdownEditorCanceledSaveRef.current = false;
 			markdownEditorPromptBusyRef.current = false;
 			setMarkdownEditorPromptBusy(false);
@@ -653,6 +665,8 @@ export function App() {
 		setMarkdownEditorPromptBusy(true);
 		const settled = await editor?.settle();
 		if (markdownEditorCanceledSaveRef.current || !settled || !editor?.discard()) {
+			if (markdownEditorPromptTimerRef.current !== null) window.clearTimeout(markdownEditorPromptTimerRef.current);
+			markdownEditorPromptTimerRef.current = null;
 			markdownEditorCanceledSaveRef.current = false;
 			markdownEditorPromptBusyRef.current = false;
 			markdownEditorPendingActionRef.current = null;
@@ -666,6 +680,8 @@ export function App() {
 
 	function cancelMarkdownEditorPrompt(): void {
 		if (markdownEditorCommittingRef.current) return;
+		if (markdownEditorPromptTimerRef.current !== null) window.clearTimeout(markdownEditorPromptTimerRef.current);
+		markdownEditorPromptTimerRef.current = null;
 		if (markdownEditorPromptBusyRef.current) markdownEditorCanceledSaveRef.current = true;
 		else {
 			markdownEditorPendingActionRef.current = null;

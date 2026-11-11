@@ -118,3 +118,7 @@ The admitted guard now stays reserved until the captured asynchronous continuati
 ## Checkpoint: room-settings Memento guard
 
 The dirty-file dialog now sits above Room settings, and the room-settings Memento keeps its existing request and exit inside the admitted action until completion. The real `workspace-file-tabs-ui-smoke.ts` flow first failed because settings intercepted the guard, then failed because Home could run while the held Memento request was pending; it passed after both changes. The filtered file-tabs and `settings-look-ui` smokes each passed 1/1. This covers that callback in the attached UI, not dependent child shutdown or native behavior.
+
+## Checkpoint: guard decision deadline
+
+The attached dirty-action guard now expires after the specified 120-second decision window without executing its continuation; a save already settling remains fenced until settlement. The controlled-timer `workspace-file-tabs-ui-smoke.ts` case failed before the timer existed and passed afterward with the filtered smoke 1/1. This does not establish the native exchange, abort acknowledgement or child-closure deadlines.

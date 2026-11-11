@@ -718,6 +718,16 @@ try {
 		await page.waitForTimeout(1300);
 		assert(await fencedEditor.textContent() === fencedContent && fencedWrites === 0, "the guard fences input and autosave until the action resolves");
 		await prompt.getByRole("button", { name: "Cancel" }).click();
+		await page.evaluate(() => {
+			const original = window.setTimeout;
+			(window as any).__testOriginalTimeout = original;
+			window.setTimeout = ((handler: TimerHandler, delay?: number, ...args: any[]) => original(handler, delay === 120_000 ? 500 : delay, ...args)) as typeof window.setTimeout;
+		});
+		await treeFile("photo.png").click();
+		await prompt.waitFor();
+		await prompt.waitFor({ state: "hidden", timeout: 3000 });
+		assert((await activeName()) === "guard-fence.md" && await fencedEditor.textContent() === fencedContent, "an expired decision leaves the current file and draft in place");
+		await page.evaluate(() => { window.setTimeout = (window as any).__testOriginalTimeout; delete (window as any).__testOriginalTimeout; });
 		await page.getByRole("button", { name: "RAW", exact: true }).click();
 		const fencedRaw = page.getByRole("textbox", { name: "Raw Markdown source" });
 		const rawBeforeFence = await fencedRaw.inputValue();
