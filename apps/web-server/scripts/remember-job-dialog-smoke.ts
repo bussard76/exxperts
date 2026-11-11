@@ -500,17 +500,48 @@ try {
 		await dialog.getByRole("button", { name: "Generate memory proposal" }).click();
 		await dialog.getByText(nineteenHeadsUp, { exact: true }).waitFor({ timeout: 20000 });
 		let releaseCheckpoint!: () => void, startCheckpoint!: () => void;
+		let checkpointApprovals = 0;
+		let freshCheckpointThread = "", releaseCheckpointFetch!: () => void, startCheckpointFetch!: () => void;
 		const checkpointReleased = new Promise<void>((resolve) => { releaseCheckpoint = resolve; });
 		const checkpointStarted = new Promise<void>((resolve) => { startCheckpoint = resolve; });
-		await page.route("**/checkpoint/approve", async (route) => { startCheckpoint(); await checkpointReleased; await route.continue(); });
+		const checkpointFetchReleased = new Promise<void>((resolve) => { releaseCheckpointFetch = resolve; });
+		const checkpointFetchStarted = new Promise<void>((resolve) => { startCheckpointFetch = resolve; });
+		await page.route("**/threads/*", async (route) => {
+			if (route.request().method() !== "GET" || !freshCheckpointThread || !route.request().url().endsWith(`/threads/${encodeURIComponent(freshCheckpointThread)}`)) return route.continue();
+			startCheckpointFetch();
+			await checkpointFetchReleased;
+			await route.continue();
+		});
+		await page.route("**/checkpoint/approve", async (route) => {
+			checkpointApprovals++;
+			startCheckpoint();
+			await checkpointReleased;
+			const response = await route.fetch();
+			const approval = await response.json();
+			freshCheckpointThread = approval.postCheckpoint?.activeThreadId || approval.runtimeBoundary?.newThreadId || "";
+			await route.fulfill({ response });
+		});
 		await dialog.getByRole("button", { name: "Save to memory" }).click();
 		try {
 			await checkpointStarted;
 			await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "second.md" }).evaluate((node) => (node as HTMLElement).click());
-			assert(await page.locator(".workspace-tab", { hasText: "second.md" }).count() === 0, "a clean checkpoint action reserves the document session until its real callback finishes");
+			await page.locator(".workspace-tab[data-active='true']", { hasText: "second.md" }).waitFor();
+			const editor = page.locator(".markdown-editor-tiptap .ProseMirror");
+			await editor.waitFor();
+			await editor.focus();
+			await page.keyboard.type(" invented pending draft");
 		} finally { releaseCheckpoint(); }
+		const checkpointGuard = page.getByRole("dialog", { name: "Unsaved Markdown changes" });
+		await checkpointGuard.getByRole("button", { name: "Discard changes" }).click();
+		try {
+			await checkpointFetchStarted;
+			await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).evaluate((node) => (node as HTMLElement).click());
+			await page.waitForTimeout(250);
+			assert((await page.title()).includes("Remember Room") && checkpointApprovals === 1, "the committed bind remains reserved during its real thread fetch without resending approval");
+		} finally { releaseCheckpointFetch(); }
 		await dialog.getByText("Memory updated", { exact: true }).waitFor({ timeout: 20000 });
 		await page.unroute("**/checkpoint/approve");
+		await page.unroute("**/threads/*");
 		assert(await dialog.getByText(nineteenHeadsUp, { exact: true }).count() === 0, "the saved page does not repeat the heads-up the review showed");
 		await dialog.getByRole("button", { name: "Return Home" }).click();
 		await dialog.waitFor({ state: "detached", timeout: 10000 });
@@ -609,6 +640,61 @@ try {
 		await page.getByRole("dialog").filter({ hasText: "Save these notes to Remember Room's memory?" }).getByRole("button", { name: "Save", exact: true }).click({ timeout: 10000 });
 		await workflow.getByRole("heading", { name: /^Remember Room memorized \d+ conversations?$/ }).waitFor({ timeout: 30000 });
 		console.log("  ok  an ordinary Memorize runs to its saved screen in the page");
+		const reentryId = agents.createPersistentAgentFromScaffoldInput({ displayName: "Reentry Room", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }).agent.agentId;
+		roomModels.writeRoomModels(reentryId, { conversation: CLAUDE });
+		const reentryWorkspace = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(reentryId)}/workspace-default`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ root: workspace, workspaceAccessMode: "localFiles" }) });
+		assert(reentryWorkspace.ok, "the invented re-entry room uses the test workspace");
+		holdRemember = false;
+		const reentryContext = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+		try {
+			const reentryPage = await reentryContext.newPage();
+			let firstConversation = "", resumedConversation = "", readyCount = 0;
+			reentryPage.on("websocket", (socket) => {
+				const url = new URL(socket.url());
+				if (url.searchParams.get("persistentAgentId") !== reentryId) return;
+				const id = url.searchParams.get("conversationId") ?? "";
+				if (!firstConversation) firstConversation = id;
+				else resumedConversation = id;
+				socket.on("framereceived", (frame) => { try { if (JSON.parse(String(frame.payload))?.type === "ready") readyCount++; } catch {} });
+			});
+			await reentryPage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+			await reentryPage.waitForLoadState("networkidle");
+			const reentryDismiss = reentryPage.locator(".whats-new-close");
+			if (await reentryDismiss.count()) await reentryDismiss.click();
+			const reentryCard = reentryPage.locator(".persistent-agent-card").filter({ hasText: "Reentry Room" });
+			await reentryCard.getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+			await waitUntil(() => Boolean(firstConversation) && readyCount > 0, "the re-entry test conversation opens");
+			const reentryComposer = reentryPage.locator("textarea").first();
+			await reentryComposer.fill("An invented re-entry conversation.");
+			await reentryComposer.press("Enter");
+			await reentryPage.getByText("Answer from claude-fake.").first().waitFor({ timeout: 45000 });
+			const reentryDialog = reentryPage.getByRole("dialog", { name: "Remember this conversation" });
+			await reentryPage.getByRole("button", { name: "Choose what to keep…", exact: true }).click();
+			await reentryDialog.getByRole("button", { name: "Generate memory proposal" }).click();
+			await reentryDialog.getByText(POINTS[11]!, { exact: true }).waitFor({ timeout: 20000 });
+			let releaseReentryApproval!: () => void, startReentryApproval!: () => void;
+			const reentryApprovalReleased = new Promise<void>((resolve) => { releaseReentryApproval = resolve; });
+			const reentryApprovalStarted = new Promise<void>((resolve) => { startReentryApproval = resolve; });
+			await reentryPage.route("**/checkpoint/approve", async (route) => { startReentryApproval(); await reentryApprovalReleased; await route.continue(); });
+			const approvalResponse = reentryPage.waitForResponse((response) => response.url().includes("/checkpoint/approve") && response.status() === 200).catch(() => null);
+			await reentryDialog.getByRole("button", { name: "Save to memory" }).click();
+			try {
+				await reentryApprovalStarted;
+				await reentryPage.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).evaluate((node) => (node as HTMLElement).click());
+				await reentryCard.getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+				await waitUntil(() => Boolean(resumedConversation) && readyCount > 1, "the same conversation is resumed");
+				assert(resumedConversation === firstConversation, "the re-entry test resumes the same conversation ID");
+				await reentryPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "first.md" }).evaluate((node) => (node as HTMLElement).click());
+				const reentryEditor = reentryPage.locator(".markdown-editor-tiptap .ProseMirror");
+				await reentryEditor.waitFor();
+				await reentryEditor.focus();
+				await reentryPage.keyboard.type(" new incarnation draft");
+				releaseReentryApproval();
+				assert(await approvalResponse, "the old approval finishes successfully");
+				await reentryPage.waitForTimeout(500);
+				assert((await reentryEditor.textContent())?.includes("new incarnation draft") && await reentryPage.getByText("Memory updated", { exact: true }).count() === 0 && await reentryPage.getByRole("dialog", { name: "Unsaved Markdown changes" }).count() === 0, "the old approval cannot prompt, replace the re-entered session or render its result");
+			} finally { releaseReentryApproval(); }
+		} finally { await closeContext(reentryContext); }
 		await closeContext(ctx);
 	} finally {
 		await closeBrowser(browser);

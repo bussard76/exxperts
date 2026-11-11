@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type SetStateAction } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { AttachmentsBrowser, AttachmentsEntry, type AttachmentsView } from "./components/attachments-panel";
 import { WorkspaceFileBrowser } from "./components/WorkspaceFileBrowser";
@@ -857,7 +857,15 @@ export function App() {
 	// and only badges the card; it never toasts.
 	const [backgroundDoneToast, setBackgroundDoneToast] = useState<{ agentId: PersistentAgentId; displayName: string } | null>(null);
 	const [persistentThread, setPersistentThread] = useState<PersistentAgentThread | null>(null);
-	const [persistentChat, setPersistentChat] = useState<PersistentChatConfig>(null);
+	const [persistentChat, setPersistentChatState] = useState<PersistentChatConfig>(null);
+	const checkpointContextRef = useRef<{ key: string | null; generation: number }>({ key: null, generation: 0 });
+	function setPersistentChat(next: SetStateAction<PersistentChatConfig>): void {
+		if (typeof next !== "function") {
+			const key = next ? `${next.agentId}\u0000${next.conversationId}` : null;
+			if (checkpointContextRef.current.key !== key) checkpointContextRef.current = { key, generation: checkpointContextRef.current.generation + 1 };
+		}
+		setPersistentChatState(next);
+	}
 	useEffect(() => {
 		setWorkspaceTabs(null);
 		setRightPane((pane) => pane?.kind === "markdownEditor" || pane?.kind === "workspaceImage" || pane?.kind === "workspaceLegacyDoc" || pane?.kind === "workspacePdf" || pane?.kind === "workspaceWord" || pane?.kind === "workspaceHtml" || pane?.kind === "workspaceFramed" || pane?.kind === "workspaceText" || pane?.kind === "workspaceSpreadsheet" ? null : pane);
@@ -5393,12 +5401,16 @@ export function App() {
 		if (checkpointPreviewOpen) void resumeCheckpointJob(false);
 	}, [checkpointPreviewOpen]);
 
-	async function bindToApprovedCheckpointRuntime(approval: CheckpointApprovalResponse, targetChat: NonNullable<PersistentChatConfig>): Promise<void> {
+	function checkpointOriginCurrent(targetChat: NonNullable<PersistentChatConfig>, generation: number): boolean {
+		return !unmountedRef.current && !personHasChanged() && checkpointContextRef.current.generation === generation && checkpointContextRef.current.key === `${targetChat.agentId}\u0000${targetChat.conversationId}`;
+	}
+
+	async function bindToApprovedCheckpointRuntime(approval: CheckpointApprovalResponse, targetChat: NonNullable<PersistentChatConfig>, generation: number): Promise<boolean> {
 		// The save landed; a tab that moved to another conversation meanwhile does not switch, and parks with the saved line.
-		const currentChat = persistentChatRef.current;
-		if (!currentChat || currentChat.agentId !== targetChat.agentId || currentChat.conversationId !== targetChat.conversationId) throw new Error(REMEMBER_OTHER_CONVERSATION_OPEN);
+		if (!checkpointOriginCurrent(targetChat, generation)) return false;
 		const freshThreadId = approval.postCheckpoint.activeThreadId || approval.runtimeBoundary.newThreadId;
 		const record = await fetchPersistentAgentThread(targetChat.agentId, freshThreadId);
+		if (!checkpointOriginCurrent(targetChat, generation)) return false;
 		const thread = threadRecordToLocalThread(record, targetChat.displayName);
 		const liveThread = { ...thread, state: "live" as const };
 		// Deliberate boundary rebind: this close must not trigger auto-reconnect.
@@ -5423,6 +5435,7 @@ export function App() {
 		setItems(liveThread.items);
 		setPersistentThread(liveThread);
 		setPersistentChat({ agentId: liveThread.agentId, displayName: liveThread.displayName, conversationId: liveThread.conversationId, model: liveThread.model });
+		const newGeneration = checkpointContextRef.current.generation;
 		// Consult MR-5 checkpoint EXCEPTION (§2.3): the checkpoint closes this thread
 		// and prepares a fresh one; an un-transferred-into-memory consult must survive
 		// into it. The server-created fresh thread starts empty (the checkpoint write
@@ -5432,9 +5445,11 @@ export function App() {
 		const carriedQueue = pendingHandoffsRef.current;
 		applyPendingHandoffs(carriedQueue, deriveTrailingConsultIds(liveThread.items, carriedQueue.length));
 		await savePersistentAgentThread(liveThread, "active", "checkpoint", liveThread.items, carriedQueue);
+		if (!checkpointOriginCurrent(liveThread, newGeneration)) return false;
 		setCurrentModel(liveThread.model);
 		setView("chat");
 		setSessionVersion((v) => v + 1);
+		return true;
 	}
 
 	async function bindToMementoRuntime(result: PersistentAgentMementoBoundaryResponse, targetChat: NonNullable<PersistentChatConfig>): Promise<void> {
@@ -5499,6 +5514,7 @@ export function App() {
 
 	async function approveCheckpointProposal(approvedFields: CheckpointApprovalEditFields) {
 		const targetChat = persistentChat;
+		const generation = checkpointContextRef.current.generation;
 		const proposal = checkpointProposal;
 		if (!targetChat || !proposal || checkpointApprovalLoading) return;
 		if (busyRef.current || turnCancellingRef.current) {
@@ -5513,9 +5529,7 @@ export function App() {
 			setCheckpointApprovalError(REMEMBER_OTHER_CONVERSATION_OPEN);
 			return;
 		}
-		const cleanAction = admitCleanMarkdownEditorAction(() => approveCheckpointProposal(approvedFields));
-		if (cleanAction) { await cleanAction; return; }
-		if (!guardMarkdownEditorAction(() => approveCheckpointProposal(approvedFields), "navigate")) return;
+		if (!guardMarkdownEditorAction(() => { void approveCheckpointProposal(approvedFields); }, "navigate")) return;
 		setCheckpointApprovalLoading(true);
 		setCheckpointApprovalError(null);
 		try {
@@ -5527,31 +5541,43 @@ export function App() {
 			} catch (e) {
 				if (!saveAnswerLost(e)) throw e;
 				// The answer was lost: the line says so, and the room says once it answers whether this conversation saved.
-				setCheckpointApprovalError(SAVE_ANSWER_LOST_SENTENCE);
+				if (checkpointOriginCurrent(targetChat, generation)) setCheckpointApprovalError(SAVE_ANSWER_LOST_SENTENCE);
 				const landed = await lostRememberSaveLanded(targetChat, proposal, approvedFields);
 				if (!landed) {
-					setCheckpointApprovalError(SAVE_NOT_LANDED_SENTENCE);
+					if (checkpointOriginCurrent(targetChat, generation)) setCheckpointApprovalError(SAVE_NOT_LANDED_SENTENCE);
 					return;
 				}
 				approval = landed;
 				answerWasLost = true;
-				setCheckpointApprovalError(null);
+				if (checkpointOriginCurrent(targetChat, generation)) setCheckpointApprovalError(null);
 			}
+			if (!checkpointOriginCurrent(targetChat, generation)) return;
 			void refreshPersistentAgentStatus();
 			// A save that had already landed parks the window, unless it filled the room or this window's answer was the one lost: then its page shows.
-			if (approval.alreadySaved && !answerWasLost && !roomFilledBy(approval)) { parkAfterSavedRemember(targetChat, savedHereBefore ? REMEMBER_SAVED_REOPEN_SENTENCE : REMEMBER_SAVED_ELSEWHERE_SENTENCE); return; }
-			// A tab that moved to another conversation meanwhile never shows this save's page: the card says it.
-			// Asked before the bind, which is what moves this tab to the fresh conversation.
-			if (tabMovedFrom(targetChat)) return;
+			const park = approval.alreadySaved && !answerWasLost && !roomFilledBy(approval);
 			// A save that fills the room never binds: the empty conversation would be refused. Its page offers Memorize.
-			if (!roomFilledBy(approval)) {
-				try { await bindToApprovedCheckpointRuntime(approval, targetChat); } catch { parkAfterSavedRemember(targetChat); return; }
-			}
-			setCheckpointApprovalResult(approval);
+			if (roomFilledBy(approval)) { setCheckpointApprovalResult(approval); return; }
+			const continueApproval = async (): Promise<void> => {
+				if (!checkpointOriginCurrent(targetChat, generation)) return;
+				const cleanAction = admitCleanMarkdownEditorAction(continueApproval);
+				if (cleanAction) { await cleanAction; return; }
+				if (!guardMarkdownEditorAction(continueApproval, "navigate")) return;
+				if (!checkpointOriginCurrent(targetChat, generation)) return;
+				if (park) { parkAfterSavedRemember(targetChat, savedHereBefore ? REMEMBER_SAVED_REOPEN_SENTENCE : REMEMBER_SAVED_ELSEWHERE_SENTENCE); return; }
+				try {
+					if (await bindToApprovedCheckpointRuntime(approval, targetChat, generation)) {
+						setCheckpointApprovalLoading(false);
+						setCheckpointApprovalResult(approval);
+					}
+				} catch {
+					if (checkpointOriginCurrent(targetChat, generation)) parkAfterSavedRemember(targetChat);
+				}
+			};
+			await continueApproval();
 		} catch (e) {
-			setCheckpointApprovalError(formatRememberError((e as Error).message));
+			if (checkpointOriginCurrent(targetChat, generation)) setCheckpointApprovalError(formatRememberError((e as Error).message));
 		} finally {
-			setCheckpointApprovalLoading(false);
+			if (checkpointOriginCurrent(targetChat, generation)) setCheckpointApprovalLoading(false);
 		}
 	}
 
@@ -5608,6 +5634,7 @@ export function App() {
 
 	async function runQuickCheckpoint() {
 		const targetChat = persistentChat;
+		const generation = checkpointContextRef.current.generation;
 		if (!targetChat || checkpointProposalLoading || checkpointApprovalLoading) return;
 		if (busyRef.current || turnCancellingRef.current) return;
 		setCheckpointQuickRequested(true);
@@ -5626,10 +5653,13 @@ export function App() {
 		checkpointProposalAbortRef.current = cancel;
 		try {
 			proposal = await requestCheckpointProposal(targetChat, "standard", "", cancel.signal);
+			if (!checkpointOriginCurrent(targetChat, generation)) return;
 			setCheckpointProposal(proposal);
 		} catch (e) {
-			showCheckpointProposalFailure(e, cancel);
-			setCheckpointProposalLoading(false);
+			if (checkpointOriginCurrent(targetChat, generation)) {
+				showCheckpointProposalFailure(e, cancel);
+				setCheckpointProposalLoading(false);
+			}
 			return;
 		} finally {
 			if (checkpointProposalAbortRef.current === cancel) checkpointProposalAbortRef.current = null;
@@ -5643,6 +5673,7 @@ export function App() {
 		// Off (or unreadable) means review-first: the safe direction is showing
 		// the proposal, never silently applying it.
 		const skipsPreview = await fetchQuickCheckpointPreference(targetChat.agentId);
+		if (!checkpointOriginCurrent(targetChat, generation)) return;
 		setRememberSkipsPreview(skipsPreview);
 		// Off: the review simply opens, as Remember's own review.
 		if (!skipsPreview) {
@@ -5663,31 +5694,42 @@ export function App() {
 				if (!landed) throw new Error(SAVE_NOT_LANDED_SENTENCE);
 				approval = { ...landed, alreadySaved: undefined };
 			}
+			if (!checkpointOriginCurrent(targetChat, generation)) return;
 			void refreshPersistentAgentStatus();
-			if (approval.alreadySaved && !roomFilledBy(approval)) { parkAfterSavedRemember(targetChat, savedHereBefore ? REMEMBER_SAVED_REOPEN_SENTENCE : REMEMBER_SAVED_ELSEWHERE_SENTENCE); return; }
 			if (roomFilledBy(approval)) {
-				if (tabMovedFrom(targetChat)) return;
 				setCheckpointApprovalResult(approval);
 				setCheckpointPreviewOpen(true);
 				return;
 			}
-			try { await bindToApprovedCheckpointRuntime(approval, targetChat); } catch { parkAfterSavedRemember(targetChat); return; }
-			resetCheckpointInput();
-			// "automatically" is deliberate: the saved line must disclose that no
-			// human reviewed this entry before it was written.
-			const refusedWhole = rememberRefusedWholeSentence(proposal);
-			let savedNote = refusedWhole ? refusedWhole.replace(/^Saved\./, "Saved to memory automatically.") : "Saved to memory automatically.";
-			// The manual path shows the sessions-cap heads-up in the preview; the
-			// auto path has no preview, so it rides the saved line instead.
-			const headsUp = recentSessionsHeadsUp(approval.recentContextEntryCount);
-			if (headsUp) savedNote += ` ${headsUp}`;
-			setItems((s) => [...s, { kind: "system", id: nid(), text: savedNote }]);
+			const continueQuick = async (): Promise<void> => {
+				if (!checkpointOriginCurrent(targetChat, generation)) return;
+				const cleanAction = admitCleanMarkdownEditorAction(continueQuick);
+				if (cleanAction) { await cleanAction; return; }
+				if (!guardMarkdownEditorAction(continueQuick, "navigate")) return;
+				if (!checkpointOriginCurrent(targetChat, generation)) return;
+				if (approval.alreadySaved) { parkAfterSavedRemember(targetChat, savedHereBefore ? REMEMBER_SAVED_REOPEN_SENTENCE : REMEMBER_SAVED_ELSEWHERE_SENTENCE); return; }
+				try {
+					if (!(await bindToApprovedCheckpointRuntime(approval, targetChat, generation))) return;
+				} catch {
+					if (checkpointOriginCurrent(targetChat, generation)) parkAfterSavedRemember(targetChat);
+					return;
+				}
+				setCheckpointApprovalLoading(false);
+				resetCheckpointInput();
+				// Say that no person reviewed this automatic save; the heads-up has no preview to ride on.
+				const refusedWhole = rememberRefusedWholeSentence(proposal);
+				let savedNote = refusedWhole ? refusedWhole.replace(/^Saved\./, "Saved to memory automatically.") : "Saved to memory automatically.";
+				const headsUp = recentSessionsHeadsUp(approval.recentContextEntryCount);
+				if (headsUp) savedNote += ` ${headsUp}`;
+				setItems((s) => [...s, { kind: "system", id: nid(), text: savedNote }]);
+			};
+			await continueQuick();
 		} catch (e) {
 			// The cause only when it is one of Remember's plain sentences: no raw text.
 			const cause = formatRememberError((e as Error).message);
-			setCheckpointApprovalError(`Saving did not work this time. Here is the entry to save.${isPlainRememberSentence(cause) ? ` ${cause}` : ""}`);
+			if (checkpointOriginCurrent(targetChat, generation)) setCheckpointApprovalError(`Saving did not work this time. Here is the entry to save.${isPlainRememberSentence(cause) ? ` ${cause}` : ""}`);
 		} finally {
-			setCheckpointApprovalLoading(false);
+			if (checkpointOriginCurrent(targetChat, generation)) setCheckpointApprovalLoading(false);
 		}
 	}
 
@@ -7599,8 +7641,11 @@ export function App() {
 			if (!isTouchScreen()) window.requestAnimationFrame(() => textareaRef.current?.focus());
 		};
 		if (approval && targetChat && targetChat.conversationId !== approval.postCheckpoint.activeThreadId) {
+			const generation = checkpointContextRef.current.generation;
+			const cleanAction = admitCleanMarkdownEditorAction(async () => { await continueAfterCheckpoint(); });
+			if (cleanAction) return cleanAction;
 			if (!guardMarkdownEditorAction(() => continueAfterCheckpoint(), "navigate")) return;
-			return bindToApprovedCheckpointRuntime(approval, targetChat).then(keepChatting).catch((error) => setCheckpointApprovalError(formatRememberError((error as Error).message)));
+			return bindToApprovedCheckpointRuntime(approval, targetChat, generation).then((bound) => { if (bound) keepChatting(); }).catch((error) => { if (checkpointOriginCurrent(targetChat, generation)) setCheckpointApprovalError(formatRememberError((error as Error).message)); });
 		}
 		keepChatting();
 	}
