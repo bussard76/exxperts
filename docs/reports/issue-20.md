@@ -136,3 +136,7 @@ A clean Home action now retains the document reservation until its existing leav
 ## Checkpoint: clean Room settings Memento
 
 A clean Room settings Memento now retains the document reservation through the component's existing confirmation and request. The controlled real-request `workspace-file-tabs-ui-smoke.ts` case selected a competing file before the change and withheld it afterward; the file-tabs and settings smokes passed 2/2. Other clean exits and the complete host/native contract remain pending.
+
+## Checkpoint: clean Archive admission
+
+An Archive action for the current room now holds the clean document reservation through its existing callback and returns its existing result. The invented-room `workspace-file-tabs-ui-smoke.ts` case observed two held Archive requests before the change and one afterward; the filtered smoke passed 1/1. Archive of another room is not reclassified as a current-context exit, and Purge and the remaining clean actions still need their own checks.

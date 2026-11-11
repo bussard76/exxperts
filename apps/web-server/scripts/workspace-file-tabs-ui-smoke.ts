@@ -1578,6 +1578,34 @@ try {
 			await unknownPrompt.getByRole("button", { name: "Discard changes" }).click();
 			assert(await roomPage.locator(".markdown-editor-tiptap .ProseMirror").count() === 1 && (await roomPage.locator(".markdown-editor-tiptap .ProseMirror").textContent())?.includes("unresolved draft") && unknownWrites === 1, "an unknown write prevents discard and retry while retaining the draft");
 		} finally { await roomContext.close(); }
+		const archiveRoom = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Willow", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
+		assert(archiveRoom.status === 201, "the invented archive-test room is created");
+		const archiveRoomId = String(archiveRoom.body?.agent?.id ?? "");
+		const archiveWorkspace = await api(`/api/persistent-agents/${encodeURIComponent(archiveRoomId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: folder, workspaceAccessMode: "localFiles" }) });
+		assert(archiveWorkspace.status === 200, "the archive-test room uses the temporary workspace");
+		const archiveContext = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+		try {
+			const archivePage = await archiveContext.newPage();
+			await archivePage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+			await archivePage.waitForLoadState("networkidle");
+			const close = archivePage.locator(".whats-new-close");
+			if (await close.count()) await close.click();
+			await archivePage.locator(".persistent-agent-card").filter({ hasText: "Willow" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+			await archivePage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "photo.png" }).click();
+			await archivePage.getByRole("button", { name: "Room settings" }).click();
+			await archivePage.locator(".settings-dialog-nav-item").filter({ hasText: /^Archive or delete$/ }).first().click();
+			let archiveRequests = 0, releaseArchive!: () => void, startArchive!: () => void;
+			const archiveReleased = new Promise<void>((resolve) => { releaseArchive = resolve; });
+			const archiveStarted = new Promise<void>((resolve) => { startArchive = resolve; });
+			await archivePage.route("**/archive", async (route) => { archiveRequests++; startArchive(); await archiveReleased; await route.continue(); });
+			await archivePage.locator(".room-danger-zone").getByRole("button", { name: "Archive", exact: true }).evaluate((button) => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
+			try {
+				await archiveStarted;
+				await archivePage.waitForTimeout(250);
+				assert(archiveRequests === 1, `a clean archive executes once while pending, got ${archiveRequests}`);
+			} finally { releaseArchive(); }
+			await waitUntil(async () => await archivePage.locator(".persistent-agent-card").filter({ hasText: "Willow" }).count() === 0, "the invented room is archived");
+		} finally { await archiveContext.close(); }
 	} finally {
 		await browser.close();
 	}

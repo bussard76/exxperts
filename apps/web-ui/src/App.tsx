@@ -1678,6 +1678,10 @@ export function App() {
 	async function archivePersistentAgentRoom(agentId: PersistentAgentId, confirmation: string): Promise<PersistentAgentArchiveResponse | null> {
 		const roomName = shownRoomName(persistentAgentStatuses.find((status) => status.id === agentId)?.displayName) || agentId;
 		const leavingBoundRoom = persistentChat?.agentId === agentId;
+		if (leavingBoundRoom) {
+			const cleanAction = admitCleanMarkdownEditorAction(() => archivePersistentAgentRoom(agentId, confirmation));
+			if (cleanAction) return await cleanAction as PersistentAgentArchiveResponse | null;
+		}
 		if (leavingBoundRoom && !guardMarkdownEditorAction(() => archivePersistentAgentRoom(agentId, confirmation), "navigate")) return null;
 		if (leavingBoundRoom && persistentRoomInFlight) {
 			// Leaving now would detach the turn into background cooking, and the
