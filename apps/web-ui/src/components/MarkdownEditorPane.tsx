@@ -104,6 +104,18 @@ function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
+async function readRevisionWithinDeadline(agentId: string, conversationId: string, path: string): Promise<WorkspaceMarkdownFile> {
+	const controller = new AbortController();
+	const timer = window.setTimeout(() => controller.abort(), 30_000);
+	try {
+		const file = await getWorkspaceMarkdownFile(agentId, conversationId, path, { signal: controller.signal });
+		if (controller.signal.aborted) throw new Error("The revision read timed out.");
+		return file;
+	} finally {
+		window.clearTimeout(timer);
+	}
+}
+
 interface SurfaceHandle {
 	setFence: (value: boolean) => void;
 	save: (resolvedConflict?: boolean) => Promise<boolean>;
@@ -540,7 +552,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		if (unknown) {
 			if (!unknown.terminal) return null;
 			try {
-				const latest = await getWorkspaceMarkdownFile(agentId, conversationId, path);
+				const latest = await readRevisionWithinDeadline(agentId, conversationId, path);
 				if (latest.revision === unknown.revision) return null;
 				unknownWriteRef.current = null;
 				if (latest.content !== unknown.content) {
@@ -594,7 +606,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			if (!(cause instanceof WorkspaceMarkdownApiError)) {
 				unknownWriteRef.current = { content, revision, terminal: true };
 				try {
-					const latest = await getWorkspaceMarkdownFile(agentId, conversationId, path);
+					const latest = await readRevisionWithinDeadline(agentId, conversationId, path);
 					if (latest.revision !== revision && latest.content === content) {
 						unknownWriteRef.current = null;
 						recordConfirmedWrite(latest);
@@ -674,7 +686,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		if (!unknown) return true;
 		if (!unknown.terminal) return false;
 		try {
-			const latest = await getWorkspaceMarkdownFile(agentId, conversationId, path);
+			const latest = await readRevisionWithinDeadline(agentId, conversationId, path);
 			if (latest.revision === unknown.revision) return false;
 			unknownWriteRef.current = null;
 			fileRef.current = latest;
@@ -759,12 +771,8 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		if (keepMineInFlightRef.current) return;
 		const localDraft = surfaceRef.current?.getContent() ?? draftRef.current;
 		const request = (async () => {
-			const controller = new AbortController();
-			const timer = window.setTimeout(() => controller.abort(), 30_000);
 			try {
-				const latest = await getWorkspaceMarkdownFile(agentId, conversationId, path, { signal: controller.signal });
-				if (controller.signal.aborted) return false;
-				window.clearTimeout(timer);
+				const latest = await readRevisionWithinDeadline(agentId, conversationId, path);
 				fileRef.current = latest;
 				setFile(latest);
 				dismissExternalUpdate();
@@ -777,8 +785,6 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 				setPhase("conflict");
 				setError(errorMessage(cause));
 				return false;
-			} finally {
-				window.clearTimeout(timer);
 			}
 		})();
 		keepMineInFlightRef.current = request;

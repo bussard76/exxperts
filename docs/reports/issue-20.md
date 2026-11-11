@@ -276,3 +276,7 @@ The `two-window-room-ui-smoke.ts` Home Save scenario now also changes the invent
 ## Checkpoint: bounded Keep mine revision read
 
 The conflict-resolution revision read now has a 30-second abort deadline; after that read is canceled, its late result cannot initiate a PUT. `two-window-room-ui-smoke.ts` holds the real read with an accelerated timer, requests Home Save, and verifies the guard refuses, retains the draft and sends no later write after the read is released. Before the change the guard remained open past the deadline. UI and scripts typechecks, the UI-only build, and the attributed two-window and Markdown-images smokes passed 2/2. This covers a local read timeout only; the correlated native exchange and its abort acknowledgement remain unimplemented.
+
+## Checkpoint: bounded unknown-write reconciliation
+
+The existing unknown-write reconciliation reads now use the same 30-second abort deadline as the conflict revision read. `two-window-room-ui-smoke.ts` aborts a real PUT transport, holds the ensuing reconciliation GET and accelerates the deadline; before the change the Home Save guard stayed open, and afterward it refuses Home, retains the exact local draft and unknown outcome, and sends no late retry when the held read is released. UI and scripts typechecks, the UI-only build and the attributed two-window, file-tabs and Markdown-images smokes passed 3/3. Other C2/C4 correlations, detached-host and native lifecycle requirements remain open.

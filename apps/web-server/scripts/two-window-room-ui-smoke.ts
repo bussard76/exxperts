@@ -50,6 +50,7 @@ fs.writeFileSync(path.join(workspace, "guard-keep.md"), "# Invented keep origina
 fs.writeFileSync(path.join(workspace, "guard-keep-save.md"), "# Invented save original\n");
 fs.writeFileSync(path.join(workspace, "guard-keep-save-conflict.md"), "# Invented save original\n");
 fs.writeFileSync(path.join(workspace, "guard-keep-timeout.md"), "# Invented timeout original\n");
+fs.writeFileSync(path.join(workspace, "guard-unknown-timeout.md"), "# Invented unknown original\n");
 for (const dir of [agentsRoot, agentDir]) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 process.env.HOME = tempHome;
 process.env.USERPROFILE = tempHome;
@@ -447,6 +448,40 @@ try {
 			await t.waitForTimeout(500);
 			assert(writes === 0 && fs.readFileSync(path.join(workspace, "guard-keep-timeout.md"), "utf8") === "# Invented timeout competitor\n", "a late read cannot start a Keep mine write after timeout");
 			await t.close();
+		}
+		{
+			const u = await ctx.newPage();
+			await u.goto(`${baseUrl}/#/room/${agentId}`);
+			await u.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "guard-unknown-timeout.md" }).click();
+			await u.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented unknown original").waitFor();
+			await u.getByRole("button", { name: "RAW", exact: true }).click();
+			const raw = u.getByRole("textbox", { name: "Raw Markdown source" });
+			await u.evaluate(() => {
+				const original = window.setTimeout;
+				window.setTimeout = ((handler: TimerHandler, delay?: number, ...args: any[]) => original(handler, delay === 30_000 ? 1000 : delay, ...args)) as typeof window.setTimeout;
+			});
+			let releaseRead!: () => void, startRead!: () => void, writes = 0;
+			const released = new Promise<void>((resolve) => { releaseRead = resolve; });
+			const started = new Promise<void>((resolve) => { startRead = resolve; });
+			await u.route("**/workspace-markdown?*", async (route) => {
+				if (route.request().method() === "PUT") { writes++; return route.abort(); }
+				startRead();
+				await released;
+				await route.continue().catch(() => {});
+			});
+			try {
+				await raw.fill("# Invented unknown draft\n");
+				await u.locator(".markdown-editor-save").click();
+				await started;
+				await u.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+				const guard = u.getByRole("dialog", { name: "Unsaved Markdown changes" });
+				await guard.getByRole("button", { name: "Save and continue" }).click();
+				await guard.waitFor({ state: "hidden", timeout: 4000 });
+				assert((await raw.inputValue()) === "# Invented unknown draft\n" && (await u.evaluate(() => location.hash)).includes("/room/") && writes === 1, "a timed-out reconciliation refuses Home and retains the unknown write and draft");
+			} finally { releaseRead(); }
+			await u.waitForTimeout(500);
+			assert(writes === 1 && fs.readFileSync(path.join(workspace, "guard-unknown-timeout.md"), "utf8") === "# Invented unknown original\n", "a late reconciliation cannot retry the unknown write");
+			await u.close();
 		}
 		const e = await ctx.newPage();
 		await e.goto(`${baseUrl}/#/room/${agentId}`);
