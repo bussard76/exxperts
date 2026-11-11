@@ -12,6 +12,7 @@ interface Options {
 	/** True when the file load has settled; path changes wait for real content. */
 	isSettled: boolean;
 	onDirtyChange?: (isDirty: boolean) => void;
+	onMutation?: () => void;
 	setContentRef?: RefObject<((content: string) => void) | null>;
 }
 
@@ -31,14 +32,23 @@ export function useMarkdownEditorSync({
 	path,
 	isSettled,
 	onDirtyChange,
+	onMutation,
 	setContentRef,
 }: Options): Result {
 	const [editorKey, setEditorKey] = useState(0);
 	const [isDirty, setIsDirty] = useState(false);
-	const [hasExternalUpdate, setHasExternalUpdate] = useState(false);
+	const [hasExternalUpdate, setHasExternalUpdateState] = useState(false);
+	const externalUpdateRef = useRef(false);
 	const isDirtyRef = useRef(isDirty);
 	isDirtyRef.current = isDirty;
 	const pendingContentRef = useRef<string | null>(null);
+	const setHasExternalUpdate = useCallback((value: boolean) => {
+		if (externalUpdateRef.current !== value) { externalUpdateRef.current = value; onMutation?.(); }
+		setHasExternalUpdateState(value);
+	}, [onMutation]);
+	const setPendingContent = useCallback((value: string | null) => {
+		if (pendingContentRef.current !== value) { pendingContentRef.current = value; onMutation?.(); }
+	}, [onMutation]);
 	const lastSavedRef = useRef<string | null>(null);
 	const prevContentRef = useRef(content);
 	const prevPathRef = useRef(path);
@@ -54,12 +64,12 @@ export function useMarkdownEditorSync({
 		if (prevPathRef.current === path) return;
 		prevPathRef.current = path;
 		prevContentRef.current = content;
-		pendingContentRef.current = null;
+		setPendingContent(null);
 		lastSavedRef.current = null;
 		setHasExternalUpdate(false);
 		setDirty(false);
 		pendingRemountRef.current = true;
-	}, [path, content, setDirty]);
+	}, [path, content, setDirty, setHasExternalUpdate, setPendingContent]);
 
 	useEffect(() => {
 		if (!isSettled || !pendingRemountRef.current) return;
@@ -77,53 +87,53 @@ export function useMarkdownEditorSync({
 		prevContentRef.current = content;
 		if (pendingRemountRef.current) return;
 		if (isDirtyRef.current) {
-			pendingContentRef.current = content;
+			setPendingContent(content);
 			setHasExternalUpdate(true);
 			return;
 		}
 		if (setContentRef?.current) setContentRef.current(content);
 		else setEditorKey((key) => key + 1);
-	}, [content, setContentRef]);
+	}, [content, setContentRef, setHasExternalUpdate, setPendingContent]);
 
 	useEffect(() => {
 		if (isDirty || pendingContentRef.current === null) return;
 		const pending = pendingContentRef.current;
-		pendingContentRef.current = null;
+		setPendingContent(null);
 		setHasExternalUpdate(false);
 		if (setContentRef?.current) setContentRef.current(pending);
 		else setEditorKey((key) => key + 1);
-	}, [isDirty, setContentRef]);
+	}, [isDirty, setContentRef, setHasExternalUpdate, setPendingContent]);
 
 	const discardAndApplyExternal = useCallback(() => {
 		const pending = pendingContentRef.current;
-		pendingContentRef.current = null;
+		setPendingContent(null);
 		setHasExternalUpdate(false);
 		setDirty(false);
 		if (setContentRef?.current && pending !== null) setContentRef.current(pending);
 		else setEditorKey((key) => key + 1);
-	}, [setDirty, setContentRef]);
+	}, [setDirty, setContentRef, setHasExternalUpdate, setPendingContent]);
 
 	const dismissExternalUpdate = useCallback(() => {
-		pendingContentRef.current = null;
+		setPendingContent(null);
 		setHasExternalUpdate(false);
-	}, []);
+	}, [setHasExternalUpdate, setPendingContent]);
 
 	const markSaved = useCallback((saved: string) => {
-		lastSavedRef.current = saved;
-	}, []);
+		if (lastSavedRef.current !== saved) { lastSavedRef.current = saved; onMutation?.(); }
+	}, [onMutation]);
 
 	const reconcileServerContent = useCallback((serverContent: string): boolean => {
 		if (serverContent === prevContentRef.current || serverContent === lastSavedRef.current) return false;
 		prevContentRef.current = serverContent;
 		if (isDirtyRef.current) {
-			pendingContentRef.current = serverContent;
+			setPendingContent(serverContent);
 			setHasExternalUpdate(true);
 			return true;
 		}
 		if (setContentRef?.current) setContentRef.current(serverContent);
 		else setEditorKey((key) => key + 1);
 		return false;
-	}, [setContentRef]);
+	}, [setContentRef, setHasExternalUpdate, setPendingContent]);
 
 	return {
 		editorKey,

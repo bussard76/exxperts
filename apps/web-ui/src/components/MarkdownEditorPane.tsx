@@ -41,10 +41,12 @@ export interface MarkdownEditorHandle {
 interface Props {
 	agentId: string;
 	conversationId: string;
+	contextGeneration: number;
 	path: string;
 	fenced: boolean;
 	onClose: () => void;
-	onDirtyChange: (dirty: boolean) => void;
+	onMutation: (agentId: string, conversationId: string, generation: number) => void;
+	onDirtyChange: (dirty: boolean, agentId: string, conversationId: string, generation: number) => void;
 	onOpenMarkdown?: (path: string) => void;
 }
 
@@ -116,6 +118,23 @@ async function readRevisionWithinDeadline(agentId: string, conversationId: strin
 	}
 }
 
+function sameDocumentFile(a: WorkspaceMarkdownFile | null, b: WorkspaceMarkdownFile | null): boolean {
+	return a === b || Boolean(a && b && a.path === b.path && a.content === b.content && a.bytes === b.bytes && a.revision === b.revision && a.readOnly === b.readOnly);
+}
+
+function useDocumentState<T>(initial: T, onMutation: () => void, equals: (a: T, b: T) => boolean = Object.is): [T, (next: T) => void] {
+	const [value, setValue] = useState(initial);
+	const current = useRef(initial);
+	const set = useCallback((next: T) => {
+		if (!equals(current.current, next)) {
+			current.current = next;
+			onMutation();
+		}
+		setValue(next);
+	}, [equals, onMutation]);
+	return [value, set];
+}
+
 interface SurfaceHandle {
 	setFence: (value: boolean) => void;
 	save: (resolvedConflict?: boolean) => Promise<boolean>;
@@ -147,6 +166,7 @@ interface SurfaceProps {
 	resolveImageSrc: (src: string) => string | null;
 	setDirty: (dirty: boolean) => void;
 	onDraftChange: (content: string) => void;
+	onMutation: () => void;
 	onSave: (content: string, revision: string) => Promise<string | null>;
 	discardAndApplyExternal: () => void;
 	contentSetterRef: { current: ((content: string) => void) | null };
@@ -167,6 +187,7 @@ function MarkdownEditorSurface({
 	resolveImageSrc,
 	setDirty,
 	onDraftChange,
+	onMutation,
 	onSave,
 	discardAndApplyExternal,
 	contentSetterRef,
@@ -229,6 +250,7 @@ function MarkdownEditorSurface({
 			// exact text stays the content, so opening a file or switching views never
 			// rewrites it. The editor's own tidying after loading is not an edit.
 			if (!changed.isFocused && !userEditedRef.current && rawRef.current !== null) return;
+			onMutation();
 			rawRef.current = null;
 			const markdown = editorMarkdown(changed);
 			draftRef.current = markdown;
@@ -274,12 +296,13 @@ function MarkdownEditorSurface({
 			}
 		})();
 		saveInFlightRef.current = request;
+		onMutation();
 		try {
 			return await request;
 		} finally {
-			if (saveInFlightRef.current === request) saveInFlightRef.current = null;
+			if (saveInFlightRef.current === request) { saveInFlightRef.current = null; onMutation(); }
 		}
-	}, [canEdit, hasExternalUpdate, onDraftChange, onSave, setDirty]);
+	}, [canEdit, hasExternalUpdate, onDraftChange, onMutation, onSave, setDirty]);
 	headerSaveRef.current = save;
 
 	const discard = useCallback(() => {
@@ -290,32 +313,35 @@ function MarkdownEditorSurface({
 		const current = editorRef.current;
 		if (!current) return;
 		const next = baselineRef.current;
+		if (rawRef.current !== next || userEditedRef.current) onMutation();
 		rawRef.current = next;
 		current.commands.setContent(next, { emitUpdate: false, contentType: "markdown" });
 		draftRef.current = next;
 		onDraftChange(next);
 		userEditedRef.current = false;
 		setDirty(false);
-	}, [discardAndApplyExternal, hasExternalUpdate, onDraftChange, setDirty]);
+	}, [discardAndApplyExternal, hasExternalUpdate, onDraftChange, onMutation, setDirty]);
 
 	const markSaved = useCallback((saved: string, revision: string) => {
+		const latest = editorRef.current ? editorMarkdown(editorRef.current) : draftRef.current;
+		if (baselineRef.current !== saved || revisionRef.current !== revision || userEditedRef.current !== (latest !== saved)) onMutation();
 		baselineRef.current = saved;
 		revisionRef.current = revision;
-		const latest = editorRef.current ? editorMarkdown(editorRef.current) : draftRef.current;
 		draftRef.current = latest;
 		onDraftChange(latest);
 		userEditedRef.current = latest !== saved;
 		setDirty(userEditedRef.current);
-	}, [onDraftChange, setDirty]);
+	}, [onDraftChange, onMutation, setDirty]);
 
 	const setRaw = useCallback((text: string) => {
 		if (!canEdit || fencedRef.current) return;
+		if (rawRef.current !== text || !userEditedRef.current) onMutation();
 		rawRef.current = text;
 		draftRef.current = text;
 		onDraftChange(text);
 		userEditedRef.current = true;
 		setDirty(text !== baselineRef.current);
-	}, [canEdit, onDraftChange, setDirty]);
+	}, [canEdit, onDraftChange, onMutation, setDirty]);
 
 	const leaveRaw = useCallback(() => {
 		const raw = rawRef.current;
@@ -348,6 +374,7 @@ function MarkdownEditorSurface({
 		editor.setEditable(canEdit && !readOnly && !fenced, false);
 		contentSetterRef.current = (next: string) => {
 			if (editor.isDestroyed) return;
+			if (rawRef.current !== next || baselineRef.current !== next || userEditedRef.current) onMutation();
 			rawRef.current = next;
 			trailingNewlinesRef.current = next.match(/(?:\r?\n)+$/)?.[0] ?? "";
 			editor.commands.setContent(next, { emitUpdate: false, contentType: "markdown" });
@@ -360,7 +387,7 @@ function MarkdownEditorSurface({
 		return () => {
 			if (contentSetterRef.current) contentSetterRef.current = null;
 		};
-	}, [canEdit, contentSetterRef, editor, fenced, onDraftChange, readOnly, setDirty]);
+	}, [canEdit, contentSetterRef, editor, fenced, onDraftChange, onMutation, readOnly, setDirty]);
 
 	useEffect(() => {
 		const handler = (event: KeyboardEvent) => {
@@ -434,17 +461,22 @@ function resolveWorkspaceMarkdownPath(currentPath: string, href: string, allowEx
 	return allowExtensionless ? `${resolved}.md` : null;
 }
 
-export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agentId, conversationId, path, fenced, onClose, onDirtyChange, onOpenMarkdown }: Props, ref: Ref<MarkdownEditorHandle>) {
-	const [file, setFile] = useState<WorkspaceMarkdownFile | null>(null);
+export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agentId, conversationId, contextGeneration, path, fenced, onClose, onMutation, onDirtyChange, onOpenMarkdown }: Props, ref: Ref<MarkdownEditorHandle>) {
+	const noteMutation = useCallback(() => onMutation(agentId, conversationId, contextGeneration), [agentId, contextGeneration, conversationId, onMutation]);
+	const reportDirty = useCallback((dirty: boolean) => onDirtyChange(dirty, agentId, conversationId, contextGeneration), [agentId, contextGeneration, conversationId, onDirtyChange]);
+	const [file, setFile] = useDocumentState<WorkspaceMarkdownFile | null>(null, noteMutation, sameDocumentFile);
 	const fileRef = useRef<WorkspaceMarkdownFile | null>(null);
-	const [draft, setDraft] = useState("");
+	const [draft, setDraft] = useDocumentState("", noteMutation);
 	const draftRef = useRef("");
-	const [phase, setPhase] = useState<EditorPhase>("loading");
-	const [mode, setMode] = useState<EditorMode>("edit");
-	const [error, setError] = useState<string | null>(null);
-	const [conflictRevision, setConflictRevision] = useState<string | null>(null);
-	const [canEdit, setCanEdit] = useState(false);
+	const [phase, setPhase] = useDocumentState<EditorPhase>("loading", noteMutation);
+	const [mode, setMode] = useDocumentState<EditorMode>("edit", noteMutation);
+	const [error, setError] = useDocumentState<string | null>(null, noteMutation);
+	const [conflictRevision, setConflictRevision] = useDocumentState<string | null>(null, noteMutation);
+	const [canEdit, setCanEdit] = useDocumentState(false, noteMutation);
 	const unknownWriteRef = useRef<{ content: string; revision: string; terminal: boolean } | null>(null);
+	const setUnknownWrite = useCallback((next: { content: string; revision: string; terminal: boolean } | null) => {
+		if (unknownWriteRef.current !== next) { unknownWriteRef.current = next; noteMutation(); }
+	}, [noteMutation]);
 	const keepMineInFlightRef = useRef<Promise<boolean> | null>(null);
 	const surfaceRef = useRef<SurfaceHandle | null>(null);
 	const rawAreaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -462,7 +494,8 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		content: file?.content ?? "",
 		path,
 		isSettled: file?.path === path && phase !== "loading",
-		onDirtyChange,
+		onDirtyChange: reportDirty,
+		onMutation: noteMutation,
 		setContentRef: contentSetterRef,
 	});
 	const { editorKey, isDirty, hasExternalUpdate, setDirty, dismissExternalUpdate, discardAndApplyExternal, markSaved, reconcileServerContent } = sync;
@@ -493,7 +526,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 
 	useEffect(() => {
 		const controller = new AbortController();
-		unknownWriteRef.current = null;
+		setUnknownWrite(null);
 		fileRef.current = null;
 		setFile(null);
 		draftRef.current = "";
@@ -554,7 +587,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			try {
 				const latest = await readRevisionWithinDeadline(agentId, conversationId, path);
 				if (latest.revision === unknown.revision) return null;
-				unknownWriteRef.current = null;
+				setUnknownWrite(null);
 				if (latest.content !== unknown.content) {
 					reconcileServerContent(latest.content);
 					fileRef.current = latest;
@@ -589,8 +622,11 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			const next = await Promise.race([write, timeout]).finally(() => window.clearTimeout(timer));
 			if (!next) {
 				const unknown = { content, revision, terminal: false };
-				unknownWriteRef.current = unknown;
-				void write.then(() => { unknown.terminal = true; }, () => { unknown.terminal = true; });
+				setUnknownWrite(unknown);
+				const terminal = () => {
+					if (!unknown.terminal) { unknown.terminal = true; if (unknownWriteRef.current === unknown) noteMutation(); }
+				};
+				void write.then(terminal, terminal);
 				setPhase("error");
 				setError("The save has not finished. Its outcome is unknown.");
 				return null;
@@ -604,11 +640,11 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			return next.revision;
 		} catch (cause) {
 			if (!(cause instanceof WorkspaceMarkdownApiError)) {
-				unknownWriteRef.current = { content, revision, terminal: true };
+				setUnknownWrite({ content, revision, terminal: true });
 				try {
 					const latest = await readRevisionWithinDeadline(agentId, conversationId, path);
 					if (latest.revision !== revision && latest.content === content) {
-						unknownWriteRef.current = null;
+						setUnknownWrite(null);
 						recordConfirmedWrite(latest);
 						if (latest.readOnly) {
 							setPhase("error");
@@ -618,7 +654,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 						return latest.revision;
 					}
 					if (latest.revision !== revision) {
-						unknownWriteRef.current = null;
+						setUnknownWrite(null);
 						setDirty(true);
 						reconcileServerContent(latest.content);
 						fileRef.current = latest;
@@ -688,7 +724,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		try {
 			const latest = await readRevisionWithinDeadline(agentId, conversationId, path);
 			if (latest.revision === unknown.revision) return false;
-			unknownWriteRef.current = null;
+			setUnknownWrite(null);
 			fileRef.current = latest;
 			setFile(latest);
 			setCanEdit(!latest.readOnly);
@@ -788,8 +824,9 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			}
 		})();
 		keepMineInFlightRef.current = request;
-		void request.then(() => { if (keepMineInFlightRef.current === request) keepMineInFlightRef.current = null; });
-	}, [agentId, conversationId, dismissExternalUpdate, path, persist]);
+		noteMutation();
+		void request.then(() => { if (keepMineInFlightRef.current === request) { keepMineInFlightRef.current = null; noteMutation(); } });
+	}, [agentId, conversationId, dismissExternalUpdate, noteMutation, path, persist]);
 
 	const resolveImageSrc = useCallback((src: string) => workspaceImageUrl(agentId, conversationId, path, src), [agentId, conversationId, path]);
 	const filename = path.split("/").pop() || path;
@@ -814,7 +851,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			{error && <p className="markdown-editor-error" role="alert">{error}</p>}
 			<div className={mode === "raw" ? "markdown-editor-body markdown-editor-body-raw" : "markdown-editor-body"}>
 				{phase === "loading" && <p className="markdown-editor-placeholder">Loading file…</p>}
-				{phase !== "loading" && file && <div className={mode === "raw" ? "markdown-editor-surface markdown-editor-surface-raw" : "markdown-editor-surface"}><MarkdownEditorSurfaceWithRef key={`${conversationId}:${path}:${editorKey}`} ref={surfaceRef} resolveImageSrc={resolveImageSrc} content={draft} revision={file.revision} canEdit={canEdit} fenced={fenced} isDirty={isDirty} hasExternalUpdate={hasExternalUpdate || phase === "conflict"} isSaving={phase === "saving"} saveError={phase === "error"} readOnly={mode === "preview"} raw={mode === "raw" ? { taskActive: rawTaskActive, onTask: toggleRawTask } : undefined} onPreviewLink={handlePreviewLink} setDirty={setDirty} onDraftChange={handleDraftChange} onSave={persistAfterKeepMine} discardAndApplyExternal={discardAndApplyExternal} contentSetterRef={contentSetterRef} /></div>}
+				{phase !== "loading" && file && <div className={mode === "raw" ? "markdown-editor-surface markdown-editor-surface-raw" : "markdown-editor-surface"}><MarkdownEditorSurfaceWithRef key={`${conversationId}:${path}:${editorKey}`} ref={surfaceRef} resolveImageSrc={resolveImageSrc} content={draft} revision={file.revision} canEdit={canEdit} fenced={fenced} isDirty={isDirty} hasExternalUpdate={hasExternalUpdate || phase === "conflict"} isSaving={phase === "saving"} saveError={phase === "error"} readOnly={mode === "preview"} raw={mode === "raw" ? { taskActive: rawTaskActive, onTask: toggleRawTask } : undefined} onPreviewLink={handlePreviewLink} setDirty={setDirty} onDraftChange={handleDraftChange} onMutation={noteMutation} onSave={persistAfterKeepMine} discardAndApplyExternal={discardAndApplyExternal} contentSetterRef={contentSetterRef} /></div>}
 				{phase !== "loading" && mode === "raw" && <textarea ref={rawAreaRef} className="markdown-editor-raw markdown-editor-raw-input" aria-label="Raw Markdown source" spellCheck={false} readOnly={!canEdit || fenced} value={draft} onChange={(event) => { if (immediateFenceRef.current) { event.target.value = draftRef.current; return; } surfaceRef.current?.setRaw(event.target.value); syncRawTaskActive(); }} onSelect={syncRawTaskActive} />}
 			</div>
 			{conflict && <div className="markdown-editor-conflict" role="alert"><strong>This file changed outside the editor.</strong>{conflictRevision ? <span> Reload the latest version or save your draft over it.</span> : <span> Reload the latest version or keep your local draft.</span>}<div className="markdown-editor-conflict-actions"><button type="button" onClick={() => void reloadLatest()}>Reload</button><button type="button" onClick={() => void keepMine()} disabled={!canEdit}>Keep mine</button></div></div>}

@@ -180,6 +180,7 @@ type DocumentAdmission = Readonly<{
 	ownerId: string;
 	ownerGeneration: number;
 	roomGeneration: number;
+	initialDraftGeneration: number;
 	context: DocumentContext | null;
 }>;
 
@@ -544,6 +545,7 @@ export function App() {
 	rightPaneRef.current = rightPane;
 	const [documentOwnerId] = useState(allocateDocumentId);
 	const documentOwnerGenerationRef = useRef(1);
+	const documentDraftGenerationRef = useRef(1);
 	const markdownEditorRef = useRef<MarkdownEditorHandle | null>(null);
 	const markdownEditorAdmissionRef = useRef<DocumentAdmission | null>(null);
 	const markdownEditorDirtyRef = useRef(false);
@@ -638,9 +640,18 @@ export function App() {
 		if (data && rightPaneRef.current?.kind === "markdownEditor" && !guardMarkdownEditorAction(() => setPreview(data), "switch")) return;
 		setRightPane((pane) => (data ? { kind: "preview", data } : pane?.kind === "attachments" || pane?.kind === "workspaceImage" || pane?.kind === "workspaceLegacyDoc" || pane?.kind === "workspacePdf" || pane?.kind === "workspaceWord" || pane?.kind === "workspaceHtml" || pane?.kind === "workspaceFramed" || pane?.kind === "workspaceText" || pane?.kind === "workspaceSpreadsheet" || (pane?.kind === "artifactViewer" && pane.backTo) ? pane : null));
 	};
-	const onMarkdownEditorDirtyChange = useCallback((dirty: boolean) => {
-		markdownEditorDirtyRef.current = dirty;
+	const onDocumentMutation = useCallback((agentId: string, conversationId: string, generation: number) => {
+		const context = checkpointContextRef.current;
+		if (context.roomId !== agentId || context.conversationId !== conversationId || context.generation !== generation) return;
+		const old = documentDraftGenerationRef.current;
+		documentDraftGenerationRef.current = Number.isSafeInteger(old) && old < Number.MAX_SAFE_INTEGER ? old + 1 : Number.NaN;
 	}, []);
+	const onMarkdownEditorDirtyChange = useCallback((dirty: boolean, agentId: string, conversationId: string, generation: number) => {
+		const context = checkpointContextRef.current;
+		if (context.roomId !== agentId || context.conversationId !== conversationId || context.generation !== generation) return;
+		if (markdownEditorDirtyRef.current !== dirty) onDocumentMutation(agentId, conversationId, generation);
+		markdownEditorDirtyRef.current = dirty;
+	}, [onDocumentMutation]);
 	useEffect(() => {
 		if (navigator.userAgent.includes("ExxpertsDesktop")) return;
 		const beforeUnload = (event: BeforeUnloadEvent) => {
@@ -655,12 +666,13 @@ export function App() {
 	function captureDocumentAdmission(requestId: string): DocumentAdmission | null {
 		const ownerGeneration = documentOwnerGenerationRef.current;
 		const current = checkpointContextRef.current;
-		if (!documentOwnerId || !Number.isSafeInteger(ownerGeneration) || ownerGeneration < 1 || !Number.isSafeInteger(current.generation) || current.generation < 0) return null;
+		const draftGeneration = documentDraftGenerationRef.current;
+		if (!documentOwnerId || !Number.isSafeInteger(ownerGeneration) || ownerGeneration < 1 || !Number.isSafeInteger(current.generation) || current.generation < 0 || !Number.isSafeInteger(draftGeneration) || draftGeneration < 1) return null;
 		const context = current.key === null ? null : current.roomId && current.conversationId && current.generation > 0 ? {
 			ownerId: documentOwnerId, ownerGeneration, roomId: current.roomId, conversationId: current.conversationId, roomGeneration: current.generation,
 		} : null;
 		if (current.key !== null && !context) return null;
-		return { requestId, ownerId: documentOwnerId, ownerGeneration, roomGeneration: current.generation, context };
+		return { requestId, ownerId: documentOwnerId, ownerGeneration, roomGeneration: current.generation, initialDraftGeneration: draftGeneration, context };
 	}
 
 	function documentAdmissionIsCurrent(admission: DocumentAdmission): boolean {
@@ -985,6 +997,7 @@ export function App() {
 				const old = checkpointContextRef.current.generation;
 				const generation = Number.isSafeInteger(old) && old < Number.MAX_SAFE_INTEGER ? old + 1 : Number.NaN;
 				checkpointContextRef.current = { key, generation, roomId: next?.agentId ?? null, conversationId: next?.conversationId ?? null };
+				documentDraftGenerationRef.current = 1;
 			}
 		}
 		setPersistentChatState(next);
@@ -8987,9 +9000,12 @@ export function App() {
 					<WorkspaceFileTabs tabs={workspaceTabs.paths} active={activeWorkspacePath(rightPane)} onSelect={(path) => openWorkspaceMarkdown({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} onReorder={(paths) => setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths } : tabs)} />
 					{rightPane && (rightPane.kind === "workspaceImage" || rightPane.kind === "workspacePdf" || rightPane.kind === "workspaceWord" || rightPane.kind === "workspaceHtml" || rightPane.kind === "workspaceFramed" || rightPane.kind === "workspaceText" || rightPane.kind === "workspaceSpreadsheet" || (rightPane.kind === "workspaceLegacyDoc" && !/\.doc$/i.test(rightPane.path))) && <WorkspaceOpenAction key={JSON.stringify([persistentChat.agentId, persistentChat.conversationId, rightPane.path])} agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={rightPane.path} />}
 					{rightPane?.kind === "markdownEditor" && <MarkdownEditorPane
+						key={checkpointContextRef.current.generation}
 						ref={markdownEditorRef}
 						agentId={persistentChat.agentId}
 						conversationId={persistentChat.conversationId}
+						contextGeneration={checkpointContextRef.current.generation}
+						onMutation={onDocumentMutation}
 						path={rightPane.path}
 						fenced={markdownEditorFenced}
 						onClose={requestCloseMarkdownEditor}
