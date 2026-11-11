@@ -759,8 +759,12 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		if (keepMineInFlightRef.current) return;
 		const localDraft = surfaceRef.current?.getContent() ?? draftRef.current;
 		const request = (async () => {
+			const controller = new AbortController();
+			const timer = window.setTimeout(() => controller.abort(), 30_000);
 			try {
-				const latest = await getWorkspaceMarkdownFile(agentId, conversationId, path);
+				const latest = await getWorkspaceMarkdownFile(agentId, conversationId, path, { signal: controller.signal });
+				if (controller.signal.aborted) return false;
+				window.clearTimeout(timer);
 				fileRef.current = latest;
 				setFile(latest);
 				dismissExternalUpdate();
@@ -773,6 +777,8 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 				setPhase("conflict");
 				setError(errorMessage(cause));
 				return false;
+			} finally {
+				window.clearTimeout(timer);
 			}
 		})();
 		keepMineInFlightRef.current = request;
