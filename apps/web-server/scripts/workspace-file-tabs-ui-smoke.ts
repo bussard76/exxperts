@@ -1311,6 +1311,26 @@ try {
 			await roomPage.unroute("**/runtime/discard-empty-prepared-boundary");
 			assert(!fs.readFileSync(path.join(folder, "notes.md"), "utf8").includes("pending room draft"), "discarding the room draft leaves the file unchanged");
 			await archive.getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "photo.png" }).click();
+			let releaseCleanHome!: () => void, startCleanHome!: () => void;
+			const cleanHomeReleased = new Promise<void>((resolve) => { releaseCleanHome = resolve; });
+			const cleanHomeStarted = new Promise<void>((resolve) => { startCleanHome = resolve; });
+			await roomPage.route("**/api/persistent-agents/**", async (route) => {
+				const request = route.request();
+				if (!((request.method() === "DELETE" && request.url().includes("/threads/")) || (request.method() === "POST" && request.url().includes("/runtime/discard-empty-prepared-boundary")))) return route.continue();
+				startCleanHome();
+				await cleanHomeReleased;
+				await route.continue();
+			});
+			await home.click();
+			try {
+				await cleanHomeStarted;
+				await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "notes.md" }).click();
+				assert(await roomPage.locator(".workspace-tab", { hasText: "notes.md" }).count() === 0, "a clean Home action reserves the session against file selection");
+			} finally { releaseCleanHome(); }
+			await archive.waitFor();
+			await roomPage.unroute("**/api/persistent-agents/**");
+			await archive.getByRole("button", { name: /^(Enter|Resume)$/ }).click();
 			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "notes.md" }).click();
 			await roomPage.locator(".markdown-editor-tiptap .ProseMirror").click();
 			await roomPage.keyboard.type(" settings memento draft");

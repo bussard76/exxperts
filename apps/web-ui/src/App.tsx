@@ -637,6 +637,14 @@ export function App() {
 		}
 	}
 
+	function admitCleanMarkdownEditorAction(action: () => Promise<unknown>): Promise<unknown> | null {
+		if (markdownEditorDirtyRef.current || markdownEditorPendingActionRef.current || markdownEditorCommitBypassRef.current) return null;
+		markdownEditorPendingActionRef.current = action;
+		markdownEditorPromptBusyRef.current = true;
+		setMarkdownEditorFenced(true);
+		return completeMarkdownEditorPrompt(action);
+	}
+
 	async function saveMarkdownEditorAndContinue(): Promise<void> {
 		if (markdownEditorPromptBusyRef.current) return;
 		const action = markdownEditorPendingActionRef.current;
@@ -7519,14 +7527,8 @@ export function App() {
 	}
 
 	async function mementoPersistentThread() {
-		if (!markdownEditorDirtyRef.current && !markdownEditorPendingActionRef.current && !markdownEditorCommitBypassRef.current) {
-			const action = () => mementoPersistentThread();
-			markdownEditorPendingActionRef.current = action;
-			markdownEditorPromptBusyRef.current = true;
-			setMarkdownEditorFenced(true);
-			await completeMarkdownEditorPrompt(action);
-			return;
-		}
+		const cleanAction = admitCleanMarkdownEditorAction(() => mementoPersistentThread());
+		if (cleanAction) { await cleanAction; return; }
 		if (!guardMarkdownEditorAction(() => mementoPersistentThread(), "navigate")) return;
 		const targetChat = persistentChat;
 		if (!targetChat) return;
@@ -8028,6 +8030,8 @@ export function App() {
 	// chaining a navigation (the background-answer toast's Open) can stand down
 	// without reading state that only settles on the next render.
 	async function goHome(): Promise<boolean> {
+		const cleanAction = admitCleanMarkdownEditorAction(() => goHome());
+		if (cleanAction) return await cleanAction as boolean;
 		// A conversation the save that filled the room closed leaves the way Return Home does: nothing is saved into it.
 		if (closedByFullSaveRef.current) return restAfterCheckpoint();
 		if (!guardMarkdownEditorAction(() => goHome(), "navigate")) return false;

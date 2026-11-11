@@ -128,3 +128,7 @@ The decision-deadline regression now also holds a real PUT past expiry, checks t
 ## Checkpoint: clean Memento admission
 
 A clean topbar Memento now reserves the document action through its existing callback, and file selection and tab close respect an outstanding action even when a preview is selected. The real held Memento case in `workspace-file-tabs-ui-smoke.ts` opened a competing file before the change and withheld it afterward; the filtered smoke passed 1/1. Other clean context actions and full correlated identity/host/native arbitration remain pending.
+
+## Checkpoint: clean Home admission
+
+A clean Home action now retains the document reservation until its existing leave callback settles and preserves its return value for callers. The held real leave in `workspace-file-tabs-ui-smoke.ts` admitted a competing file before the change and blocked it afterward; the filtered smoke passed 1/1. Other clean exits, context identity and dependent child/native arbitration remain pending.
