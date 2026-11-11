@@ -31,6 +31,7 @@ import { createSearchDecorationExtension, type SearchDecorationState } from "./T
 
 export interface MarkdownEditorHandle {
 	save: () => Promise<boolean>;
+	settle: () => Promise<void>;
 	discard: () => boolean;
 	focus: () => void;
 }
@@ -102,6 +103,7 @@ function errorMessage(error: unknown): string {
 
 interface SurfaceHandle {
 	save: () => Promise<boolean>;
+	settle: () => Promise<void>;
 	discard: () => void;
 	focus: () => void;
 	getContent: () => string;
@@ -304,6 +306,7 @@ function MarkdownEditorSurface({
 
 	useImperativeHandle(ref, () => ({
 		save,
+		settle: async () => { await saveInFlightRef.current; },
 		discard,
 		focus: () => editorRef.current?.commands.focus(),
 		getContent: () => editorRef.current ? editorMarkdown(editorRef.current) : draftRef.current,
@@ -558,6 +561,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		syncRawTaskActive();
 	}, [draft, syncRawTaskActive]);
 	const save = useCallback(() => surfaceRef.current?.save() ?? Promise.resolve(false), []);
+	const settle = useCallback(async () => { await surfaceRef.current?.settle(); }, []);
 	const discard = useCallback(() => {
 		if (unknownWriteRef.current || !surfaceRef.current) return false;
 		surfaceRef.current.discard();
@@ -589,7 +593,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		}
 		setMode(nextMode);
 	}, [isDirty, mode]);
-	useImperativeHandle(ref, () => ({ save, discard, focus }), [discard, focus, save]);
+	useImperativeHandle(ref, () => ({ save, settle, discard, focus }), [discard, focus, save, settle]);
 
 	const reloadLatest = useCallback(async () => {
 		setPhase("loading");

@@ -70,3 +70,7 @@ A canceled guarded save now keeps its action reserved until the in-flight save s
 ## Checkpoint: initial unknown-write fence
 
 The editor now checks the existing GET after a transport failure; if it observes the submitted content at a changed revision, it treats that write as confirmed without resending it. If the outcome remains unknown, subsequent PUT attempts and guard Discard are refused so the draft stays open. `workspace-file-tabs-ui-smoke.ts` exercises both paths through real PUT/GET routes and controlled response loss; both cases were red before their respective changes and the filtered smoke passed 1/1 afterward. This is partial R8: later reconciliation, conflict handling, outstanding in-flight writes, and the complete C2/C4 protocol still require implementation and tests.
+
+## Checkpoint: discard waits for a sent write
+
+A guarded Discard now waits for the existing in-flight editor save before it applies discard or executes the captured action. The real held-PUT `workspace-file-tabs-ui-smoke.ts` case failed on premature file switching before the change and passed afterward, including confirmation that the sent write reached the invented file; the affected filtered smoke passed 1/1. This covers one R8 ordering only, not complete reconciliation or the detached/native lifecycle.

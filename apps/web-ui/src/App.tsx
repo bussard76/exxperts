@@ -618,12 +618,20 @@ export function App() {
 		completeMarkdownEditorPrompt(action);
 	}
 
-	function discardMarkdownEditorAndContinue(): void {
-		if (!markdownEditorRef.current?.discard()) {
-			cancelMarkdownEditorPrompt();
+	async function discardMarkdownEditorAndContinue(): Promise<void> {
+		if (markdownEditorPromptBusy) return;
+		const action = markdownEditorPendingActionRef.current;
+		const editor = markdownEditorRef.current;
+		setMarkdownEditorPromptBusy(true);
+		await editor?.settle();
+		if (markdownEditorCanceledSaveRef.current || !editor?.discard()) {
+			markdownEditorCanceledSaveRef.current = false;
+			markdownEditorPendingActionRef.current = null;
+			setMarkdownEditorPrompt(null);
+			setMarkdownEditorPromptBusy(false);
 			return;
 		}
-		completeMarkdownEditorPrompt(markdownEditorPendingActionRef.current);
+		completeMarkdownEditorPrompt(action);
 	}
 
 	function cancelMarkdownEditorPrompt(): void {
