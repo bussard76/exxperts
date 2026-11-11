@@ -216,3 +216,7 @@ The moved-room case now also opens an invented Markdown file, dirties it and inv
 ## Checkpoint: clean-looking draft on lost-write conflict
 
 When a PUT response is lost and the first reconciliation GET sees a competing revision, the editor now marks the local source dirty synchronously before staging the external version. The real `workspace-file-tabs-ui-smoke.ts` case sends one write, reverts RAW to the original source while the answer is held, changes the invented file externally, then loses the answer. It observed the local source being replaced before the change; afterward the local source remains, the conflict is explicit and a switch needs Discard. The attributed file-tabs and RAW smokes passed 2/2 and the UI-only build passed. The corresponding later-reconciliation and direct-409 paths still need separate checks; full C2/C4 and detached/native acceptance remain open.
+
+## Checkpoint: later conflicting reconciliation
+
+The separate settle path now also marks the local source dirty before staging a competing external version. `workspace-file-tabs-ui-smoke.ts` holds and loses a real write response, returns the original revision once, then exposes a competing revision on the later GET. It failed by replacing the clean-looking local source before the change; afterward it preserves that source, reports conflict, and requires explicit Discard to switch. The attributed file-tabs and RAW smokes passed 2/2 and the UI-only build passed. The direct HTTP 409 with a reverted source remains to be checked separately.

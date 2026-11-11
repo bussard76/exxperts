@@ -167,6 +167,7 @@ fs.writeFileSync(path.join(folder, "pending-discard.md"), "# Invented pending wr
 fs.writeFileSync(path.join(folder, "clean-pending.md"), "# Invented original\n");
 fs.writeFileSync(path.join(folder, "clean-unknown.md"), "# Invented unknown\n");
 fs.writeFileSync(path.join(folder, "clean-unknown-conflict.md"), "# Invented local original\n");
+fs.writeFileSync(path.join(folder, "clean-late-conflict.md"), "# Invented late original\n");
 fs.writeFileSync(path.join(folder, "external-clean.md"), "# Invented before\n");
 fs.writeFileSync(path.join(folder, "discard-exact.md"), "# Invented exact baseline\r\n\r\n");
 fs.writeFileSync(path.join(folder, "lost-conflict.md"), "# Invented conflict\n");
@@ -804,6 +805,43 @@ try {
 		await treeFile("photo.png").click();
 		await prompt.getByRole("button", { name: "Discard changes" }).click();
 		await tab("clean-unknown-conflict.md").locator(".workspace-tab-close").click();
+		const initialLateCleanConflict = page.waitForResponse((response) => response.url().includes("clean-late-conflict.md") && response.request().method() === "GET");
+		await treeFile("clean-late-conflict.md").click();
+		const originalLateCleanConflict = await (await initialLateCleanConflict).json();
+		await page.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented late original").waitFor();
+		await page.locator(".markdown-editor-status").getByText("Saved").waitFor();
+		await page.getByRole("button", { name: "RAW", exact: true }).click();
+		const lateCleanConflictRaw = page.getByRole("textbox", { name: "Raw Markdown source" });
+		await waitUntil(async () => await lateCleanConflictRaw.inputValue() === "# Invented late original\n", "the late-conflict test loads its original source");
+		let releaseLateCleanConflict!: () => void, startLateCleanConflict!: () => void, lateCleanConflictWrites = 0, firstLateCleanRead = true;
+		const lateCleanConflictReleased = new Promise<void>((resolve) => { releaseLateCleanConflict = resolve; });
+		const lateCleanConflictStarted = new Promise<void>((resolve) => { startLateCleanConflict = resolve; });
+		await page.route("**/workspace-markdown?*", async (route) => {
+			if (route.request().method() === "PUT") {
+				lateCleanConflictWrites++;
+				await route.fetch();
+				fs.writeFileSync(path.join(folder, "clean-late-conflict.md"), "# Invented later competitor\n");
+				startLateCleanConflict();
+				await lateCleanConflictReleased;
+				return route.abort();
+			}
+			if (firstLateCleanRead) { firstLateCleanRead = false; return route.fulfill({ status: 200, json: originalLateCleanConflict }); }
+			return route.continue();
+		});
+		await lateCleanConflictRaw.fill("# Invented late sent\n");
+		await page.locator(".markdown-editor-save").click();
+		try {
+			await lateCleanConflictStarted;
+			await lateCleanConflictRaw.fill("# Invented late original\n");
+		} finally { releaseLateCleanConflict(); }
+		await page.locator(".markdown-editor-error").waitFor();
+		await treeFile("photo.png").click();
+		await page.locator(".markdown-editor-conflict").waitFor();
+		assert(await lateCleanConflictRaw.inputValue() === "# Invented late original\n" && lateCleanConflictWrites === 1 && fs.readFileSync(path.join(folder, "clean-late-conflict.md"), "utf8") === "# Invented later competitor\n", "later conflicting reconciliation retains the clean-looking local source without retrying");
+		await page.unroute("**/workspace-markdown?*");
+		await treeFile("photo.png").click();
+		await prompt.getByRole("button", { name: "Discard changes" }).click();
+		await tab("clean-late-conflict.md").locator(".workspace-tab-close").click();
 		await treeFile("external-clean.md").click();
 		await page.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented before").waitFor();
 		let cleanExternalWrites = 0;

@@ -659,6 +659,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			setFile(latest);
 			setCanEdit(!latest.readOnly);
 			if (latest.content !== unknown.content) {
+				setDirty(true);
 				reconcileServerContent(latest.content);
 				setConflictRevision(latest.revision);
 				setPhase("conflict");
@@ -676,7 +677,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		} catch {
 			return false;
 		}
-	}, [agentId, conversationId, path, reconcileServerContent, recordConfirmedWrite]);
+	}, [agentId, conversationId, path, reconcileServerContent, recordConfirmedWrite, setDirty]);
 	const discard = useCallback(() => {
 		if (unknownWriteRef.current || !surfaceRef.current) return false;
 		surfaceRef.current.discard();
