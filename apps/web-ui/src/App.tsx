@@ -7651,6 +7651,8 @@ export function App() {
 	}
 
 	async function restAfterCheckpoint() {
+		const cleanAction = admitCleanMarkdownEditorAction(() => restAfterCheckpoint());
+		if (cleanAction) return await cleanAction as boolean;
 		if (!guardMarkdownEditorAction(() => restAfterCheckpoint(), "navigate")) return false;
 		const approval = checkpointApprovalResult;
 		const postCheckpointThreadId = approval?.postCheckpoint.activeThreadId;

@@ -543,8 +543,19 @@ try {
 		await page.unroute("**/checkpoint/approve");
 		await page.unroute("**/threads/*");
 		assert(await dialog.getByText(nineteenHeadsUp, { exact: true }).count() === 0, "the saved page does not repeat the heads-up the review showed");
+		let releaseRest!: () => void, startRest!: () => void, restRequests = 0;
+		const restReleased = new Promise<void>((resolve) => { releaseRest = resolve; });
+		const restStarted = new Promise<void>((resolve) => { startRest = resolve; });
+		await page.route("**/runtime/discard-empty-prepared-boundary", async (route) => { restRequests++; startRest(); await restReleased; await route.continue(); });
 		await dialog.getByRole("button", { name: "Return Home" }).click();
+		try {
+			await restStarted;
+			await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "second.md" }).evaluate((node) => (node as HTMLElement).click());
+			await page.waitForTimeout(250);
+			assert(await page.locator(".workspace-tab", { hasText: "second.md" }).count() === 0 && restRequests === 1, "Return Home reserves the clean document session while retiring the prepared conversation");
+		} finally { releaseRest(); }
 		await dialog.waitFor({ state: "detached", timeout: 10000 });
+		await page.unroute("**/runtime/discard-empty-prepared-boundary");
 		(await import("../src/persistent-room-maintenance-settings.js")).writePersistentRoomMaintenanceSettings(agentId, { quickCheckpointAutoApply: true });
 		holdNineteen();
 		await reenter();

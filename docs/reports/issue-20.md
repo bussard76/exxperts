@@ -166,3 +166,7 @@ Controller reply `msg_6077f66b84d3` resolved the preceding blocker: approval is 
 This is partial attached-context fencing only: full C1/C4 correlation, retained document session, detached host, native lifecycle, bounds, integration and I1–I10/R1–R15 evidence remain open. No platform support is claimed.
 
 Verification after this correction: `npx tsc --noEmit -p apps/web-ui/tsconfig.json && npm run typecheck:scripts` passed. The attributed `GATE_SLOTS=1 GATE_E2E_SLOTS=1 gate bash -c 'npm run smokes -- --jobs 1 remember-job-dialog workspace-file-tabs-ui workspace-markdown-raw-ui settings-look-ui'` discovered and passed all four named `*-smoke.ts` entrypoints (4/4, 197 seconds); no environment reruns were needed. The UI-only Vite build also passed to supply browser assets. These checks do not replace the required later full gate or native evidence.
+
+## Checkpoint: Remember Return Home admission
+
+The clean Return Home action after a saved Remember now keeps its existing action reserved until the prepared-conversation retirement settles. A real held `discard-empty-prepared-boundary` request in `remember-job-dialog-smoke.ts` selected a second file before the change and withheld it afterward, with one request; the unmodified success continuation still reached Home. The attributed filtered `remember-job-dialog` smoke failed at that assertion before the change and passed 1/1 afterward, and the UI-only build passed. This covers that attached callback only; the detached and native contract remains open.
