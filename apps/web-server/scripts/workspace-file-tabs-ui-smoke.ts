@@ -167,6 +167,7 @@ fs.writeFileSync(path.join(folder, "pending-discard.md"), "# Invented pending wr
 fs.writeFileSync(path.join(folder, "lost-conflict.md"), "# Invented conflict\n");
 fs.writeFileSync(path.join(folder, "late-response.md"), "# Invented late response\n");
 fs.writeFileSync(path.join(folder, "late-discard.md"), "# Invented late discard\n");
+fs.writeFileSync(path.join(folder, "timeout-write.md"), "# Invented timeout\n");
 fs.writeFileSync(path.join(folder, "conflict-real.md"), "# Original invented draft\n");
 fs.writeFileSync(path.join(folder, "old.doc"), "legacy");
 fs.writeFileSync(path.join(folder, "old.xls"), "invented old workbook");
@@ -1293,6 +1294,42 @@ try {
 			await waitUntil(async () => await roomPage.locator(".workspace-tab[data-active='true']", { hasText: "photo.png" }).count() === 1, "discard reconciles the previously uncertain write");
 			assert(discardWrites === 1 && fs.readFileSync(path.join(folder, "late-discard.md"), "utf8").includes("already written"), "discard does not resend or undo the confirmed write");
 			await roomPage.unroute("**/workspace-markdown?*");
+			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "timeout-write.md" }).click();
+			await roomPage.locator(".markdown-editor-tiptap .ProseMirror").waitFor();
+			await roomPage.evaluate(() => {
+				const original = window.setTimeout.bind(window);
+				window.setTimeout = ((handler: TimerHandler, delay?: number, ...args: any[]) => original(handler, delay === 30_000 ? 100 : delay, ...args)) as typeof window.setTimeout;
+			});
+			let releaseTimeoutWrite!: () => void, startTimeoutWrite!: () => void;
+			let timeoutReconciliations = 0;
+			const timeoutWriteReleased = new Promise<void>((resolve) => { releaseTimeoutWrite = resolve; });
+			const timeoutWriteStarted = new Promise<void>((resolve) => { startTimeoutWrite = resolve; });
+			const timeoutWriteResponse = roomPage.waitForResponse((response) => response.url().includes("timeout-write.md") && response.request().method() === "PUT").catch(() => null);
+			await roomPage.route("**/workspace-markdown?*", async (route) => {
+				if (route.request().method() !== "PUT") { timeoutReconciliations++; return route.continue(); }
+				startTimeoutWrite();
+				await timeoutWriteReleased;
+				await route.continue().catch(() => {});
+			});
+			try {
+				await roomPage.locator(".markdown-editor-tiptap .ProseMirror").click();
+				await roomPage.keyboard.type(" held draft");
+				await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "photo.png" }).click();
+				const timeoutPrompt = roomPage.getByRole("dialog", { name: "Unsaved Markdown changes" });
+				await timeoutPrompt.getByRole("button", { name: "Save and continue" }).click();
+				await timeoutWriteStarted;
+				await roomPage.locator(".markdown-editor-error").waitFor({ timeout: 3000 });
+				await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "photo.png" }).click();
+				await timeoutPrompt.getByRole("button", { name: "Discard changes" }).click();
+				assert(await roomPage.locator(".markdown-editor-tiptap .ProseMirror").count() === 1 && timeoutReconciliations === 0, "a timed-out but unsettled write prevents discard and premature reconciliation");
+			} finally {
+				releaseTimeoutWrite();
+			}
+			assert(await timeoutWriteResponse, "the held write eventually reaches the server");
+			await roomPage.unroute("**/workspace-markdown?*");
+			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "photo.png" }).click();
+			const settledTimeoutPrompt = roomPage.getByRole("dialog", { name: "Unsaved Markdown changes" });
+			if (await settledTimeoutPrompt.isVisible()) await settledTimeoutPrompt.getByRole("button", { name: "Discard changes" }).click();
 			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "unknown-write.md" }).click();
 			await roomPage.locator(".markdown-editor-tiptap .ProseMirror").waitFor();
 			let unknownWrites = 0;

@@ -415,7 +415,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 	const [error, setError] = useState<string | null>(null);
 	const [conflictRevision, setConflictRevision] = useState<string | null>(null);
 	const [canEdit, setCanEdit] = useState(false);
-	const unknownWriteRef = useRef<{ content: string; revision: string } | null>(null);
+	const unknownWriteRef = useRef<{ content: string; revision: string; terminal: boolean } | null>(null);
 	const surfaceRef = useRef<SurfaceHandle | null>(null);
 	const rawAreaRef = useRef<HTMLTextAreaElement | null>(null);
 	const rawSelectionRef = useRef<[number, number] | null>(null);
@@ -506,6 +506,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		if (!canEdit) return null;
 		const unknown = unknownWriteRef.current;
 		if (unknown) {
+			if (!unknown.terminal) return null;
 			try {
 				const latest = await getWorkspaceMarkdownFile(agentId, conversationId, path);
 				if (latest.revision === unknown.revision) return null;
@@ -536,13 +537,24 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		setPhase("saving");
 		setError(null);
 		try {
-			const next = await putWorkspaceMarkdownFile(agentId, conversationId, path, content, revision);
+			const write = putWorkspaceMarkdownFile(agentId, conversationId, path, content, revision);
+			let timer = 0;
+			const timeout = new Promise<null>((resolve) => { timer = window.setTimeout(() => resolve(null), 30_000); });
+			const next = await Promise.race([write, timeout]).finally(() => window.clearTimeout(timer));
+			if (!next) {
+				const unknown = { content, revision, terminal: false };
+				unknownWriteRef.current = unknown;
+				void write.then(() => { unknown.terminal = true; }, () => { unknown.terminal = true; });
+				setPhase("error");
+				setError("The save has not finished. Its outcome is unknown.");
+				return null;
+			}
 			setLoadedFile(next);
 			markSaved(next.content);
 			return next.revision;
 		} catch (cause) {
 			if (!(cause instanceof WorkspaceMarkdownApiError)) {
-				unknownWriteRef.current = { content, revision };
+				unknownWriteRef.current = { content, revision, terminal: true };
 				try {
 					const latest = await getWorkspaceMarkdownFile(agentId, conversationId, path);
 					if (latest.revision !== revision && latest.content === content) {
@@ -604,6 +616,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		await surfaceRef.current?.settle();
 		const unknown = unknownWriteRef.current;
 		if (!unknown) return true;
+		if (!unknown.terminal) return false;
 		try {
 			const latest = await getWorkspaceMarkdownFile(agentId, conversationId, path);
 			if (latest.revision === unknown.revision) return false;

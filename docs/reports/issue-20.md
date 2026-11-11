@@ -86,3 +86,7 @@ The editor retains the submitted content and revision after an inconclusive GET 
 ## Checkpoint: discard after later confirmation
 
 A fresh Discard now rechecks an unknown write before acting; it proceeds only after the submitted write is observed, and a changed competing revision refuses the current action and enters conflict. The controlled stale-read `workspace-file-tabs-ui-smoke.ts` case failed before the change and passed afterward; the complete filtered smoke passed 1/1 and verified that Discard neither resends nor undoes the sent write. Remaining C2/C4, host, native, geometry, platform and integration requirements are still open.
+
+## Checkpoint: write deadline
+
+The editor marks a PUT unknown after the 30-second wait without treating the underlying transport as finished. A fresh Discard cannot abandon or reconcile it until that transport reaches a terminal result. The controlled-timer and held real PUT case in `workspace-file-tabs-ui-smoke.ts` failed before the change and passed afterward, including zero GETs while the PUT remained open; the filtered smoke passed 1/1. This is only the write deadline, not the complete C4 prepare/abort/native deadlines or a detached-host test.
