@@ -44,6 +44,7 @@ const appDir = path.join(tempHome, ".exxperts", "app");
 const workspace = path.join(tempRoot, "workspace");
 fs.mkdirSync(workspace, { recursive: true });
 fs.writeFileSync(path.join(workspace, "invented.md"), "# Invented source\n");
+fs.writeFileSync(path.join(workspace, "owners.md"), "# Invented shared file\n");
 for (const dir of [agentsRoot, agentDir]) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 process.env.HOME = tempHome;
 process.env.USERPROFILE = tempHome;
@@ -149,6 +150,39 @@ try {
 		await b.locator('button[title="Send"]').first().waitFor({ timeout: 15000 });
 		await b.getByText("First question.").first().waitFor({ timeout: 30000 });
 		await lockTakenSince(beforeB, "window B's connection is ready");
+		// Each window has its own editor; the existing revision route arbitrates their writes.
+		await a.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "owners.md" }).click();
+		await b.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "owners.md" }).click();
+		const ownerAEditor = a.locator(".markdown-editor-tiptap .ProseMirror");
+		const ownerBEditor = b.locator(".markdown-editor-tiptap .ProseMirror");
+		await ownerAEditor.getByText("Invented shared file").waitFor();
+		await ownerBEditor.getByText("Invented shared file").waitFor();
+		let releaseOwnerA!: () => void, startOwnerA!: () => void, ownerAWrites = 0;
+		const ownerAReleased = new Promise<void>((resolve) => { releaseOwnerA = resolve; });
+		const ownerAStarted = new Promise<void>((resolve) => { startOwnerA = resolve; });
+		await a.route("**/workspace-markdown?*", async (route) => {
+			if (route.request().method() !== "PUT") return route.continue();
+			ownerAWrites++;
+			startOwnerA();
+			await ownerAReleased;
+			await route.continue();
+		});
+		await ownerAEditor.click();
+		await a.keyboard.type(" owner A draft");
+		await a.locator(".markdown-editor-save").click();
+		try {
+			await ownerAStarted;
+			await ownerBEditor.click();
+			await b.keyboard.type(" owner B saved");
+			await b.locator(".markdown-editor-save").click();
+			await waitUntil(async () => fs.readFileSync(path.join(workspace, "owners.md"), "utf8").includes("owner B saved"), "the second owner's write lands");
+		} finally { releaseOwnerA(); }
+		await a.locator(".markdown-editor-conflict").waitFor();
+		assert(ownerAWrites === 1 && (await ownerAEditor.textContent())?.includes("owner A draft") && fs.readFileSync(path.join(workspace, "owners.md"), "utf8").includes("owner B saved"), "a competing owner write preserves the first owner's draft and the second owner's saved file");
+		await a.unroute("**/workspace-markdown?*");
+		await a.locator(".workspace-tab", { hasText: "owners.md" }).locator(".workspace-tab-close").click();
+		await a.getByRole("dialog", { name: "Unsaved Markdown changes" }).getByRole("button", { name: "Discard changes" }).click();
+		await b.locator(".workspace-tab", { hasText: "owners.md" }).locator(".workspace-tab-close").click();
 		const beforeForget = await lockTakenAt();
 		await b.getByRole("button", { name: "Forget" }).click();
 		await b.getByRole("button", { name: "Forget", exact: true }).last().click();
