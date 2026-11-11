@@ -45,6 +45,7 @@ const workspace = path.join(tempRoot, "workspace");
 fs.mkdirSync(workspace, { recursive: true });
 fs.writeFileSync(path.join(workspace, "invented.md"), "# Invented source\n");
 fs.writeFileSync(path.join(workspace, "owners.md"), "# Invented shared file\n");
+fs.writeFileSync(path.join(workspace, "lost-keep.md"), "# Invented keep original\n");
 for (const dir of [agentsRoot, agentDir]) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 process.env.HOME = tempHome;
 process.env.USERPROFILE = tempHome;
@@ -264,6 +265,37 @@ try {
 		await a.unroute("**/api/persistent-agents");
 		const d = await ctx.newPage();
 		await d.goto(`${baseUrl}/#/room/${agentId}`);
+		await d.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "lost-keep.md" }).click();
+		await d.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented keep original").waitFor();
+		await d.getByRole("button", { name: "RAW", exact: true }).click();
+		const keepRaw = d.getByRole("textbox", { name: "Raw Markdown source" });
+		await waitUntil(async () => await keepRaw.inputValue() === "# Invented keep original\n", "the Keep mine test loads its original source");
+		let releaseLostKeep!: () => void, startLostKeep!: () => void, lostKeepWrites = 0;
+		const lostKeepReleased = new Promise<void>((resolve) => { releaseLostKeep = resolve; });
+		const lostKeepStarted = new Promise<void>((resolve) => { startLostKeep = resolve; });
+		await d.route("**/workspace-markdown?*", async (route) => {
+			if (route.request().method() !== "PUT") return route.continue();
+			if (++lostKeepWrites !== 1) return route.continue();
+			await route.fetch();
+			fs.writeFileSync(path.join(workspace, "lost-keep.md"), "# Invented competing source\n");
+			startLostKeep();
+			await lostKeepReleased;
+			await route.abort();
+		});
+		await keepRaw.fill("# Invented sent source\n");
+		await d.locator(".markdown-editor-save").click();
+		try {
+			await lostKeepStarted;
+			await keepRaw.fill("# Invented keep original\n");
+		} finally { releaseLostKeep(); }
+		await d.locator(".markdown-editor-conflict").waitFor();
+		assert(await keepRaw.inputValue() === "# Invented keep original\n", "lost-write conflict keeps the local source before the decision");
+		await d.getByRole("button", { name: "Keep mine", exact: true }).click();
+		await waitUntil(() => fs.readFileSync(path.join(workspace, "lost-keep.md"), "utf8") === "# Invented keep original\n", "Keep mine writes the retained source over the confirmed competing revision");
+		await waitUntil(async () => await d.locator(".markdown-editor-status").textContent() === "Saved", "Keep mine settles after the lost response");
+		assert(lostKeepWrites === 2, "Keep mine sends only the original write and the explicitly chosen replacement");
+		await d.unroute("**/workspace-markdown?*");
+		await d.locator(".workspace-tab", { hasText: "lost-keep.md" }).locator(".workspace-tab-close").click();
 		await d.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "invented.md" }).click();
 		await d.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented source").waitFor();
 		await d.getByRole("button", { name: "RAW", exact: true }).click();

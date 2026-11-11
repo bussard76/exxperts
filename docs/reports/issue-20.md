@@ -240,3 +240,7 @@ The browser-close test now also exercises an unresolved write after the visible 
 The existing `two-window-room-ui-smoke.ts` now holds a real PUT, reverts RAW to its original source, and invokes the actual Home callback. Temporarily removing the pending-write join made Home leave early; with it restored, Home waits, the latest reverted source is confirmed through the existing pipeline, and then the room closes. The attributed filtered two-window smoke passed 1/1 and the UI-only build passed. This is attached exit evidence and does not establish child closure or native behavior.
 
 The affected `workspace-markdown-images-ui-smoke.ts` entrypoint, including its existing Keep mine scenarios, passed 1/1 through the attributed filtered gate after the editor changes. This is attached browser coverage, not transfer or native evidence.
+
+## Checkpoint: Keep mine after a lost-response conflict
+
+The real `two-window-room-ui-smoke.ts` flow now covers explicit Keep mine after a lost write response and a competing revision, with the local RAW source reverted to its original value. It verifies the retained source is written over the confirmed competitor only after that choice, with exactly the original PUT and the chosen replacement PUT; the attributed filtered two-window smoke passed 1/1. This complements the earlier Discard and Reload coverage and is attached-editor evidence only.
