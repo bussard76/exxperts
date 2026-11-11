@@ -144,6 +144,16 @@ For each series at Node 20.6 and 22, a failure in the same smoke with the same e
 
 Before escalating, apply the ticket's abort criteria and Sascha's recorded decisions. Escalate only an unsettled question and state which decisions were checked and why they do not fit. For every `NEEDS-SASCHA` or `BLOCKED` event, retain the append-only `front-events.log` line and immediately send the question or blocker with `orca orchestration send --to term_6eae3083-5398-4d94-85e5-57a8f00d7065` to wake the Front agent. Keep the existing status and fallback records.
 
+### Editor and upstream series decisions (decided by Sascha, 2026-11-11)
+
+[Decision record](https://github.com/bussard76/exxperts/issues/22#issuecomment-6790581835): Autosave option A stays as is and must be disclosed plainly: the existing approximately one-second dirty-edit timer is not a guarantee of one second after the last keystroke. Existing guard, conflict, read-only and in-flight-save controls remain, as does manual save.
+
+Markdown normalization option A stays as is and must be named in the PR: saving a rich-editor change serializes the whole document and can change unrelated table padding and blank lines, including after a checkbox click. No checkbox-only patch is requested; specified image preservation and no-write-on-load/search guarantees remain binding.
+
+Squash option A: each upstream series is one clean commit with pinned upstream `461e6485bf932f5cba85ac3dde8e0104e47d5dec` as its sole parent. Front created fork branch `exxeta/workspace-file-previews` at `5fcffe1036b2d6f867d6583b29822c4985d36fba`, with tree identical to `6dffcd539bdb41cec6d1895cf30ac0677d09843e`, and `exxeta/workspace-markdown-editor` at `8ed27f62843e0252bf5326897f0096a074ad6c8c`, with tree identical to `c156379b90f540c01695d6118d26647a7b67b106`. Both commits are signed off by Sascha, with no AI trailers or factory paths. No regate is required for identical trees; original raw gate counts and their documented exceptions remain unchanged. Preserve both branches and all three frozen product heads, including combined `13aa3c8f3930f310141379de1e85990f3d440d7d`. Sascha opens the PRs himself; EXXETA remains read-only for agents. This supersedes the prior one-PR/wait instruction for these series.
+
+Front reports that a Mac browser session against the packaged server passed the file tree; DOCX, XLSX, PPTX, PDF and image previews; image Open in default app; and Markdown Edit, RAW, Preview and checkbox. The Electron window, other Open-in actions and notices remain for Sascha's acceptance; this is not a blanket native pass.
+
 ### Series 1 buffers decision (decided by Sascha, 2026-11-10; PR disclosure superseded below)
 
 The earlier licence-source and replacement choices for `buffers@0.1.1` are superseded. Stop the prerelease replacement trial and alternative/licence-source research. Series 1 retains stable `exceljs@4.4.0` and the `exceljs → unzipper → binary → buffers@0.1.1` chain on the candidate with the PPTX fix (`cc36c88` line). The Series 1 PR description must state that `buffers@0.1.1` has no licence field in its registry metadata; upstream decides whether to accept the contribution. This records no conclusion about legal sufficiency and changes none of the existing integrity, artifact, test, review or Node-comparison requirements.
@@ -164,5 +174,5 @@ If it fits, Series 1 owns the implementation and the same fix is folded into the
 
 ## Additional decisions, 2026-11-09
 
-- **Upstream:** one upstream pull request is intended later, but not now. Do not prepare or send anything to `EXXETA/exxperts` until Sascha resumes that work. Sascha: "einer aber warten".
+- **Upstream (historical; one-PR/wait superseded for the series by the 2026-11-11 decision above):** one upstream pull request is intended later, but not now. Do not prepare or send anything to `EXXETA/exxperts` until Sascha resumes that work. Sascha: "einer aber warten".
 - **Excalidraw:** keep it only in the fork and keep its changes separable, so a future upstream port can omit them cleanly. Sascha: "nur im fork".
