@@ -148,3 +148,5 @@ A Purge action for the current room now holds the clean document reservation thr
 ## Checkpoint: guarded history continuation
 
 A guarded Home leave now returns its eventual result to the actual history callback, so Discard continues to the original room destination and Cancel retains the current room, address and draft. The browser-history `workspace-file-tabs-ui-smoke.ts` case failed by stopping at Home before the change and passed afterward; the filtered smoke passed 1/1. The Cypress test setup was also synchronized with its room transition after a selector race. Other route entrypoints and full context generations remain pending.
+
+The guarded history regression also issues a competing Forward while the first Back is pending and confirms the first requested room still opens. The filtered file-tabs smoke passed 1/1; this does not establish native or detached action correlation.

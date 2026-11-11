@@ -1656,8 +1656,11 @@ try {
 			await waitUntil(async () => (await historyPage.evaluate(() => window.location.hash)).includes(encodeURIComponent(agentId)), "a canceled history move restores its address");
 			assert((await historyPage.locator(".markdown-editor-tiptap .ProseMirror").textContent())?.includes("history draft"), "canceling history keeps the draft");
 			await historyPage.evaluate(() => window.history.go(-2));
+			await historyPrompt.waitFor();
+			await historyPage.evaluate(() => window.history.forward());
+			await historyPage.waitForTimeout(100);
 			await historyPrompt.getByRole("button", { name: "Discard changes" }).click();
-			await waitUntil(async () => (await historyPage.title()).includes("Workshop"), "a guarded history move reaches its original destination");
+			await waitUntil(async () => (await historyPage.title()).includes("Workshop"), "the first guarded history move reaches its original destination despite a competing move");
 			assert(await historyPage.locator(".workspace-tab").count() === 0, "the old room's document tabs do not follow the history destination");
 		} finally { await historyContext.close(); }
 	} finally {
