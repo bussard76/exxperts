@@ -166,6 +166,7 @@ fs.writeFileSync(path.join(folder, "unknown-write.md"), "# Invented unknown writ
 fs.writeFileSync(path.join(folder, "pending-discard.md"), "# Invented pending write\n");
 fs.writeFileSync(path.join(folder, "clean-pending.md"), "# Invented original\n");
 fs.writeFileSync(path.join(folder, "clean-unknown.md"), "# Invented unknown\n");
+fs.writeFileSync(path.join(folder, "external-clean.md"), "# Invented before\n");
 fs.writeFileSync(path.join(folder, "lost-conflict.md"), "# Invented conflict\n");
 fs.writeFileSync(path.join(folder, "late-response.md"), "# Invented late response\n");
 fs.writeFileSync(path.join(folder, "late-discard.md"), "# Invented late discard\n");
@@ -771,6 +772,17 @@ try {
 		assert(Number(unknownWrites) === 2 && fs.readFileSync(path.join(folder, "clean-unknown.md"), "utf8") === "# Invented unknown\n", "the newer reverted source is saved only after reconciling the first write");
 		await page.unroute("**/workspace-markdown?*");
 		await tab("clean-unknown.md").locator(".workspace-tab-close").click();
+		await treeFile("external-clean.md").click();
+		await page.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented before").waitFor();
+		let cleanExternalWrites = 0;
+		await page.route("**/workspace-markdown?*", (route) => { if (route.request().method() === "PUT") cleanExternalWrites++; return route.continue(); });
+		fs.writeFileSync(path.join(folder, "external-clean.md"), "# Invented externally changed\r\n\r\n");
+		await page.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented externally changed").waitFor({ timeout: 12000 });
+		await page.keyboard.press("Control+s");
+		await page.waitForTimeout(500);
+		assert(cleanExternalWrites === 0 && fs.readFileSync(path.join(folder, "external-clean.md"), "utf8") === "# Invented externally changed\r\n\r\n", "keyboard Save does not normalize an unedited external update");
+		await page.unroute("**/workspace-markdown?*");
+		await tab("external-clean.md").locator(".workspace-tab-close").click();
 		await treeFile("guard-fence.md").click();
 		await page.locator(".markdown-editor-tiptap .ProseMirror").waitFor();
 		let fencedWrites = 0;

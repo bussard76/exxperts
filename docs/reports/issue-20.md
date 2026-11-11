@@ -198,3 +198,7 @@ The landing-page Wallet and Memory callbacks now consult the existing action gua
 ## Checkpoint: history during admitted entry
 
 The existing history route handler now refuses a competing Back or Forward while a document action is reserved, allowing the established history reconciliation to restore the shown address. `workspace-file-tabs-ui-smoke.ts` builds a real Memory-to-Rooms history entry, holds an invented room's first PUT, and observed Back navigating to Memory before the change; afterward it keeps the landing screen and address, then finishes the first room entry. The pre-existing dirty-document history cases still pass. The attributed file-tabs and Remember smokes passed 2/2 and the UI-only build passed. This remains attached action arbitration; full correlated owner/child/native behavior remains pending.
+
+## Checkpoint: clean external source remains exact
+
+An external update of a clean Markdown file now remains the editor's exact source until a real rich edit. The `workspace-file-tabs-ui-smoke.ts` case updates an invented file to CRLF source through the existing poll and presses the real Save shortcut: before the change it sent a PUT and normalized the file; afterward it sends none and the bytes remain exact. The attributed file-tabs and RAW smokes passed 2/2 and the UI-only build passed. This proves an attached source-retention case, not transfer or native behavior.

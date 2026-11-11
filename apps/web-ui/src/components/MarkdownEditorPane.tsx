@@ -330,7 +330,7 @@ function MarkdownEditorSurface({
 		editor.setEditable(canEdit && !readOnly && !fenced, false);
 		contentSetterRef.current = (next: string) => {
 			if (editor.isDestroyed) return;
-			rawRef.current = null;
+			rawRef.current = next;
 			trailingNewlinesRef.current = next.match(/(?:\r?\n)+$/)?.[0] ?? "";
 			editor.commands.setContent(next, { emitUpdate: false, contentType: "markdown" });
 			baselineRef.current = next;
