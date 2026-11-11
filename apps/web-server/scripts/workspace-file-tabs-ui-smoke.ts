@@ -1239,9 +1239,19 @@ try {
 			const slow = switchingPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "slow.png" });
 			await slow.click();
 			await oldStarted;
+			let releaseCleanMemento!: () => void, startCleanMemento!: () => void;
+			const cleanMementoReleased = new Promise<void>((resolve) => { releaseCleanMemento = resolve; });
+			const cleanMementoStarted = new Promise<void>((resolve) => { startCleanMemento = resolve; });
+			await switchingPage.route("**/memento", async (route) => { startCleanMemento(); await cleanMementoReleased; await route.continue(); });
 			await switchingPage.getByRole("button", { name: "Forget", exact: true }).first().click();
 			await switchingPage.getByRole("button", { name: "Forget", exact: true }).last().click();
+			try {
+				await cleanMementoStarted;
+				await switchingPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "notes.md" }).click();
+				assert(await switchingPage.locator(".workspace-tab").count() === 1 && await switchingPage.locator(".workspace-tab", { hasText: "notes.md" }).count() === 0, "a clean pending context replacement reserves the action against file selection");
+			} finally { releaseCleanMemento(); }
 			await waitUntil(async () => (await switchingPage.locator(".workspace-tab").count()) === 0, "conversation replacement clears the loading tab");
+			await switchingPage.unroute("**/memento");
 			releaseOld();
 			await oldFinished;
 			assert(await switchingPage.locator(".workspace-tab").count() === 0 && await switchingPage.locator(".workspace-preview-image img:visible").count() === 0, "a late response cannot restore the old conversation preview");

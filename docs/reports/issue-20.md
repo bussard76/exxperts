@@ -124,3 +124,7 @@ The dirty-file dialog now sits above Room settings, and the room-settings Mement
 The attached dirty-action guard now expires after the specified 120-second decision window without executing its continuation; a save already settling remains fenced until settlement. The controlled-timer `workspace-file-tabs-ui-smoke.ts` case failed before the timer existed and passed afterward with the filtered smoke 1/1. This does not establish the native exchange, abort acknowledgement or child-closure deadlines.
 
 The decision-deadline regression now also holds a real PUT past expiry, checks that a competing file selection is refused, and verifies the late response cannot execute the expired action. The full filtered `workspace-file-tabs-ui` smoke passed 1/1 with this additional case; native abort acknowledgement remains untested and unimplemented.
+
+## Checkpoint: clean Memento admission
+
+A clean topbar Memento now reserves the document action through its existing callback, and file selection and tab close respect an outstanding action even when a preview is selected. The real held Memento case in `workspace-file-tabs-ui-smoke.ts` opened a competing file before the change and withheld it afterward; the filtered smoke passed 1/1. Other clean context actions and full correlated identity/host/native arbitration remain pending.

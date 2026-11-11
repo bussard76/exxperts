@@ -612,7 +612,7 @@ export function App() {
 		return false;
 	}
 
-	function completeMarkdownEditorPrompt(action: (() => void | Promise<unknown>) | null): void {
+	function completeMarkdownEditorPrompt(action: (() => void | Promise<unknown>) | null): Promise<unknown> {
 		if (markdownEditorPromptTimerRef.current !== null) window.clearTimeout(markdownEditorPromptTimerRef.current);
 		markdownEditorPromptTimerRef.current = null;
 		markdownEditorCommittingRef.current = true;
@@ -629,7 +629,7 @@ export function App() {
 			markdownEditorCommitBypassRef.current = true;
 			const result = action?.();
 			markdownEditorCommitBypassRef.current = false;
-			void Promise.resolve(result).finally(release);
+			return Promise.resolve(result).finally(release);
 		} catch (error) {
 			markdownEditorCommitBypassRef.current = false;
 			release();
@@ -654,7 +654,7 @@ export function App() {
 			setMarkdownEditorFenced(false);
 			return;
 		}
-		completeMarkdownEditorPrompt(action);
+		void completeMarkdownEditorPrompt(action);
 	}
 
 	async function discardMarkdownEditorAndContinue(): Promise<void> {
@@ -675,7 +675,7 @@ export function App() {
 			setMarkdownEditorFenced(false);
 			return;
 		}
-		completeMarkdownEditorPrompt(action);
+		void completeMarkdownEditorPrompt(action);
 	}
 
 	function cancelMarkdownEditorPrompt(): void {
@@ -700,6 +700,7 @@ export function App() {
 	}
 
 	function requestCloseWorkspaceTab(path: string): void {
+		if (markdownEditorPendingActionRef.current && !markdownEditorCommitBypassRef.current) return;
 		const active = activeWorkspacePath(rightPaneRef.current);
 		if (active === path && rightPaneRef.current?.kind === "markdownEditor" && !guardMarkdownEditorAction(() => requestCloseWorkspaceTab(path), "close")) return;
 		const paths = workspaceTabs?.paths ?? [];
@@ -720,6 +721,7 @@ export function App() {
 	}
 
 	function openWorkspaceMarkdown(entry: { relativePath: string; extension: string }): void {
+		if (markdownEditorPendingActionRef.current && !markdownEditorCommitBypassRef.current) return;
 		const path = entry.relativePath;
 		if (!/\.(md|doc|docx|pptx|excalidraw|drawio|dio|txt|json|pdf|html?|xls|xlsx|xlsm|png|jpe?g|gif|webp|svg)$/i.test(path) || !persistentChat) return;
 		if (activeWorkspacePath(rightPaneRef.current) === path && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId) return;
@@ -7517,6 +7519,14 @@ export function App() {
 	}
 
 	async function mementoPersistentThread() {
+		if (!markdownEditorDirtyRef.current && !markdownEditorPendingActionRef.current && !markdownEditorCommitBypassRef.current) {
+			const action = () => mementoPersistentThread();
+			markdownEditorPendingActionRef.current = action;
+			markdownEditorPromptBusyRef.current = true;
+			setMarkdownEditorFenced(true);
+			await completeMarkdownEditorPrompt(action);
+			return;
+		}
 		if (!guardMarkdownEditorAction(() => mementoPersistentThread(), "navigate")) return;
 		const targetChat = persistentChat;
 		if (!targetChat) return;
