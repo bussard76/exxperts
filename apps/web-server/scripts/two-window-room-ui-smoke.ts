@@ -273,15 +273,16 @@ try {
 		await a.unroute("**/api/persistent-agents");
 		// Permission can change without changing the file's content revision.
 		const policy = await ctx.newPage();
-		await policy.addInitScript({ content: `const realInterval = window.setInterval; window.setInterval = (callback, delay, ...args) => realInterval(callback, delay === 5000 ? 100 : delay, ...args);` });
+		await policy.addInitScript({ content: `const realInterval = window.setInterval; window.setInterval = (callback, delay, ...args) => realInterval(callback, delay === 5000 ? 100 : delay, ...args); const realTimeout = window.setTimeout; window.setTimeout = (callback, delay, ...args) => realTimeout(callback, delay === 1000 ? 30000 : delay, ...args);` });
 		await policy.goto(`${baseUrl}/#/room/${agentId}`);
 		await policy.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "identity.md" }).click();
 		await policy.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented identity source").waitFor();
 		await policy.getByRole("button", { name: "RAW", exact: true }).click();
 		const policyRaw = policy.getByRole("textbox", { name: "Raw Markdown source" });
-		let readOnly = false, policyWrites = 0;
+		let readOnly = false, readDenied = false, policyWrites = 0;
 		await policy.route("**/workspace-markdown?*", async (route) => {
 			if (route.request().method() !== "GET") { policyWrites++; return route.continue(); }
+			if (readDenied) return route.fulfill({ status: 403, json: { code: "workspace_read_forbidden", error: "Workspace reading is not enabled for this room." } });
 			const response = await route.fetch();
 			const body = await response.json();
 			await route.fulfill({ response, json: { ...body, readOnly } });
@@ -297,6 +298,11 @@ try {
 		assert((await policy.evaluate(() => location.hash)).includes("/room/") && await policyRaw.inputValue() === "# Invented permission draft\n" && policyWrites === 0, "a guarded Save refuses navigation after permission loss without discarding the draft");
 		readOnly = false;
 		await waitUntil(() => policyRaw.isEditable(), "restored permission re-enables the real editor");
+		readDenied = true;
+		await waitUntil(async () => !(await policyRaw.isEditable()), "an explicit read-policy refusal fences the real editor", 5000);
+		assert(await policyRaw.inputValue() === "# Invented permission draft\n" && policyWrites === 0, "read-policy refusal retains the draft without a write");
+		readDenied = false;
+		await waitUntil(() => policyRaw.isEditable(), "a later successful policy read re-enables the real editor", 5000);
 		await policy.close();
 		{
 			const unknownPolicy = await ctx.newPage();

@@ -559,25 +559,25 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 				const latest = await getWorkspaceMarkdownFile(agentId, conversationId, path);
 				const current = fileRef.current;
 				if (!active || !current) return;
+				setCanEdit(!latest.readOnly);
 				if (latest.revision === current.revision) {
 					if (latest.readOnly !== current.readOnly) {
 						fileRef.current = latest;
 						setFile(latest);
-						setCanEdit(!latest.readOnly);
 					}
 					return;
 				}
 				const conflictDetected = reconcileServerContent(latest.content);
 				fileRef.current = latest;
 				setFile(latest);
-				setCanEdit(!latest.readOnly);
 				if (conflictDetected) {
 					setConflictRevision(latest.revision);
 					setPhase("conflict");
 				} else {
 					setPhase("ready");
 				}
-			} catch {
+			} catch (cause) {
+				if (active && cause instanceof WorkspaceMarkdownApiError && cause.status === 403) setCanEdit(false);
 				// A transient OneDrive/readability error must not discard a draft.
 			} finally {
 				checking = false;
