@@ -190,3 +190,7 @@ A held real initial conversation PUT in `workspace-file-tabs-ui-smoke.ts` showed
 ## Checkpoint: first admitted room resume
 
 `workspace-file-tabs-ui-smoke.ts` seeds an invented standby thread via the existing test server, holds the real resume GET, and attempts entry to another invented room. Without the reservation, the competing room issued its conversation save and replaced the pending resume; with the existing action guard around the resume callback, it issues no competing save and the original room resumes after release. The attributed filtered file-tabs smoke passed 1/1 and the UI-only build passed. This covers only the attached callback; complete C1/C4 correlation and all detached/native work remain pending.
+
+## Checkpoint: product navigation during admitted entry
+
+The landing-page Wallet and Memory callbacks now consult the existing action guard before changing screen. The real pending-entry case in `workspace-file-tabs-ui-smoke.ts` observed Wallet replacing the screen before the change; after it, both Wallet and Memory are withheld while the original room save is held and that original room completes. The attributed filtered file-tabs smoke passed 1/1 and the UI-only build passed. Browser history while an entry is pending and the broader C1/C4/native contract remain open.

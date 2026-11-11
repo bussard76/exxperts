@@ -1734,6 +1734,11 @@ try {
 				await entryPage.locator(".persistent-agent-card").filter({ hasText: "Alder" }).getByRole("button", { name: /^(Enter|Resume)$/ }).evaluate((button) => (button as HTMLButtonElement).click());
 				await entryPage.waitForTimeout(250);
 				assert(otherEntries === 0, "a second room cannot replace the first admitted room entry while its conversation save is pending");
+				const productNavigation = entryPage.getByRole("navigation", { name: "Product navigation" });
+				await productNavigation.getByRole("button", { name: "Wallet", exact: true }).click();
+				assert(await entryPage.getByRole("heading", { name: "Your rooms." }).isVisible(), "Wallet cannot replace the admitted room entry while its save is pending");
+				await productNavigation.getByRole("button", { name: "Memory", exact: true }).click();
+				assert(await entryPage.getByRole("heading", { name: "Your rooms." }).isVisible(), "Memory cannot replace the admitted room entry while its save is pending");
 			} finally { releaseEntry(); }
 			await waitUntil(async () => (await entryPage.title()).includes("Spruce"), "the first admitted room entry completes");
 		} finally { await entryContext.close(); }
