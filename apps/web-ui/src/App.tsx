@@ -8244,8 +8244,8 @@ export function App() {
 	// the conversation, so staying bound to the thread would leave the user
 	// typing into a dead one (refreshPersistentAgentStatus deliberately stands
 	// down while a room is open). Leave the room the way archiving does.
-	function leaveRoomAfterMemento(): void {
-		if (!guardMarkdownEditorAction(() => leaveRoomAfterMemento(), "navigate")) return;
+	function leaveRoomAfterMemento(alreadyGuarded = false): void {
+		if (!alreadyGuarded && !guardMarkdownEditorAction(() => leaveRoomAfterMemento(), "navigate")) return;
 		if (persistTimerRef.current) {
 			window.clearTimeout(persistTimerRef.current);
 			persistTimerRef.current = null;
@@ -9098,7 +9098,7 @@ export function App() {
 			globalOverlaySlot={
 				<>
 					{markdownEditorPrompt && (
-						<div className="checkpoint-preview-backdrop maintain-confirm-backdrop" role="dialog" aria-modal="true" aria-label="Unsaved Markdown changes">
+						<div className="checkpoint-preview-backdrop maintain-confirm-backdrop markdown-editor-confirm-backdrop" role="dialog" aria-modal="true" aria-label="Unsaved Markdown changes">
 							<section className="checkpoint-input-card maintain-confirm-card markdown-editor-confirm">
 								<h2>Unsaved Markdown changes</h2>
 								<p>{markdownEditorPrompt === "switch" ? "Save this file before opening another file?" : "Save this file before leaving the editor?"}</p>
@@ -9111,7 +9111,7 @@ export function App() {
 						</div>
 					)}
 					{roomSettingsOpen && currentPersistentStatus && (
-						<RoomSettingsModal status={currentPersistentStatus} answering={persistentRoomInFlight} initialPane={roomSettingsPane} onClose={() => setRoomSettingsOpen(false)} onArchive={archivePersistentAgentRoom} onPurge={purgePersistentAgentRoom} onRefresh={refreshPersistentAgentStatus} onMementoApplied={leaveRoomAfterMemento} onBeforeMemento={(continueAction) => guardMarkdownEditorAction(continueAction, "navigate")} onOpenSkillsLibrary={() => openSettings("skills")} onOpenConnectors={() => openSettings("connectors")} />
+						<RoomSettingsModal status={currentPersistentStatus} answering={persistentRoomInFlight} initialPane={roomSettingsPane} onClose={() => setRoomSettingsOpen(false)} onArchive={archivePersistentAgentRoom} onPurge={purgePersistentAgentRoom} onRefresh={refreshPersistentAgentStatus} onMementoApplied={() => leaveRoomAfterMemento(true)} onBeforeMemento={(continueAction) => guardMarkdownEditorAction(continueAction, "navigate")} onOpenSkillsLibrary={() => openSettings("skills")} onOpenConnectors={() => openSettings("connectors")} />
 					)}
 					{modelSwitchAsk && persistentChat && modelSwitchAsk.agentId === persistentChat.agentId && modelSwitchAsk.conversationId === persistentChat.conversationId && (
 						<ModelSwitchWindow

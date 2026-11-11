@@ -126,6 +126,7 @@ html.sidebar-collapsed .sidebar-resizer { display: none; }
 .markdown-editor-conflict strong { color: var(--fg); }
 .markdown-editor-conflict-actions { display: flex; gap: 6px; margin-left: auto; }
 .markdown-editor-conflict-actions button { border: 1px solid var(--border); border-radius: 5px; color: var(--fg); }
+.markdown-editor-confirm-backdrop { z-index: 99; }
 .markdown-editor-confirm { max-width: 520px; }
 
 @media (max-width: 900px) {

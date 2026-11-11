@@ -114,3 +114,7 @@ A synchronous decision lock now rejects repeated Save or Discard confirmation wh
 ## Checkpoint: reserve the action through its continuation
 
 The admitted guard now stays reserved until the captured asynchronous continuation settles; the existing callback effects are retained, and checkpoint continuation returns its existing promise to that guard. The real held Home leave in `workspace-file-tabs-ui-smoke.ts` issued two requests before the change and one afterward, with the filtered smoke passing 1/1. The room-settings Memento nested continuation and full context/native correlation remain open and are not claimed by this case.
+
+## Checkpoint: room-settings Memento guard
+
+The dirty-file dialog now sits above Room settings, and the room-settings Memento keeps its existing request and exit inside the admitted action until completion. The real `workspace-file-tabs-ui-smoke.ts` flow first failed because settings intercepted the guard, then failed because Home could run while the held Memento request was pending; it passed after both changes. The filtered file-tabs and `settings-look-ui` smokes each passed 1/1. This covers that callback in the attached UI, not dependent child shutdown or native behavior.

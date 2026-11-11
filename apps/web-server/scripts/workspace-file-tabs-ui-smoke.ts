@@ -1256,6 +1256,29 @@ try {
 			await roomPage.unroute("**/runtime/discard-empty-prepared-boundary");
 			assert(!fs.readFileSync(path.join(folder, "notes.md"), "utf8").includes("pending room draft"), "discarding the room draft leaves the file unchanged");
 			await archive.getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "notes.md" }).click();
+			await roomPage.locator(".markdown-editor-tiptap .ProseMirror").click();
+			await roomPage.keyboard.type(" settings memento draft");
+			await roomPage.getByRole("button", { name: "Room settings" }).click();
+			await roomPage.locator(".settings-dialog-nav-item").filter({ hasText: /^Conversation$/ }).first().click();
+			await roomPage.locator(".room-session-section").getByRole("button", { name: "Forget…" }).click();
+			await roomPage.getByRole("dialog", { name: "Unsaved Markdown changes" }).getByRole("button", { name: "Discard changes" }).click();
+			let releaseSettingsMemento!: () => void, startSettingsMemento!: () => void;
+			const settingsMementoReleased = new Promise<void>((resolve) => { releaseSettingsMemento = resolve; });
+			const settingsMementoStarted = new Promise<void>((resolve) => { startSettingsMemento = resolve; });
+			let concurrentLeave = 0;
+			roomPage.on("request", (request) => { if ((request.method() === "DELETE" && request.url().includes("/threads/")) || (request.method() === "POST" && request.url().includes("/runtime/discard-empty-prepared-boundary"))) concurrentLeave++; });
+			await roomPage.route("**/memento", async (route) => { startSettingsMemento(); await settingsMementoReleased; await route.continue(); });
+			await roomPage.getByRole("alertdialog", { name: "Forget this conversation and start fresh?" }).getByRole("button", { name: "Forget", exact: true }).click();
+			try {
+				await settingsMementoStarted;
+				await home.evaluate((button) => (button as HTMLButtonElement).click());
+				await roomPage.waitForTimeout(250);
+				assert(concurrentLeave === 0, "a held room-settings Memento reserves the guarded action against Home");
+			} finally { releaseSettingsMemento(); }
+			await archive.waitFor();
+			await roomPage.unroute("**/memento");
+			await archive.getByRole("button", { name: /^(Enter|Resume)$/ }).click();
 			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "report.docx" }).click();
 			await oldStarted;
 			await roomPage.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
