@@ -1616,6 +1616,7 @@ try {
 			const close = purgePage.locator(".whats-new-close");
 			if (await close.count()) await close.click();
 			await purgePage.locator(".persistent-agent-card").filter({ hasText: "Cypress" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+			await waitUntil(async () => (await purgePage.title()).includes("Cypress"), "the invented purge room opens");
 			await purgePage.getByRole("button", { name: "Room settings" }).click();
 			await purgePage.locator(".settings-dialog-nav-item").filter({ hasText: /^Archive or delete$/ }).first().click();
 			await purgePage.locator(".room-danger-zone").getByRole("button", { name: "Delete room", exact: true }).click();
@@ -1634,6 +1635,31 @@ try {
 			} finally { releasePurge(); }
 			assert(await purgeResult, "the invented room is purged after the held request is released");
 		} finally { await purgeContext.close(); }
+		const historyContext = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+		try {
+			const historyPage = await historyContext.newPage();
+			await historyPage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+			await historyPage.waitForLoadState("networkidle");
+			const close = historyPage.locator(".whats-new-close");
+			if (await close.count()) await close.click();
+			await historyPage.locator(".persistent-agent-card").filter({ hasText: "Workshop" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+			await waitUntil(async () => (await historyPage.title()).includes("Workshop"), "the history source room opens");
+			await historyPage.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+			await historyPage.locator(".persistent-agent-card").filter({ hasText: "Archive" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+			await historyPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "notes.md" }).click();
+			await historyPage.locator(".markdown-editor-tiptap .ProseMirror").click();
+			await historyPage.keyboard.type(" history draft");
+			await historyPage.evaluate(() => window.history.go(-2));
+			const historyPrompt = historyPage.getByRole("dialog", { name: "Unsaved Markdown changes" });
+			await historyPrompt.getByRole("button", { name: "Cancel" }).click();
+			await waitUntil(async () => (await historyPage.title()).includes("Archive"), "a canceled history move keeps the current room");
+			await waitUntil(async () => (await historyPage.evaluate(() => window.location.hash)).includes(encodeURIComponent(agentId)), "a canceled history move restores its address");
+			assert((await historyPage.locator(".markdown-editor-tiptap .ProseMirror").textContent())?.includes("history draft"), "canceling history keeps the draft");
+			await historyPage.evaluate(() => window.history.go(-2));
+			await historyPrompt.getByRole("button", { name: "Discard changes" }).click();
+			await waitUntil(async () => (await historyPage.title()).includes("Workshop"), "a guarded history move reaches its original destination");
+			assert(await historyPage.locator(".workspace-tab").count() === 0, "the old room's document tabs do not follow the history destination");
+		} finally { await historyContext.close(); }
 	} finally {
 		await browser.close();
 	}

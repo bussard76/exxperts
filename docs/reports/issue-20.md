@@ -144,3 +144,7 @@ An Archive action for the current room now holds the clean document reservation 
 ## Checkpoint: clean Purge admission
 
 A Purge action for the current room now holds the clean document reservation through its existing callback. The invented-room `workspace-file-tabs-ui-smoke.ts` case entered another room during a held Purge before the change and withheld entry afterward; the test also observed successful completion after release, and the filtered smoke passed 1/1. Purge of another room remains its existing operation; this does not establish child closure or the remaining clean callbacks.
+
+## Checkpoint: guarded history continuation
+
+A guarded Home leave now returns its eventual result to the actual history callback, so Discard continues to the original room destination and Cancel retains the current room, address and draft. The browser-history `workspace-file-tabs-ui-smoke.ts` case failed by stopping at Home before the change and passed afterward; the filtered smoke passed 1/1. The Cypress test setup was also synchronized with its room transition after a selector race. Other route entrypoints and full context generations remain pending.

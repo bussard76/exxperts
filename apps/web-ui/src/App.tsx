@@ -501,6 +501,7 @@ export function App() {
 	const markdownEditorRef = useRef<MarkdownEditorHandle | null>(null);
 	const markdownEditorDirtyRef = useRef(false);
 	const markdownEditorPendingActionRef = useRef<(() => void | Promise<unknown>) | null>(null);
+	const markdownEditorActionResultRef = useRef<{ promise: Promise<unknown>; resolve: (result: unknown) => void } | null>(null);
 	const markdownEditorCommitBypassRef = useRef(false);
 	const markdownEditorCommittingRef = useRef(false);
 	const markdownEditorPromptTimerRef = useRef<number | null>(null);
@@ -602,6 +603,9 @@ export function App() {
 		if (markdownEditorPendingActionRef.current) return false;
 		if (!markdownEditorDirtyRef.current) return true;
 		markdownEditorPendingActionRef.current = action;
+		let resolve!: (result: unknown) => void;
+		const promise = new Promise<unknown>((done) => { resolve = done; });
+		markdownEditorActionResultRef.current = { promise, resolve };
 		const timer = window.setTimeout(() => {
 			if (markdownEditorPromptTimerRef.current === timer) cancelMarkdownEditorPrompt();
 		}, 120_000);
@@ -619,8 +623,10 @@ export function App() {
 		setMarkdownEditorPrompt(null);
 		setMarkdownEditorPromptBusy(false);
 		markdownEditorDirtyRef.current = false;
+		const actionResult = markdownEditorActionResultRef.current;
 		const release = () => {
 			markdownEditorPendingActionRef.current = null;
+			markdownEditorActionResultRef.current = null;
 			markdownEditorPromptBusyRef.current = false;
 			markdownEditorCommittingRef.current = false;
 			setMarkdownEditorFenced(false);
@@ -629,10 +635,19 @@ export function App() {
 			markdownEditorCommitBypassRef.current = true;
 			const result = action?.();
 			markdownEditorCommitBypassRef.current = false;
-			return Promise.resolve(result).finally(release);
+			return Promise.resolve(result).then((value) => {
+				release();
+				actionResult?.resolve(value);
+				return value;
+			}, (error) => {
+				release();
+				actionResult?.resolve(false);
+				throw error;
+			});
 		} catch (error) {
 			markdownEditorCommitBypassRef.current = false;
 			release();
+			actionResult?.resolve(false);
 			throw error;
 		}
 	}
@@ -659,6 +674,8 @@ export function App() {
 			setMarkdownEditorPromptBusy(false);
 			setMarkdownEditorPrompt(null);
 			markdownEditorPendingActionRef.current = null;
+			markdownEditorActionResultRef.current?.resolve(false);
+			markdownEditorActionResultRef.current = null;
 			setMarkdownEditorFenced(false);
 			return;
 		}
@@ -678,6 +695,8 @@ export function App() {
 			markdownEditorCanceledSaveRef.current = false;
 			markdownEditorPromptBusyRef.current = false;
 			markdownEditorPendingActionRef.current = null;
+			markdownEditorActionResultRef.current?.resolve(false);
+			markdownEditorActionResultRef.current = null;
 			setMarkdownEditorPrompt(null);
 			setMarkdownEditorPromptBusy(false);
 			setMarkdownEditorFenced(false);
@@ -693,6 +712,8 @@ export function App() {
 		if (markdownEditorPromptBusyRef.current) markdownEditorCanceledSaveRef.current = true;
 		else {
 			markdownEditorPendingActionRef.current = null;
+			markdownEditorActionResultRef.current?.resolve(false);
+			markdownEditorActionResultRef.current = null;
 			setMarkdownEditorFenced(false);
 		}
 		setMarkdownEditorPrompt(null);
@@ -8042,7 +8063,11 @@ export function App() {
 		if (cleanAction) return await cleanAction as boolean;
 		// A conversation the save that filled the room closed leaves the way Return Home does: nothing is saved into it.
 		if (closedByFullSaveRef.current) return restAfterCheckpoint();
-		if (!guardMarkdownEditorAction(() => goHome(), "navigate")) return false;
+		const alreadyPending = markdownEditorPendingActionRef.current !== null;
+		if (!guardMarkdownEditorAction(() => goHome(), "navigate")) {
+			if (alreadyPending) return false;
+			return Boolean(await markdownEditorActionResultRef.current?.promise);
+		}
 		// Another window has the room: leaving saves nothing over its conversation.
 		if (turnLinkRef.current === "elsewhere") {
 			await finishLeaveRoom({ detachInFlight: true });
