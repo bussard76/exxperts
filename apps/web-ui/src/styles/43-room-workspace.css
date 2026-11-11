@@ -291,7 +291,7 @@ html.desktop-app-mac .markdown-editor-header input {
 }
 /* The file tabs share the window's top row: above the drag strip, the bar drags
    and the tabs click, as in the headers above. */
-html.desktop-app-mac .workbench > .workspace-pane {
+html.desktop-app-mac .workbench > .docs-slot .workspace-pane {
 	position: relative;
 	z-index: 21;
 }
@@ -313,7 +313,9 @@ html.desktop-app-mac .workspace-tab {
 .workbench.right-pane-collapsed > :not(.main):not(.attachments-gallery) { display: none; }
 /* The topbar's actions sit on the chat rail's edge, far from the pane in a wide window. The pane toggle moves out to the column's right edge, 8px from the pane. */
 .topbar-actions .right-pane-toggle { transform: translateX(calc(var(--topbar-banner-edge) - 15px)); }
+.docs-slot, .docs-host { display: contents; }
 .workspace-pane { min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; }
+.workbench.right-pane-collapsed .docs-slot .workspace-pane { display: none; }
 .workspace-pane[hidden], .workspace-pane [hidden] { display: none; }
 .workspace-open-action { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.5rem; padding: 0.5rem 1rem; border-bottom: 1px solid var(--exx-border); background: var(--exx-surface); }
 .workspace-open-action button { flex: none; padding: 5px 12px; border: 1px solid var(--exx-border); border-radius: 6px; background: transparent; color: inherit; font-size: 13px; cursor: pointer; }
