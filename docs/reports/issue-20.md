@@ -182,3 +182,7 @@ The real lost-response case in `workspace-file-tabs-ui-smoke.ts` now also revert
 The first commit attempt correctly failed the normal typecheck hook because the existing Keep mine call also needed the confirmed revision argument; the call was corrected, with no hook bypass. Affected browser checks and typechecks were rerun after that correction.
 
 The first standalone rerun then exposed TypeScript narrowing of the test's asynchronously updated request counter; the assertion was adjusted to read it as a number and typechecks restarted.
+
+## Checkpoint: first admitted room entry
+
+A held real initial conversation PUT in `workspace-file-tabs-ui-smoke.ts` showed that clicking a second invented room could replace the first entry before it finished. The clean new-room entry now reserves the existing action until its original callback settles; the second entry starts no conversation save, and the first room opens after release. The new case failed on the competing request before the change, and the attributed file-tabs and Remember smokes passed 2/2 with the fix. Resume uses a separate callback and remains to be tested independently. This is attached owner arbitration only, not the detached host/native contract.

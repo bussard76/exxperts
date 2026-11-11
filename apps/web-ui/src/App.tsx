@@ -7228,6 +7228,8 @@ export function App() {
 
 
 	async function openPersistentAgent(target: PersistentAgentTarget) {
+		const cleanAction = admitCleanMarkdownEditorAction(() => openPersistentAgent(target));
+		if (cleanAction) { await cleanAction; return; }
 		if (!guardMarkdownEditorAction(() => openPersistentAgent(target), "navigate")) return;
 		const label = shownRoomName(target.displayName) || "Exxpert";
 		// The server decides a new conversation's model (the room's conversation

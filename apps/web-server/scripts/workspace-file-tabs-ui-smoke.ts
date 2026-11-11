@@ -1705,6 +1705,38 @@ try {
 			} finally { releasePurge(); }
 			assert(await purgeResult, "the invented room is purged after the held request is released");
 		} finally { await purgeContext.close(); }
+		for (const displayName of ["Spruce", "Alder"]) {
+			const room = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName, userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
+			assert(room.status === 201, `the invented ${displayName} room is created`);
+		}
+		const entryContext = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+		try {
+			const entryPage = await entryContext.newPage();
+			await entryPage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+			await entryPage.waitForLoadState("networkidle");
+			const close = entryPage.locator(".whats-new-close");
+			if (await close.count()) await close.click();
+			let releaseEntry!: () => void, startEntry!: () => void, otherEntries = 0;
+			const entryReleased = new Promise<void>((resolve) => { releaseEntry = resolve; });
+			const entryStarted = new Promise<void>((resolve) => { startEntry = resolve; });
+			await entryPage.route("**/threads/*", async (route) => {
+				const request = route.request();
+				if (request.method() !== "PUT") return route.continue();
+				if (request.url().includes("/persistent-agents/alder/")) otherEntries++;
+				if (!request.url().includes("/persistent-agents/spruce/")) return route.continue();
+				startEntry();
+				await entryReleased;
+				await route.continue();
+			});
+			await entryPage.locator(".persistent-agent-card").filter({ hasText: "Spruce" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+			try {
+				await entryStarted;
+				await entryPage.locator(".persistent-agent-card").filter({ hasText: "Alder" }).getByRole("button", { name: /^(Enter|Resume)$/ }).evaluate((button) => (button as HTMLButtonElement).click());
+				await entryPage.waitForTimeout(250);
+				assert(otherEntries === 0, "a second room cannot replace the first admitted room entry while its conversation save is pending");
+			} finally { releaseEntry(); }
+			await waitUntil(async () => (await entryPage.title()).includes("Spruce"), "the first admitted room entry completes");
+		} finally { await entryContext.close(); }
 		const historyContext = await browser.newContext({ viewport: { width: 1400, height: 900 } });
 		try {
 			const historyPage = await historyContext.newPage();
