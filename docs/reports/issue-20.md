@@ -242,3 +242,7 @@ The affected `workspace-markdown-images-ui-smoke.ts` entrypoint, including its e
 ## Checkpoint: Keep mine after a lost-response conflict
 
 The real `two-window-room-ui-smoke.ts` flow now covers explicit Keep mine after a lost write response and a competing revision, with the local RAW source reverted to its original value. It verifies the retained source is written over the confirmed competitor only after that choice, with exactly the original PUT and the chosen replacement PUT; the attributed filtered two-window smoke passed 1/1. This complements the earlier Discard and Reload coverage and is attached-editor evidence only.
+
+## Checkpoint: first detached-host test (red)
+
+Added `workspace-detached-documents-ui-smoke.ts` with an invented room/workspace and the real browser entrypoints for a clean RAW document, Detach, child tree/tab/source presentation, Return and zero movement PUTs. The attributed filtered smoke is intentionally red at the unavailable Detach control; no child, host transfer or I1/R1 pass is claimed. The initial test incorrectly compared Chromium's LF textarea presentation directly to CRLF file bytes; it now checks those separately. A later real-entry case must still prove byte-exact unsaved CRLF transfer, all preview snapshots, empty/denied/bootstrap behavior, context fencing and native lifecycle. Detach remains unavailable until the complete safeguards work together.
