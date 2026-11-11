@@ -501,6 +501,7 @@ export function App() {
 	const markdownEditorRef = useRef<MarkdownEditorHandle | null>(null);
 	const markdownEditorDirtyRef = useRef(false);
 	const markdownEditorPendingActionRef = useRef<(() => void | Promise<unknown>) | null>(null);
+	const markdownEditorCanceledSaveRef = useRef(false);
 	const [markdownEditorPrompt, setMarkdownEditorPrompt] = useState<"close" | "switch" | "navigate" | null>(null);
 	const [markdownEditorPromptBusy, setMarkdownEditorPromptBusy] = useState(false);
 	const [artifactMaximized, setArtifactMaximized] = useState(false);
@@ -604,15 +605,17 @@ export function App() {
 
 	async function saveMarkdownEditorAndContinue(): Promise<void> {
 		if (markdownEditorPromptBusy) return;
+		const action = markdownEditorPendingActionRef.current;
 		setMarkdownEditorPromptBusy(true);
 		const saved = await markdownEditorRef.current?.save();
-		if (!saved) {
+		if (!saved || markdownEditorCanceledSaveRef.current) {
+			markdownEditorCanceledSaveRef.current = false;
 			setMarkdownEditorPromptBusy(false);
 			setMarkdownEditorPrompt(null);
 			markdownEditorPendingActionRef.current = null;
 			return;
 		}
-		completeMarkdownEditorPrompt(markdownEditorPendingActionRef.current);
+		completeMarkdownEditorPrompt(action);
 	}
 
 	function discardMarkdownEditorAndContinue(): void {
@@ -621,7 +624,8 @@ export function App() {
 	}
 
 	function cancelMarkdownEditorPrompt(): void {
-		markdownEditorPendingActionRef.current = null;
+		if (markdownEditorPromptBusy) markdownEditorCanceledSaveRef.current = true;
+		else markdownEditorPendingActionRef.current = null;
 		setMarkdownEditorPrompt(null);
 		setMarkdownEditorPromptBusy(false);
 	}
