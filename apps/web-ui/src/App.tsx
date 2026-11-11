@@ -167,6 +167,22 @@ function WorkspaceOpenAction({ agentId, conversationId, path }: { agentId: strin
 	return <div className="workspace-open-action"><button type="button" disabled={pending} onClick={() => void open()}>{label}</button>{failed && <p role="alert">This file could not be opened in another program.</p>}</div>;
 }
 
+type DocumentContext = Readonly<{
+	ownerId: string;
+	ownerGeneration: number;
+	roomId: string;
+	conversationId: string;
+	roomGeneration: number;
+}>;
+
+type DocumentAdmission = Readonly<{
+	requestId: string;
+	ownerId: string;
+	ownerGeneration: number;
+	roomGeneration: number;
+	context: DocumentContext | null;
+}>;
+
 function allocateDocumentId(): string | null {
 	try {
 		const crypto = window.crypto;
@@ -527,8 +543,9 @@ export function App() {
 	const rightPaneRef = useRef<RightPaneOccupant | null>(null);
 	rightPaneRef.current = rightPane;
 	const [documentOwnerId] = useState(allocateDocumentId);
+	const documentOwnerGenerationRef = useRef(1);
 	const markdownEditorRef = useRef<MarkdownEditorHandle | null>(null);
-	const markdownEditorRequestIdRef = useRef<string | null>(null);
+	const markdownEditorAdmissionRef = useRef<DocumentAdmission | null>(null);
 	const markdownEditorDirtyRef = useRef(false);
 	const markdownEditorPendingActionRef = useRef<(() => void | Promise<unknown>) | null>(null);
 	const markdownEditorActionResultRef = useRef<{ promise: Promise<unknown>; resolve: (result: unknown) => void } | null>(null);
@@ -635,6 +652,25 @@ export function App() {
 		return () => window.removeEventListener("beforeunload", beforeUnload);
 	}, []);
 
+	function captureDocumentAdmission(requestId: string): DocumentAdmission | null {
+		const ownerGeneration = documentOwnerGenerationRef.current;
+		const current = checkpointContextRef.current;
+		if (!documentOwnerId || !Number.isSafeInteger(ownerGeneration) || ownerGeneration < 1 || !Number.isSafeInteger(current.generation) || current.generation < 0) return null;
+		const context = current.key === null ? null : current.roomId && current.conversationId && current.generation > 0 ? {
+			ownerId: documentOwnerId, ownerGeneration, roomId: current.roomId, conversationId: current.conversationId, roomGeneration: current.generation,
+		} : null;
+		if (current.key !== null && !context) return null;
+		return { requestId, ownerId: documentOwnerId, ownerGeneration, roomGeneration: current.generation, context };
+	}
+
+	function documentAdmissionIsCurrent(admission: DocumentAdmission): boolean {
+		if (markdownEditorAdmissionRef.current !== admission || admission.ownerId !== documentOwnerId || admission.ownerGeneration !== documentOwnerGenerationRef.current || unmountedRef.current || personHasChanged()) return false;
+		const current = checkpointContextRef.current;
+		if (current.generation !== admission.roomGeneration) return false;
+		const context = admission.context;
+		return context === null ? current.key === null : context.ownerId === admission.ownerId && context.ownerGeneration === admission.ownerGeneration && current.key === `${context.roomId}\u0000${context.conversationId}` && current.roomId === context.roomId && current.conversationId === context.conversationId && current.generation === context.roomGeneration;
+	}
+
 	function guardMarkdownEditorAction(action: () => void | Promise<unknown>, prompt: "close" | "switch" | "navigate"): boolean {
 		if (markdownEditorCommitBypassRef.current) {
 			markdownEditorCommitBypassRef.current = false;
@@ -642,16 +678,16 @@ export function App() {
 		}
 		if (markdownEditorPendingActionRef.current || !documentOwnerId) return false;
 		const requestId = allocateDocumentId();
-		if (!requestId) return false;
+		const admission = requestId ? captureDocumentAdmission(requestId) : null;
+		if (!admission) return false;
 		if (!markdownEditorDirtyRef.current) {
 			if (!markdownEditorRef.current?.pendingWrite()) return true;
-			void admitCleanMarkdownEditorAction(async () => action(), requestId);
+			void admitCleanMarkdownEditorAction(async () => action(), admission.requestId);
 			return false;
 		}
-		const generation = checkpointContextRef.current.generation;
-		markdownEditorRequestIdRef.current = requestId;
+		markdownEditorAdmissionRef.current = admission;
 		markdownEditorPendingActionRef.current = () => {
-			if (markdownEditorRequestIdRef.current !== requestId || unmountedRef.current || personHasChanged() || checkpointContextRef.current.generation !== generation) return Promise.resolve(false);
+			if (!documentAdmissionIsCurrent(admission)) return Promise.resolve(false);
 			return action();
 		};
 		let resolve!: (result: unknown) => void;
@@ -678,7 +714,7 @@ export function App() {
 		const actionResult = markdownEditorActionResultRef.current;
 		const release = () => {
 			markdownEditorPendingActionRef.current = null;
-			markdownEditorRequestIdRef.current = null;
+			markdownEditorAdmissionRef.current = null;
 			markdownEditorActionResultRef.current = null;
 			markdownEditorPromptBusyRef.current = false;
 			markdownEditorCommittingRef.current = false;
@@ -709,15 +745,15 @@ export function App() {
 	function admitCleanMarkdownEditorAction(action: () => Promise<unknown>, admittedId?: string): Promise<unknown> | null {
 		if (markdownEditorDirtyRef.current || markdownEditorPendingActionRef.current || markdownEditorCommitBypassRef.current) return null;
 		const requestId = documentOwnerId && (admittedId ?? allocateDocumentId());
-		if (!requestId) return Promise.resolve(false);
-		markdownEditorRequestIdRef.current = requestId;
-		const generation = checkpointContextRef.current.generation;
+		const admission = requestId ? captureDocumentAdmission(requestId) : null;
+		if (!admission) return Promise.resolve(false);
+		markdownEditorAdmissionRef.current = admission;
 		const continueAfterWrite = async () => {
 			const editor = markdownEditorRef.current;
 			const pending = editor?.pendingWrite();
 			if (pending === "pending" && !(await editor!.save())) return false;
 			if (pending === "unknown" && (!(await editor!.settle()) || !(await editor!.save()))) return false;
-			if (markdownEditorRequestIdRef.current !== requestId || unmountedRef.current || personHasChanged() || checkpointContextRef.current.generation !== generation) return false;
+			if (!documentAdmissionIsCurrent(admission)) return false;
 			markdownEditorCommitBypassRef.current = true;
 			try { return action(); } finally { markdownEditorCommitBypassRef.current = false; }
 		};
@@ -742,7 +778,7 @@ export function App() {
 			setMarkdownEditorPromptBusy(false);
 			setMarkdownEditorPrompt(null);
 			markdownEditorPendingActionRef.current = null;
-			markdownEditorRequestIdRef.current = null;
+			markdownEditorAdmissionRef.current = null;
 			markdownEditorActionResultRef.current?.resolve(false);
 			markdownEditorActionResultRef.current = null;
 			markdownEditorRef.current?.setFence(false);
@@ -765,7 +801,7 @@ export function App() {
 			markdownEditorCanceledSaveRef.current = false;
 			markdownEditorPromptBusyRef.current = false;
 			markdownEditorPendingActionRef.current = null;
-			markdownEditorRequestIdRef.current = null;
+			markdownEditorAdmissionRef.current = null;
 			markdownEditorActionResultRef.current?.resolve(false);
 			markdownEditorActionResultRef.current = null;
 			setMarkdownEditorPrompt(null);
@@ -784,7 +820,7 @@ export function App() {
 		if (markdownEditorPromptBusyRef.current) markdownEditorCanceledSaveRef.current = true;
 		else {
 			markdownEditorPendingActionRef.current = null;
-			markdownEditorRequestIdRef.current = null;
+			markdownEditorAdmissionRef.current = null;
 			markdownEditorActionResultRef.current?.resolve(false);
 			markdownEditorActionResultRef.current = null;
 			markdownEditorRef.current?.setFence(false);
@@ -810,7 +846,10 @@ export function App() {
 		if (index < 0) return;
 		if (active === path && rightPaneRef.current?.kind === "markdownEditor") {
 			if (!guardMarkdownEditorAction(() => requestCloseWorkspaceTab(path), "close")) return;
-		} else if (!documentOwnerId || !allocateDocumentId()) return;
+		} else {
+			const requestId = documentOwnerId && allocateDocumentId();
+			if (!requestId || !captureDocumentAdmission(requestId)) return;
+		}
 		const remaining = paths.filter((item) => item !== path);
 		setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths: remaining } : tabs);
 		if (active === path) {
@@ -934,11 +973,15 @@ export function App() {
 	const [backgroundDoneToast, setBackgroundDoneToast] = useState<{ agentId: PersistentAgentId; displayName: string } | null>(null);
 	const [persistentThread, setPersistentThread] = useState<PersistentAgentThread | null>(null);
 	const [persistentChat, setPersistentChatState] = useState<PersistentChatConfig>(null);
-	const checkpointContextRef = useRef<{ key: string | null; generation: number }>({ key: null, generation: 0 });
+	const checkpointContextRef = useRef<{ key: string | null; generation: number; roomId: string | null; conversationId: string | null }>({ key: null, generation: 0, roomId: null, conversationId: null });
 	function setPersistentChat(next: SetStateAction<PersistentChatConfig>): void {
 		if (typeof next !== "function") {
 			const key = next ? `${next.agentId}\u0000${next.conversationId}` : null;
-			if (checkpointContextRef.current.key !== key) checkpointContextRef.current = { key, generation: checkpointContextRef.current.generation + 1 };
+			if (checkpointContextRef.current.key !== key) {
+				const old = checkpointContextRef.current.generation;
+				const generation = Number.isSafeInteger(old) && old < Number.MAX_SAFE_INTEGER ? old + 1 : Number.NaN;
+				checkpointContextRef.current = { key, generation, roomId: next?.agentId ?? null, conversationId: next?.conversationId ?? null };
+			}
 		}
 		setPersistentChatState(next);
 	}
@@ -2700,6 +2743,8 @@ export function App() {
 		// A development remount (StrictMode) runs the cleanup and then mounts again.
 		unmountedRef.current = false;
 		return () => {
+			const old = documentOwnerGenerationRef.current;
+			documentOwnerGenerationRef.current = Number.isSafeInteger(old) && old < Number.MAX_SAFE_INTEGER ? old + 1 : Number.NaN;
 			unmountedRef.current = true;
 			if (connectionHealthTimerRef.current !== null) window.clearTimeout(connectionHealthTimerRef.current);
 			cancelScheduledHomeReconnect();
