@@ -649,7 +649,8 @@ try {
 					await route.fulfill({ response });
 				} catch (error) { if (!closingInsecure) throw error; }
 			});
-			await insecureContext.routeWebSocket("**/*", (socket) => socket.close());
+			// Hold this unrelated transport without server messages while the owner/HTTP consumers are exercised.
+			await insecureContext.routeWebSocket("**/*", () => {});
 			const page = await insecureContext.newPage();
 			const pageErrors: string[] = [];
 			page.on("pageerror", (error) => { pageErrors.push(error.message); });
@@ -714,6 +715,16 @@ try {
 				await room.getByRole("button", { name: /^(Enter|Resume)$/ }).click();
 				await page.waitForTimeout(300);
 				assert(await room.isVisible() && await page.getByRole("navigation", { name: "Room navigation" }).count() === 0 && popups === 0, "an owner without identity grants no room action or child authority");
+				await page.getByRole("navigation", { name: "Product navigation" }).getByRole("button", { name: "Memory", exact: true }).click();
+				await page.getByRole("heading", { name: "Memory.", exact: true }).waitFor({ timeout: 10_000 });
+				assert(popups === 0, "an unavailable document owner does not block unrelated navigation with no room session");
+				await page.getByRole("navigation", { name: "Product navigation" }).getByRole("button", { name: "Rooms", exact: true }).click();
+				await room.waitFor();
+				await page.getByRole("navigation", { name: "Product navigation" }).getByRole("button", { name: "Wallet", exact: true }).click();
+				await page.getByRole("heading", { name: "Wallet.", exact: true }).waitFor();
+				await page.getByRole("navigation", { name: "Product navigation" }).getByRole("button", { name: "Rooms", exact: true }).click();
+				await room.waitFor();
+				assert(popups === 0, "unrelated navigation returns to Rooms without child authority");
 			} finally { await noOwnerContext.close(); }
 		}
 		await ctx.close();

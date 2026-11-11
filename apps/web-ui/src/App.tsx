@@ -671,6 +671,10 @@ export function App() {
 		return context === null ? current.key === null : context.ownerId === admission.ownerId && context.ownerGeneration === admission.ownerGeneration && current.key === `${context.roomId}\u0000${context.conversationId}` && current.roomId === context.roomId && current.conversationId === context.conversationId && current.generation === context.roomGeneration;
 	}
 
+	function noDocumentSession(): boolean {
+		return !unmountedRef.current && !personHasChanged() && checkpointContextRef.current.key === null && !markdownEditorRef.current && !markdownEditorPendingActionRef.current;
+	}
+
 	function guardMarkdownEditorAction(action: () => void | Promise<unknown>, prompt: "close" | "switch" | "navigate"): boolean {
 		if (markdownEditorCommitBypassRef.current) {
 			markdownEditorCommitBypassRef.current = false;
@@ -8242,14 +8246,19 @@ export function App() {
 	// chaining a navigation (the background-answer toast's Open) can stand down
 	// without reading state that only settles on the next render.
 	async function goHome(): Promise<boolean> {
-		const cleanAction = admitCleanMarkdownEditorAction(() => goHome());
-		if (cleanAction) return await cleanAction as boolean;
+		const noSession = noDocumentSession();
+		if (!noSession) {
+			const cleanAction = admitCleanMarkdownEditorAction(() => goHome());
+			if (cleanAction) return await cleanAction as boolean;
+		}
 		// A conversation the save that filled the room closed leaves the way Return Home does: nothing is saved into it.
 		if (closedByFullSaveRef.current) return restAfterCheckpoint();
-		const alreadyPending = markdownEditorPendingActionRef.current !== null;
-		if (!guardMarkdownEditorAction(() => goHome(), "navigate")) {
-			if (alreadyPending) return false;
-			return Boolean(await markdownEditorActionResultRef.current?.promise);
+		if (!noSession) {
+			const alreadyPending = markdownEditorPendingActionRef.current !== null;
+			if (!guardMarkdownEditorAction(() => goHome(), "navigate")) {
+				if (alreadyPending) return false;
+				return Boolean(await markdownEditorActionResultRef.current?.promise);
+			}
 		}
 		// Another window has the room: leaving saves nothing over its conversation.
 		if (turnLinkRef.current === "elsewhere") {
@@ -8878,7 +8887,7 @@ export function App() {
 				    already turns to response ready. Inside another room, where the
 				    card cannot be seen, the room's toast stack carries it. */}
 				{whatsNew && <WhatsNewDialog sections={whatsNew.sections} onClose={dismissWhatsNew} />}
-				<Landing roomOrder={homeRoomOrder.view} onChooseRoomOrder={homeRoomOrder.choose} onArrangingChange={(dirty) => { roomArrangeDirtyRef.current = dirty; }} onOpenSettings={openSettings} onOpenDashboard={() => { if (guardMarkdownEditorAction(() => setView("dashboard"), "navigate")) setView("dashboard"); }} onOpenMemory={() => { if (guardMarkdownEditorAction(() => setView("memory"), "navigate")) setView("memory"); }} onOpenPersistentAgent={openPersistentAgent} onResumePersistentAgent={openPersistentAgentResume} onMaintainPersistentAgent={(target) => { if (!openMaintainChooser(target)) setPersistentResumeError(maintainBlockedReason(target.agentId) ?? "Maintain is not available for this room right now."); }} onCreatePersistentAgent={createPersistentAgentRoom} onArchiveRoom={archivePersistentAgentRoom} onPurgeRoom={purgePersistentAgentRoom} onMementoForget={(agentId) => { roomDraftsRef.current.delete(agentId); }} modelStatus={modelStatus} persistentAgentStatuses={persistentAgentStatuses} persistentThread={persistentThread} persistentLive={!!persistentChat} persistentResumeError={homeStripLine} onRefreshPersistentAgent={refreshPersistentAgentStatus} theme={theme} appearance={appearance} onSetAppearance={setAppearance} aiProfileStatus={aiProfileStatus} backgroundReadyRooms={backgroundReadyRooms} purgingRooms={purgingRooms} serviceBack={serviceBack} />
+				<Landing roomOrder={homeRoomOrder.view} onChooseRoomOrder={homeRoomOrder.choose} onArrangingChange={(dirty) => { roomArrangeDirtyRef.current = dirty; }} onOpenSettings={openSettings} onOpenDashboard={() => { if (noDocumentSession() || guardMarkdownEditorAction(() => setView("dashboard"), "navigate")) setView("dashboard"); }} onOpenMemory={() => { if (noDocumentSession() || guardMarkdownEditorAction(() => setView("memory"), "navigate")) setView("memory"); }} onOpenPersistentAgent={openPersistentAgent} onResumePersistentAgent={openPersistentAgentResume} onMaintainPersistentAgent={(target) => { if (!openMaintainChooser(target)) setPersistentResumeError(maintainBlockedReason(target.agentId) ?? "Maintain is not available for this room right now."); }} onCreatePersistentAgent={createPersistentAgentRoom} onArchiveRoom={archivePersistentAgentRoom} onPurgeRoom={purgePersistentAgentRoom} onMementoForget={(agentId) => { roomDraftsRef.current.delete(agentId); }} modelStatus={modelStatus} persistentAgentStatuses={persistentAgentStatuses} persistentThread={persistentThread} persistentLive={!!persistentChat} persistentResumeError={homeStripLine} onRefreshPersistentAgent={refreshPersistentAgentStatus} theme={theme} appearance={appearance} onSetAppearance={setAppearance} aiProfileStatus={aiProfileStatus} backgroundReadyRooms={backgroundReadyRooms} purgingRooms={purgingRooms} serviceBack={serviceBack} />
 			</>
 		);
 	}
