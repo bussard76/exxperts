@@ -31,7 +31,7 @@ import { createSearchDecorationExtension, type SearchDecorationState } from "./T
 
 export interface MarkdownEditorHandle {
 	save: () => Promise<boolean>;
-	discard: () => void;
+	discard: () => boolean;
 	focus: () => void;
 }
 
@@ -412,6 +412,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 	const [error, setError] = useState<string | null>(null);
 	const [conflictRevision, setConflictRevision] = useState<string | null>(null);
 	const [canEdit, setCanEdit] = useState(false);
+	const unknownWriteRef = useRef(false);
 	const surfaceRef = useRef<SurfaceHandle | null>(null);
 	const rawAreaRef = useRef<HTMLTextAreaElement | null>(null);
 	const rawSelectionRef = useRef<[number, number] | null>(null);
@@ -445,6 +446,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 
 	useEffect(() => {
 		const controller = new AbortController();
+		unknownWriteRef.current = false;
 		fileRef.current = null;
 		setFile(null);
 		draftRef.current = "";
@@ -498,7 +500,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 	}, [agentId, conversationId, file, path, phase, reconcileServerContent]);
 
 	const persist = useCallback(async (content: string, revision: string): Promise<string | null> => {
-		if (!canEdit) return null;
+		if (!canEdit || unknownWriteRef.current) return null;
 		setPhase("saving");
 		setError(null);
 		try {
@@ -507,6 +509,20 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			markSaved(next.content);
 			return next.revision;
 		} catch (cause) {
+			if (!(cause instanceof WorkspaceMarkdownApiError)) {
+				unknownWriteRef.current = true;
+				try {
+					const latest = await getWorkspaceMarkdownFile(agentId, conversationId, path);
+					if (latest.revision !== revision && latest.content === content) {
+						unknownWriteRef.current = false;
+						setLoadedFile(latest);
+						markSaved(latest.content);
+						return latest.revision;
+					}
+				} catch {
+					// The write remains unknown until its outcome can be reconciled.
+				}
+			}
 			if (cause instanceof WorkspaceMarkdownApiError && (cause.status === 409 || cause.code === "revision_conflict")) {
 				setConflictRevision(cause.currentRevision ?? null);
 				setPhase("conflict");
@@ -542,7 +558,11 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		syncRawTaskActive();
 	}, [draft, syncRawTaskActive]);
 	const save = useCallback(() => surfaceRef.current?.save() ?? Promise.resolve(false), []);
-	const discard = useCallback(() => surfaceRef.current?.discard(), []);
+	const discard = useCallback(() => {
+		if (unknownWriteRef.current || !surfaceRef.current) return false;
+		surfaceRef.current.discard();
+		return true;
+	}, []);
 	const focus = useCallback(() => surfaceRef.current?.focus(), []);
 	const handlePreviewLink = useCallback((href: string, isWikiLink = false): boolean => {
 		const workspacePath = resolveWorkspaceMarkdownPath(path, href, isWikiLink);

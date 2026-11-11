@@ -619,7 +619,10 @@ export function App() {
 	}
 
 	function discardMarkdownEditorAndContinue(): void {
-		markdownEditorRef.current?.discard();
+		if (!markdownEditorRef.current?.discard()) {
+			cancelMarkdownEditorPrompt();
+			return;
+		}
 		completeMarkdownEditorPrompt(markdownEditorPendingActionRef.current);
 	}
 

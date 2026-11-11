@@ -161,6 +161,8 @@ fs.writeFileSync(path.join(folder, "large.svg"), '<svg xmlns="http://www.w3.org/
 fs.writeFileSync(path.join(folder, "notes.md"), "# Notes\n\nSome text\n");
 fs.writeFileSync(path.join(folder, "draft.md"), "# Invented draft\n");
 fs.writeFileSync(path.join(folder, "save-race.md"), "# Invented save race\n");
+fs.writeFileSync(path.join(folder, "lost-response.md"), "# Invented response loss\n");
+fs.writeFileSync(path.join(folder, "unknown-write.md"), "# Invented unknown write\n");
 fs.writeFileSync(path.join(folder, "conflict-real.md"), "# Original invented draft\n");
 fs.writeFileSync(path.join(folder, "old.doc"), "legacy");
 fs.writeFileSync(path.join(folder, "old.xls"), "invented old workbook");
@@ -647,6 +649,23 @@ try {
 		if (await prompt.isVisible()) await prompt.getByRole("button", { name: "Cancel" }).click();
 		await page.unroute("**/workspace-markdown?*");
 		await tab("save-race.md").locator(".workspace-tab-close").click();
+		await treeFile("lost-response.md").click();
+		await page.locator(".markdown-editor-tiptap .ProseMirror").waitFor();
+		let lostResponseWrites = 0;
+		await page.route("**/workspace-markdown?*", async (route) => {
+			if (route.request().method() !== "PUT") return route.continue();
+			lostResponseWrites++;
+			await route.fetch();
+			await route.abort();
+		});
+		await page.locator(".markdown-editor-tiptap .ProseMirror").click();
+		await page.keyboard.type(" saved despite response loss");
+		await treeFile("photo.png").click();
+		await prompt.getByRole("button", { name: "Save and continue" }).click();
+		await waitUntil(async () => (await activeName()) === "photo.png", "a lost save response is reconciled through the real file route");
+		assert(lostResponseWrites === 1 && fs.readFileSync(path.join(folder, "lost-response.md"), "utf8").includes("saved despite response loss"), "reconciliation recognizes the completed write without resending it");
+		await page.unroute("**/workspace-markdown?*");
+		await tab("lost-response.md").locator(".workspace-tab-close").click();
 		await treeFile("notes.md").click();
 		let refusedSaves = 0;
 		await page.route("**/workspace-markdown?*", async (route) => {
@@ -1171,6 +1190,23 @@ try {
 			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "report.docx" }).click();
 			await roomPage.frameLocator(".workspace-preview-word iframe").getByText("Invented heading", { exact: true }).waitFor({ timeout: 20_000 });
 			assert(requestedRooms.length === 2 && requestedRooms[0].includes(encodeURIComponent(agentId)) && requestedRooms[1].includes(encodeURIComponent(otherAgentId)), "the same Word path is fetched under the new room identity");
+			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "unknown-write.md" }).click();
+			await roomPage.locator(".markdown-editor-tiptap .ProseMirror").waitFor();
+			let unknownWrites = 0;
+			await roomPage.route("**/workspace-markdown?*", (route) => {
+				if (route.request().method() !== "PUT") return route.continue();
+				unknownWrites++;
+				return route.abort();
+			});
+			await roomPage.locator(".markdown-editor-tiptap .ProseMirror").click();
+			await roomPage.keyboard.type(" unresolved draft");
+			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "photo.png" }).click();
+			const unknownPrompt = roomPage.getByRole("dialog", { name: "Unsaved Markdown changes" });
+			await unknownPrompt.getByRole("button", { name: "Save and continue" }).click();
+			await roomPage.locator(".markdown-editor-error").waitFor();
+			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "photo.png" }).click();
+			await unknownPrompt.getByRole("button", { name: "Discard changes" }).click();
+			assert(await roomPage.locator(".markdown-editor-tiptap .ProseMirror").count() === 1 && (await roomPage.locator(".markdown-editor-tiptap .ProseMirror").textContent())?.includes("unresolved draft") && unknownWrites === 1, "an unknown write prevents discard and retry while retaining the draft");
 		} finally { await roomContext.close(); }
 	} finally {
 		await browser.close();

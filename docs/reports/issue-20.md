@@ -66,3 +66,7 @@ Checks: `EXXETA_SKIP_BROWSER_INSTALL=1 npm ci`, `cd runtime && npm run build`, `
 ## Checkpoint: canceled save continuation
 
 A canceled guarded save now keeps its action reserved until the in-flight save settles and cannot run a later selection. The real `workspace-file-tabs-ui-smoke.ts` held-PUT regression failed before the fix and passed afterward; a first green attempt exposed interference with an existing byte-preservation fixture, so the test was moved to a separate invented file and the entire filtered smoke passed 1/1. This does not yet implement unknown-write reconciliation, complete C4 correlations, host transfer, or native safeguards.
+
+## Checkpoint: initial unknown-write fence
+
+The editor now checks the existing GET after a transport failure; if it observes the submitted content at a changed revision, it treats that write as confirmed without resending it. If the outcome remains unknown, subsequent PUT attempts and guard Discard are refused so the draft stays open. `workspace-file-tabs-ui-smoke.ts` exercises both paths through real PUT/GET routes and controlled response loss; both cases were red before their respective changes and the filtered smoke passed 1/1 afterward. This is partial R8: later reconciliation, conflict handling, outstanding in-flight writes, and the complete C2/C4 protocol still require implementation and tests.
