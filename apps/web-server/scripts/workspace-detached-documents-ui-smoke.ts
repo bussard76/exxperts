@@ -89,10 +89,13 @@ try {
 			await child.locator(".workspace-tab[data-active='true']", { hasText: "invented.md" }).waitFor();
 			assert(await child.getByRole("textbox", { name: "Raw Markdown source" }).inputValue() === rawDisplay, "the child presents the source and active tab");
 			assert(await page.locator("textarea").first().isVisible(), "chat remains usable in the owner window");
+			const childRaw = child.getByRole("textbox", { name: "Raw Markdown source" });
+			const edited = "# Invented child draft\n\n";
+			await childRaw.fill(edited);
 			const closed = child.waitForEvent("close");
 			await child.getByRole("button", { name: "Return", exact: true }).click();
 			await closed;
-			assert(await raw.inputValue() === rawDisplay && writes === 0 && fs.readFileSync(path.join(workspace, "invented.md"), "utf8") === original, "Return retains exact source without a movement write");
+			assert(await raw.inputValue() === edited && writes === 0 && fs.readFileSync(path.join(workspace, "invented.md"), "utf8") === original, "Return retains the child's exact unsaved source without a movement write");
 		} finally { await context.close(); }
 	} finally { await browser.close(); }
 	console.log("workspace-detached-documents-ui smoke: ok");
