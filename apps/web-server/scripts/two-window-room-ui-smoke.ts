@@ -580,6 +580,11 @@ try {
 				await page.locator(".workspace-tab[data-active='true']", { hasText: "owners.md" }).waitFor();
 				await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "identity.md" }).click();
 				await page.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented identity source").waitFor();
+				await page.evaluate(() => { (window as any).__t20IdentityTest.fail = true; });
+				await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "owners.md" }).click();
+				await page.waitForTimeout(300);
+				assert(await page.locator(".workspace-tab[data-active='true']", { hasText: "identity.md" }).count() === 1 && await page.getByRole("dialog", { name: "Unsaved Markdown changes" }).count() === 0 && await page.evaluate(() => (window as any).__t20IdentityTest.fallbackWhileFailed) === 0 && popups === 0, "a failed request ID refuses a clean file selection without fallback or child authority");
+				await page.evaluate(() => { (window as any).__t20IdentityTest.fail = false; });
 				await page.getByRole("button", { name: "RAW", exact: true }).click();
 				const raw = page.getByRole("textbox", { name: "Raw Markdown source" });
 				await raw.fill("# Invented identity draft\n");
