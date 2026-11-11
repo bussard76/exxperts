@@ -601,7 +601,11 @@ export function App() {
 			return true;
 		}
 		if (markdownEditorPendingActionRef.current) return false;
-		if (!markdownEditorDirtyRef.current) return true;
+		if (!markdownEditorDirtyRef.current) {
+			if (!markdownEditorRef.current?.pendingWrite()) return true;
+			void admitCleanMarkdownEditorAction(async () => action());
+			return false;
+		}
 		markdownEditorPendingActionRef.current = action;
 		let resolve!: (result: unknown) => void;
 		const promise = new Promise<unknown>((done) => { resolve = done; });
@@ -654,10 +658,18 @@ export function App() {
 
 	function admitCleanMarkdownEditorAction(action: () => Promise<unknown>): Promise<unknown> | null {
 		if (markdownEditorDirtyRef.current || markdownEditorPendingActionRef.current || markdownEditorCommitBypassRef.current) return null;
-		markdownEditorPendingActionRef.current = action;
+		const continueAfterWrite = async () => {
+			const editor = markdownEditorRef.current;
+			const pending = editor?.pendingWrite();
+			if (pending === "pending" && !(await editor!.save())) return false;
+			if (pending === "unknown" && (!(await editor!.settle()) || !(await editor!.save()))) return false;
+			markdownEditorCommitBypassRef.current = true;
+			try { return action(); } finally { markdownEditorCommitBypassRef.current = false; }
+		};
+		markdownEditorPendingActionRef.current = continueAfterWrite;
 		markdownEditorPromptBusyRef.current = true;
 		setMarkdownEditorFenced(true);
-		return completeMarkdownEditorPrompt(action);
+		return completeMarkdownEditorPrompt(continueAfterWrite);
 	}
 
 	async function saveMarkdownEditorAndContinue(): Promise<void> {

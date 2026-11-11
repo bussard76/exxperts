@@ -164,6 +164,7 @@ fs.writeFileSync(path.join(folder, "save-race.md"), "# Invented save race\n");
 fs.writeFileSync(path.join(folder, "lost-response.md"), "# Invented response loss\n");
 fs.writeFileSync(path.join(folder, "unknown-write.md"), "# Invented unknown write\n");
 fs.writeFileSync(path.join(folder, "pending-discard.md"), "# Invented pending write\n");
+fs.writeFileSync(path.join(folder, "clean-pending.md"), "# Invented original\n");
 fs.writeFileSync(path.join(folder, "lost-conflict.md"), "# Invented conflict\n");
 fs.writeFileSync(path.join(folder, "late-response.md"), "# Invented late response\n");
 fs.writeFileSync(path.join(folder, "late-discard.md"), "# Invented late discard\n");
@@ -701,6 +702,35 @@ try {
 		assert(fs.readFileSync(path.join(folder, "pending-discard.md"), "utf8").includes("sent draft"), "discard does not undo the already-sent write");
 		await page.unroute("**/workspace-markdown?*");
 		await tab("pending-discard.md").locator(".workspace-tab-close").click();
+		await treeFile("clean-pending.md").click();
+		await page.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented original").waitFor();
+		await page.locator(".markdown-editor-status").getByText("Saved").waitFor();
+		await page.getByRole("button", { name: "RAW", exact: true }).click();
+		const cleanPendingRaw = page.getByRole("textbox", { name: "Raw Markdown source" });
+		await cleanPendingRaw.waitFor();
+		await waitUntil(async () => await cleanPendingRaw.inputValue() === "# Invented original\n", "the reverted-write test loads its original source");
+		let releaseCleanPending!: () => void, startCleanPending!: () => void, cleanPendingWrites = 0;
+		const cleanPendingReleased = new Promise<void>((resolve) => { releaseCleanPending = resolve; });
+		const cleanPendingStarted = new Promise<void>((resolve) => { startCleanPending = resolve; });
+		await page.route("**/workspace-markdown?*", async (route) => {
+			if (route.request().method() !== "PUT") return route.continue();
+			if (++cleanPendingWrites === 1) { startCleanPending(); await cleanPendingReleased; }
+			await route.continue();
+		});
+		await cleanPendingRaw.fill("# Invented sent draft\n");
+		await page.locator(".markdown-editor-save").click();
+		try {
+			await cleanPendingStarted;
+			await cleanPendingRaw.fill("# Invented original\n");
+			await treeFile("photo.png").click();
+			await page.waitForTimeout(250);
+			assert(!(await prompt.isVisible()), "a reverted clean source does not require an unsaved-changes decision");
+			assert((await activeName()) === "clean-pending.md", "a clean dirty flag cannot abandon an outstanding write");
+		} finally { releaseCleanPending(); }
+		await waitUntil(async () => (await activeName()) === "photo.png", "the file switch waits for the latest source to settle");
+		assert(cleanPendingWrites === 2 && fs.readFileSync(path.join(folder, "clean-pending.md"), "utf8") === "# Invented original\n", "the pending save drains the reverted source before switching");
+		await page.unroute("**/workspace-markdown?*");
+		await tab("clean-pending.md").locator(".workspace-tab-close").click();
 		await treeFile("guard-fence.md").click();
 		await page.locator(".markdown-editor-tiptap .ProseMirror").waitFor();
 		let fencedWrites = 0;

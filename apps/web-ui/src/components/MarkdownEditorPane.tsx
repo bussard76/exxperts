@@ -32,6 +32,7 @@ import { createSearchDecorationExtension, type SearchDecorationState } from "./T
 export interface MarkdownEditorHandle {
 	save: () => Promise<boolean>;
 	settle: () => Promise<boolean>;
+	pendingWrite: () => "pending" | "unknown" | null;
 	discard: () => boolean;
 	focus: () => void;
 }
@@ -105,6 +106,7 @@ function errorMessage(error: unknown): string {
 interface SurfaceHandle {
 	save: () => Promise<boolean>;
 	settle: () => Promise<void>;
+	pendingWrite: () => boolean;
 	discard: () => void;
 	focus: () => void;
 	getContent: () => string;
@@ -203,9 +205,10 @@ function MarkdownEditorSurface({
 		content,
 		contentType: "markdown",
 		editable: canEdit && !readOnly,
-		onCreate: ({ editor: created }) => {
-			baselineRef.current = editorMarkdown(created);
-			draftRef.current = editorMarkdown(created);
+		onCreate: () => {
+			baselineRef.current = content;
+			draftRef.current = content;
+			rawRef.current = content;
 		},
 		onUpdate: ({ editor: changed }) => {
 			// An edit in the rich editor makes the editor the source again; until then the
@@ -312,6 +315,7 @@ function MarkdownEditorSurface({
 	useImperativeHandle(ref, () => ({
 		save,
 		settle: async () => { await saveInFlightRef.current; },
+		pendingWrite: () => saveInFlightRef.current !== null,
 		discard,
 		focus: () => editorRef.current?.commands.focus(),
 		getContent: () => editorRef.current ? editorMarkdown(editorRef.current) : draftRef.current,
@@ -677,6 +681,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		return true;
 	}, []);
 	const focus = useCallback(() => surfaceRef.current?.focus(), []);
+	const pendingWrite = useCallback(() => unknownWriteRef.current ? "unknown" as const : surfaceRef.current?.pendingWrite() ? "pending" as const : null, []);
 	const handlePreviewLink = useCallback((href: string, isWikiLink = false): boolean => {
 		const workspacePath = resolveWorkspaceMarkdownPath(path, href, isWikiLink);
 		if (workspacePath && onOpenMarkdown) {
@@ -702,7 +707,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		}
 		setMode(nextMode);
 	}, [isDirty, mode]);
-	useImperativeHandle(ref, () => ({ save, settle, discard, focus }), [discard, focus, save, settle]);
+	useImperativeHandle(ref, () => ({ save, settle, pendingWrite, discard, focus }), [discard, focus, pendingWrite, save, settle]);
 
 	const reloadLatest = useCallback(async () => {
 		setPhase("loading");
