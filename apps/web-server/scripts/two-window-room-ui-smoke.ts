@@ -641,6 +641,8 @@ try {
 			});
 			await insecureContext.routeWebSocket("**/*", (socket) => socket.close());
 			const page = await insecureContext.newPage();
+			const pageErrors: string[] = [];
+			page.on("pageerror", (error) => { pageErrors.push(error.message); });
 			let popups = 0;
 			page.on("popup", () => { popups++; });
 			const calls = () => page.evaluate(() => (window as any).__t20FallbackTest.calls.map((call: any) => ({ before: call.before, after: Array.from(call.output) })) as Array<{ before: number[]; after: number[] }>);
@@ -673,7 +675,12 @@ try {
 				await page.evaluate(() => { Object.defineProperty(crypto, "getRandomValues", { configurable: true, value: undefined }); });
 				await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
 				await page.waitForTimeout(300);
+				assert(await raw.count() === 1, `the fallback editor remains mounted after missing cryptography: ${pageErrors.join(" | ")}`);
 				assert((await page.evaluate(() => location.hash)) === hash && await raw.inputValue() === "# Invented fallback draft\n" && await guard.count() === 0 && popups === 0, "missing cryptographic primitives refuse Home without losing the session or opening a child");
+				await page.evaluate(`Object.defineProperty(crypto, "getRandomValues", { configurable: true, value: function () { return new Uint8Array(1); } })`);
+				await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+				await page.waitForTimeout(300);
+				assert((await page.evaluate(() => location.hash)) === hash && await raw.inputValue() === "# Invented fallback draft\n" && await guard.count() === 0 && popups === 0, "a malformed fallback result refuses Home without creating authority");
 			} finally { closingInsecure = true; await insecureContext.close(); }
 		}
 		{

@@ -175,7 +175,8 @@ function allocateDocumentId(): string | null {
 			return typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id) ? id : null;
 		}
 		if (typeof crypto?.getRandomValues !== "function") return null;
-		const bytes = crypto.getRandomValues(new Uint8Array(16));
+		const bytes = new Uint8Array(16);
+		if (crypto.getRandomValues(bytes) !== bytes) return null;
 		bytes[6] = (bytes[6] & 0x0f) | 0x40;
 		bytes[8] = (bytes[8] & 0x3f) | 0x80;
 		const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
