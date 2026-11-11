@@ -594,13 +594,13 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			if (!unknown.terminal) return null;
 			try {
 				const latest = await readRevisionWithinDeadline(agentId, conversationId, path);
+				setCanEdit(!latest.readOnly);
 				if (latest.revision === unknown.revision) return null;
 				setUnknownWrite(null);
 				if (latest.content !== unknown.content) {
 					reconcileServerContent(latest.content);
 					fileRef.current = latest;
 					setFile(latest);
-					setCanEdit(!latest.readOnly);
 					setConflictRevision(latest.revision);
 					setPhase("conflict");
 					return null;
@@ -651,6 +651,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 				setUnknownWrite({ content, revision, terminal: true });
 				try {
 					const latest = await readRevisionWithinDeadline(agentId, conversationId, path);
+					setCanEdit(!latest.readOnly);
 					if (latest.revision !== revision && latest.content === content) {
 						setUnknownWrite(null);
 						recordConfirmedWrite(latest);
@@ -667,7 +668,6 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 						reconcileServerContent(latest.content);
 						fileRef.current = latest;
 						setFile(latest);
-						setCanEdit(!latest.readOnly);
 						setConflictRevision(latest.revision);
 						setPhase("conflict");
 						return null;
@@ -731,11 +731,11 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		if (!unknown.terminal) return false;
 		try {
 			const latest = await readRevisionWithinDeadline(agentId, conversationId, path);
+			setCanEdit(!latest.readOnly);
 			if (latest.revision === unknown.revision) return false;
 			setUnknownWrite(null);
 			fileRef.current = latest;
 			setFile(latest);
-			setCanEdit(!latest.readOnly);
 			if (latest.content !== unknown.content) {
 				setDirty(true);
 				reconcileServerContent(latest.content);

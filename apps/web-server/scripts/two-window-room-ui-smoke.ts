@@ -50,6 +50,7 @@ fs.writeFileSync(path.join(workspace, "guard-keep.md"), "# Invented keep origina
 fs.writeFileSync(path.join(workspace, "guard-keep-save.md"), "# Invented save original\n");
 fs.writeFileSync(path.join(workspace, "guard-keep-save-conflict.md"), "# Invented save original\n");
 fs.writeFileSync(path.join(workspace, "guard-keep-permission.md"), "# Invented permission original\n");
+fs.writeFileSync(path.join(workspace, "unknown-permission.md"), "# Invented unknown original\n");
 fs.writeFileSync(path.join(workspace, "guard-keep-timeout.md"), "# Invented timeout original\n");
 fs.writeFileSync(path.join(workspace, "guard-unknown-timeout.md"), "# Invented unknown original\n");
 fs.writeFileSync(path.join(workspace, "identity.md"), "# Invented identity source\n");
@@ -297,6 +298,29 @@ try {
 		readOnly = false;
 		await waitUntil(() => policyRaw.isEditable(), "restored permission re-enables the real editor");
 		await policy.close();
+		{
+			const unknownPolicy = await ctx.newPage();
+			await unknownPolicy.goto(`${baseUrl}/#/room/${agentId}`);
+			await unknownPolicy.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "unknown-permission.md" }).click();
+			await unknownPolicy.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented unknown original").waitFor();
+			await unknownPolicy.getByRole("button", { name: "RAW", exact: true }).click();
+			const raw = unknownPolicy.getByRole("textbox", { name: "Raw Markdown source" });
+			let writes = 0;
+			await unknownPolicy.route("**/workspace-markdown?*", async (route) => {
+				if (route.request().method() !== "GET") { writes++; return route.abort(); }
+				const response = await route.fetch();
+				await route.fulfill({ response, json: { ...(await response.json()), readOnly: true } });
+			});
+			await raw.fill("# Invented unresolved permission draft\n");
+			await unknownPolicy.locator(".markdown-editor-save").click();
+			await waitUntil(async () => !(await raw.isEditable()), "unknown write reconciliation observes read-only policy", 5000);
+			await unknownPolicy.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+			const unknownGuard = unknownPolicy.getByRole("dialog", { name: "Unsaved Markdown changes" });
+			await unknownGuard.getByRole("button", { name: "Discard changes" }).click();
+			await unknownGuard.waitFor({ state: "hidden" });
+			assert((await unknownPolicy.evaluate(() => location.hash)).includes("/room/") && await raw.inputValue() === "# Invented unresolved permission draft\n" && writes === 1, "the unknown write and revoked permission retain the draft and refuse Discard without retry");
+			await unknownPolicy.close();
+		}
 		const d = await ctx.newPage();
 		await d.goto(`${baseUrl}/#/room/${agentId}`);
 		await d.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "lost-keep.md" }).click();
