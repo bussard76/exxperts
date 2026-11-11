@@ -46,6 +46,7 @@ fs.mkdirSync(workspace, { recursive: true });
 fs.writeFileSync(path.join(workspace, "invented.md"), "# Invented source\n");
 fs.writeFileSync(path.join(workspace, "owners.md"), "# Invented shared file\n");
 fs.writeFileSync(path.join(workspace, "lost-keep.md"), "# Invented keep original\n");
+fs.writeFileSync(path.join(workspace, "guard-keep.md"), "# Invented keep original\n");
 for (const dir of [agentsRoot, agentDir]) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 process.env.HOME = tempHome;
 process.env.USERPROFILE = tempHome;
@@ -321,6 +322,51 @@ try {
 		await d.locator(".persistent-agent-card").filter({ hasText: "Two Window Room" }).waitFor();
 		assert(homeWrites === 2 && fs.readFileSync(path.join(workspace, "invented.md"), "utf8") === "# Invented source\n", "Home follows the confirmed latest source without abandoning the sent write");
 		await d.unroute("**/workspace-markdown?*");
+		{
+			const h = await ctx.newPage();
+			await h.goto(`${baseUrl}/#/room/${agentId}`);
+			await h.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "guard-keep.md" }).click();
+			await h.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented keep original").waitFor();
+			await h.getByRole("button", { name: "RAW", exact: true }).click();
+			const keepRaw = h.getByRole("textbox", { name: "Raw Markdown source" });
+			await waitUntil(async () => await keepRaw.inputValue() === "# Invented keep original\n", "the Keep mine test loads its original source");
+			let releaseLostKeep!: () => void, startLostKeep!: () => void, lostKeepWrites = 0;
+			const lostKeepReleased = new Promise<void>((resolve) => { releaseLostKeep = resolve; });
+			const lostKeepStarted = new Promise<void>((resolve) => { startLostKeep = resolve; });
+			let releaseKeepDecision!: () => void, startKeepDecision!: () => void;
+			const keepDecisionReleased = new Promise<void>((resolve) => { releaseKeepDecision = resolve; });
+			const keepDecisionStarted = new Promise<void>((resolve) => { startKeepDecision = resolve; });
+			await h.route("**/workspace-markdown?*", async (route) => {
+				if (route.request().method() !== "PUT") return route.continue();
+				if (++lostKeepWrites !== 1) { startKeepDecision(); await keepDecisionReleased; return route.continue(); }
+				await route.fetch();
+				fs.writeFileSync(path.join(workspace, "guard-keep.md"), "# Invented competing source\n");
+				startLostKeep();
+				await lostKeepReleased;
+				await route.abort();
+			});
+			await keepRaw.fill("# Invented sent source\n");
+			await h.locator(".markdown-editor-save").click();
+			try {
+				await lostKeepStarted;
+				await keepRaw.fill("# Invented keep original\n");
+			} finally { releaseLostKeep(); }
+			await h.locator(".markdown-editor-conflict").waitFor();
+			assert(await keepRaw.inputValue() === "# Invented keep original\n", "lost-write conflict keeps the local source before the decision");
+			await h.getByRole("button", { name: "Keep mine", exact: true }).click();
+			try {
+				await keepDecisionStarted;
+				await h.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "invented.md" }).click();
+				await h.getByRole("dialog", { name: "Unsaved Markdown changes" }).getByRole("button", { name: "Discard changes" }).click();
+				await h.waitForTimeout(250);
+				assert(await h.getByRole("complementary", { name: "Markdown editor: guard-keep.md" }).count() === 1, "Discard cannot leave while the Keep mine write is unresolved");
+			} finally { releaseKeepDecision(); }
+			await h.getByRole("complementary", { name: "Markdown editor: invented.md" }).waitFor();
+			assert(lostKeepWrites === 2 && fs.readFileSync(path.join(workspace, "guard-keep.md"), "utf8") === "# Invented keep original\n", "Keep mine settles exactly once before Discard continues");
+			await h.unroute("**/workspace-markdown?*");
+			await h.locator(".workspace-tab", { hasText: "guard-keep.md" }).locator(".workspace-tab-close").click();
+			await h.close();
+		}
 		const e = await ctx.newPage();
 		await e.goto(`${baseUrl}/#/room/${agentId}`);
 		await e.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "invented.md" }).click();

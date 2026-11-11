@@ -433,6 +433,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 	const [conflictRevision, setConflictRevision] = useState<string | null>(null);
 	const [canEdit, setCanEdit] = useState(false);
 	const unknownWriteRef = useRef<{ content: string; revision: string; terminal: boolean } | null>(null);
+	const keepMineInFlightRef = useRef<Promise<boolean> | null>(null);
 	const surfaceRef = useRef<SurfaceHandle | null>(null);
 	const rawAreaRef = useRef<HTMLTextAreaElement | null>(null);
 	const immediateFenceRef = useRef(fenced);
@@ -632,6 +633,12 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		}
 	}, [agentId, canEdit, conversationId, path, reconcileServerContent, recordConfirmedWrite, setDirty]);
 
+	const persistAfterKeepMine = useCallback(async (content: string, revision: string) => {
+		const keepMine = keepMineInFlightRef.current;
+		if (keepMine && !(await keepMine)) return null;
+		return persist(content, keepMine ? fileRef.current?.revision ?? revision : revision);
+	}, [persist]);
+
 	const handleDraftChange = useCallback((next: string) => {
 		draftRef.current = next;
 		setDraft(next);
@@ -654,8 +661,13 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		area.setSelectionRange(selection[0], selection[1]);
 		syncRawTaskActive();
 	}, [draft, syncRawTaskActive]);
-	const save = useCallback(() => surfaceRef.current?.save() ?? Promise.resolve(false), []);
+	const save = useCallback(async () => {
+		const keepMine = keepMineInFlightRef.current;
+		if (keepMine && !(await keepMine)) return false;
+		return surfaceRef.current?.save() ?? false;
+	}, []);
 	const settle = useCallback(async () => {
+		await keepMineInFlightRef.current;
 		await surfaceRef.current?.settle();
 		const unknown = unknownWriteRef.current;
 		if (!unknown) return true;
@@ -693,7 +705,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		return true;
 	}, []);
 	const focus = useCallback(() => surfaceRef.current?.focus(), []);
-	const pendingWrite = useCallback(() => unknownWriteRef.current ? "unknown" as const : surfaceRef.current?.pendingWrite() ? "pending" as const : null, []);
+	const pendingWrite = useCallback(() => unknownWriteRef.current ? "unknown" as const : keepMineInFlightRef.current || surfaceRef.current?.pendingWrite() ? "pending" as const : null, []);
 	const handlePreviewLink = useCallback((href: string, isWikiLink = false): boolean => {
 		const workspacePath = resolveWorkspaceMarkdownPath(path, href, isWikiLink);
 		if (workspacePath && onOpenMarkdown) {
@@ -742,21 +754,28 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		}
 	}, [agentId, conversationId, discardAndApplyExternal, path, setLoadedFile]);
 
-	const keepMine = useCallback(async () => {
+	const keepMine = useCallback(() => {
+		if (keepMineInFlightRef.current) return;
 		const localDraft = surfaceRef.current?.getContent() ?? draftRef.current;
-		try {
-			const latest = await getWorkspaceMarkdownFile(agentId, conversationId, path);
-			fileRef.current = latest;
-			setFile(latest);
-			dismissExternalUpdate();
-			setConflictRevision(null);
-			const saved = await persist(localDraft, latest.revision);
-			if (saved) surfaceRef.current?.markSaved(localDraft, saved);
-			else setPhase("conflict");
-		} catch (cause) {
-			setPhase("conflict");
-			setError(errorMessage(cause));
-		}
+		const request = (async () => {
+			try {
+				const latest = await getWorkspaceMarkdownFile(agentId, conversationId, path);
+				fileRef.current = latest;
+				setFile(latest);
+				dismissExternalUpdate();
+				setConflictRevision(null);
+				const saved = await persist(localDraft, latest.revision);
+				if (saved) surfaceRef.current?.markSaved(localDraft, saved);
+				else setPhase("conflict");
+				return Boolean(saved);
+			} catch (cause) {
+				setPhase("conflict");
+				setError(errorMessage(cause));
+				return false;
+			}
+		})();
+		keepMineInFlightRef.current = request;
+		void request.then(() => { if (keepMineInFlightRef.current === request) keepMineInFlightRef.current = null; });
 	}, [agentId, conversationId, dismissExternalUpdate, path, persist]);
 
 	const resolveImageSrc = useCallback((src: string) => workspaceImageUrl(agentId, conversationId, path, src), [agentId, conversationId, path]);
@@ -782,7 +801,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			{error && <p className="markdown-editor-error" role="alert">{error}</p>}
 			<div className={mode === "raw" ? "markdown-editor-body markdown-editor-body-raw" : "markdown-editor-body"}>
 				{phase === "loading" && <p className="markdown-editor-placeholder">Loading file…</p>}
-				{phase !== "loading" && file && <div className={mode === "raw" ? "markdown-editor-surface markdown-editor-surface-raw" : "markdown-editor-surface"}><MarkdownEditorSurfaceWithRef key={`${conversationId}:${path}:${editorKey}`} ref={surfaceRef} resolveImageSrc={resolveImageSrc} content={draft} revision={file.revision} canEdit={canEdit} fenced={fenced} isDirty={isDirty} hasExternalUpdate={hasExternalUpdate || phase === "conflict"} isSaving={phase === "saving"} saveError={phase === "error"} readOnly={mode === "preview"} raw={mode === "raw" ? { taskActive: rawTaskActive, onTask: toggleRawTask } : undefined} onPreviewLink={handlePreviewLink} setDirty={setDirty} onDraftChange={handleDraftChange} onSave={persist} discardAndApplyExternal={discardAndApplyExternal} contentSetterRef={contentSetterRef} /></div>}
+				{phase !== "loading" && file && <div className={mode === "raw" ? "markdown-editor-surface markdown-editor-surface-raw" : "markdown-editor-surface"}><MarkdownEditorSurfaceWithRef key={`${conversationId}:${path}:${editorKey}`} ref={surfaceRef} resolveImageSrc={resolveImageSrc} content={draft} revision={file.revision} canEdit={canEdit} fenced={fenced} isDirty={isDirty} hasExternalUpdate={hasExternalUpdate || phase === "conflict"} isSaving={phase === "saving"} saveError={phase === "error"} readOnly={mode === "preview"} raw={mode === "raw" ? { taskActive: rawTaskActive, onTask: toggleRawTask } : undefined} onPreviewLink={handlePreviewLink} setDirty={setDirty} onDraftChange={handleDraftChange} onSave={persistAfterKeepMine} discardAndApplyExternal={discardAndApplyExternal} contentSetterRef={contentSetterRef} /></div>}
 				{phase !== "loading" && mode === "raw" && <textarea ref={rawAreaRef} className="markdown-editor-raw markdown-editor-raw-input" aria-label="Raw Markdown source" spellCheck={false} readOnly={!canEdit || fenced} value={draft} onChange={(event) => { if (immediateFenceRef.current) { event.target.value = draftRef.current; return; } surfaceRef.current?.setRaw(event.target.value); syncRawTaskActive(); }} onSelect={syncRawTaskActive} />}
 			</div>
 			{conflict && <div className="markdown-editor-conflict" role="alert"><strong>This file changed outside the editor.</strong>{conflictRevision ? <span> Reload the latest version or save your draft over it.</span> : <span> Reload the latest version or keep your local draft.</span>}<div className="markdown-editor-conflict-actions"><button type="button" onClick={() => void reloadLatest()}>Reload</button><button type="button" onClick={() => void keepMine()} disabled={!canEdit}>Keep mine</button></div></div>}
