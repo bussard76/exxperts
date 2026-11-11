@@ -597,6 +597,10 @@ try {
 				await guard.waitFor();
 				const ids = await page.evaluate(() => (window as any).__t20IdentityTest.ids as string[]);
 				assert(ids.length === beforeRequest + 1 && new Set(ids).size === ids.length && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(ids.at(-1)!), "the real admitted file action allocates a fresh UUIDv4 request");
+				await page.evaluate(() => { (window as any).__t20IdentityTest.fail = true; });
+				await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "invented.md" }).evaluate((node) => (node as HTMLElement).click());
+				assert(await guard.isVisible() && await raw.evaluate((node) => (node as HTMLTextAreaElement).readOnly) && await raw.inputValue() === "# Invented identity draft\n" && await page.evaluate(() => (window as any).__t20IdentityTest.fallbackWhileFailed) === 0, "a competing action preserves the admitted guard and fenced draft");
+				await page.evaluate(() => { (window as any).__t20IdentityTest.fail = false; });
 				await guard.getByRole("button", { name: "Cancel" }).click();
 				await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "owners.md" }).click();
 				await guard.waitFor();
@@ -612,6 +616,12 @@ try {
 				await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
 				await page.waitForTimeout(300);
 				assert((await page.evaluate(() => location.hash)) === originalHash && await raw.inputValue() === "# Invented identity draft\n" && await guard.count() === 0 && popups === 0 && await page.evaluate(() => (window as any).__t20IdentityTest.fallbackWhileFailed) === 0, "a malformed available UUID refuses Home without fallback or session loss");
+				const anotherOwner = await identityContext.newPage();
+				await anotherOwner.goto(`${baseUrl}/`);
+				await anotherOwner.locator(".persistent-agent-card").filter({ hasText: "Two Window Room" }).waitFor();
+				const anotherIds = await anotherOwner.evaluate(() => (window as any).__t20IdentityTest.ids as string[]);
+				assert(anotherIds.length >= 1 && !ids.includes(anotherIds[0]), "a new App mount allocates a distinct owner UUIDv4");
+				await anotherOwner.close();
 			} finally { await identityContext.close(); }
 		}
 		{
