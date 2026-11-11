@@ -8520,6 +8520,7 @@ export function App() {
 	};
 	const applyRouteRef = useRef<(route: AppRoute) => Promise<void>>(async () => {});
 	applyRouteRef.current = async (route: AppRoute) => {
+		if (markdownEditorPendingActionRef.current) return;
 		// Leaving Maintain asks what its own close asks.
 		if (maintainAgentId) {
 			if (route.screen === "maintain" && route.agentId === maintainAgentId) return;

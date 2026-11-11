@@ -194,3 +194,7 @@ A held real initial conversation PUT in `workspace-file-tabs-ui-smoke.ts` showed
 ## Checkpoint: product navigation during admitted entry
 
 The landing-page Wallet and Memory callbacks now consult the existing action guard before changing screen. The real pending-entry case in `workspace-file-tabs-ui-smoke.ts` observed Wallet replacing the screen before the change; after it, both Wallet and Memory are withheld while the original room save is held and that original room completes. The attributed filtered file-tabs smoke passed 1/1 and the UI-only build passed. Browser history while an entry is pending and the broader C1/C4/native contract remain open.
+
+## Checkpoint: history during admitted entry
+
+The existing history route handler now refuses a competing Back or Forward while a document action is reserved, allowing the established history reconciliation to restore the shown address. `workspace-file-tabs-ui-smoke.ts` builds a real Memory-to-Rooms history entry, holds an invented room's first PUT, and observed Back navigating to Memory before the change; afterward it keeps the landing screen and address, then finishes the first room entry. The pre-existing dirty-document history cases still pass. The attributed file-tabs and Remember smokes passed 2/2 and the UI-only build passed. This remains attached action arbitration; full correlated owner/child/native behavior remains pending.

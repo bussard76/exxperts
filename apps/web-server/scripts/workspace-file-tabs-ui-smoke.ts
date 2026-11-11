@@ -1716,6 +1716,12 @@ try {
 			await entryPage.waitForLoadState("networkidle");
 			const close = entryPage.locator(".whats-new-close");
 			if (await close.count()) await close.click();
+			const initialNavigation = entryPage.getByRole("navigation", { name: "Product navigation" });
+			await initialNavigation.getByRole("button", { name: "Memory", exact: true }).click();
+			await waitUntil(async () => (await entryPage.evaluate(() => window.location.hash)).includes("memory"), "Memory is in the browser history");
+			await initialNavigation.getByRole("button", { name: "Rooms", exact: true }).click();
+			await entryPage.getByRole("heading", { name: "Your rooms." }).waitFor();
+			await waitUntil(async () => (await entryPage.evaluate(() => window.location.hash)) === "#/", "the landing address is current before entry");
 			let releaseEntry!: () => void, startEntry!: () => void, otherEntries = 0;
 			const entryReleased = new Promise<void>((resolve) => { releaseEntry = resolve; });
 			const entryStarted = new Promise<void>((resolve) => { startEntry = resolve; });
@@ -1739,6 +1745,9 @@ try {
 				assert(await entryPage.getByRole("heading", { name: "Your rooms." }).isVisible(), "Wallet cannot replace the admitted room entry while its save is pending");
 				await productNavigation.getByRole("button", { name: "Memory", exact: true }).click();
 				assert(await entryPage.getByRole("heading", { name: "Your rooms." }).isVisible(), "Memory cannot replace the admitted room entry while its save is pending");
+				await entryPage.goBack();
+				await entryPage.waitForTimeout(250);
+				assert(await entryPage.getByRole("heading", { name: "Your rooms." }).isVisible() && (await entryPage.evaluate(() => window.location.hash)) === "#/", "Back cannot replace the admitted room entry or leave a mismatched address");
 			} finally { releaseEntry(); }
 			await waitUntil(async () => (await entryPage.title()).includes("Spruce"), "the first admitted room entry completes");
 		} finally { await entryContext.close(); }
