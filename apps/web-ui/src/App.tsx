@@ -637,6 +637,7 @@ export function App() {
 			if (markdownEditorPromptTimerRef.current === timer) cancelMarkdownEditorPrompt();
 		}, 120_000);
 		markdownEditorPromptTimerRef.current = timer;
+		markdownEditorRef.current?.setFence(true);
 		setMarkdownEditorFenced(true);
 		setMarkdownEditorPrompt(prompt);
 		setMarkdownEditorPromptBusy(false);
@@ -656,6 +657,7 @@ export function App() {
 			markdownEditorActionResultRef.current = null;
 			markdownEditorPromptBusyRef.current = false;
 			markdownEditorCommittingRef.current = false;
+			markdownEditorRef.current?.setFence(false);
 			setMarkdownEditorFenced(false);
 		};
 		try {
@@ -693,6 +695,7 @@ export function App() {
 		};
 		markdownEditorPendingActionRef.current = continueAfterWrite;
 		markdownEditorPromptBusyRef.current = true;
+		markdownEditorRef.current?.setFence(true);
 		setMarkdownEditorFenced(true);
 		return completeMarkdownEditorPrompt(continueAfterWrite);
 	}
@@ -713,6 +716,7 @@ export function App() {
 			markdownEditorPendingActionRef.current = null;
 			markdownEditorActionResultRef.current?.resolve(false);
 			markdownEditorActionResultRef.current = null;
+			markdownEditorRef.current?.setFence(false);
 			setMarkdownEditorFenced(false);
 			return;
 		}
@@ -736,6 +740,7 @@ export function App() {
 			markdownEditorActionResultRef.current = null;
 			setMarkdownEditorPrompt(null);
 			setMarkdownEditorPromptBusy(false);
+			markdownEditorRef.current?.setFence(false);
 			setMarkdownEditorFenced(false);
 			return;
 		}
@@ -751,6 +756,7 @@ export function App() {
 			markdownEditorPendingActionRef.current = null;
 			markdownEditorActionResultRef.current?.resolve(false);
 			markdownEditorActionResultRef.current = null;
+			markdownEditorRef.current?.setFence(false);
 			setMarkdownEditorFenced(false);
 		}
 		setMarkdownEditorPrompt(null);

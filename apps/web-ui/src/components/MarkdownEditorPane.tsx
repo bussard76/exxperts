@@ -30,6 +30,7 @@ import { MarkdownSearchBar } from "./MarkdownSearchBar";
 import { createSearchDecorationExtension, type SearchDecorationState } from "./TipTapSearchExtension";
 
 export interface MarkdownEditorHandle {
+	setFence: (value: boolean) => void;
 	save: () => Promise<boolean>;
 	settle: () => Promise<boolean>;
 	pendingWrite: () => "pending" | "unknown" | null;
@@ -104,6 +105,7 @@ function errorMessage(error: unknown): string {
 }
 
 interface SurfaceHandle {
+	setFence: (value: boolean) => void;
 	save: () => Promise<boolean>;
 	settle: () => Promise<void>;
 	pendingWrite: () => boolean;
@@ -295,7 +297,7 @@ function MarkdownEditorSurface({
 	}, [onDraftChange, setDirty]);
 
 	const setRaw = useCallback((text: string) => {
-		if (!canEdit) return;
+		if (!canEdit || fencedRef.current) return;
 		rawRef.current = text;
 		draftRef.current = text;
 		onDraftChange(text);
@@ -314,6 +316,10 @@ function MarkdownEditorSurface({
 	}, []);
 
 	useImperativeHandle(ref, () => ({
+		setFence: (value: boolean) => {
+			fencedRef.current = value;
+			editorRef.current?.setEditable(canEdit && !readOnly && !value, false);
+		},
 		save,
 		settle: async () => { await saveInFlightRef.current; },
 		pendingWrite: () => saveInFlightRef.current !== null,
@@ -323,7 +329,7 @@ function MarkdownEditorSurface({
 		markSaved,
 		setRaw,
 		leaveRaw,
-	}), [discard, leaveRaw, markSaved, save, setRaw]);
+	}), [canEdit, discard, leaveRaw, markSaved, readOnly, save, setRaw]);
 
 	useEffect(() => {
 		if (!editor) return;
@@ -361,7 +367,7 @@ function MarkdownEditorSurface({
 
 	useEffect(() => {
 		if (!canEdit || fenced || !isDirty || hasExternalUpdate || isSaving) return;
-		const timer = window.setTimeout(() => { void save(); }, 1000);
+		const timer = window.setTimeout(() => { if (!fencedRef.current) void save(); }, 1000);
 		return () => window.clearTimeout(timer);
 	}, [canEdit, fenced, hasExternalUpdate, isDirty, isSaving, save]);
 
@@ -429,6 +435,8 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 	const unknownWriteRef = useRef<{ content: string; revision: string; terminal: boolean } | null>(null);
 	const surfaceRef = useRef<SurfaceHandle | null>(null);
 	const rawAreaRef = useRef<HTMLTextAreaElement | null>(null);
+	const immediateFenceRef = useRef(fenced);
+	immediateFenceRef.current = fenced;
 	const rawSelectionRef = useRef<[number, number] | null>(null);
 	const [rawTaskActive, setRawTaskActive] = useState(false);
 	const syncRawTaskActive = useCallback(() => {
@@ -711,7 +719,14 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		}
 		setMode(nextMode);
 	}, [isDirty, mode]);
-	useImperativeHandle(ref, () => ({ save, settle, pendingWrite, discard, focus }), [discard, focus, pendingWrite, save, settle]);
+	useImperativeHandle(ref, () => ({
+		setFence: (value: boolean) => {
+			immediateFenceRef.current = value;
+			if (rawAreaRef.current) rawAreaRef.current.readOnly = !canEdit || value;
+			surfaceRef.current?.setFence(value);
+		},
+		save, settle, pendingWrite, discard, focus,
+	}), [canEdit, discard, focus, pendingWrite, save, settle]);
 
 	const reloadLatest = useCallback(async () => {
 		setPhase("loading");
@@ -768,7 +783,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			<div className={mode === "raw" ? "markdown-editor-body markdown-editor-body-raw" : "markdown-editor-body"}>
 				{phase === "loading" && <p className="markdown-editor-placeholder">Loading file…</p>}
 				{phase !== "loading" && file && <div className={mode === "raw" ? "markdown-editor-surface markdown-editor-surface-raw" : "markdown-editor-surface"}><MarkdownEditorSurfaceWithRef key={`${conversationId}:${path}:${editorKey}`} ref={surfaceRef} resolveImageSrc={resolveImageSrc} content={draft} revision={file.revision} canEdit={canEdit} fenced={fenced} isDirty={isDirty} hasExternalUpdate={hasExternalUpdate || phase === "conflict"} isSaving={phase === "saving"} saveError={phase === "error"} readOnly={mode === "preview"} raw={mode === "raw" ? { taskActive: rawTaskActive, onTask: toggleRawTask } : undefined} onPreviewLink={handlePreviewLink} setDirty={setDirty} onDraftChange={handleDraftChange} onSave={persist} discardAndApplyExternal={discardAndApplyExternal} contentSetterRef={contentSetterRef} /></div>}
-				{phase !== "loading" && mode === "raw" && <textarea ref={rawAreaRef} className="markdown-editor-raw markdown-editor-raw-input" aria-label="Raw Markdown source" spellCheck={false} readOnly={!canEdit || fenced} value={draft} onChange={(event) => { surfaceRef.current?.setRaw(event.target.value); syncRawTaskActive(); }} onSelect={syncRawTaskActive} />}
+				{phase !== "loading" && mode === "raw" && <textarea ref={rawAreaRef} className="markdown-editor-raw markdown-editor-raw-input" aria-label="Raw Markdown source" spellCheck={false} readOnly={!canEdit || fenced} value={draft} onChange={(event) => { if (immediateFenceRef.current) { event.target.value = draftRef.current; return; } surfaceRef.current?.setRaw(event.target.value); syncRawTaskActive(); }} onSelect={syncRawTaskActive} />}
 			</div>
 			{conflict && <div className="markdown-editor-conflict" role="alert"><strong>This file changed outside the editor.</strong>{conflictRevision ? <span> Reload the latest version or save your draft over it.</span> : <span> Reload the latest version or keep your local draft.</span>}<div className="markdown-editor-conflict-actions"><button type="button" onClick={() => void reloadLatest()}>Reload</button><button type="button" onClick={() => void keepMine()} disabled={!canEdit}>Keep mine</button></div></div>}
 		</aside>

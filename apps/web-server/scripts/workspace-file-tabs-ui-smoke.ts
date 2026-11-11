@@ -923,6 +923,17 @@ try {
 		await page.getByRole("button", { name: "RAW", exact: true }).click();
 		const fencedRaw = page.getByRole("textbox", { name: "Raw Markdown source" });
 		const rawBeforeFence = await fencedRaw.inputValue();
+		const photoTarget = await treeFile("photo.png").elementHandle();
+		assert(photoTarget, "the file-selection target is present for the synchronous fence test");
+		await fencedRaw.evaluate((node, target) => {
+			(target as HTMLElement).click();
+			const input = node as HTMLTextAreaElement;
+			Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, "invented late input");
+			input.dispatchEvent(new Event("input", { bubbles: true }));
+		}, photoTarget);
+		await prompt.waitFor();
+		await prompt.getByRole("button", { name: "Cancel" }).click();
+		assert(await fencedRaw.inputValue() === rawBeforeFence, "input queued with a file selection cannot change the admitted draft");
 		await treeFile("photo.png").click();
 		await prompt.waitFor();
 		assert(await fencedRaw.evaluate((node) => (node as HTMLTextAreaElement).readOnly) && await fencedRaw.inputValue() === rawBeforeFence, "the guard fences RAW without changing its exact source");
