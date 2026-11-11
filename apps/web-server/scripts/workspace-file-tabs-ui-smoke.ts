@@ -165,6 +165,7 @@ fs.writeFileSync(path.join(folder, "lost-response.md"), "# Invented response los
 fs.writeFileSync(path.join(folder, "unknown-write.md"), "# Invented unknown write\n");
 fs.writeFileSync(path.join(folder, "pending-discard.md"), "# Invented pending write\n");
 fs.writeFileSync(path.join(folder, "clean-pending.md"), "# Invented original\n");
+fs.writeFileSync(path.join(folder, "clean-unknown.md"), "# Invented unknown\n");
 fs.writeFileSync(path.join(folder, "lost-conflict.md"), "# Invented conflict\n");
 fs.writeFileSync(path.join(folder, "late-response.md"), "# Invented late response\n");
 fs.writeFileSync(path.join(folder, "late-discard.md"), "# Invented late discard\n");
@@ -731,6 +732,45 @@ try {
 		assert(cleanPendingWrites === 2 && fs.readFileSync(path.join(folder, "clean-pending.md"), "utf8") === "# Invented original\n", "the pending save drains the reverted source before switching");
 		await page.unroute("**/workspace-markdown?*");
 		await tab("clean-pending.md").locator(".workspace-tab-close").click();
+		const initialCleanUnknown = page.waitForResponse((response) => response.url().includes("clean-unknown.md") && response.request().method() === "GET");
+		await treeFile("clean-unknown.md").click();
+		const originalCleanUnknown = await (await initialCleanUnknown).json();
+		await page.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented unknown").waitFor();
+		await page.locator(".markdown-editor-status").getByText("Saved").waitFor();
+		await page.getByRole("button", { name: "RAW", exact: true }).click();
+		const cleanUnknownRaw = page.getByRole("textbox", { name: "Raw Markdown source" });
+		await waitUntil(async () => await cleanUnknownRaw.inputValue() === "# Invented unknown\n", "the unknown-write test loads its original source");
+		let releaseCleanUnknown!: () => void, startCleanUnknown!: () => void, unknownWrites = 0, unknownReads = 0, staleUnknown = true;
+		const cleanUnknownReleased = new Promise<void>((resolve) => { releaseCleanUnknown = resolve; });
+		const cleanUnknownStarted = new Promise<void>((resolve) => { startCleanUnknown = resolve; });
+		await page.route("**/workspace-markdown?*", async (route) => {
+			if (route.request().method() === "PUT") {
+				if (++unknownWrites !== 1) return route.continue();
+				await route.fetch();
+				startCleanUnknown();
+				await cleanUnknownReleased;
+				return route.abort();
+			}
+			if (staleUnknown) { unknownReads++; return route.fulfill({ status: 200, json: originalCleanUnknown }); }
+			return route.continue();
+		});
+		await cleanUnknownRaw.fill("# Invented unknown sent\n");
+		await page.locator(".markdown-editor-save").click();
+		try {
+			await cleanUnknownStarted;
+			await cleanUnknownRaw.fill("# Invented unknown\n");
+		} finally { releaseCleanUnknown(); }
+		await page.locator(".markdown-editor-error").waitFor();
+		await treeFile("photo.png").click();
+		await waitUntil(() => unknownReads >= 2, "the first clean switch checks the unresolved write");
+		assert((await activeName()) === "clean-unknown.md" && unknownWrites === 1, "an inconclusive clean write cannot be abandoned or retried");
+		await waitUntil(async () => !(await cleanUnknownRaw.evaluate((node) => (node as HTMLTextAreaElement).readOnly)), "the refused clean action releases its fence");
+		staleUnknown = false;
+		await treeFile("photo.png").click();
+		await waitUntil(async () => (await activeName()) === "photo.png", "a later real read settles the clean write before switching");
+		assert(Number(unknownWrites) === 2 && fs.readFileSync(path.join(folder, "clean-unknown.md"), "utf8") === "# Invented unknown\n", "the newer reverted source is saved only after reconciling the first write");
+		await page.unroute("**/workspace-markdown?*");
+		await tab("clean-unknown.md").locator(".workspace-tab-close").click();
 		await treeFile("guard-fence.md").click();
 		await page.locator(".markdown-editor-tiptap .ProseMirror").waitFor();
 		let fencedWrites = 0;

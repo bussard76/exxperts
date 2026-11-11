@@ -110,7 +110,7 @@ interface SurfaceHandle {
 	discard: () => void;
 	focus: () => void;
 	getContent: () => string;
-	markSaved: (content: string) => void;
+	markSaved: (content: string, revision: string) => void;
 	/** RAW typing: the exact text becomes the content, the rich editor is not touched. */
 	setRaw: (text: string) => void;
 	/** Leaving RAW after typing: load the rich editor from the typed text. */
@@ -284,8 +284,9 @@ function MarkdownEditorSurface({
 		setDirty(false);
 	}, [discardAndApplyExternal, hasExternalUpdate, onDraftChange, setDirty]);
 
-	const markSaved = useCallback((saved: string) => {
+	const markSaved = useCallback((saved: string, revision: string) => {
 		baselineRef.current = saved;
+		revisionRef.current = revision;
 		const latest = editorRef.current ? editorMarkdown(editorRef.current) : draftRef.current;
 		draftRef.current = latest;
 		onDraftChange(latest);
@@ -462,7 +463,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		setFile(next);
 		setCanEdit(!next.readOnly);
 		markSaved(next.content);
-		surfaceRef.current?.markSaved(next.content);
+		surfaceRef.current?.markSaved(next.content, next.revision);
 		dismissExternalUpdate();
 		setConflictRevision(null);
 		setError(null);
@@ -732,7 +733,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			dismissExternalUpdate();
 			setConflictRevision(null);
 			const saved = await persist(localDraft, latest.revision);
-			if (saved) surfaceRef.current?.markSaved(localDraft);
+			if (saved) surfaceRef.current?.markSaved(localDraft, saved);
 			else setPhase("conflict");
 		} catch (cause) {
 			setPhase("conflict");
