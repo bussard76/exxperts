@@ -522,6 +522,16 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 						markSaved(latest.content);
 						return latest.revision;
 					}
+					if (latest.revision !== revision) {
+						unknownWriteRef.current = false;
+						reconcileServerContent(latest.content);
+						fileRef.current = latest;
+						setFile(latest);
+						setCanEdit(!latest.readOnly);
+						setConflictRevision(latest.revision);
+						setPhase("conflict");
+						return null;
+					}
 				} catch {
 					// The write remains unknown until its outcome can be reconciled.
 				}
@@ -536,7 +546,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			}
 			return null;
 		}
-	}, [agentId, canEdit, conversationId, markSaved, path, setLoadedFile]);
+	}, [agentId, canEdit, conversationId, markSaved, path, reconcileServerContent, setLoadedFile]);
 
 	const handleDraftChange = useCallback((next: string) => {
 		draftRef.current = next;

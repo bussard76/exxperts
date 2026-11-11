@@ -74,3 +74,7 @@ The editor now checks the existing GET after a transport failure; if it observes
 ## Checkpoint: discard waits for a sent write
 
 A guarded Discard now waits for the existing in-flight editor save before it applies discard or executes the captured action. The real held-PUT `workspace-file-tabs-ui-smoke.ts` case failed on premature file switching before the change and passed afterward, including confirmation that the sent write reached the invented file; the affected filtered smoke passed 1/1. This covers one R8 ordering only, not complete reconciliation or the detached/native lifecycle.
+
+## Checkpoint: competing revision after response loss
+
+When reconciliation observes a different revision and different content, the existing editor conflict state now retains the local draft and exposes the competing content rather than retrying the write. The real-route `workspace-file-tabs-ui-smoke.ts` case failed before the change and passed afterward; the complete filtered smoke passed 1/1. Later reconciliation of a still-unknown outcome and full C2/C4 requirements remain pending.
