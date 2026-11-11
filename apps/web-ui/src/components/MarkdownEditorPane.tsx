@@ -558,7 +558,15 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			try {
 				const latest = await getWorkspaceMarkdownFile(agentId, conversationId, path);
 				const current = fileRef.current;
-				if (!active || !current || latest.revision === current.revision) return;
+				if (!active || !current) return;
+				if (latest.revision === current.revision) {
+					if (latest.readOnly !== current.readOnly) {
+						fileRef.current = latest;
+						setFile(latest);
+						setCanEdit(!latest.readOnly);
+					}
+					return;
+				}
 				const conflictDetected = reconcileServerContent(latest.content);
 				fileRef.current = latest;
 				setFile(latest);

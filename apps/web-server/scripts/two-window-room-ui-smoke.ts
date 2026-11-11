@@ -269,6 +269,33 @@ try {
 		await waitUntil(async () => (await a.getByText(MOVED).count()) === 0, "the admitted Reload completes after its status read");
 		assert((await a.title()).includes("Two Window Room"), "the original room remains selected after the admitted Reload");
 		await a.unroute("**/api/persistent-agents");
+		// Permission can change without changing the file's content revision.
+		const policy = await ctx.newPage();
+		await policy.addInitScript({ content: `const realInterval = window.setInterval; window.setInterval = (callback, delay, ...args) => realInterval(callback, delay === 5000 ? 100 : delay, ...args);` });
+		await policy.goto(`${baseUrl}/#/room/${agentId}`);
+		await policy.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "identity.md" }).click();
+		await policy.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented identity source").waitFor();
+		await policy.getByRole("button", { name: "RAW", exact: true }).click();
+		const policyRaw = policy.getByRole("textbox", { name: "Raw Markdown source" });
+		let readOnly = false, policyWrites = 0;
+		await policy.route("**/workspace-markdown?*", async (route) => {
+			if (route.request().method() !== "GET") { policyWrites++; return route.continue(); }
+			const response = await route.fetch();
+			const body = await response.json();
+			await route.fulfill({ response, json: { ...body, readOnly } });
+		});
+		await policyRaw.fill("# Invented permission draft\n");
+		readOnly = true;
+		await waitUntil(async () => !(await policyRaw.isEditable()), "unchanged-revision permission loss fences the real editor");
+		assert(await policyRaw.inputValue() === "# Invented permission draft\n" && policyWrites === 0, "permission loss retains the unsaved source and starts no write");
+		await policy.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+		const policyGuard = policy.getByRole("dialog", { name: "Unsaved Markdown changes" });
+		await policyGuard.getByRole("button", { name: "Save and continue" }).click();
+		await policyGuard.waitFor({ state: "hidden" });
+		assert((await policy.evaluate(() => location.hash)).includes("/room/") && await policyRaw.inputValue() === "# Invented permission draft\n" && policyWrites === 0, "a guarded Save refuses navigation after permission loss without discarding the draft");
+		readOnly = false;
+		await waitUntil(() => policyRaw.isEditable(), "restored permission re-enables the real editor");
+		await policy.close();
 		const d = await ctx.newPage();
 		await d.goto(`${baseUrl}/#/room/${agentId}`);
 		await d.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "lost-keep.md" }).click();
