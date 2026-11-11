@@ -114,6 +114,29 @@ try {
 			} finally {
 				await page.evaluate(`window.setTimeout = window.__t20OriginalTimeout; delete window.__t20OriginalTimeout`);
 			}
+			let releaseWrite!: () => void, beginWrite!: () => void;
+			const writeReleased = new Promise<void>((resolve) => { releaseWrite = resolve; });
+			const writeStarted = new Promise<void>((resolve) => { beginWrite = resolve; });
+			await page.route("**/workspace-markdown?*", async (route) => {
+				if (route.request().method() !== "PUT") return route.continue();
+				beginWrite();
+				await writeReleased;
+				await route.continue();
+			});
+			const reopened = page.waitForEvent("popup");
+			await detach.click();
+			const savingChild = await reopened;
+			await savingChild.getByRole("textbox", { name: "Raw Markdown source" }).waitFor();
+			try {
+				await savingChild.locator(".markdown-editor-save").click();
+				await writeStarted;
+				const closedSavingChild = savingChild.waitForEvent("close");
+				await savingChild.getByRole("button", { name: "Return", exact: true }).click();
+				await closedSavingChild;
+				assert(await raw.inputValue() === edited && Number(writes) === 1, "Return retains a single pending Save and its source");
+			} finally { releaseWrite(); }
+			await waitUntil(() => fs.readFileSync(path.join(workspace, "invented.md"), "utf8") === edited, "the retained Save reaches the original workspace");
+			assert(Number(writes) === 1, "moving the pending Save does not send another write");
 		} finally { await context.close(); }
 	} finally { await browser.close(); }
 	console.log("workspace-detached-documents-ui smoke: ok");
