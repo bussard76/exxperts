@@ -453,6 +453,18 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		setPhase("ready");
 	}, [dismissExternalUpdate, setDirty]);
 
+	const recordConfirmedWrite = useCallback((next: WorkspaceMarkdownFile) => {
+		fileRef.current = next;
+		setFile(next);
+		setCanEdit(!next.readOnly);
+		markSaved(next.content);
+		surfaceRef.current?.markSaved(next.content);
+		dismissExternalUpdate();
+		setConflictRevision(null);
+		setError(null);
+		setPhase("ready");
+	}, [dismissExternalUpdate, markSaved]);
+
 	useEffect(() => {
 		const controller = new AbortController();
 		unknownWriteRef.current = null;
@@ -526,10 +538,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 					setPhase("conflict");
 					return null;
 				}
-				fileRef.current = latest;
-				setFile(latest);
-				setCanEdit(!latest.readOnly);
-				markSaved(latest.content);
+				recordConfirmedWrite(latest);
 				if (latest.readOnly) {
 					setPhase("error");
 					setError("This file is read-only.");
@@ -540,7 +549,6 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 					setPhase("ready");
 					return latest.revision;
 				}
-				surfaceRef.current?.markSaved(latest.content);
 				revision = latest.revision;
 			} catch {
 				return null;
@@ -561,9 +569,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 				setError("The save has not finished. Its outcome is unknown.");
 				return null;
 			}
-			setLoadedFile(next);
-			markSaved(next.content);
-			setCanEdit(!next.readOnly);
+			recordConfirmedWrite(next);
 			if (next.readOnly) {
 				setPhase("error");
 				setError("This file is read-only.");
@@ -577,9 +583,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 					const latest = await getWorkspaceMarkdownFile(agentId, conversationId, path);
 					if (latest.revision !== revision && latest.content === content) {
 						unknownWriteRef.current = null;
-						setLoadedFile(latest);
-						markSaved(latest.content);
-						setCanEdit(!latest.readOnly);
+						recordConfirmedWrite(latest);
 						if (latest.readOnly) {
 							setPhase("error");
 							setError("This file is read-only.");
@@ -611,7 +615,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			}
 			return null;
 		}
-	}, [agentId, canEdit, conversationId, markSaved, path, reconcileServerContent, setLoadedFile]);
+	}, [agentId, canEdit, conversationId, path, reconcileServerContent, recordConfirmedWrite]);
 
 	const handleDraftChange = useCallback((next: string) => {
 		draftRef.current = next;
@@ -654,8 +658,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 				setPhase("conflict");
 				return false;
 			}
-			markSaved(latest.content);
-			surfaceRef.current?.markSaved(latest.content);
+			recordConfirmedWrite(latest);
 			if (latest.readOnly) {
 				setError("This file is read-only.");
 				setPhase("error");
@@ -667,7 +670,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		} catch {
 			return false;
 		}
-	}, [agentId, conversationId, markSaved, path, reconcileServerContent]);
+	}, [agentId, conversationId, path, reconcileServerContent, recordConfirmedWrite]);
 	const discard = useCallback(() => {
 		if (unknownWriteRef.current || !surfaceRef.current) return false;
 		surfaceRef.current.discard();

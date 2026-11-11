@@ -102,3 +102,7 @@ A read-only result from the existing reconciliation GET now refuses the current 
 ## Checkpoint: permission revalidation on a successful response
 
 The existing PUT result now also refuses a guarded continuation when the returned file is read-only. The controlled real-route `workspace-file-tabs-ui-smoke.ts` case failed before the change and passed afterward with the entire filtered smoke 1/1. This does not prove all policy changes or complete the broader task.
+
+## Checkpoint: retain newer RAW source after save confirmation
+
+Confirming an older write now updates the saved baseline without overwriting newer editor source. The held real PUT and controlled read-only response case in `workspace-file-tabs-ui-smoke.ts` failed on the old code with the earlier source and passed with exact newer CRLF source after the change; `workspace-file-tabs-ui` and `workspace-markdown-raw-ui` passed 2/2. An initial assertion mistakenly expected LF normalization and was corrected to require the exact entered CRLF before the old-code red run. This is partial R8/R9, not detached-host evidence.

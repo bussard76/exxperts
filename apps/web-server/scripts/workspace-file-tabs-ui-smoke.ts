@@ -171,6 +171,7 @@ fs.writeFileSync(path.join(folder, "timeout-write.md"), "# Invented timeout\n");
 fs.writeFileSync(path.join(folder, "guard-fence.md"), "# Invented guard\n");
 fs.writeFileSync(path.join(folder, "lost-permission.md"), "# Invented permission\n");
 fs.writeFileSync(path.join(folder, "saved-permission.md"), "# Invented saved permission\n");
+fs.writeFileSync(path.join(folder, "raw-permission.md"), "# Invented raw permission\n");
 fs.writeFileSync(path.join(folder, "conflict-real.md"), "# Original invented draft\n");
 fs.writeFileSync(path.join(folder, "old.doc"), "legacy");
 fs.writeFileSync(path.join(folder, "old.xls"), "invented old workbook");
@@ -1342,6 +1343,39 @@ try {
 			await roomPage.unroute("**/workspace-markdown?*");
 			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "photo.png" }).click();
 			if (await savedPermissionPrompt.isVisible()) await savedPermissionPrompt.getByRole("button", { name: "Discard changes" }).click();
+			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "raw-permission.md" }).click();
+			await roomPage.locator(".markdown-editor-tiptap .ProseMirror").waitFor();
+			await roomPage.getByRole("button", { name: "RAW", exact: true }).click();
+			const rawPermission = roomPage.getByRole("textbox", { name: "Raw Markdown source" });
+			await rawPermission.fill("# First submitted source\n");
+			let releaseRawPermission!: () => void, startRawPermission!: () => void;
+			const rawPermissionReleased = new Promise<void>((resolve) => { releaseRawPermission = resolve; });
+			const rawPermissionStarted = new Promise<void>((resolve) => { startRawPermission = resolve; });
+			await roomPage.route("**/workspace-markdown?*", async (route) => {
+				if (route.request().method() !== "PUT") return route.continue();
+				const response = await route.fetch();
+				startRawPermission();
+				await rawPermissionReleased;
+				const body = await response.json();
+				return route.fulfill({ response, json: { ...body, readOnly: true } });
+			});
+			try {
+				await roomPage.locator(".markdown-editor-save").click();
+				await rawPermissionStarted;
+				await rawPermission.fill("# Newer exact source\r\n\r\n");
+				const rawPermissionResult = roomPage.waitForResponse((response) => response.url().includes("raw-permission.md") && response.request().method() === "PUT");
+				releaseRawPermission();
+				await rawPermissionResult;
+				await roomPage.locator(".markdown-editor-error").waitFor();
+				const retainedRawPermission = await rawPermission.inputValue();
+				assert(retainedRawPermission === "# Newer exact source\r\n\r\n", `permission loss retains newer RAW edits after an earlier save: ${JSON.stringify(retainedRawPermission)}`);
+			} finally {
+				releaseRawPermission();
+			}
+			await roomPage.unroute("**/workspace-markdown?*");
+			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "photo.png" }).click();
+			const rawPermissionPrompt = roomPage.getByRole("dialog", { name: "Unsaved Markdown changes" });
+			if (await rawPermissionPrompt.isVisible()) await rawPermissionPrompt.getByRole("button", { name: "Discard changes" }).click();
 			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "lost-permission.md" }).click();
 			await roomPage.locator(".markdown-editor-tiptap .ProseMirror").waitFor();
 			await roomPage.route("**/workspace-markdown?*", async (route) => {
