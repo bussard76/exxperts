@@ -563,6 +563,12 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			}
 			setLoadedFile(next);
 			markSaved(next.content);
+			setCanEdit(!next.readOnly);
+			if (next.readOnly) {
+				setPhase("error");
+				setError("This file is read-only.");
+				return null;
+			}
 			return next.revision;
 		} catch (cause) {
 			if (!(cause instanceof WorkspaceMarkdownApiError)) {

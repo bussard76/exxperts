@@ -98,3 +98,7 @@ An admitted dirty action now fences rich input, RAW input, editor controls and a
 ## Checkpoint: permission revalidation after response loss
 
 A read-only result from the existing reconciliation GET now refuses the current guarded continuation while retaining the visible source. The controlled real-route permission-loss case in `workspace-file-tabs-ui-smoke.ts` failed before the change and the full filtered smoke passed 1/1 afterward. This is one permission path only; general action/policy revalidation and the remaining task requirements are not complete.
+
+## Checkpoint: permission revalidation on a successful response
+
+The existing PUT result now also refuses a guarded continuation when the returned file is read-only. The controlled real-route `workspace-file-tabs-ui-smoke.ts` case failed before the change and passed afterward with the entire filtered smoke 1/1. This does not prove all policy changes or complete the broader task.

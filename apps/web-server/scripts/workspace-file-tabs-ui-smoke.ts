@@ -170,6 +170,7 @@ fs.writeFileSync(path.join(folder, "late-discard.md"), "# Invented late discard\
 fs.writeFileSync(path.join(folder, "timeout-write.md"), "# Invented timeout\n");
 fs.writeFileSync(path.join(folder, "guard-fence.md"), "# Invented guard\n");
 fs.writeFileSync(path.join(folder, "lost-permission.md"), "# Invented permission\n");
+fs.writeFileSync(path.join(folder, "saved-permission.md"), "# Invented saved permission\n");
 fs.writeFileSync(path.join(folder, "conflict-real.md"), "# Original invented draft\n");
 fs.writeFileSync(path.join(folder, "old.doc"), "legacy");
 fs.writeFileSync(path.join(folder, "old.xls"), "invented old workbook");
@@ -1323,6 +1324,24 @@ try {
 			await waitUntil(async () => await roomPage.locator(".workspace-tab[data-active='true']", { hasText: "photo.png" }).count() === 1, "discard reconciles the previously uncertain write");
 			assert(discardWrites === 1 && fs.readFileSync(path.join(folder, "late-discard.md"), "utf8").includes("already written"), "discard does not resend or undo the confirmed write");
 			await roomPage.unroute("**/workspace-markdown?*");
+			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "saved-permission.md" }).click();
+			await roomPage.locator(".markdown-editor-tiptap .ProseMirror").waitFor();
+			await roomPage.route("**/workspace-markdown?*", async (route) => {
+				if (route.request().method() !== "PUT") return route.continue();
+				const response = await route.fetch();
+				const body = await response.json();
+				return route.fulfill({ response, json: { ...body, readOnly: true } });
+			});
+			await roomPage.locator(".markdown-editor-tiptap .ProseMirror").click();
+			await roomPage.keyboard.type(" saved after permission loss");
+			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "photo.png" }).click();
+			const savedPermissionPrompt = roomPage.getByRole("dialog", { name: "Unsaved Markdown changes" });
+			await savedPermissionPrompt.getByRole("button", { name: "Save and continue" }).click();
+			await waitUntil(async () => await savedPermissionPrompt.count() === 0, "saved permission refusal settles");
+			assert(await roomPage.locator(".workspace-tab[data-active='true']", { hasText: "saved-permission.md" }).count() === 1 && (await roomPage.locator(".markdown-editor-tiptap .ProseMirror").textContent())?.includes("saved after permission loss"), "a read-only successful write refuses the guarded continuation and retains the draft");
+			await roomPage.unroute("**/workspace-markdown?*");
+			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "photo.png" }).click();
+			if (await savedPermissionPrompt.isVisible()) await savedPermissionPrompt.getByRole("button", { name: "Discard changes" }).click();
 			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "lost-permission.md" }).click();
 			await roomPage.locator(".markdown-editor-tiptap .ProseMirror").waitFor();
 			await roomPage.route("**/workspace-markdown?*", async (route) => {
