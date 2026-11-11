@@ -168,6 +168,7 @@ fs.writeFileSync(path.join(folder, "lost-conflict.md"), "# Invented conflict\n")
 fs.writeFileSync(path.join(folder, "late-response.md"), "# Invented late response\n");
 fs.writeFileSync(path.join(folder, "late-discard.md"), "# Invented late discard\n");
 fs.writeFileSync(path.join(folder, "timeout-write.md"), "# Invented timeout\n");
+fs.writeFileSync(path.join(folder, "guard-fence.md"), "# Invented guard\n");
 fs.writeFileSync(path.join(folder, "conflict-real.md"), "# Original invented draft\n");
 fs.writeFileSync(path.join(folder, "old.doc"), "legacy");
 fs.writeFileSync(path.join(folder, "old.xls"), "invented old workbook");
@@ -696,6 +697,33 @@ try {
 		assert(fs.readFileSync(path.join(folder, "pending-discard.md"), "utf8").includes("sent draft"), "discard does not undo the already-sent write");
 		await page.unroute("**/workspace-markdown?*");
 		await tab("pending-discard.md").locator(".workspace-tab-close").click();
+		await treeFile("guard-fence.md").click();
+		await page.locator(".markdown-editor-tiptap .ProseMirror").waitFor();
+		let fencedWrites = 0;
+		await page.route("**/workspace-markdown?*", (route) => {
+			if (route.request().method() === "PUT") fencedWrites++;
+			return route.continue();
+		});
+		const fencedEditor = page.locator(".markdown-editor-tiptap .ProseMirror");
+		await fencedEditor.click();
+		await page.keyboard.type(" admitted draft");
+		await treeFile("photo.png").click();
+		await prompt.waitFor();
+		const fencedContent = await fencedEditor.textContent();
+		await fencedEditor.focus();
+		await page.keyboard.type("forbidden-edit");
+		await page.waitForTimeout(1300);
+		assert(await fencedEditor.textContent() === fencedContent && fencedWrites === 0, "the guard fences input and autosave until the action resolves");
+		await prompt.getByRole("button", { name: "Cancel" }).click();
+		await page.getByRole("button", { name: "RAW", exact: true }).click();
+		const fencedRaw = page.getByRole("textbox", { name: "Raw Markdown source" });
+		const rawBeforeFence = await fencedRaw.inputValue();
+		await treeFile("photo.png").click();
+		await prompt.waitFor();
+		assert(await fencedRaw.evaluate((node) => (node as HTMLTextAreaElement).readOnly) && await fencedRaw.inputValue() === rawBeforeFence, "the guard fences RAW without changing its exact source");
+		await prompt.getByRole("button", { name: "Discard changes" }).click();
+		await page.unroute("**/workspace-markdown?*");
+		await tab("guard-fence.md").locator(".workspace-tab-close").click();
 		await treeFile("notes.md").click();
 		let refusedSaves = 0;
 		await page.route("**/workspace-markdown?*", async (route) => {

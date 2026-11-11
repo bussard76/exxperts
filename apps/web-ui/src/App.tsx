@@ -504,6 +504,7 @@ export function App() {
 	const markdownEditorCanceledSaveRef = useRef(false);
 	const [markdownEditorPrompt, setMarkdownEditorPrompt] = useState<"close" | "switch" | "navigate" | null>(null);
 	const [markdownEditorPromptBusy, setMarkdownEditorPromptBusy] = useState(false);
+	const [markdownEditorFenced, setMarkdownEditorFenced] = useState(false);
 	const [artifactMaximized, setArtifactMaximized] = useState(false);
 	const attachmentsScrollRef = useRef(0);
 	// Bumped when a finished revise rewrote the bytes behind the OPEN viewer's
@@ -590,6 +591,7 @@ export function App() {
 		if (markdownEditorPendingActionRef.current) return false;
 		if (!markdownEditorDirtyRef.current) return true;
 		markdownEditorPendingActionRef.current = action;
+		setMarkdownEditorFenced(true);
 		setMarkdownEditorPrompt(prompt);
 		setMarkdownEditorPromptBusy(false);
 		return false;
@@ -599,6 +601,7 @@ export function App() {
 		markdownEditorPendingActionRef.current = null;
 		setMarkdownEditorPrompt(null);
 		setMarkdownEditorPromptBusy(false);
+		setMarkdownEditorFenced(false);
 		markdownEditorDirtyRef.current = false;
 		if (action) void action();
 	}
@@ -613,6 +616,7 @@ export function App() {
 			setMarkdownEditorPromptBusy(false);
 			setMarkdownEditorPrompt(null);
 			markdownEditorPendingActionRef.current = null;
+			setMarkdownEditorFenced(false);
 			return;
 		}
 		completeMarkdownEditorPrompt(action);
@@ -629,6 +633,7 @@ export function App() {
 			markdownEditorPendingActionRef.current = null;
 			setMarkdownEditorPrompt(null);
 			setMarkdownEditorPromptBusy(false);
+			setMarkdownEditorFenced(false);
 			return;
 		}
 		completeMarkdownEditorPrompt(action);
@@ -636,7 +641,10 @@ export function App() {
 
 	function cancelMarkdownEditorPrompt(): void {
 		if (markdownEditorPromptBusy) markdownEditorCanceledSaveRef.current = true;
-		else markdownEditorPendingActionRef.current = null;
+		else {
+			markdownEditorPendingActionRef.current = null;
+			setMarkdownEditorFenced(false);
+		}
 		setMarkdownEditorPrompt(null);
 		setMarkdownEditorPromptBusy(false);
 	}
@@ -8700,6 +8708,7 @@ export function App() {
 						agentId={persistentChat.agentId}
 						conversationId={persistentChat.conversationId}
 						path={rightPane.path}
+						fenced={markdownEditorFenced}
 						onClose={requestCloseMarkdownEditor}
 						onDirtyChange={onMarkdownEditorDirtyChange}
 						onOpenMarkdown={(path) => openWorkspaceMarkdown({ relativePath: path, extension: ".md" })}

@@ -90,3 +90,7 @@ A fresh Discard now rechecks an unknown write before acting; it proceeds only af
 ## Checkpoint: write deadline
 
 The editor marks a PUT unknown after the 30-second wait without treating the underlying transport as finished. A fresh Discard cannot abandon or reconcile it until that transport reaches a terminal result. The controlled-timer and held real PUT case in `workspace-file-tabs-ui-smoke.ts` failed before the change and passed afterward, including zero GETs while the PUT remained open; the filtered smoke passed 1/1. This is only the write deadline, not the complete C4 prepare/abort/native deadlines or a detached-host test.
+
+## Checkpoint: guarded editor fence
+
+An admitted dirty action now fences rich input, RAW input, editor controls and autosave while its decision is pending, without blocking the guard's own Save. The real `workspace-file-tabs-ui-smoke.ts` input/autosave case failed before the fence; the RAW check separately failed with RAW deliberately unfenced; both pass with the change. The filtered `workspace-file-tabs-ui` and `workspace-markdown-raw-ui` smokes each passed 1/1. Host transfer, full context/action correlation and native lifecycle remain pending.
