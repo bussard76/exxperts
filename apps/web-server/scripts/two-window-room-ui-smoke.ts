@@ -460,13 +460,15 @@ try {
 				const original = window.setTimeout;
 				window.setTimeout = ((handler: TimerHandler, delay?: number, ...args: any[]) => original(handler, delay === 30_000 ? 1000 : delay, ...args)) as typeof window.setTimeout;
 			});
-			let releaseRead!: () => void, startRead!: () => void, writes = 0;
+			let releaseRead!: () => void, startRead!: () => void, releaseDiscardRead!: () => void, startDiscardRead!: () => void, writes = 0, reads = 0;
 			const released = new Promise<void>((resolve) => { releaseRead = resolve; });
 			const started = new Promise<void>((resolve) => { startRead = resolve; });
+			const discardReleased = new Promise<void>((resolve) => { releaseDiscardRead = resolve; });
+			const discardStarted = new Promise<void>((resolve) => { startDiscardRead = resolve; });
 			await u.route("**/workspace-markdown?*", async (route) => {
 				if (route.request().method() === "PUT") { writes++; return route.abort(); }
-				startRead();
-				await released;
+				if (++reads === 1) { startRead(); await released; }
+				else { startDiscardRead(); await discardReleased; }
 				await route.continue().catch(() => {});
 			});
 			try {
@@ -479,8 +481,16 @@ try {
 				await guard.waitFor({ state: "hidden", timeout: 4000 });
 				assert((await raw.inputValue()) === "# Invented unknown draft\n" && (await u.evaluate(() => location.hash)).includes("/room/") && writes === 1, "a timed-out reconciliation refuses Home and retains the unknown write and draft");
 			} finally { releaseRead(); }
+			try {
+				await u.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+				const guard = u.getByRole("dialog", { name: "Unsaved Markdown changes" });
+				await guard.getByRole("button", { name: "Discard changes" }).click();
+				await discardStarted;
+				await guard.waitFor({ state: "hidden", timeout: 4000 });
+				assert((await raw.inputValue()) === "# Invented unknown draft\n" && (await u.evaluate(() => location.hash)).includes("/room/") && writes === 1, "a timed-out Discard reconciliation retains the unknown write and draft");
+			} finally { releaseDiscardRead(); }
 			await u.waitForTimeout(500);
-			assert(writes === 1 && fs.readFileSync(path.join(workspace, "guard-unknown-timeout.md"), "utf8") === "# Invented unknown original\n", "a late reconciliation cannot retry the unknown write");
+			assert(writes === 1 && fs.readFileSync(path.join(workspace, "guard-unknown-timeout.md"), "utf8") === "# Invented unknown original\n", "late reconciliations cannot retry the unknown write");
 			await u.close();
 		}
 		const e = await ctx.newPage();
