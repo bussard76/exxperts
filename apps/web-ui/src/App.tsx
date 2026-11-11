@@ -180,8 +180,15 @@ type DocumentAdmission = Readonly<{
 	ownerId: string;
 	ownerGeneration: number;
 	roomGeneration: number;
+	initialHostGeneration: number;
 	initialDraftGeneration: number;
 	context: DocumentContext | null;
+}>;
+
+type PreparedDocumentAdmission = Readonly<{
+	admission: DocumentAdmission;
+	hostGeneration: number;
+	draftGeneration: number;
 }>;
 
 function allocateDocumentId(): string | null {
@@ -545,9 +552,11 @@ export function App() {
 	rightPaneRef.current = rightPane;
 	const [documentOwnerId] = useState(allocateDocumentId);
 	const documentOwnerGenerationRef = useRef(1);
+	const documentHostGenerationRef = useRef(1);
 	const documentDraftGenerationRef = useRef(1);
 	const markdownEditorRef = useRef<MarkdownEditorHandle | null>(null);
 	const markdownEditorAdmissionRef = useRef<DocumentAdmission | null>(null);
+	const preparedDocumentAdmissionRef = useRef<PreparedDocumentAdmission | null>(null);
 	const markdownEditorDirtyRef = useRef(false);
 	const markdownEditorPendingActionRef = useRef<(() => void | Promise<unknown>) | null>(null);
 	const markdownEditorActionResultRef = useRef<{ promise: Promise<unknown>; resolve: (result: unknown) => void } | null>(null);
@@ -666,21 +675,36 @@ export function App() {
 	function captureDocumentAdmission(requestId: string): DocumentAdmission | null {
 		const ownerGeneration = documentOwnerGenerationRef.current;
 		const current = checkpointContextRef.current;
+		const hostGeneration = documentHostGenerationRef.current;
 		const draftGeneration = documentDraftGenerationRef.current;
-		if (!documentOwnerId || !Number.isSafeInteger(ownerGeneration) || ownerGeneration < 1 || !Number.isSafeInteger(current.generation) || current.generation < 0 || !Number.isSafeInteger(draftGeneration) || draftGeneration < 1) return null;
+		if (!documentOwnerId || !Number.isSafeInteger(ownerGeneration) || ownerGeneration < 1 || !Number.isSafeInteger(current.generation) || current.generation < 0 || !Number.isSafeInteger(hostGeneration) || hostGeneration < 1 || !Number.isSafeInteger(draftGeneration) || draftGeneration < 1) return null;
 		const context = current.key === null ? null : current.roomId && current.conversationId && current.generation > 0 ? {
 			ownerId: documentOwnerId, ownerGeneration, roomId: current.roomId, conversationId: current.conversationId, roomGeneration: current.generation,
 		} : null;
 		if (current.key !== null && !context) return null;
-		return { requestId, ownerId: documentOwnerId, ownerGeneration, roomGeneration: current.generation, initialDraftGeneration: draftGeneration, context };
+		return { requestId, ownerId: documentOwnerId, ownerGeneration, roomGeneration: current.generation, initialHostGeneration: hostGeneration, initialDraftGeneration: draftGeneration, context };
 	}
 
 	function documentAdmissionIsCurrent(admission: DocumentAdmission): boolean {
-		if (markdownEditorAdmissionRef.current !== admission || admission.ownerId !== documentOwnerId || admission.ownerGeneration !== documentOwnerGenerationRef.current || unmountedRef.current || personHasChanged()) return false;
+		if (markdownEditorAdmissionRef.current !== admission || admission.ownerId !== documentOwnerId || admission.ownerGeneration !== documentOwnerGenerationRef.current || admission.initialHostGeneration !== documentHostGenerationRef.current || unmountedRef.current || personHasChanged()) return false;
 		const current = checkpointContextRef.current;
 		if (current.generation !== admission.roomGeneration) return false;
 		const context = admission.context;
 		return context === null ? current.key === null : context.ownerId === admission.ownerId && context.ownerGeneration === admission.ownerGeneration && current.key === `${context.roomId}\u0000${context.conversationId}` && current.roomId === context.roomId && current.conversationId === context.conversationId && current.generation === context.roomGeneration;
+	}
+
+	function prepareDocumentAdmission(admission: DocumentAdmission): boolean {
+		if (preparedDocumentAdmissionRef.current) return preparedDocumentAdmissionIsCurrent(admission);
+		const hostGeneration = documentHostGenerationRef.current;
+		const draftGeneration = documentDraftGenerationRef.current;
+		if (!documentAdmissionIsCurrent(admission) || !Number.isSafeInteger(hostGeneration) || hostGeneration < 1 || !Number.isSafeInteger(draftGeneration) || draftGeneration < admission.initialDraftGeneration) return false;
+		preparedDocumentAdmissionRef.current = { admission, hostGeneration, draftGeneration };
+		return true;
+	}
+
+	function preparedDocumentAdmissionIsCurrent(admission: DocumentAdmission): boolean {
+		const prepared = preparedDocumentAdmissionRef.current;
+		return Boolean(prepared && prepared.admission === admission && documentAdmissionIsCurrent(admission) && prepared.hostGeneration === documentHostGenerationRef.current && prepared.draftGeneration === documentDraftGenerationRef.current);
 	}
 
 	function noDocumentSession(): boolean {
@@ -702,8 +726,9 @@ export function App() {
 			return false;
 		}
 		markdownEditorAdmissionRef.current = admission;
+		preparedDocumentAdmissionRef.current = null;
 		markdownEditorPendingActionRef.current = () => {
-			if (!documentAdmissionIsCurrent(admission)) return Promise.resolve(false);
+			if (!preparedDocumentAdmissionIsCurrent(admission)) return Promise.resolve(false);
 			return action();
 		};
 		let resolve!: (result: unknown) => void;
@@ -720,23 +745,32 @@ export function App() {
 		return false;
 	}
 
-	function completeMarkdownEditorPrompt(action: (() => void | Promise<unknown>) | null): Promise<unknown> {
+	function completeMarkdownEditorPrompt(action: (() => void | Promise<unknown>) | null, prepareNow = true): Promise<unknown> {
 		if (markdownEditorPromptTimerRef.current !== null) window.clearTimeout(markdownEditorPromptTimerRef.current);
 		markdownEditorPromptTimerRef.current = null;
 		markdownEditorCommittingRef.current = true;
-		setMarkdownEditorPrompt(null);
-		setMarkdownEditorPromptBusy(false);
-		markdownEditorDirtyRef.current = false;
 		const actionResult = markdownEditorActionResultRef.current;
 		const release = () => {
 			markdownEditorPendingActionRef.current = null;
 			markdownEditorAdmissionRef.current = null;
+			preparedDocumentAdmissionRef.current = null;
 			markdownEditorActionResultRef.current = null;
 			markdownEditorPromptBusyRef.current = false;
 			markdownEditorCommittingRef.current = false;
 			markdownEditorRef.current?.setFence(false);
 			setMarkdownEditorFenced(false);
 		};
+		const admission = markdownEditorAdmissionRef.current;
+		if (prepareNow && (!admission || !prepareDocumentAdmission(admission))) {
+			setMarkdownEditorPrompt(null);
+			setMarkdownEditorPromptBusy(false);
+			release();
+			actionResult?.resolve(false);
+			return Promise.resolve(false);
+		}
+		setMarkdownEditorPrompt(null);
+		setMarkdownEditorPromptBusy(false);
+		markdownEditorDirtyRef.current = false;
 		try {
 			markdownEditorCommitBypassRef.current = true;
 			const result = action?.();
@@ -764,12 +798,13 @@ export function App() {
 		const admission = requestId ? captureDocumentAdmission(requestId) : null;
 		if (!admission) return Promise.resolve(false);
 		markdownEditorAdmissionRef.current = admission;
+		preparedDocumentAdmissionRef.current = null;
 		const continueAfterWrite = async () => {
 			const editor = markdownEditorRef.current;
 			const pending = editor?.pendingWrite();
 			if (pending === "pending" && !(await editor!.save())) return false;
 			if (pending === "unknown" && (!(await editor!.settle()) || !(await editor!.save()))) return false;
-			if (!documentAdmissionIsCurrent(admission)) return false;
+			if (!prepareDocumentAdmission(admission) || !preparedDocumentAdmissionIsCurrent(admission)) return false;
 			markdownEditorCommitBypassRef.current = true;
 			try { return action(); } finally { markdownEditorCommitBypassRef.current = false; }
 		};
@@ -777,7 +812,7 @@ export function App() {
 		markdownEditorPromptBusyRef.current = true;
 		markdownEditorRef.current?.setFence(true);
 		setMarkdownEditorFenced(true);
-		return completeMarkdownEditorPrompt(continueAfterWrite);
+		return completeMarkdownEditorPrompt(continueAfterWrite, false);
 	}
 
 	async function saveMarkdownEditorAndContinue(): Promise<void> {
@@ -795,6 +830,7 @@ export function App() {
 			setMarkdownEditorPrompt(null);
 			markdownEditorPendingActionRef.current = null;
 			markdownEditorAdmissionRef.current = null;
+			preparedDocumentAdmissionRef.current = null;
 			markdownEditorActionResultRef.current?.resolve(false);
 			markdownEditorActionResultRef.current = null;
 			markdownEditorRef.current?.setFence(false);
@@ -818,6 +854,7 @@ export function App() {
 			markdownEditorPromptBusyRef.current = false;
 			markdownEditorPendingActionRef.current = null;
 			markdownEditorAdmissionRef.current = null;
+			preparedDocumentAdmissionRef.current = null;
 			markdownEditorActionResultRef.current?.resolve(false);
 			markdownEditorActionResultRef.current = null;
 			setMarkdownEditorPrompt(null);
@@ -837,6 +874,7 @@ export function App() {
 		else {
 			markdownEditorPendingActionRef.current = null;
 			markdownEditorAdmissionRef.current = null;
+			preparedDocumentAdmissionRef.current = null;
 			markdownEditorActionResultRef.current?.resolve(false);
 			markdownEditorActionResultRef.current = null;
 			markdownEditorRef.current?.setFence(false);
@@ -997,6 +1035,7 @@ export function App() {
 				const old = checkpointContextRef.current.generation;
 				const generation = Number.isSafeInteger(old) && old < Number.MAX_SAFE_INTEGER ? old + 1 : Number.NaN;
 				checkpointContextRef.current = { key, generation, roomId: next?.agentId ?? null, conversationId: next?.conversationId ?? null };
+				documentHostGenerationRef.current = 1;
 				documentDraftGenerationRef.current = 1;
 			}
 		}
