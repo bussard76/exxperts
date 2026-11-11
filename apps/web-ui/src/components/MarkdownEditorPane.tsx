@@ -106,7 +106,7 @@ function errorMessage(error: unknown): string {
 
 interface SurfaceHandle {
 	setFence: (value: boolean) => void;
-	save: () => Promise<boolean>;
+	save: (resolvedConflict?: boolean) => Promise<boolean>;
 	settle: () => Promise<void>;
 	pendingWrite: () => boolean;
 	discard: () => void;
@@ -232,10 +232,10 @@ function MarkdownEditorSurface({
 	});
 	editorRef.current = editor;
 
-	const save = useCallback(async (): Promise<boolean> => {
+	const save = useCallback(async (resolvedConflict = false): Promise<boolean> => {
 		if (saveInFlightRef.current) return saveInFlightRef.current;
 		const current = editorRef.current;
-		if (!current || !canEdit || hasExternalUpdate) return false;
+		if (!current || !canEdit || (hasExternalUpdate && !resolvedConflict)) return false;
 		const request = (async () => {
 			while (true) {
 				const markdown = editorMarkdown(current);
@@ -664,7 +664,8 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 	const save = useCallback(async () => {
 		const keepMine = keepMineInFlightRef.current;
 		if (keepMine && !(await keepMine)) return false;
-		return surfaceRef.current?.save() ?? false;
+		// The resolved conflict prop can lag this promise by one render; the next PUT still checks its revision.
+		return surfaceRef.current?.save(Boolean(keepMine)) ?? false;
 	}, []);
 	const settle = useCallback(async () => {
 		await keepMineInFlightRef.current;

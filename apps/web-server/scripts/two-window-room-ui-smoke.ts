@@ -47,6 +47,7 @@ fs.writeFileSync(path.join(workspace, "invented.md"), "# Invented source\n");
 fs.writeFileSync(path.join(workspace, "owners.md"), "# Invented shared file\n");
 fs.writeFileSync(path.join(workspace, "lost-keep.md"), "# Invented keep original\n");
 fs.writeFileSync(path.join(workspace, "guard-keep.md"), "# Invented keep original\n");
+fs.writeFileSync(path.join(workspace, "guard-keep-save.md"), "# Invented save original\n");
 for (const dir of [agentsRoot, agentDir]) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 process.env.HOME = tempHome;
 process.env.USERPROFILE = tempHome;
@@ -366,6 +367,38 @@ try {
 			await h.unroute("**/workspace-markdown?*");
 			await h.locator(".workspace-tab", { hasText: "guard-keep.md" }).locator(".workspace-tab-close").click();
 			await h.close();
+		}
+		{
+			const k = await ctx.newPage();
+			await k.goto(`${baseUrl}/#/room/${agentId}`);
+			await k.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "guard-keep-save.md" }).click();
+			await k.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented save original").waitFor();
+			await k.getByRole("button", { name: "RAW", exact: true }).click();
+			const raw = k.getByRole("textbox", { name: "Raw Markdown source" });
+			await raw.fill("# Invented mine first\n");
+			fs.writeFileSync(path.join(workspace, "guard-keep-save.md"), "# Invented competing revision\n");
+			await k.locator(".markdown-editor-save").click();
+			await k.locator(".markdown-editor-conflict").waitFor();
+			let releaseKeep!: () => void, startKeep!: () => void, writes = 0;
+			const released = new Promise<void>((resolve) => { releaseKeep = resolve; });
+			const started = new Promise<void>((resolve) => { startKeep = resolve; });
+			await k.route("**/workspace-markdown?*", async (route) => {
+				if (route.request().method() !== "PUT") return route.continue();
+				if (++writes === 1) { startKeep(); await released; }
+				await route.continue();
+			});
+			await k.getByRole("button", { name: "Keep mine", exact: true }).click();
+			try {
+				await started;
+				await raw.fill("# Invented mine latest\n");
+				await k.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+				await k.getByRole("dialog", { name: "Unsaved Markdown changes" }).getByRole("button", { name: "Save and continue" }).click();
+				await k.waitForTimeout(250);
+				assert(writes === 1 && await k.getByRole("complementary", { name: "Markdown editor: guard-keep-save.md" }).count() === 1, "Home Save cannot overtake the in-flight Keep mine write");
+			} finally { releaseKeep(); }
+			await k.locator(".persistent-agent-card").filter({ hasText: "Two Window Room" }).waitFor();
+			assert(Number(writes) === 2 && fs.readFileSync(path.join(workspace, "guard-keep-save.md"), "utf8") === "# Invented mine latest\n", "Home waits for the latest source after Keep mine");
+			await k.close();
 		}
 		const e = await ctx.newPage();
 		await e.goto(`${baseUrl}/#/room/${agentId}`);
