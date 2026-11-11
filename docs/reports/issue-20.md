@@ -206,3 +206,7 @@ An external update of a clean Markdown file now remains the editor's exact sourc
 ## Checkpoint: exact discarded baseline
 
 Discard now retains the exact baseline as the clean source if a later confirmation cancels the intended exit. In `workspace-file-tabs-ui-smoke.ts`, a real Forget action is canceled after Discard of an invented CRLF file; the subsequent Save shortcut sent a normalizing PUT before the change and sends none afterward, preserving the exact file bytes. An initial LF-only check passed without exposing the defect; the independent CRLF case was added without changing the existing Forget assertions. The attributed file-tabs and RAW smokes passed 2/2 and the UI-only build passed. This is attached editor evidence only.
+
+## Checkpoint: moved-room Reload admission
+
+Reload after another window moves a room now admits the existing action before reading room status, verifies that the original context is still current after the read, and retains the same reservation through the actual room-open callback. In the real `two-window-room-ui-smoke.ts` flow, holding that status GET previously let Home replace the pending Reload; afterward Home is withheld and Reload completes in the original room. The attributed two-window and file-tabs smokes passed 2/2 and the UI-only build passed. Dirty-document Reload at this entry still needs a focused check; this does not establish detached or native closure.

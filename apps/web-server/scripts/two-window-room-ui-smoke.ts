@@ -193,6 +193,20 @@ try {
 		await a.getByText(MOVED).first().waitFor({ timeout: 10000 });
 		await a.waitForTimeout(1000);
 		assert(await a.getByText(/Remember stopped unexpectedly/).count() === 0 && await a.locator(".checkpoint-preview-actions").count() === 0, "Remember in the old window closes with the plain line");
+		let releaseMovedStatus!: () => void, startMovedStatus!: () => void;
+		const movedStatusReleased = new Promise<void>((resolve) => { releaseMovedStatus = resolve; });
+		const movedStatusStarted = new Promise<void>((resolve) => { startMovedStatus = resolve; });
+		await a.route("**/api/persistent-agents", async (route) => { startMovedStatus(); await movedStatusReleased; await route.continue(); });
+		await a.getByRole("button", { name: "Reload", exact: true }).click();
+		try {
+			await movedStatusStarted;
+			await a.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+			await a.waitForTimeout(500);
+			assert((await a.title()).includes("Two Window Room") && await a.getByText(MOVED).count() > 0, "Home cannot replace an admitted Reload while its real room-status read is pending");
+		} finally { releaseMovedStatus(); }
+		await waitUntil(async () => (await a.getByText(MOVED).count()) === 0, "the admitted Reload completes after its status read");
+		assert((await a.title()).includes("Two Window Room"), "the original room remains selected after the admitted Reload");
+		await a.unroute("**/api/persistent-agents");
 		await ctx.close();
 	} finally {
 		await browser.close();

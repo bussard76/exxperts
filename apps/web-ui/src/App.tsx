@@ -7349,15 +7349,24 @@ export function App() {
 
 	// Reload in a window the room moved on from: it joins the room's conversation, the typed message kept in the box.
 	async function reloadMovedRoom(): Promise<void> {
+		const cleanAction = admitCleanMarkdownEditorAction(() => reloadMovedRoom());
+		if (cleanAction) { await cleanAction; return; }
+		if (!guardMarkdownEditorAction(() => reloadMovedRoom(), "navigate")) return;
 		const chat = persistentChatRef.current;
 		if (!chat) return;
+		const generation = checkpointContextRef.current.generation;
 		const draft = textareaRef.current?.value ?? "";
 		if (draft.trim()) roomDraftsRef.current.set(chat.agentId, draft);
 		try {
 			const status = (await fetchPersistentAgentStatuses()).find((candidate) => candidate.id === chat.agentId);
+			if (!checkpointOriginCurrent(chat, generation)) return;
 			if (!status) throw new Error("This room is no longer available. Refresh Home and try again.");
-			await openRoomFromAddress(status);
+			markdownEditorCommitBypassRef.current = true;
+			let opening: Promise<void>;
+			try { opening = openRoomFromAddress(status); } finally { markdownEditorCommitBypassRef.current = false; }
+			await opening;
 		} catch (e) {
+			if (!checkpointOriginCurrent(chat, generation)) return;
 			setPersistentResumeError((e as Error).message);
 			setView("home");
 			await refreshPersistentAgentStatus();
