@@ -41,6 +41,9 @@ const tempHome = path.join(tempRoot, "home");
 const agentsRoot = path.join(tempHome, ".exxperts", "app", "personalized-agents");
 const agentDir = path.join(tempHome, ".exxperts", "agent");
 const appDir = path.join(tempHome, ".exxperts", "app");
+const workspace = path.join(tempRoot, "workspace");
+fs.mkdirSync(workspace, { recursive: true });
+fs.writeFileSync(path.join(workspace, "invented.md"), "# Invented source\n");
 for (const dir of [agentsRoot, agentDir]) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 process.env.HOME = tempHome;
 process.env.USERPROFILE = tempHome;
@@ -113,6 +116,8 @@ try {
 	server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
 	server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
 	await waitUntil(() => fetch(`${baseUrl}/healthz`).then((r) => r.ok).catch(() => false), "server ready");
+	const workspaceSaved = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ root: workspace, workspaceAccessMode: "localFiles" }) });
+	assert(workspaceSaved.ok, "the invented workspace is configured");
 	// When the room's lock was last taken: a window whose connection is ready holds it.
 	const lockTakenAt = async () => Number(((await (await authedFetch(`${baseUrl}/api/persistent-agents`)).json()) as Array<{ id: string; activeLock?: { acquiredAt?: number } | null }>).find((room) => room.id === agentId)?.activeLock?.acquiredAt ?? 0);
 	const lockTakenSince = (before: number, label: string) => waitUntil(async () => (await lockTakenAt()) > before, label);
@@ -163,9 +168,25 @@ try {
 		assert(shownAsSent.length === 0, `the message is not shown as sent, got ${JSON.stringify(shownAsSent)}`);
 		assert(await a.getByRole("button", { name: "Reload" }).count() === 1, "the line offers Reload");
 
+		// A dirty document is decided before Reload starts its own status read.
+		await a.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "invented.md" }).click();
+		const reloadEditor = a.locator(".markdown-editor-tiptap .ProseMirror");
+		await reloadEditor.getByText("Invented source").waitFor();
+		await reloadEditor.click();
+		await a.keyboard.type(" unsaved document");
+		let reloadStatusReads = 0;
+		await a.route("**/api/persistent-agents", (route) => { reloadStatusReads++; return route.continue(); });
+		await a.getByRole("button", { name: "Reload" }).click();
+		const reloadGuard = a.getByRole("dialog", { name: "Unsaved Markdown changes" });
+		await reloadGuard.waitFor();
+		assert(reloadStatusReads === 0, "dirty Reload asks before its status read starts");
+		await reloadGuard.getByRole("button", { name: "Cancel" }).click();
+		assert((await reloadEditor.textContent())?.includes("unsaved document") && await a.getByText(MOVED).count() > 0, "canceling dirty Reload retains the document and old context");
+		await a.unroute("**/api/persistent-agents");
 		// Reload joins the room's new conversation, keeps the message, and sends it there.
 		const beforeReload = await lockTakenAt();
 		await a.getByRole("button", { name: "Reload" }).click();
+		await reloadGuard.getByRole("button", { name: "Discard changes" }).click();
 		await waitUntil(async () => (await a.getByText(MOVED).count()) === 0, "the line goes after Reload");
 		await a.locator('button[title="Send"]').first().waitFor({ timeout: 15000 });
 		await lockTakenSince(beforeReload, "window A's connection is ready after Reload");
