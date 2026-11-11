@@ -262,6 +262,33 @@ try {
 		await waitUntil(async () => (await a.getByText(MOVED).count()) === 0, "the admitted Reload completes after its status read");
 		assert((await a.title()).includes("Two Window Room"), "the original room remains selected after the admitted Reload");
 		await a.unroute("**/api/persistent-agents");
+		const d = await ctx.newPage();
+		await d.goto(`${baseUrl}/#/room/${agentId}`);
+		await d.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "invented.md" }).click();
+		await d.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented source").waitFor();
+		await d.getByRole("button", { name: "RAW", exact: true }).click();
+		const homeRaw = d.getByRole("textbox", { name: "Raw Markdown source" });
+		await waitUntil(async () => await homeRaw.inputValue() === "# Invented source\n", "the Home test loads its original source");
+		let releaseHomeWrite!: () => void, startHomeWrite!: () => void, homeWrites = 0;
+		const homeWriteReleased = new Promise<void>((resolve) => { releaseHomeWrite = resolve; });
+		const homeWriteStarted = new Promise<void>((resolve) => { startHomeWrite = resolve; });
+		await d.route("**/workspace-markdown?*", async (route) => {
+			if (route.request().method() !== "PUT") return route.continue();
+			if (++homeWrites === 1) { startHomeWrite(); await homeWriteReleased; }
+			await route.continue();
+		});
+		await homeRaw.fill("# Invented pending Home write\n");
+		await d.locator(".markdown-editor-save").click();
+		try {
+			await homeWriteStarted;
+			await homeRaw.fill("# Invented source\n");
+			await d.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+			await d.waitForTimeout(250);
+			assert((await d.title()).includes("Two Window Room") && await d.getByRole("dialog", { name: "Unsaved Markdown changes" }).count() === 0, "Home waits for the pending write even when the visible source is clean");
+		} finally { releaseHomeWrite(); }
+		await d.locator(".persistent-agent-card").filter({ hasText: "Two Window Room" }).waitFor();
+		assert(homeWrites === 2 && fs.readFileSync(path.join(workspace, "invented.md"), "utf8") === "# Invented source\n", "Home follows the confirmed latest source without abandoning the sent write");
+		await d.unroute("**/workspace-markdown?*");
 		await ctx.close();
 	} finally {
 		await browser.close();

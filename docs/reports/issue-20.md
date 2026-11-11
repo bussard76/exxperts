@@ -234,3 +234,7 @@ The browser-close test now also exercises an unresolved write after the visible 
 ## Checkpoint: independent attached owners
 
 `two-window-room-ui-smoke.ts` now opens the same invented Markdown file in two real chat pages, holds owner A's PUT, saves a competing draft from owner B, and releases A's actual request. The existing revision route returns conflict, owner A keeps its own draft, and owner B's file remains saved; the attributed filtered two-window smoke passed 1/1. This is real attached two-owner revision evidence only: no detached child or per-owner host identity has been implemented or proven.
+
+## Checkpoint: pending write through the real Home exit
+
+The existing `two-window-room-ui-smoke.ts` now holds a real PUT, reverts RAW to its original source, and invokes the actual Home callback. Temporarily removing the pending-write join made Home leave early; with it restored, Home waits, the latest reverted source is confirmed through the existing pipeline, and then the room closes. The attributed filtered two-window smoke passed 1/1 and the UI-only build passed. This is attached exit evidence and does not establish child closure or native behavior.
