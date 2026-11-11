@@ -98,11 +98,18 @@ try {
 			assert(await page.locator("textarea").first().isVisible(), "chat remains usable in the owner window");
 			const childRaw = child.getByRole("textbox", { name: "Raw Markdown source" });
 			const edited = "# Invented child draft\n\n";
-			await childRaw.fill(edited);
-			const closed = child.waitForEvent("close");
-			await child.getByRole("button", { name: "Return", exact: true }).click();
-			await closed;
-			assert(await raw.inputValue() === edited && writes === 0 && fs.readFileSync(path.join(workspace, "invented.md"), "utf8") === original, "Return retains the child's exact unsaved source without a movement write");
+			// Hold the ordinary one-second autosave deadline while testing the movement itself.
+			await page.evaluate(`window.__t20OriginalTimeout = window.setTimeout; window.setTimeout = (callback, delay, ...args) => window.__t20OriginalTimeout(callback, delay === 1000 ? 30000 : delay, ...args)`);
+			await child.evaluate(`window.__t20OriginalTimeout = window.setTimeout; window.setTimeout = (callback, delay, ...args) => window.__t20OriginalTimeout(callback, delay === 1000 ? 30000 : delay, ...args)`);
+			try {
+				await childRaw.fill(edited);
+				const closed = child.waitForEvent("close");
+				await child.getByRole("button", { name: "Return", exact: true }).click();
+				await closed;
+				assert(await raw.inputValue() === edited && writes === 0 && fs.readFileSync(path.join(workspace, "invented.md"), "utf8") === original, "Return retains the child's exact unsaved source without a movement write");
+			} finally {
+				await page.evaluate(`window.setTimeout = window.__t20OriginalTimeout; delete window.__t20OriginalTimeout`);
+			}
 		} finally { await context.close(); }
 	} finally { await browser.close(); }
 	console.log("workspace-detached-documents-ui smoke: ok");
