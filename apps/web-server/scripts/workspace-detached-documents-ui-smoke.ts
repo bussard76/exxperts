@@ -103,6 +103,10 @@ try {
 			await child.evaluate(`window.__t20OriginalTimeout = window.setTimeout; window.setTimeout = (callback, delay, ...args) => window.__t20OriginalTimeout(callback, delay === 1000 ? 30000 : delay, ...args)`);
 			try {
 				await childRaw.fill(edited);
+				await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+				const guard = page.getByRole("dialog", { name: "Unsaved Markdown changes" });
+				await guard.getByRole("button", { name: "Cancel", exact: true }).click();
+				assert(!child.isClosed() && (await page.evaluate(() => location.hash)).includes("/room/") && await childRaw.inputValue() === edited, "Cancel retains the room, child and exact draft");
 				const closed = child.waitForEvent("close");
 				await child.getByRole("button", { name: "Return", exact: true }).click();
 				await closed;
