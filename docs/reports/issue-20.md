@@ -14,7 +14,6 @@ All items remain pending until supported by actual tests.
 
 | Item | Required observable | Contract and evidence |
 | --- | --- | --- |
-| Item | Required result and observable | Frozen contract / future proving tests |
 | I1 | [ ] Detach moves the full room tree, tabs, previews and Markdown Edit/Preview/RAW into one second-monitor host; chat remains usable; empty/loading/denied workspace states are deterministic | C2/C3/C7; R1/R9/R11/R14; approved P plus strip draft |
 | I2 | [ ] One window per chat owner/current room-conversation; no same-room owner collision or second editor/socket/save pipeline; repeated Show focuses verified host | C1/C3/C5; R2/R7 |
 | I3 | [ ] Chat file references select/focus the current document host; correct room/path after Save; stale focus/context does nothing | C1/C4/C8; R2/R4 |
@@ -25,7 +24,6 @@ All items remain pending until supported by actual tests.
 | I8 | [ ] Actual child Save/Find/Escape/tree/overlays/preview frame messages work once in correct host; real opened snapshots retained; sandbox/source/permission rules unchanged | C7/C8; R10/R11/R14 |
 | I9 | [ ] Existing workspace-relative drag intent and click selection preserved; actual cross-window producer→composer tested per claimed environment; no clipboard/OS-open side effects | C8; R12/R14/R15 |
 | I10 | [ ] Exact Q5=B limits disclosed; no forced-loss preservation, immediate orphan-shutdown or native/browser support inferred from source/prototype; final entrypoint evidence precedes claims | C4/C5; R15 and MAC-TASK; Q10 |
-| ID / scenario name | Actual entry, producer → consumer, controlled conditions | Observable required before pass |
 
 ## Required scenario evidence
 
