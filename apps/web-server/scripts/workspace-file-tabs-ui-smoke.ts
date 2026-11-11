@@ -168,6 +168,7 @@ fs.writeFileSync(path.join(folder, "clean-pending.md"), "# Invented original\n")
 fs.writeFileSync(path.join(folder, "clean-unknown.md"), "# Invented unknown\n");
 fs.writeFileSync(path.join(folder, "clean-unknown-conflict.md"), "# Invented local original\n");
 fs.writeFileSync(path.join(folder, "clean-late-conflict.md"), "# Invented late original\n");
+fs.writeFileSync(path.join(folder, "clean-direct-conflict.md"), "# Invented direct original\n");
 fs.writeFileSync(path.join(folder, "external-clean.md"), "# Invented before\n");
 fs.writeFileSync(path.join(folder, "discard-exact.md"), "# Invented exact baseline\r\n\r\n");
 fs.writeFileSync(path.join(folder, "lost-conflict.md"), "# Invented conflict\n");
@@ -842,6 +843,37 @@ try {
 		await treeFile("photo.png").click();
 		await prompt.getByRole("button", { name: "Discard changes" }).click();
 		await tab("clean-late-conflict.md").locator(".workspace-tab-close").click();
+		await treeFile("clean-direct-conflict.md").click();
+		await page.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented direct original").waitFor();
+		await page.locator(".markdown-editor-status").getByText("Saved").waitFor();
+		await page.getByRole("button", { name: "RAW", exact: true }).click();
+		const directConflictRaw = page.getByRole("textbox", { name: "Raw Markdown source" });
+		await waitUntil(async () => await directConflictRaw.inputValue() === "# Invented direct original\n", "the direct-conflict test loads its original source");
+		let releaseDirectConflict!: () => void, startDirectConflict!: () => void, directConflictWrites = 0;
+		const directConflictReleased = new Promise<void>((resolve) => { releaseDirectConflict = resolve; });
+		const directConflictStarted = new Promise<void>((resolve) => { startDirectConflict = resolve; });
+		await page.route("**/workspace-markdown?*", async (route) => {
+			if (route.request().method() !== "PUT") return route.continue();
+			directConflictWrites++;
+			startDirectConflict();
+			await directConflictReleased;
+			await route.continue();
+		});
+		await directConflictRaw.fill("# Invented direct sent\n");
+		await page.locator(".markdown-editor-save").click();
+		try {
+			await directConflictStarted;
+			await directConflictRaw.fill("# Invented direct original\n");
+			fs.writeFileSync(path.join(folder, "clean-direct-conflict.md"), "# Invented direct competitor\n");
+		} finally { releaseDirectConflict(); }
+		await page.locator(".markdown-editor-conflict").waitFor();
+		assert(await directConflictRaw.inputValue() === "# Invented direct original\n" && directConflictWrites === 1, "a direct 409 keeps the clean-looking local source");
+		await page.unroute("**/workspace-markdown?*");
+		await treeFile("photo.png").click();
+		await page.waitForTimeout(250);
+		assert(await prompt.isVisible() && (await activeName()) === "clean-direct-conflict.md", "a direct 409 cannot be abandoned without an explicit decision");
+		await prompt.getByRole("button", { name: "Discard changes" }).click();
+		await tab("clean-direct-conflict.md").locator(".workspace-tab-close").click();
 		await treeFile("external-clean.md").click();
 		await page.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented before").waitFor();
 		let cleanExternalWrites = 0;

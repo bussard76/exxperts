@@ -612,6 +612,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 				}
 			}
 			if (cause instanceof WorkspaceMarkdownApiError && (cause.status === 409 || cause.code === "revision_conflict")) {
+				setDirty(true);
 				setConflictRevision(cause.currentRevision ?? null);
 				setPhase("conflict");
 				setError(cause.message);

@@ -220,3 +220,7 @@ When a PUT response is lost and the first reconciliation GET sees a competing re
 ## Checkpoint: later conflicting reconciliation
 
 The separate settle path now also marks the local source dirty before staging a competing external version. `workspace-file-tabs-ui-smoke.ts` holds and loses a real write response, returns the original revision once, then exposes a competing revision on the later GET. It failed by replacing the clean-looking local source before the change; afterward it preserves that source, reports conflict, and requires explicit Discard to switch. The attributed file-tabs and RAW smokes passed 2/2 and the UI-only build passed. The direct HTTP 409 with a reverted source remains to be checked separately.
+
+## Checkpoint: direct revision conflict with reverted source
+
+A direct HTTP 409 now marks the retained local source as needing an explicit decision even if it had been reverted to the old baseline while the PUT was pending. `workspace-file-tabs-ui-smoke.ts` holds the real PUT, reverts RAW, changes the invented file and releases the request; before the change a tab switch abandoned the conflict without a prompt, while afterward it prompts and preserves the source. The attributed file-tabs and RAW smokes passed 2/2 and the UI-only build passed. Other C2/C4, detached, native and platform requirements remain open.
