@@ -82,6 +82,13 @@ try {
 			assert(await raw.inputValue() === rawDisplay, "the original RAW source is presented");
 			const detach = page.getByRole("button", { name: "Detach", exact: true });
 			assert(await detach.count() === 1 && await detach.isEnabled(), "the document session offers Detach when all safeguards are ready");
+			await page.evaluate(`window.__t20OriginalOpen = window.open; window.open = () => null`);
+			try {
+				await detach.click();
+				assert(await raw.inputValue() === rawDisplay && writes === 0 && fs.readFileSync(path.join(workspace, "invented.md"), "utf8") === original, "a blocked popup retains the attached source and sends no write");
+			} finally {
+				await page.evaluate(`window.open = window.__t20OriginalOpen; delete window.__t20OriginalOpen`);
+			}
 			const opened = page.waitForEvent("popup");
 			await detach.click();
 			const child = await opened;
