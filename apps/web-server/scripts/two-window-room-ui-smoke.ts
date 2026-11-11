@@ -321,6 +321,40 @@ try {
 		await d.locator(".persistent-agent-card").filter({ hasText: "Two Window Room" }).waitFor();
 		assert(homeWrites === 2 && fs.readFileSync(path.join(workspace, "invented.md"), "utf8") === "# Invented source\n", "Home follows the confirmed latest source without abandoning the sent write");
 		await d.unroute("**/workspace-markdown?*");
+		const e = await ctx.newPage();
+		await e.goto(`${baseUrl}/#/room/${agentId}`);
+		await e.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "invented.md" }).click();
+		const invalidatedEditor = e.locator(".markdown-editor-tiptap .ProseMirror");
+		await invalidatedEditor.getByText("Invented source").waitFor();
+		let releaseInvalidatedSave!: () => void, startInvalidatedSave!: () => void;
+		const invalidatedSaveReleased = new Promise<void>((resolve) => { releaseInvalidatedSave = resolve; });
+		const invalidatedSaveStarted = new Promise<void>((resolve) => { startInvalidatedSave = resolve; });
+		await e.route("**/workspace-markdown?*", async (route) => {
+			if (route.request().method() !== "PUT") return route.continue();
+			startInvalidatedSave();
+			await invalidatedSaveReleased;
+			await route.continue();
+		});
+		await invalidatedEditor.click();
+		await e.keyboard.type(" identity-fenced draft");
+		await e.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+		const invalidatedGuard = e.getByRole("dialog", { name: "Unsaved Markdown changes" });
+		await invalidatedGuard.getByRole("button", { name: "Save and continue" }).click();
+		try {
+			await invalidatedSaveStarted;
+			const originalHash = await e.evaluate(() => window.location.hash);
+			let beforeUnloadAsked = false;
+			e.on("dialog", (dialog) => { if (dialog.type() === "beforeunload") beforeUnloadAsked = true; void dialog.dismiss(); });
+			await e.route("**/workspace-files?*", (route) => route.fulfill({ status: 409, json: { code: "person_changed", error: "Invented identity change" } }));
+			await e.evaluate(() => window.dispatchEvent(new Event("focus")));
+			await e.getByText("Someone else is now signed in on this server.", { exact: true }).waitFor();
+			assert(beforeUnloadAsked, "the browser held the invalidated page while the document write was pending");
+			const completedWrite = e.waitForResponse((response) => response.request().method() === "PUT" && response.url().includes("/workspace-markdown?"));
+			releaseInvalidatedSave();
+			assert((await completedWrite).ok(), "the already-sent invented write reaches the real server");
+			await e.waitForTimeout(500);
+			assert((await e.evaluate(() => window.location.hash)) === originalHash, "a late save cannot execute Home after the page identity changes");
+		} finally { releaseInvalidatedSave(); }
 		await ctx.close();
 	} finally {
 		await browser.close();

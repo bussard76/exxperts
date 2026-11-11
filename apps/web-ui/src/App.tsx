@@ -625,7 +625,11 @@ export function App() {
 			void admitCleanMarkdownEditorAction(async () => action());
 			return false;
 		}
-		markdownEditorPendingActionRef.current = action;
+		const generation = checkpointContextRef.current.generation;
+		markdownEditorPendingActionRef.current = () => {
+			if (unmountedRef.current || personHasChanged() || checkpointContextRef.current.generation !== generation) return Promise.resolve(false);
+			return action();
+		};
 		let resolve!: (result: unknown) => void;
 		const promise = new Promise<unknown>((done) => { resolve = done; });
 		markdownEditorActionResultRef.current = { promise, resolve };
@@ -677,11 +681,13 @@ export function App() {
 
 	function admitCleanMarkdownEditorAction(action: () => Promise<unknown>): Promise<unknown> | null {
 		if (markdownEditorDirtyRef.current || markdownEditorPendingActionRef.current || markdownEditorCommitBypassRef.current) return null;
+		const generation = checkpointContextRef.current.generation;
 		const continueAfterWrite = async () => {
 			const editor = markdownEditorRef.current;
 			const pending = editor?.pendingWrite();
 			if (pending === "pending" && !(await editor!.save())) return false;
 			if (pending === "unknown" && (!(await editor!.settle()) || !(await editor!.save()))) return false;
+			if (unmountedRef.current || personHasChanged() || checkpointContextRef.current.generation !== generation) return false;
 			markdownEditorCommitBypassRef.current = true;
 			try { return action(); } finally { markdownEditorCommitBypassRef.current = false; }
 		};
