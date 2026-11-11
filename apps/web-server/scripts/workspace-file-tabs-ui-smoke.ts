@@ -1737,6 +1737,39 @@ try {
 			} finally { releaseEntry(); }
 			await waitUntil(async () => (await entryPage.title()).includes("Spruce"), "the first admitted room entry completes");
 		} finally { await entryContext.close(); }
+		for (const displayName of ["Birch", "Maple"]) {
+			const room = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName, userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
+			assert(room.status === 201, `the invented ${displayName} room is created`);
+		}
+		const standby = await api("/api/persistent-agents/birch/threads/c_invented_resume", { method: "PUT", body: JSON.stringify({ state: "standby", origin: "home", model: { provider: "fake-claude", model: "claude-fake" }, items: [{ kind: "user", id: "invented-user", text: "An invented previous turn." }] }) });
+		assert(standby.status === 200, "the invented resumable conversation is prepared through the real route");
+		const resumeContext = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+		try {
+			const resumePage = await resumeContext.newPage();
+			await resumePage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+			await resumePage.waitForLoadState("networkidle");
+			const close = resumePage.locator(".whats-new-close");
+			if (await close.count()) await close.click();
+			let releaseResume!: () => void, startResume!: () => void, competingEntries = 0;
+			const resumeReleased = new Promise<void>((resolve) => { releaseResume = resolve; });
+			const resumeStarted = new Promise<void>((resolve) => { startResume = resolve; });
+			await resumePage.route("**/threads/*", async (route) => {
+				const request = route.request();
+				if (request.method() === "PUT" && request.url().includes("/persistent-agents/maple/")) competingEntries++;
+				if (request.method() !== "GET" || !request.url().includes("/persistent-agents/birch/")) return route.continue();
+				startResume();
+				await resumeReleased;
+				await route.continue();
+			});
+			await resumePage.locator(".persistent-agent-card").filter({ hasText: "Birch" }).getByRole("button", { name: "Resume", exact: true }).click();
+			try {
+				await resumeStarted;
+				await resumePage.locator(".persistent-agent-card").filter({ hasText: "Maple" }).getByRole("button", { name: /^(Enter|Resume)$/ }).evaluate((button) => (button as HTMLButtonElement).click());
+				await resumePage.waitForTimeout(250);
+				assert(competingEntries === 0, "a second room cannot replace the first admitted resume while its real thread read is pending");
+			} finally { releaseResume(); }
+			await waitUntil(async () => (await resumePage.title()).includes("Birch"), "the first admitted room resume completes");
+		} finally { await resumeContext.close(); }
 		const historyContext = await browser.newContext({ viewport: { width: 1400, height: 900 } });
 		try {
 			const historyPage = await historyContext.newPage();

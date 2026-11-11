@@ -7365,6 +7365,8 @@ export function App() {
 	}
 
 	async function openPersistentAgentResume(status: PersistentAgentStatus) {
+		const cleanAction = admitCleanMarkdownEditorAction(() => openPersistentAgentResume(status));
+		if (cleanAction) { await cleanAction; return; }
 		if (!guardMarkdownEditorAction(() => openPersistentAgentResume(status), "navigate")) return;
 		setPersistentResumeError(null);
 		clearBackgroundActivityBadge(status.id);

@@ -186,3 +186,7 @@ The first standalone rerun then exposed TypeScript narrowing of the test's async
 ## Checkpoint: first admitted room entry
 
 A held real initial conversation PUT in `workspace-file-tabs-ui-smoke.ts` showed that clicking a second invented room could replace the first entry before it finished. The clean new-room entry now reserves the existing action until its original callback settles; the second entry starts no conversation save, and the first room opens after release. The new case failed on the competing request before the change, and the attributed file-tabs and Remember smokes passed 2/2 with the fix. Resume uses a separate callback and remains to be tested independently. This is attached owner arbitration only, not the detached host/native contract.
+
+## Checkpoint: first admitted room resume
+
+`workspace-file-tabs-ui-smoke.ts` seeds an invented standby thread via the existing test server, holds the real resume GET, and attempts entry to another invented room. Without the reservation, the competing room issued its conversation save and replaced the pending resume; with the existing action guard around the resume callback, it issues no competing save and the original room resumes after release. The attributed filtered file-tabs smoke passed 1/1 and the UI-only build passed. This covers only the attached callback; complete C1/C4 correlation and all detached/native work remain pending.
