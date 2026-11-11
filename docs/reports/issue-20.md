@@ -56,3 +56,9 @@ Pending implementation.
 ## Files, tests, assumptions and debt
 
 Pending implementation.
+
+## Checkpoint: initial guarded-action admission
+
+The existing attached editor now retains the first pending guarded action when another file selection arrives. `workspace-file-tabs-ui-smoke.ts` selects a second file through its real callback while the first dirty-file prompt is pending, then checks that discard executes the first selection; it failed on the unchanged app and passed after the change. This is only a small part of R7: correlated arbitration, save fencing, host and native lifecycle are still pending and Detach remains unavailable.
+
+Checks: `EXXETA_SKIP_BROWSER_INSTALL=1 npm ci`, `cd runtime && npm run build`, `npm run build --workspace apps/web-ui`, UI and scripts typechecks all passed; the attributed filtered `workspace-file-tabs-ui` gate passed 1/1 after its intentional red run. No native, Mac, drag or detached-host evidence is claimed. Files at this checkpoint: `App.tsx`, `workspace-file-tabs-ui-smoke.ts`, this report; no screenshots. Graph: no; the prescribed alternating graph assignment was not specified in the dispatch. No new dependency, manifest, lockfile, route or store was added.

@@ -586,6 +586,7 @@ export function App() {
 	}, []);
 
 	function guardMarkdownEditorAction(action: () => void | Promise<unknown>, prompt: "close" | "switch" | "navigate"): boolean {
+		if (markdownEditorPendingActionRef.current) return false;
 		if (!markdownEditorDirtyRef.current) return true;
 		markdownEditorPendingActionRef.current = action;
 		setMarkdownEditorPrompt(prompt);

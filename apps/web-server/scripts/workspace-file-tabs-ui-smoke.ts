@@ -612,7 +612,10 @@ try {
 		await prompt.getByRole("button", { name: "Cancel" }).click();
 		assert((await activeName()) === "notes.md", "cancel keeps the draft active");
 		await treeFile("photo.png").click();
+		await prompt.waitFor();
+		await treeFile("draft.md").evaluate((node) => (node as HTMLElement).click());
 		await prompt.getByRole("button", { name: "Discard changes" }).click();
+		assert((await activeName()) === "photo.png", "a later file selection cannot replace the first pending guarded action");
 		assert(imageRequests === 1, "reactivating an image does not refetch it");
 		assert((await tabs.count()) === 2 && (await activeName()) === "photo.png", "reopening activates the existing tab");
 		await treeFile("notes.md").click();
