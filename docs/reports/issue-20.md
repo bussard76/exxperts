@@ -94,3 +94,7 @@ The editor marks a PUT unknown after the 30-second wait without treating the und
 ## Checkpoint: guarded editor fence
 
 An admitted dirty action now fences rich input, RAW input, editor controls and autosave while its decision is pending, without blocking the guard's own Save. The real `workspace-file-tabs-ui-smoke.ts` input/autosave case failed before the fence; the RAW check separately failed with RAW deliberately unfenced; both pass with the change. The filtered `workspace-file-tabs-ui` and `workspace-markdown-raw-ui` smokes each passed 1/1. Host transfer, full context/action correlation and native lifecycle remain pending.
+
+## Checkpoint: permission revalidation after response loss
+
+A read-only result from the existing reconciliation GET now refuses the current guarded continuation while retaining the visible source. The controlled real-route permission-loss case in `workspace-file-tabs-ui-smoke.ts` failed before the change and the full filtered smoke passed 1/1 afterward. This is one permission path only; general action/policy revalidation and the remaining task requirements are not complete.

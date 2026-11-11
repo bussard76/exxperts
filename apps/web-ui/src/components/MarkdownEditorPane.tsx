@@ -528,7 +528,13 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 				}
 				fileRef.current = latest;
 				setFile(latest);
+				setCanEdit(!latest.readOnly);
 				markSaved(latest.content);
+				if (latest.readOnly) {
+					setPhase("error");
+					setError("This file is read-only.");
+					return null;
+				}
 				if (content === unknown.content) {
 					setError(null);
 					setPhase("ready");
@@ -567,6 +573,12 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 						unknownWriteRef.current = null;
 						setLoadedFile(latest);
 						markSaved(latest.content);
+						setCanEdit(!latest.readOnly);
+						if (latest.readOnly) {
+							setPhase("error");
+							setError("This file is read-only.");
+							return null;
+						}
 						return latest.revision;
 					}
 					if (latest.revision !== revision) {
@@ -638,6 +650,11 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			}
 			markSaved(latest.content);
 			surfaceRef.current?.markSaved(latest.content);
+			if (latest.readOnly) {
+				setError("This file is read-only.");
+				setPhase("error");
+				return false;
+			}
 			setError(null);
 			setPhase("ready");
 			return true;
