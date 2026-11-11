@@ -78,3 +78,7 @@ A guarded Discard now waits for the existing in-flight editor save before it app
 ## Checkpoint: competing revision after response loss
 
 When reconciliation observes a different revision and different content, the existing editor conflict state now retains the local draft and exposes the competing content rather than retrying the write. The real-route `workspace-file-tabs-ui-smoke.ts` case failed before the change and passed afterward; the complete filtered smoke passed 1/1. Later reconciliation of a still-unknown outcome and full C2/C4 requirements remain pending.
+
+## Checkpoint: later reconciliation
+
+The editor retains the submitted content and revision after an inconclusive GET and can reconcile a later confirmed result without resending the original PUT. A fresh guarded Save is required to run its own continuation; the `workspace-file-tabs-ui-smoke.ts` case uses one controlled stale GET followed by the real current route and passed after an intentional red run, with the filtered smoke 1/1. Write timeout, permission revalidation, complete draft retention and C4/native action correlation remain pending.

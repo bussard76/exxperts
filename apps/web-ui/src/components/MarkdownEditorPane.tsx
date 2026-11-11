@@ -415,7 +415,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 	const [error, setError] = useState<string | null>(null);
 	const [conflictRevision, setConflictRevision] = useState<string | null>(null);
 	const [canEdit, setCanEdit] = useState(false);
-	const unknownWriteRef = useRef(false);
+	const unknownWriteRef = useRef<{ content: string; revision: string } | null>(null);
 	const surfaceRef = useRef<SurfaceHandle | null>(null);
 	const rawAreaRef = useRef<HTMLTextAreaElement | null>(null);
 	const rawSelectionRef = useRef<[number, number] | null>(null);
@@ -449,7 +449,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 
 	useEffect(() => {
 		const controller = new AbortController();
-		unknownWriteRef.current = false;
+		unknownWriteRef.current = null;
 		fileRef.current = null;
 		setFile(null);
 		draftRef.current = "";
@@ -476,7 +476,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		let active = true;
 		let checking = false;
 		const checkForExternalChange = async () => {
-			if (!active || checking) return;
+			if (!active || checking || unknownWriteRef.current) return;
 			checking = true;
 			try {
 				const latest = await getWorkspaceMarkdownFile(agentId, conversationId, path);
@@ -503,7 +503,36 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 	}, [agentId, conversationId, file, path, phase, reconcileServerContent]);
 
 	const persist = useCallback(async (content: string, revision: string): Promise<string | null> => {
-		if (!canEdit || unknownWriteRef.current) return null;
+		if (!canEdit) return null;
+		const unknown = unknownWriteRef.current;
+		if (unknown) {
+			try {
+				const latest = await getWorkspaceMarkdownFile(agentId, conversationId, path);
+				if (latest.revision === unknown.revision) return null;
+				unknownWriteRef.current = null;
+				if (latest.content !== unknown.content) {
+					reconcileServerContent(latest.content);
+					fileRef.current = latest;
+					setFile(latest);
+					setCanEdit(!latest.readOnly);
+					setConflictRevision(latest.revision);
+					setPhase("conflict");
+					return null;
+				}
+				fileRef.current = latest;
+				setFile(latest);
+				markSaved(latest.content);
+				if (content === unknown.content) {
+					setError(null);
+					setPhase("ready");
+					return latest.revision;
+				}
+				surfaceRef.current?.markSaved(latest.content);
+				revision = latest.revision;
+			} catch {
+				return null;
+			}
+		}
 		setPhase("saving");
 		setError(null);
 		try {
@@ -513,17 +542,17 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			return next.revision;
 		} catch (cause) {
 			if (!(cause instanceof WorkspaceMarkdownApiError)) {
-				unknownWriteRef.current = true;
+				unknownWriteRef.current = { content, revision };
 				try {
 					const latest = await getWorkspaceMarkdownFile(agentId, conversationId, path);
 					if (latest.revision !== revision && latest.content === content) {
-						unknownWriteRef.current = false;
+						unknownWriteRef.current = null;
 						setLoadedFile(latest);
 						markSaved(latest.content);
 						return latest.revision;
 					}
 					if (latest.revision !== revision) {
-						unknownWriteRef.current = false;
+						unknownWriteRef.current = null;
 						reconcileServerContent(latest.content);
 						fileRef.current = latest;
 						setFile(latest);
