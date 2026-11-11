@@ -167,6 +167,24 @@ function WorkspaceOpenAction({ agentId, conversationId, path }: { agentId: strin
 	return <div className="workspace-open-action"><button type="button" disabled={pending} onClick={() => void open()}>{label}</button>{failed && <p role="alert">This file could not be opened in another program.</p>}</div>;
 }
 
+function allocateDocumentId(): string | null {
+	try {
+		const crypto = window.crypto;
+		if (typeof crypto?.randomUUID === "function") {
+			const id = crypto.randomUUID();
+			return typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id) ? id : null;
+		}
+		if (typeof crypto?.getRandomValues !== "function") return null;
+		const bytes = crypto.getRandomValues(new Uint8Array(16));
+		bytes[6] = (bytes[6] & 0x0f) | 0x40;
+		bytes[8] = (bytes[8] & 0x3f) | 0x80;
+		const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
+		return [hex.slice(0, 4).join(""), hex.slice(4, 6).join(""), hex.slice(6, 8).join(""), hex.slice(8, 10).join(""), hex.slice(10).join("")].join("-");
+	} catch {
+		return null;
+	}
+}
+
 export function App() {
 	const [view, setView] = useState<MainView>("home");
 	// The Settings overlay renders over whatever view is current; closing it
@@ -507,7 +525,9 @@ export function App() {
 	// read the pane at event time, not at closure-capture time).
 	const rightPaneRef = useRef<RightPaneOccupant | null>(null);
 	rightPaneRef.current = rightPane;
+	const [documentOwnerId] = useState(allocateDocumentId);
 	const markdownEditorRef = useRef<MarkdownEditorHandle | null>(null);
+	const markdownEditorRequestIdRef = useRef<string | null>(null);
 	const markdownEditorDirtyRef = useRef(false);
 	const markdownEditorPendingActionRef = useRef<(() => void | Promise<unknown>) | null>(null);
 	const markdownEditorActionResultRef = useRef<{ promise: Promise<unknown>; resolve: (result: unknown) => void } | null>(null);
@@ -619,15 +639,18 @@ export function App() {
 			markdownEditorCommitBypassRef.current = false;
 			return true;
 		}
-		if (markdownEditorPendingActionRef.current) return false;
+		if (markdownEditorPendingActionRef.current || !documentOwnerId) return false;
+		const requestId = allocateDocumentId();
+		if (!requestId) return false;
 		if (!markdownEditorDirtyRef.current) {
 			if (!markdownEditorRef.current?.pendingWrite()) return true;
-			void admitCleanMarkdownEditorAction(async () => action());
+			void admitCleanMarkdownEditorAction(async () => action(), requestId);
 			return false;
 		}
 		const generation = checkpointContextRef.current.generation;
+		markdownEditorRequestIdRef.current = requestId;
 		markdownEditorPendingActionRef.current = () => {
-			if (unmountedRef.current || personHasChanged() || checkpointContextRef.current.generation !== generation) return Promise.resolve(false);
+			if (markdownEditorRequestIdRef.current !== requestId || unmountedRef.current || personHasChanged() || checkpointContextRef.current.generation !== generation) return Promise.resolve(false);
 			return action();
 		};
 		let resolve!: (result: unknown) => void;
@@ -654,6 +677,7 @@ export function App() {
 		const actionResult = markdownEditorActionResultRef.current;
 		const release = () => {
 			markdownEditorPendingActionRef.current = null;
+			markdownEditorRequestIdRef.current = null;
 			markdownEditorActionResultRef.current = null;
 			markdownEditorPromptBusyRef.current = false;
 			markdownEditorCommittingRef.current = false;
@@ -681,15 +705,18 @@ export function App() {
 		}
 	}
 
-	function admitCleanMarkdownEditorAction(action: () => Promise<unknown>): Promise<unknown> | null {
+	function admitCleanMarkdownEditorAction(action: () => Promise<unknown>, admittedId?: string): Promise<unknown> | null {
 		if (markdownEditorDirtyRef.current || markdownEditorPendingActionRef.current || markdownEditorCommitBypassRef.current) return null;
+		const requestId = documentOwnerId && (admittedId ?? allocateDocumentId());
+		if (!requestId) return Promise.resolve(false);
+		markdownEditorRequestIdRef.current = requestId;
 		const generation = checkpointContextRef.current.generation;
 		const continueAfterWrite = async () => {
 			const editor = markdownEditorRef.current;
 			const pending = editor?.pendingWrite();
 			if (pending === "pending" && !(await editor!.save())) return false;
 			if (pending === "unknown" && (!(await editor!.settle()) || !(await editor!.save()))) return false;
-			if (unmountedRef.current || personHasChanged() || checkpointContextRef.current.generation !== generation) return false;
+			if (markdownEditorRequestIdRef.current !== requestId || unmountedRef.current || personHasChanged() || checkpointContextRef.current.generation !== generation) return false;
 			markdownEditorCommitBypassRef.current = true;
 			try { return action(); } finally { markdownEditorCommitBypassRef.current = false; }
 		};
@@ -714,6 +741,7 @@ export function App() {
 			setMarkdownEditorPromptBusy(false);
 			setMarkdownEditorPrompt(null);
 			markdownEditorPendingActionRef.current = null;
+			markdownEditorRequestIdRef.current = null;
 			markdownEditorActionResultRef.current?.resolve(false);
 			markdownEditorActionResultRef.current = null;
 			markdownEditorRef.current?.setFence(false);
@@ -736,6 +764,7 @@ export function App() {
 			markdownEditorCanceledSaveRef.current = false;
 			markdownEditorPromptBusyRef.current = false;
 			markdownEditorPendingActionRef.current = null;
+			markdownEditorRequestIdRef.current = null;
 			markdownEditorActionResultRef.current?.resolve(false);
 			markdownEditorActionResultRef.current = null;
 			setMarkdownEditorPrompt(null);
@@ -754,6 +783,7 @@ export function App() {
 		if (markdownEditorPromptBusyRef.current) markdownEditorCanceledSaveRef.current = true;
 		else {
 			markdownEditorPendingActionRef.current = null;
+			markdownEditorRequestIdRef.current = null;
 			markdownEditorActionResultRef.current?.resolve(false);
 			markdownEditorActionResultRef.current = null;
 			markdownEditorRef.current?.setFence(false);
@@ -774,10 +804,12 @@ export function App() {
 	function requestCloseWorkspaceTab(path: string): void {
 		if (markdownEditorPendingActionRef.current && !markdownEditorCommitBypassRef.current) return;
 		const active = activeWorkspacePath(rightPaneRef.current);
-		if (active === path && rightPaneRef.current?.kind === "markdownEditor" && !guardMarkdownEditorAction(() => requestCloseWorkspaceTab(path), "close")) return;
 		const paths = workspaceTabs?.paths ?? [];
 		const index = paths.indexOf(path);
 		if (index < 0) return;
+		if (active === path && rightPaneRef.current?.kind === "markdownEditor") {
+			if (!guardMarkdownEditorAction(() => requestCloseWorkspaceTab(path), "close")) return;
+		} else if (!documentOwnerId || !allocateDocumentId()) return;
 		const remaining = paths.filter((item) => item !== path);
 		setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths: remaining } : tabs);
 		if (active === path) {
@@ -797,7 +829,7 @@ export function App() {
 		const path = entry.relativePath;
 		if (!/\.(md|doc|docx|pptx|excalidraw|drawio|dio|txt|json|pdf|html?|xls|xlsx|xlsm|png|jpe?g|gif|webp|svg)$/i.test(path) || !persistentChat) return;
 		if (activeWorkspacePath(rightPaneRef.current) === path && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId) return;
-		if (rightPaneRef.current?.kind === "markdownEditor" && !guardMarkdownEditorAction(() => openWorkspaceMarkdown(entry), "switch")) return;
+		if (!guardMarkdownEditorAction(() => openWorkspaceMarkdown(entry), "switch")) return;
 		setArtifactMaximized(false);
 		setWorkspaceTabs((tabs) => {
 			const same = tabs?.agentId === persistentChat.agentId && tabs.conversationId === persistentChat.conversationId;

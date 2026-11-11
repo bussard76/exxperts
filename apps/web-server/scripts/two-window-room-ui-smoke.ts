@@ -51,6 +51,7 @@ fs.writeFileSync(path.join(workspace, "guard-keep-save.md"), "# Invented save or
 fs.writeFileSync(path.join(workspace, "guard-keep-save-conflict.md"), "# Invented save original\n");
 fs.writeFileSync(path.join(workspace, "guard-keep-timeout.md"), "# Invented timeout original\n");
 fs.writeFileSync(path.join(workspace, "guard-unknown-timeout.md"), "# Invented unknown original\n");
+fs.writeFileSync(path.join(workspace, "identity.md"), "# Invented identity source\n");
 for (const dir of [agentsRoot, agentDir]) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 process.env.HOME = tempHome;
 process.env.USERPROFILE = tempHome;
@@ -546,6 +547,153 @@ try {
 		await cleanHome.evaluate((button) => (button as HTMLButtonElement).click());
 		await f.waitForTimeout(500);
 		assert((await f.evaluate(() => window.location.hash)) === cleanOriginalHash, "a stale clean Home action cannot run after the page identity changes");
+		{
+			const identityContext = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+			await identityContext.addInitScript({ content: `(() => {
+				const state = { ids: [], fail: false, malformed: false, fallbackWhileFailed: 0 };
+				window.__t20IdentityTest = state;
+				const original = crypto.randomUUID.bind(crypto);
+				const originalValues = crypto.getRandomValues.bind(crypto);
+				Object.defineProperty(crypto, "getRandomValues", { configurable: true, value: function (view) {
+					if (state.fail || state.malformed) state.fallbackWhileFailed++;
+					return originalValues(view);
+				} });
+				Object.defineProperty(crypto, "randomUUID", { configurable: true, value: function () {
+					if (state.fail) throw new Error("invented crypto failure");
+					if (state.malformed) return "invented-invalid-id";
+					const id = original();
+					state.ids.push(id);
+					return id;
+				} });
+			})();` });
+			const page = await identityContext.newPage();
+			let popups = 0;
+			page.on("popup", () => { popups++; });
+			try {
+				await page.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+				const room = page.locator(".persistent-agent-card").filter({ hasText: "Two Window Room" });
+				await room.waitFor();
+				const mountedIds = await page.evaluate(() => (window as any).__t20IdentityTest.ids as string[]);
+				assert(mountedIds.length >= 1 && mountedIds.every((id) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)), "the real App owner allocates canonical UUIDv4 identity on localhost");
+				await room.getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+				await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "owners.md" }).click();
+				await page.locator(".workspace-tab[data-active='true']", { hasText: "owners.md" }).waitFor();
+				await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "identity.md" }).click();
+				await page.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented identity source").waitFor();
+				await page.getByRole("button", { name: "RAW", exact: true }).click();
+				const raw = page.getByRole("textbox", { name: "Raw Markdown source" });
+				await raw.fill("# Invented identity draft\n");
+				const beforeClose = await page.evaluate(() => (window as any).__t20IdentityTest.ids.length as number);
+				await page.locator(".workspace-tab", { hasText: "owners.md" }).locator(".workspace-tab-close").click();
+				assert(await page.locator(".workspace-tab", { hasText: "owners.md" }).count() === 0 && await raw.inputValue() === "# Invented identity draft\n" && await page.getByRole("dialog", { name: "Unsaved Markdown changes" }).count() === 0 && await page.evaluate(() => (window as any).__t20IdentityTest.ids.length as number) === beforeClose + 1, "closing an inactive tab allocates one request and leaves the active draft without a prompt");
+				const beforeRequest = await page.evaluate(() => (window as any).__t20IdentityTest.ids.length as number);
+				await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "owners.md" }).click();
+				const guard = page.getByRole("dialog", { name: "Unsaved Markdown changes" });
+				await guard.waitFor();
+				const ids = await page.evaluate(() => (window as any).__t20IdentityTest.ids as string[]);
+				assert(ids.length === beforeRequest + 1 && new Set(ids).size === ids.length && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(ids.at(-1)!), "the real admitted file action allocates a fresh UUIDv4 request");
+				await guard.getByRole("button", { name: "Cancel" }).click();
+				await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "owners.md" }).click();
+				await guard.waitFor();
+				const repeatedIds = await page.evaluate(() => (window as any).__t20IdentityTest.ids as string[]);
+				assert(repeatedIds.length === ids.length + 1 && new Set(repeatedIds).size === repeatedIds.length, "a later admitted action gets a fresh request ID");
+				await guard.getByRole("button", { name: "Cancel" }).click();
+				const originalHash = await page.evaluate(() => location.hash);
+				await page.evaluate(() => { (window as any).__t20IdentityTest.fail = true; });
+				await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+				await page.waitForTimeout(300);
+				assert((await page.evaluate(() => location.hash)) === originalHash && await raw.inputValue() === "# Invented identity draft\n" && await guard.count() === 0 && popups === 0 && await page.evaluate(() => (window as any).__t20IdentityTest.fallbackWhileFailed) === 0, "a throwing request allocator refuses Home without fallback and retains the session without a child");
+				await page.evaluate(() => { (window as any).__t20IdentityTest.fail = false; (window as any).__t20IdentityTest.malformed = true; });
+				await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+				await page.waitForTimeout(300);
+				assert((await page.evaluate(() => location.hash)) === originalHash && await raw.inputValue() === "# Invented identity draft\n" && await guard.count() === 0 && popups === 0 && await page.evaluate(() => (window as any).__t20IdentityTest.fallbackWhileFailed) === 0, "a malformed available UUID refuses Home without fallback or session loss");
+			} finally { await identityContext.close(); }
+		}
+		{
+			const insecureOrigin = "http://192.0.2.10";
+			const insecureContext = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+			await insecureContext.addInitScript({ content: `(() => {
+				const state = { calls: [], fail: false };
+				window.__t20FallbackTest = state;
+				const original = crypto.getRandomValues.bind(crypto);
+				Object.defineProperty(crypto, "getRandomValues", { configurable: true, value: function (view) {
+					if (state.fail) throw new Error("invented crypto failure");
+					const result = original(view);
+					state.calls.push({ before: Array.from(view), output: view });
+					return result;
+				} });
+			})();` });
+			let closingInsecure = false;
+			await insecureContext.route("**/*", async (route) => {
+				try {
+					const url = new URL(route.request().url());
+					if (url.origin !== insecureOrigin) return await route.abort();
+					const headers: Record<string, string> = { ...route.request().headers(), host: `127.0.0.1:${port}`, "x-exxperts-auth": SMOKE_AUTH_TOKEN };
+					if (headers.origin) headers.origin = baseUrl;
+					const response = await route.fetch({ url: `${baseUrl}${url.pathname}${url.search}`, headers, maxRedirects: 0 });
+					await route.fulfill({ response });
+				} catch (error) { if (!closingInsecure) throw error; }
+			});
+			await insecureContext.routeWebSocket("**/*", (socket) => socket.close());
+			const page = await insecureContext.newPage();
+			let popups = 0;
+			page.on("popup", () => { popups++; });
+			const calls = () => page.evaluate(() => (window as any).__t20FallbackTest.calls.map((call: any) => ({ before: call.before, after: Array.from(call.output) })) as Array<{ before: number[]; after: number[] }>);
+			const validBytes = (call: { before: number[]; after: number[] }) => call.before.length === 16 && call.after.length === 16 && call.after.every((value, index) => value === (index === 6 ? (call.before[index] & 15) | 64 : index === 8 ? (call.before[index] & 63) | 128 : call.before[index]));
+			try {
+				await page.goto(`${insecureOrigin}/`);
+				const room = page.locator(".persistent-agent-card").filter({ hasText: "Two Window Room" });
+				await room.waitFor();
+				assert(await page.evaluate(() => !isSecureContext && typeof crypto.randomUUID === "undefined"), "the actual owner page uses the intercepted insecure origin");
+				const ownerCalls = await calls();
+				assert(ownerCalls.length >= 1 && validBytes(ownerCalls[0]), "the App owner consumes 16 real random bytes with UUIDv4 masks on an insecure origin");
+				await room.getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+				await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "identity.md" }).click();
+				await page.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented identity source").waitFor();
+				await page.getByRole("button", { name: "RAW", exact: true }).click();
+				const raw = page.getByRole("textbox", { name: "Raw Markdown source" });
+				await raw.fill("# Invented fallback draft\n");
+				const beforeRequest = (await calls()).length;
+				await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "owners.md" }).click();
+				const guard = page.getByRole("dialog", { name: "Unsaved Markdown changes" });
+				await guard.waitFor();
+				const requestCalls = await calls();
+				assert(requestCalls.length === beforeRequest + 1 && validBytes(requestCalls.at(-1)!), "the admitted file action uses a fresh 16-byte UUIDv4 allocation");
+				await guard.getByRole("button", { name: "Cancel" }).click();
+				const hash = await page.evaluate(() => location.hash);
+				await page.evaluate(() => { (window as any).__t20FallbackTest.fail = true; });
+				await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+				await page.waitForTimeout(300);
+				assert((await page.evaluate(() => location.hash)) === hash && await raw.inputValue() === "# Invented fallback draft\n" && await guard.count() === 0 && popups === 0, "a throwing fallback refuses the action and retains the owner session without a child");
+				await page.evaluate(() => { Object.defineProperty(crypto, "getRandomValues", { configurable: true, value: undefined }); });
+				await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+				await page.waitForTimeout(300);
+				assert((await page.evaluate(() => location.hash)) === hash && await raw.inputValue() === "# Invented fallback draft\n" && await guard.count() === 0 && popups === 0, "missing cryptographic primitives refuse Home without losing the session or opening a child");
+			} finally { closingInsecure = true; await insecureContext.close(); }
+		}
+		{
+			const noOwnerContext = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+			await noOwnerContext.addInitScript({ content: `(() => {
+				const state = { attempts: 0, fallback: 0 };
+				window.__t20OwnerFailure = state;
+				const originalValues = crypto.getRandomValues.bind(crypto);
+				Object.defineProperty(crypto, "getRandomValues", { configurable: true, value: function (view) { state.fallback++; return originalValues(view); } });
+				Object.defineProperty(crypto, "randomUUID", { configurable: true, value: function () { state.attempts++; throw new Error("invented owner failure"); } });
+			})();` });
+			const page = await noOwnerContext.newPage();
+			let popups = 0;
+			page.on("popup", () => { popups++; });
+			try {
+				await page.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+				const room = page.locator(".persistent-agent-card").filter({ hasText: "Two Window Room" });
+				await room.waitFor();
+				const failure = await page.evaluate(() => (window as any).__t20OwnerFailure as { attempts: number; fallback: number });
+				assert(failure.attempts >= 1 && failure.fallback === 0, "a throwing owner primitive fails without trying another primitive");
+				await room.getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+				await page.waitForTimeout(300);
+				assert(await room.isVisible() && await page.getByRole("navigation", { name: "Room navigation" }).count() === 0 && popups === 0, "an owner without identity grants no room action or child authority");
+			} finally { await noOwnerContext.close(); }
+		}
 		await ctx.close();
 	} finally {
 		await browser.close();
