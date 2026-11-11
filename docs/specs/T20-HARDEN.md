@@ -6,6 +6,10 @@ Status: revised **author draft**, 2026-11-11; awaiting a fresh different Archite
 
 **Level 3**, accepted architecture A under [ADR-0009](../adr/0009-detached-document-window.md): one chat-owned document session, one portal host, native close/placement adapter in apps/desktop. Apps/web-ui owns volatile session, host transfer, event binding and correlated action arbitration; apps/desktop owns synchronous native prevention, trusted child registration and accessible child bounds. Existing server workspace/preview/Markdown/OS-open policy remains authoritative and unchanged; C7 reuses the contained one-shot frame delivery at the existing HTML frame entry without a new route or privilege. Accepted ADR-0002/0003/0004/0008 remain binding. No new public package export, dependency, route, durable store, backend, second App/WebSocket/editor/save pipeline or independent child lifetime is authorized.
 
+## Controller compatibility clarification, 2026-11-11
+
+C1 owner/request UUIDv4 allocation uses the actual owner realm's `crypto.randomUUID()` when callable, or that realm's `crypto.getRandomValues` for 16 bytes with the required UUIDv4 masks and canonical formatting only when `randomUUID` is unavailable. Missing or throwing cryptography fails closed; C5 shell-originated producers remain unchanged. The independently reviewed narrow correction is [T20-C1-COMPAT](../reviews/T20-C1-COMPAT-architecture-spec.md); it changes neither ADR-0009 nor the accepted product decisions.
+
 ## Sources and authority
 
 | Source | Exact reference | Authority and use |

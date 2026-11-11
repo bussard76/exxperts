@@ -21,10 +21,12 @@ All names below are **future internal types/functions**; they do not exist on cu
 
 ## 2. C1: identities, allocation and validation
 
+**Controller compatibility clarification, 2026-11-11:** The owner realm uses `crypto.randomUUID()` when callable; only if unavailable, it uses that realm's `crypto.getRandomValues` on 16 bytes, with UUIDv4 version and variant masks and canonical formatting. A missing or throwing primitive fails closed without another fallback or authority. Shell-originated C5 request and permit producers remain unchanged. The independent [C1 compatibility review](../../docs/reviews/T20-C1-COMPAT-architecture-spec.md) records this narrow correction; it is not a new Sascha decision or ADR change.
+
 ```ts
 type Generation = number; // positive safe integer, increments; never wrap/reuse
-type OwnerId = string;    // crypto.randomUUID() per App mount; never persisted
-type RequestId = string;  // crypto.randomUUID() per admitted action
+type OwnerId = string;    // fresh owner-realm UUIDv4 per App mount; never persisted
+type RequestId = string;  // fresh owner-realm UUIDv4 per admitted owner action
 type Context = {
   ownerId: OwnerId;
   ownerGeneration: Generation;
