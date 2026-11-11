@@ -501,6 +501,8 @@ export function App() {
 	const markdownEditorRef = useRef<MarkdownEditorHandle | null>(null);
 	const markdownEditorDirtyRef = useRef(false);
 	const markdownEditorPendingActionRef = useRef<(() => void | Promise<unknown>) | null>(null);
+	const markdownEditorCommitBypassRef = useRef(false);
+	const markdownEditorCommittingRef = useRef(false);
 	const markdownEditorCanceledSaveRef = useRef(false);
 	const [markdownEditorPrompt, setMarkdownEditorPrompt] = useState<"close" | "switch" | "navigate" | null>(null);
 	const [markdownEditorPromptBusy, setMarkdownEditorPromptBusy] = useState(false);
@@ -589,6 +591,10 @@ export function App() {
 	}, []);
 
 	function guardMarkdownEditorAction(action: () => void | Promise<unknown>, prompt: "close" | "switch" | "navigate"): boolean {
+		if (markdownEditorCommitBypassRef.current) {
+			markdownEditorCommitBypassRef.current = false;
+			return true;
+		}
 		if (markdownEditorPendingActionRef.current) return false;
 		if (!markdownEditorDirtyRef.current) return true;
 		markdownEditorPendingActionRef.current = action;
@@ -599,13 +605,26 @@ export function App() {
 	}
 
 	function completeMarkdownEditorPrompt(action: (() => void | Promise<unknown>) | null): void {
-		markdownEditorPendingActionRef.current = null;
-		markdownEditorPromptBusyRef.current = false;
+		markdownEditorCommittingRef.current = true;
 		setMarkdownEditorPrompt(null);
 		setMarkdownEditorPromptBusy(false);
-		setMarkdownEditorFenced(false);
 		markdownEditorDirtyRef.current = false;
-		if (action) void action();
+		const release = () => {
+			markdownEditorPendingActionRef.current = null;
+			markdownEditorPromptBusyRef.current = false;
+			markdownEditorCommittingRef.current = false;
+			setMarkdownEditorFenced(false);
+		};
+		try {
+			markdownEditorCommitBypassRef.current = true;
+			const result = action?.();
+			markdownEditorCommitBypassRef.current = false;
+			void Promise.resolve(result).finally(release);
+		} catch (error) {
+			markdownEditorCommitBypassRef.current = false;
+			release();
+			throw error;
+		}
 	}
 
 	async function saveMarkdownEditorAndContinue(): Promise<void> {
@@ -646,6 +665,7 @@ export function App() {
 	}
 
 	function cancelMarkdownEditorPrompt(): void {
+		if (markdownEditorCommittingRef.current) return;
 		if (markdownEditorPromptBusyRef.current) markdownEditorCanceledSaveRef.current = true;
 		else {
 			markdownEditorPendingActionRef.current = null;
@@ -1632,7 +1652,7 @@ export function App() {
 	async function archivePersistentAgentRoom(agentId: PersistentAgentId, confirmation: string): Promise<PersistentAgentArchiveResponse | null> {
 		const roomName = shownRoomName(persistentAgentStatuses.find((status) => status.id === agentId)?.displayName) || agentId;
 		const leavingBoundRoom = persistentChat?.agentId === agentId;
-		if (leavingBoundRoom && !guardMarkdownEditorAction(() => { void archivePersistentAgentRoom(agentId, confirmation); }, "navigate")) return null;
+		if (leavingBoundRoom && !guardMarkdownEditorAction(() => archivePersistentAgentRoom(agentId, confirmation), "navigate")) return null;
 		if (leavingBoundRoom && persistentRoomInFlight) {
 			// Leaving now would detach the turn into background cooking, and the
 			// archive would then refuse on that — say it while the pane can show it.
@@ -1704,7 +1724,7 @@ export function App() {
 	async function purgePersistentAgentRoom(agentId: PersistentAgentId, confirmation: string): Promise<PersistentAgentPurgeResponse | null> {
 		const roomName = shownRoomName(persistentAgentStatuses.find((status) => status.id === agentId)?.displayName) || agentId;
 		const leavingBoundRoom = persistentChat?.agentId === agentId;
-		if (leavingBoundRoom && !guardMarkdownEditorAction(() => { void purgePersistentAgentRoom(agentId, confirmation); }, "navigate")) return null;
+		if (leavingBoundRoom && !guardMarkdownEditorAction(() => purgePersistentAgentRoom(agentId, confirmation), "navigate")) return null;
 		if (leavingBoundRoom && persistentRoomInFlight) {
 			// Leaving now would detach the turn into background cooking, and the
 			// purge would then refuse on that — say it while the pane can show it.
@@ -5438,7 +5458,7 @@ export function App() {
 			setCheckpointApprovalError(REMEMBER_OTHER_CONVERSATION_OPEN);
 			return;
 		}
-		if (!guardMarkdownEditorAction(() => { void approveCheckpointProposal(approvedFields); }, "navigate")) return;
+		if (!guardMarkdownEditorAction(() => approveCheckpointProposal(approvedFields), "navigate")) return;
 		setCheckpointApprovalLoading(true);
 		setCheckpointApprovalError(null);
 		try {
@@ -7097,7 +7117,7 @@ export function App() {
 
 
 	async function openPersistentAgent(target: PersistentAgentTarget) {
-		if (!guardMarkdownEditorAction(() => { void openPersistentAgent(target); }, "navigate")) return;
+		if (!guardMarkdownEditorAction(() => openPersistentAgent(target), "navigate")) return;
 		const label = shownRoomName(target.displayName) || "Exxpert";
 		// The server decides a new conversation's model (the room's conversation
 		// row); the resolved row only fills the room's header until the saved
@@ -7232,7 +7252,7 @@ export function App() {
 	}
 
 	async function openPersistentAgentResume(status: PersistentAgentStatus) {
-		if (!guardMarkdownEditorAction(() => { void openPersistentAgentResume(status); }, "navigate")) return;
+		if (!guardMarkdownEditorAction(() => openPersistentAgentResume(status), "navigate")) return;
 		setPersistentResumeError(null);
 		clearBackgroundActivityBadge(status.id);
 		const runtimeThreadId = status.runtime.state === "standby" || status.runtime.state === "active" ? status.runtime.activeThreadId : null;
@@ -7481,7 +7501,7 @@ export function App() {
 	}
 
 	async function mementoPersistentThread() {
-		if (!guardMarkdownEditorAction(() => { void mementoPersistentThread(); }, "navigate")) return;
+		if (!guardMarkdownEditorAction(() => mementoPersistentThread(), "navigate")) return;
 		const targetChat = persistentChat;
 		if (!targetChat) return;
 		// Memento always works, even mid-stream: the server stops the current
@@ -7521,14 +7541,13 @@ export function App() {
 		};
 		if (approval && targetChat && targetChat.conversationId !== approval.postCheckpoint.activeThreadId) {
 			if (!guardMarkdownEditorAction(() => continueAfterCheckpoint(), "navigate")) return;
-			void bindToApprovedCheckpointRuntime(approval, targetChat).then(keepChatting).catch((error) => setCheckpointApprovalError(formatRememberError((error as Error).message)));
-			return;
+			return bindToApprovedCheckpointRuntime(approval, targetChat).then(keepChatting).catch((error) => setCheckpointApprovalError(formatRememberError((error as Error).message)));
 		}
 		keepChatting();
 	}
 
 	async function restAfterCheckpoint() {
-		if (!guardMarkdownEditorAction(() => { void restAfterCheckpoint(); }, "navigate")) return false;
+		if (!guardMarkdownEditorAction(() => restAfterCheckpoint(), "navigate")) return false;
 		const approval = checkpointApprovalResult;
 		const postCheckpointThreadId = approval?.postCheckpoint.activeThreadId;
 		if (approval && postCheckpointThreadId) {
@@ -7985,7 +8004,7 @@ export function App() {
 	async function goHome(): Promise<boolean> {
 		// A conversation the save that filled the room closed leaves the way Return Home does: nothing is saved into it.
 		if (closedByFullSaveRef.current) return restAfterCheckpoint();
-		if (!guardMarkdownEditorAction(() => { void goHome(); }, "navigate")) return false;
+		if (!guardMarkdownEditorAction(() => goHome(), "navigate")) return false;
 		// Another window has the room: leaving saves nothing over its conversation.
 		if (turnLinkRef.current === "elsewhere") {
 			await finishLeaveRoom({ detachInFlight: true });

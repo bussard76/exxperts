@@ -1237,11 +1237,23 @@ try {
 			assert((await roomDraft.textContent())?.includes("pending room draft"), "canceling room navigation keeps the unsaved draft");
 			await home.click();
 			let roomLeaveRequests = 0;
+			let releaseRoomLeave!: () => void, startRoomLeave!: () => void;
+			const roomLeaveReleased = new Promise<void>((resolve) => { releaseRoomLeave = resolve; });
+			const roomLeaveStarted = new Promise<void>((resolve) => { startRoomLeave = resolve; });
+			await roomPage.route("**/runtime/discard-empty-prepared-boundary", async (route) => {
+				startRoomLeave();
+				await roomLeaveReleased;
+				await route.continue();
+			});
 			roomPage.on("request", (request) => { if ((request.method() === "DELETE" && request.url().includes("/threads/")) || (request.method() === "POST" && request.url().includes("/runtime/discard-empty-prepared-boundary"))) roomLeaveRequests++; });
 			await unsaved.getByRole("button", { name: "Discard changes" }).evaluate((button) => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
+			await roomLeaveStarted;
+			await home.click();
+			releaseRoomLeave();
 			const archive = roomPage.locator(".persistent-agent-card").filter({ hasText: "Archive" });
 			await archive.waitFor();
 			assert(roomLeaveRequests === 1, `repeated guard confirmation executes the actual room leave once, got ${roomLeaveRequests}`);
+			await roomPage.unroute("**/runtime/discard-empty-prepared-boundary");
 			assert(!fs.readFileSync(path.join(folder, "notes.md"), "utf8").includes("pending room draft"), "discarding the room draft leaves the file unchanged");
 			await archive.getByRole("button", { name: /^(Enter|Resume)$/ }).click();
 			await roomPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "report.docx" }).click();

@@ -110,3 +110,7 @@ Confirming an older write now updates the saved baseline without overwriting new
 ## Checkpoint: single guarded continuation
 
 A synchronous decision lock now rejects repeated Save or Discard confirmation while the admitted action is settling. The real Home callback case in `workspace-file-tabs-ui-smoke.ts` produced two prepared-boundary requests before the change and one afterward; the full filtered smoke passed 1/1. This establishes only that tested duplicate path, not the complete correlated arbiter or dependent child shutdown.
+
+## Checkpoint: reserve the action through its continuation
+
+The admitted guard now stays reserved until the captured asynchronous continuation settles; the existing callback effects are retained, and checkpoint continuation returns its existing promise to that guard. The real held Home leave in `workspace-file-tabs-ui-smoke.ts` issued two requests before the change and one afterward, with the filtered smoke passing 1/1. The room-settings Memento nested continuation and full context/native correlation remain open and are not claimed by this case.
