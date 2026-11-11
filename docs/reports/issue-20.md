@@ -140,3 +140,7 @@ A clean Room settings Memento now retains the document reservation through the c
 ## Checkpoint: clean Archive admission
 
 An Archive action for the current room now holds the clean document reservation through its existing callback and returns its existing result. The invented-room `workspace-file-tabs-ui-smoke.ts` case observed two held Archive requests before the change and one afterward; the filtered smoke passed 1/1. Archive of another room is not reclassified as a current-context exit, and Purge and the remaining clean actions still need their own checks.
+
+## Checkpoint: clean Purge admission
+
+A Purge action for the current room now holds the clean document reservation through its existing callback. The invented-room `workspace-file-tabs-ui-smoke.ts` case entered another room during a held Purge before the change and withheld entry afterward; the test also observed successful completion after release, and the filtered smoke passed 1/1. Purge of another room remains its existing operation; this does not establish child closure or the remaining clean callbacks.

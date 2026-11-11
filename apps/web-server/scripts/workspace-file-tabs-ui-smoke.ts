@@ -1606,6 +1606,34 @@ try {
 			} finally { releaseArchive(); }
 			await waitUntil(async () => await archivePage.locator(".persistent-agent-card").filter({ hasText: "Willow" }).count() === 0, "the invented room is archived");
 		} finally { await archiveContext.close(); }
+		const purgeRoom = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Cypress", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
+		assert(purgeRoom.status === 201, "the invented purge-test room is created");
+		const purgeContext = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+		try {
+			const purgePage = await purgeContext.newPage();
+			await purgePage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+			await purgePage.waitForLoadState("networkidle");
+			const close = purgePage.locator(".whats-new-close");
+			if (await close.count()) await close.click();
+			await purgePage.locator(".persistent-agent-card").filter({ hasText: "Cypress" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+			await purgePage.getByRole("button", { name: "Room settings" }).click();
+			await purgePage.locator(".settings-dialog-nav-item").filter({ hasText: /^Archive or delete$/ }).first().click();
+			await purgePage.locator(".room-danger-zone").getByRole("button", { name: "Delete room", exact: true }).click();
+			let releasePurge!: () => void, startPurge!: () => void;
+			const purgeReleased = new Promise<void>((resolve) => { releasePurge = resolve; });
+			const purgeStarted = new Promise<void>((resolve) => { startPurge = resolve; });
+			const purgeResult = purgePage.waitForResponse((response) => response.url().endsWith("/purge") && response.status() === 200).catch(() => null);
+			await purgePage.route("**/purge", async (route) => { startPurge(); await purgeReleased; await route.continue(); });
+			await purgePage.getByRole("alertdialog", { name: "Delete Cypress?" }).getByRole("button", { name: "Delete room", exact: true }).click();
+			try {
+				await purgeStarted;
+				const workshopCard = purgePage.locator(".persistent-agent-card").filter({ hasText: "Workshop" });
+				await workshopCard.getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+				await purgePage.waitForTimeout(250);
+				assert(await workshopCard.count() === 1, "a clean pending Purge reserves the session against entering another room");
+			} finally { releasePurge(); }
+			assert(await purgeResult, "the invented room is purged after the held request is released");
+		} finally { await purgeContext.close(); }
 	} finally {
 		await browser.close();
 	}

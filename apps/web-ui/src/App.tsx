@@ -1754,6 +1754,10 @@ export function App() {
 	async function purgePersistentAgentRoom(agentId: PersistentAgentId, confirmation: string): Promise<PersistentAgentPurgeResponse | null> {
 		const roomName = shownRoomName(persistentAgentStatuses.find((status) => status.id === agentId)?.displayName) || agentId;
 		const leavingBoundRoom = persistentChat?.agentId === agentId;
+		if (leavingBoundRoom) {
+			const cleanAction = admitCleanMarkdownEditorAction(() => purgePersistentAgentRoom(agentId, confirmation));
+			if (cleanAction) return await cleanAction as PersistentAgentPurgeResponse | null;
+		}
 		if (leavingBoundRoom && !guardMarkdownEditorAction(() => purgePersistentAgentRoom(agentId, confirmation), "navigate")) return null;
 		if (leavingBoundRoom && persistentRoomInFlight) {
 			// Leaving now would detach the turn into background cooking, and the
