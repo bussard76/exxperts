@@ -106,3 +106,7 @@ The existing PUT result now also refuses a guarded continuation when the returne
 ## Checkpoint: retain newer RAW source after save confirmation
 
 Confirming an older write now updates the saved baseline without overwriting newer editor source. The held real PUT and controlled read-only response case in `workspace-file-tabs-ui-smoke.ts` failed on the old code with the earlier source and passed with exact newer CRLF source after the change; `workspace-file-tabs-ui` and `workspace-markdown-raw-ui` passed 2/2. An initial assertion mistakenly expected LF normalization and was corrected to require the exact entered CRLF before the old-code red run. This is partial R8/R9, not detached-host evidence.
+
+## Checkpoint: single guarded continuation
+
+A synchronous decision lock now rejects repeated Save or Discard confirmation while the admitted action is settling. The real Home callback case in `workspace-file-tabs-ui-smoke.ts` produced two prepared-boundary requests before the change and one afterward; the full filtered smoke passed 1/1. This establishes only that tested duplicate path, not the complete correlated arbiter or dependent child shutdown.

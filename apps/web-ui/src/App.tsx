@@ -504,6 +504,7 @@ export function App() {
 	const markdownEditorCanceledSaveRef = useRef(false);
 	const [markdownEditorPrompt, setMarkdownEditorPrompt] = useState<"close" | "switch" | "navigate" | null>(null);
 	const [markdownEditorPromptBusy, setMarkdownEditorPromptBusy] = useState(false);
+	const markdownEditorPromptBusyRef = useRef(false);
 	const [markdownEditorFenced, setMarkdownEditorFenced] = useState(false);
 	const [artifactMaximized, setArtifactMaximized] = useState(false);
 	const attachmentsScrollRef = useRef(0);
@@ -599,6 +600,7 @@ export function App() {
 
 	function completeMarkdownEditorPrompt(action: (() => void | Promise<unknown>) | null): void {
 		markdownEditorPendingActionRef.current = null;
+		markdownEditorPromptBusyRef.current = false;
 		setMarkdownEditorPrompt(null);
 		setMarkdownEditorPromptBusy(false);
 		setMarkdownEditorFenced(false);
@@ -607,12 +609,14 @@ export function App() {
 	}
 
 	async function saveMarkdownEditorAndContinue(): Promise<void> {
-		if (markdownEditorPromptBusy) return;
+		if (markdownEditorPromptBusyRef.current) return;
 		const action = markdownEditorPendingActionRef.current;
+		markdownEditorPromptBusyRef.current = true;
 		setMarkdownEditorPromptBusy(true);
 		const saved = await markdownEditorRef.current?.save();
 		if (!saved || markdownEditorCanceledSaveRef.current) {
 			markdownEditorCanceledSaveRef.current = false;
+			markdownEditorPromptBusyRef.current = false;
 			setMarkdownEditorPromptBusy(false);
 			setMarkdownEditorPrompt(null);
 			markdownEditorPendingActionRef.current = null;
@@ -623,13 +627,15 @@ export function App() {
 	}
 
 	async function discardMarkdownEditorAndContinue(): Promise<void> {
-		if (markdownEditorPromptBusy) return;
+		if (markdownEditorPromptBusyRef.current) return;
 		const action = markdownEditorPendingActionRef.current;
 		const editor = markdownEditorRef.current;
+		markdownEditorPromptBusyRef.current = true;
 		setMarkdownEditorPromptBusy(true);
 		const settled = await editor?.settle();
 		if (markdownEditorCanceledSaveRef.current || !settled || !editor?.discard()) {
 			markdownEditorCanceledSaveRef.current = false;
+			markdownEditorPromptBusyRef.current = false;
 			markdownEditorPendingActionRef.current = null;
 			setMarkdownEditorPrompt(null);
 			setMarkdownEditorPromptBusy(false);
@@ -640,7 +646,7 @@ export function App() {
 	}
 
 	function cancelMarkdownEditorPrompt(): void {
-		if (markdownEditorPromptBusy) markdownEditorCanceledSaveRef.current = true;
+		if (markdownEditorPromptBusyRef.current) markdownEditorCanceledSaveRef.current = true;
 		else {
 			markdownEditorPendingActionRef.current = null;
 			setMarkdownEditorFenced(false);
