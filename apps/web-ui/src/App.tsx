@@ -594,6 +594,16 @@ export function App() {
 	const onMarkdownEditorDirtyChange = useCallback((dirty: boolean) => {
 		markdownEditorDirtyRef.current = dirty;
 	}, []);
+	useEffect(() => {
+		if (navigator.userAgent.includes("ExxpertsDesktop")) return;
+		const beforeUnload = (event: BeforeUnloadEvent) => {
+			if (!markdownEditorDirtyRef.current && !markdownEditorRef.current?.pendingWrite()) return;
+			event.preventDefault();
+			event.returnValue = "";
+		};
+		window.addEventListener("beforeunload", beforeUnload);
+		return () => window.removeEventListener("beforeunload", beforeUnload);
+	}, []);
 
 	function guardMarkdownEditorAction(action: () => void | Promise<unknown>, prompt: "close" | "switch" | "navigate"): boolean {
 		if (markdownEditorCommitBypassRef.current) {

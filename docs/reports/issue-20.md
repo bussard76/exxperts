@@ -224,3 +224,7 @@ The separate settle path now also marks the local source dirty before staging a 
 ## Checkpoint: direct revision conflict with reverted source
 
 A direct HTTP 409 now marks the retained local source as needing an explicit decision even if it had been reverted to the old baseline while the PUT was pending. `workspace-file-tabs-ui-smoke.ts` holds the real PUT, reverts RAW, changes the invented file and releases the request; before the change a tab switch abandoned the conflict without a prompt, while afterward it prompts and preserves the source. The attributed file-tabs and RAW smokes passed 2/2 and the UI-only build passed. Other C2/C4, detached, native and platform requirements remain open.
+
+## Checkpoint: browser close warning
+
+The browser page now uses the existing beforeunload warning pattern when a Markdown draft is dirty or its write remains unresolved. `workspace-file-tabs-ui-smoke.ts` creates an invented room, edits a file, invokes Chromium's real browser close with beforeunload enabled and chooses Stay; before the change no prompt appeared, and afterward the prompt appears and the draft remains. The attributed file-tabs and RAW smokes passed 2/2 and the UI-only build passed. This is best-effort browser evidence only: browser close/reload can bypass the async guard under Q5=B, and native close/quit/reload prevention and the registered-child unload fence are still unimplemented.

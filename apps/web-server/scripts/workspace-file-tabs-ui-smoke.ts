@@ -1943,6 +1943,29 @@ try {
 			await waitUntil(async () => (await historyPage.title()).includes("Workshop"), "the first guarded history move reaches its original destination despite a competing move");
 			assert(await historyPage.locator(".workspace-tab").count() === 0, "the old room's document tabs do not follow the history destination");
 		} finally { await historyContext.close(); }
+		const unloadRoom = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Larch", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
+		assert(unloadRoom.status === 201, "the invented close-test room is created");
+		const unloadWorkspace = await api("/api/persistent-agents/larch/workspace-default", { method: "PUT", body: JSON.stringify({ root: folder, workspaceAccessMode: "localFiles" }) });
+		assert(unloadWorkspace.status === 200, "the close-test room uses the invented workspace");
+		const unloadContext = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+		try {
+			const unloadPage = await unloadContext.newPage();
+			await unloadPage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+			await unloadPage.waitForLoadState("networkidle");
+			const close = unloadPage.locator(".whats-new-close");
+			if (await close.count()) await close.click();
+			await unloadPage.locator(".persistent-agent-card").filter({ hasText: "Larch" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+			await unloadPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "notes.md" }).click();
+			const unloadEditor = unloadPage.locator(".markdown-editor-tiptap .ProseMirror");
+			await unloadEditor.waitFor();
+			await unloadEditor.click();
+			await unloadPage.keyboard.type(" unsaved close draft");
+			let asked = false;
+			unloadPage.on("dialog", (dialog) => { if (dialog.type() === "beforeunload") asked = true; void dialog.dismiss(); });
+			await unloadPage.close({ runBeforeUnload: true });
+			await waitUntil(() => asked || unloadPage.isClosed(), "browser close responds", 5_000);
+			assert(asked && !unloadPage.isClosed() && (await unloadEditor.textContent())?.includes("unsaved close draft"), "browser close asks before abandoning the unsaved document and Stay keeps it");
+		} finally { await unloadContext.close(); }
 	} finally {
 		await browser.close();
 	}
