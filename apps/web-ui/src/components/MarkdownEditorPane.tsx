@@ -819,6 +819,11 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 				const latest = await readRevisionWithinDeadline(agentId, conversationId, path);
 				fileRef.current = latest;
 				setFile(latest);
+				setCanEdit(!latest.readOnly);
+				if (latest.readOnly) {
+					setError("This file is read-only.");
+					return false;
+				}
 				dismissExternalUpdate();
 				setConflictRevision(null);
 				const saved = await persist(localDraft, latest.revision);

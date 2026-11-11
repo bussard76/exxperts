@@ -49,6 +49,7 @@ fs.writeFileSync(path.join(workspace, "lost-keep.md"), "# Invented keep original
 fs.writeFileSync(path.join(workspace, "guard-keep.md"), "# Invented keep original\n");
 fs.writeFileSync(path.join(workspace, "guard-keep-save.md"), "# Invented save original\n");
 fs.writeFileSync(path.join(workspace, "guard-keep-save-conflict.md"), "# Invented save original\n");
+fs.writeFileSync(path.join(workspace, "guard-keep-permission.md"), "# Invented permission original\n");
 fs.writeFileSync(path.join(workspace, "guard-keep-timeout.md"), "# Invented timeout original\n");
 fs.writeFileSync(path.join(workspace, "guard-unknown-timeout.md"), "# Invented unknown original\n");
 fs.writeFileSync(path.join(workspace, "identity.md"), "# Invented identity source\n");
@@ -398,6 +399,28 @@ try {
 			await h.unroute("**/workspace-markdown?*");
 			await h.locator(".workspace-tab", { hasText: "guard-keep.md" }).locator(".workspace-tab-close").click();
 			await h.close();
+		}
+		{
+			const p = await ctx.newPage();
+			await p.goto(`${baseUrl}/#/room/${agentId}`);
+			await p.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "guard-keep-permission.md" }).click();
+			await p.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented permission original").waitFor();
+			await p.getByRole("button", { name: "RAW", exact: true }).click();
+			const raw = p.getByRole("textbox", { name: "Raw Markdown source" });
+			await raw.fill("# Invented local permission draft\n");
+			fs.writeFileSync(path.join(workspace, "guard-keep-permission.md"), "# Invented competing permission source\n");
+			await p.locator(".markdown-editor-save").click();
+			await p.locator(".markdown-editor-conflict").waitFor();
+			let writes = 0;
+			await p.route("**/workspace-markdown?*", async (route) => {
+				if (route.request().method() !== "GET") { writes++; return route.abort(); }
+				const response = await route.fetch();
+				await route.fulfill({ response, json: { ...(await response.json()), readOnly: true } });
+			});
+			await p.getByRole("button", { name: "Keep mine", exact: true }).click();
+			await waitUntil(async () => !(await raw.isEditable()), "Keep mine observes the latest read-only policy", 5000);
+			assert(writes === 0 && await p.locator(".markdown-editor-conflict").isVisible() && await raw.inputValue() === "# Invented local permission draft\n" && fs.readFileSync(path.join(workspace, "guard-keep-permission.md"), "utf8") === "# Invented competing permission source\n", "Keep mine retains the conflict without issuing a write after permission is revoked");
+			await p.close();
 		}
 		for (const competing of [false, true]) {
 			const targetFile = competing ? "guard-keep-save-conflict.md" : "guard-keep-save.md";
