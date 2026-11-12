@@ -109,7 +109,27 @@ try {
 		}
 		await context.close();
 	}
-	console.log("sidebar reopen UI smoke: two cycles per room passed in Chromium mac look");
+	const phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+	await phoneContext.addInitScript(() => {
+		localStorage.setItem("exxperts.sidebarCollapsed", "1");
+		localStorage.setItem("exxperts.first-run-guide-seen", "1");
+	});
+	const phone = await phoneContext.newPage();
+	await phone.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+	await phone.waitForLoadState("networkidle");
+	const phoneDismiss = phone.locator(".whats-new-close");
+	if (await phoneDismiss.count()) await phoneDismiss.click();
+	await phone.locator(".persistent-agent-card").filter({ hasText: "Folder Room" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+	await phone.getByRole("button", { name: "Show sidebar" }).click();
+	await phone.locator(".sidebar-config-gear").click();
+	await phone.getByRole("menuitem", { name: "Settings" }).click();
+	await phone.locator(".settings-dialog-backdrop").waitFor();
+	await phone.keyboard.press("Escape");
+	await phone.locator(".settings-dialog-backdrop").waitFor({ state: "detached" });
+	await phone.locator(".sidebar-workspace-files").getByText("notes.md").click();
+	await phone.getByRole("complementary", { name: "Markdown editor: notes.md" }).waitFor();
+	await phoneContext.close();
+	console.log("sidebar reopen UI smoke: desktop cycles and phone drawer passed in Chromium");
 } catch (caught) {
 	error = caught;
 } finally {

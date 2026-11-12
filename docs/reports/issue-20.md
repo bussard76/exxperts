@@ -635,3 +635,7 @@ The attributed filtered run of `attachments-panel-ui` and `two-window-room-ui` p
 ## Checkpoint: topbar and sidebar alignment
 
 The existing `room-topbar-ui` smoke initially failed because the new disabled empty-room Detach button was the last topbar action, leaving no edge glyph for the workspace alignment contract. Moving the document controls before the existing Forget/settings icons restored the layout without weakening the smoke; the attributed `room-topbar-ui` and `sidebar-files-lineup-ui` run then passed 2/2. This verifies attached browser layout and Mac-look CSS only, not native window behavior.
+
+## Checkpoint: default-browser phone drawer
+
+The real `sidebar-reopen-ui` smoke was extended to a separate default-browser 390px context and initially failed because a collapsed zero-sized tree overflowed its slot and intercepted Show sidebar. Constraining the tree host's overflow fixes that path; after correcting a temporary diagnostic harness error, the attributed smoke passed 1/1 including opening Settings and selecting the invented Markdown file. UI assets rebuilt successfully; this is browser evidence only and does not execute a detached child.

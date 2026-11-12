@@ -315,7 +315,7 @@ html.desktop-app-mac .workspace-tab {
 .topbar-actions .right-pane-toggle { transform: translateX(calc(var(--topbar-banner-edge) - 15px)); }
 .docs-slot, .docs-host { display: contents; }
 .docs-tree-slot { flex: 1 1 auto; min-height: 0; }
-.docs-tree-host { position: fixed; left: var(--docs-tree-left); top: var(--docs-tree-top); width: var(--docs-tree-width); height: var(--docs-tree-height); display: flex; flex-direction: column; min-height: 0; }
+.docs-tree-host { position: fixed; left: var(--docs-tree-left); top: var(--docs-tree-top); width: var(--docs-tree-width); height: var(--docs-tree-height); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 @media (max-width: 760px) {
 	.app.sidebar-resizable { position: relative; }
 	.app.sidebar-resizable > .sidebar { position: absolute; z-index: auto; background: transparent; box-shadow: none; }
