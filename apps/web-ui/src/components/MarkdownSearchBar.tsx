@@ -49,7 +49,7 @@ export function MarkdownSearchBar({ editor, stateRef, open, onClose }: Props) {
 	return (
 		<div className="markdown-editor-search" role="search">
 			<span aria-hidden="true">⌕</span>
-			<input ref={inputRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find in file…" onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.shiftKey ? previous() : next(); } if (event.key === "Escape") { event.preventDefault(); close(); } }} />
+			<input ref={inputRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find in file…" onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.shiftKey ? previous() : next(); } if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); } }} />
 			<span className="markdown-editor-search-count">{query.trim() ? matchCount ? `${displayIndex} / ${matchCount}` : "No results" : ""}</span>
 			<button type="button" aria-label="Previous match" disabled={!matchCount} onClick={previous}>↑</button>
 			<button type="button" aria-label="Next match" disabled={!matchCount} onClick={next}>↓</button>

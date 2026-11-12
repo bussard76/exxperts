@@ -9194,6 +9194,7 @@ export function App() {
 						agentId={persistentChat.agentId}
 						conversationId={persistentChat.conversationId}
 						contextGeneration={checkpointContextRef.current.generation}
+						hostGeneration={documentHostGenerationRef.current}
 						onMutation={onDocumentMutation}
 						path={rightPane.path}
 						fenced={markdownEditorFenced}

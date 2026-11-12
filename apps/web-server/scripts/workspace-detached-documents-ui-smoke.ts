@@ -154,6 +154,12 @@ try {
 			await child.locator(".workspace-file-browser-file", { hasText: "invented.md" }).click();
 			assert(!child.isClosed(), "selecting a file does not close the document child");
 			await child.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented source").waitFor();
+			await child.keyboard.press("Control+f");
+			const childSearch = child.getByRole("search");
+			await childSearch.waitFor();
+			await childSearch.getByPlaceholder("Find in file…").fill("Invented");
+			await childSearch.getByPlaceholder("Find in file…").press("Escape");
+			assert(await childSearch.count() === 0 && await child.locator(".workspace-tab", { hasText: "invented.md" }).count() === 1, "Escape closes Find without closing the actual child document tab");
 			await child.getByRole("button", { name: "RAW", exact: true }).click();
 			const childRaw = child.getByRole("textbox", { name: "Raw Markdown source" });
 			const edited = "# Invented child draft\n\n";
