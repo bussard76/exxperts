@@ -16,6 +16,7 @@ export function useDocumentsHost() {
 	});
 	const ownerHostSlot = useRef<HTMLDivElement | null>(null);
 	const ownerTreeSlot = useRef<HTMLDivElement | null>(null);
+	const lastBounds = useRef<{ left: number; top: number; width: number; height: number } | null>(null);
 	const opening = useRef(false);
 	const prepared = useRef<PreparedChild | null>(null);
 	const registered = useRef<PreparedChild | null>(null);
@@ -32,8 +33,19 @@ export function useDocumentsHost() {
 	const beginChild = useCallback(async (frameName: string, title: string) => {
 		if (opening.current || prepared.current || registered.current) return null;
 		opening.current = true;
+		const screen = window.screen as Screen & { availLeft?: number; availTop?: number };
+		const hasOrigin = typeof screen.availLeft === "number" && Number.isFinite(screen.availLeft) && typeof screen.availTop === "number" && Number.isFinite(screen.availTop);
+		const hasArea = hasOrigin && Number.isFinite(screen.availWidth) && screen.availWidth > 0 && Number.isFinite(screen.availHeight) && screen.availHeight > 0;
+		const areaLeft = hasOrigin ? screen.availLeft! : 0;
+		const areaTop = hasOrigin ? screen.availTop! : 0;
+		const width = Math.round(hasArea ? Math.min(lastBounds.current?.width ?? 900, screen.availWidth) : 900);
+		const height = Math.round(hasArea ? Math.min(lastBounds.current?.height ?? 700, screen.availHeight) : 700);
+		const wantedLeft = (hasArea ? lastBounds.current?.left : undefined) ?? (Number.isFinite(window.screenX) ? window.screenX + 40 : 0);
+		const wantedTop = (hasArea ? lastBounds.current?.top : undefined) ?? (Number.isFinite(window.screenY) ? window.screenY + 40 : 0);
+		const left = Math.round(hasArea ? Math.max(areaLeft, Math.min(wantedLeft, areaLeft + screen.availWidth - width)) : wantedLeft);
+		const top = Math.round(hasArea ? Math.max(areaTop, Math.min(wantedTop, areaTop + screen.availHeight - height)) : wantedTop);
 		let child: Window | null;
-		try { child = window.open("about:blank", frameName, "popup,width=900,height=700"); }
+		try { child = window.open("about:blank", frameName, `popup,width=${width},height=${height},left=${left},top=${top}`); }
 		catch { opening.current = false; return null; }
 		if (!child) { opening.current = false; return null; }
 		let timer: number | null = null;
@@ -115,6 +127,12 @@ export function useDocumentsHost() {
 			if (host.ownerDocument !== candidate.document || treeHost.ownerDocument !== candidate.document || !current()) return "unknown";
 			treeSlot.appendChild(document.adoptNode(treeHost));
 			hostSlot.appendChild(document.adoptNode(host));
+			try {
+				if (!candidate.child.closed) {
+					const { screenX: left, screenY: top, innerWidth: width, innerHeight: height } = candidate.child;
+					if ([left, top, width, height].every(Number.isFinite) && width > 0 && height > 0) lastBounds.current = { left, top, width, height };
+				}
+			} catch {}
 			return "moved";
 		} catch { return "unknown"; }
 	}, [host, treeHost]);

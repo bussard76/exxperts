@@ -509,3 +509,7 @@ The pending child fixture was corrected to avoid duplicate invented-file writes 
 ## Checkpoint: browser popup request case
 
 The detached browser smoke now captures the real `window.open` arguments while still invoking the real opener, and requires an about:blank popup name without the invented room/draft text plus size and position hints. Scripts typecheck passed; the attributed run still stops at the first unavailable Detach assertion, so this does not establish placement, popup registration or monitor behavior.
+
+## Checkpoint: browser placement draft
+
+The private child bootstrap now requests best-effort size/position hints, clamps against an exposed browser work area, and remembers a successfully returned child's outer position and inner size only in the same owner session. UI and scripts typechecks and the UI asset build passed; the attributed detached smoke still stops at unavailable Detach, so popup arguments and placement are untested. Browsers may ignore hints; there is no Electron geometry implementation or monitor evidence here.
