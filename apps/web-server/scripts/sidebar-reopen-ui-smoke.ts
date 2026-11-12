@@ -88,6 +88,19 @@ try {
 				assert(!(await page.locator(".sidebar-workspace-files").getByText("notes.md").isVisible()), "collapsed sidebar does not leave tree entries visible");
 			}
 		}
+		if (room === "Folder Room") {
+			await page.setViewportSize({ width: 390, height: 844 });
+			await page.getByRole("button", { name: "Show sidebar" }).click();
+			const note = page.locator(".sidebar-workspace-files").getByText("notes.md");
+			await note.waitFor();
+			await page.locator(".sidebar-config-gear").click();
+			const settingsItem = page.getByRole("menuitem", { name: "Settings" });
+			await settingsItem.waitFor();
+			assert(await settingsItem.evaluate((item) => { const rect = item.getBoundingClientRect(); const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2); return hit === item || item.contains(hit); }), "sidebar menu remains above the document tree");
+			await page.keyboard.press("Escape");
+			await note.click();
+			await page.getByRole("complementary", { name: "Markdown editor: notes.md" }).waitFor();
+		}
 		await context.close();
 	}
 	console.log("sidebar reopen UI smoke: two cycles per room passed in Chromium mac look");

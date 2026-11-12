@@ -615,3 +615,7 @@ The workspace tree and document pane now render under one retained portal node; 
 ## Checkpoint: attached tree placement
 
 The `sidebar-reopen-ui` smoke now measures the single host's tree against its real sidebar slot, performs an actual sidebar resize, verifies alignment after the width changes, and checks that collapsed entries are not visible. The attributed smoke passed 1/1 in Chromium's Mac-look CSS mode; this is attached browser evidence, not Mac native or child movement evidence. The Controller reports the independent C7 identity review found the written pre-readiness guarantee applies while the test uses privileged parent authority; options await Sascha, and the regression remains red.
+
+## Open: narrow-screen tree stacking
+
+An added real 390px browser check failed because the fixed attached tree is under the sidebar drawer and its slot intercepts file clicks. A trial raising the tree above the drawer made the file clickable but caused it to cover the sidebar settings menu; the later hit-test failed, so that trial was removed. The new assertions remain in `sidebar-reopen-ui` and the narrow-screen layout is unresolved; no responsive-layout pass is claimed. The Controller's C7 review separately found the written pre-readiness guarantee applies and awaits Sascha's decision; it does not authorize a protocol or scope change.
