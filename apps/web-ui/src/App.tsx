@@ -563,9 +563,17 @@ export function App() {
 		host.className = "docs-host";
 		return host;
 	});
+	const [documentTreeHost] = useState(() => {
+		const host = document.createElement("div");
+		host.style.display = "contents";
+		return host;
+	});
 	const mountDocumentHost = useCallback((slot: HTMLDivElement | null) => {
 		if (slot) slot.appendChild(documentHost);
 	}, [documentHost]);
+	const mountDocumentTreeHost = useCallback((slot: HTMLDivElement | null) => {
+		if (slot) slot.appendChild(documentTreeHost);
+	}, [documentTreeHost]);
 	// Synchronous mirror for the WS handlers (toast suppression / run-view swap
 	// read the pane at event time, not at closure-capture time).
 	const rightPaneRef = useRef<RightPaneOccupant | null>(null);
@@ -9307,7 +9315,7 @@ export function App() {
 					appearance={appearance}
 					onSetAppearance={setAppearance}
 					onSettings={openSettings}
-					workspaceSlot={persistentChat ? <WorkspaceFileBrowser agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} selectedPath={activeWorkspacePath(rightPane)} onFileSelect={openWorkspaceMarkdown} /> : undefined}
+					workspaceSlot={persistentChat ? <><div ref={mountDocumentTreeHost} style={{ display: "contents" }} />{createPortal(<WorkspaceFileBrowser agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} selectedPath={activeWorkspacePath(rightPane)} onFileSelect={openWorkspaceMarkdown} />, documentTreeHost)}</> : undefined}
 					assetsSlot={persistentChat ? <AttachmentsEntry count={attachmentRows.length} open={attachmentsView !== null} onClick={toggleAttachments} /> : undefined}
 				/>
 			}
