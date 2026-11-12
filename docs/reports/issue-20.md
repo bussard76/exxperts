@@ -680,3 +680,7 @@ The attributed `sidebar-reopen-ui` smoke passed 1/1 with an invented long tree, 
 ## Checkpoint: child tooltip case
 
 The detached smoke now exercises a real hover in the child tree and requires the tooltip to appear in that child rather than the owner, then clear on pointer exit. Scripts typecheck passed; this case has not executed because Detach remains disabled, so R10 is still open.
+
+## Checkpoint: attached tree scroll retention
+
+The attributed `sidebar-reopen-ui` smoke passed 1/1 after verifying that an actual scrolled tree keeps its scroll position through sidebar collapse and reopening. This is attached browser behavior only; it does not add a scroll-history guarantee across host transfers.

@@ -34,6 +34,7 @@ try {
 		await page.locator(".persistent-agent-card").filter({ hasText: room }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
 		await page.locator("textarea").first().waitFor();
 		assert(await page.evaluate(() => document.documentElement.classList.contains("desktop-app-mac")), "desktop user agent enables mac look");
+		let savedTreeScroll: number | null = null;
 		for (let cycle = 0; cycle < 2; cycle++) {
 			const show = page.getByRole("button", { name: "Show sidebar" });
 			const topbar = await show.evaluate((button) => {
@@ -51,6 +52,7 @@ try {
 			await show.click();
 			await page.getByRole("button", { name: "Hide sidebar" }).waitFor();
 			if (room === "Folder Room") {
+				if (savedTreeScroll !== null) assert(await page.locator(".workspace-file-browser-tree").evaluate((tree) => tree.scrollTop) === savedTreeScroll, "reopening the sidebar retains its tree scroll position");
 				const treeNote = page.locator(".sidebar-workspace-files").getByText("notes.md");
 				await treeNote.waitFor();
 				await treeNote.hover();
@@ -65,6 +67,8 @@ try {
 				assert(await lastTooltip.evaluate((node) => new Promise<boolean>((resolve) => { const observer = new IntersectionObserver(([entry]) => { observer.disconnect(); resolve(entry.intersectionRect.width > 0 && entry.intersectionRect.height >= entry.boundingClientRect.height - 1); }); observer.observe(node); })), "the tooltip remains visible at the bottom of the scrolled tree");
 				await page.mouse.move(700, 700);
 				await page.getByRole("tooltip").waitFor({ state: "hidden" });
+				savedTreeScroll = await page.locator(".workspace-file-browser-tree").evaluate((tree) => tree.scrollTop);
+				assert(savedTreeScroll > 0, "the actual workspace tree was scrolled");
 				const aligned = async () => page.evaluate(() => {
 					const slot = document.querySelector(".docs-tree-slot")!.getBoundingClientRect();
 					const tree = document.querySelector(".docs-tree-host")!.getBoundingClientRect();
