@@ -495,3 +495,7 @@ A selected room now initializes its owner tab session with an empty path list, s
 ## Checkpoint: private adoption draft
 
 The private host hook now tracks owner slots and at most one opening, prepared or registered child. Its draft move/return operations check the exact candidate and owner-provided current predicate, retain the registration until the exact window reports closed, and report unknown if a partial move cannot be restored. UI and scripts typechecks and the UI asset build passed; the attributed detached smoke still failed at the first unavailable Detach control, so none of these operations has been exercised through the public entry. They are not connected to the arbiter, editor fence, controlled frame reconstruction, native acknowledgement or UI, and do not establish C3/C4 completion.
+
+## Checkpoint: in-flight preview transfer case
+
+The detached smoke now specifies holding the actual HTML metadata request across Detach, completing it in the child, and returning without another content request. Scripts typecheck passed; the attributed smoke remains red at the initial unavailable Detach control, so the new case was not reached and does not establish transfer behavior.

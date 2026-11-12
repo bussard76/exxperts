@@ -59,6 +59,7 @@ fs.writeFileSync(path.join(workspace, "retained.pdf"), ninePagePdf());
 }
 fs.writeFileSync(path.join(workspace, "retained.txt"), "Invented original text snapshot");
 fs.writeFileSync(path.join(workspace, "retained.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==", "base64"));
+fs.writeFileSync(path.join(workspace, "loading.html"), '<body><p>Invented loading snapshot</p></body>');
 fs.writeFileSync(path.join(workspace, "snapshot.html"), '<body><p>Invented original snapshot</p><script>document.body.dataset.executed = "yes"</script></body>');
 fs.writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({ providers: {
 	"fake-claude": { name: "Fake Claude", baseUrl: "http://127.0.0.1:9", api: "anthropic-messages", models: [{ id: "claude-fake", name: "Claude Fake", input: ["text"], contextWindow: 200000, maxTokens: 32000 }] },
@@ -137,6 +138,34 @@ try {
 			await closedEmptyChild;
 			assert(await page.getByText("Invented read refusal", { exact: true }).isVisible() && Number(writes) === 0, "Return retains a load error without inventing a draft or writing");
 			await page.unroute("**/workspace-markdown?*");
+			let releasePreview!: () => void, startPreview!: () => void, loadingReads = 0;
+			const previewReleased = new Promise<void>((resolve) => { releasePreview = resolve; });
+			const previewStarted = new Promise<void>((resolve) => { startPreview = resolve; });
+			await page.route("**/workspace-preview?*", async (route) => {
+				const url = new URL(route.request().url());
+				if (url.searchParams.get("path") !== "loading.html" || url.searchParams.get("frame") === "1") return route.continue();
+				loadingReads++;
+				startPreview();
+				await previewReleased;
+				await route.continue().catch(() => {});
+			});
+			await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "loading.html" }).click();
+			await previewStarted;
+			const loadingOpened = page.waitForEvent("popup");
+			await detach.click();
+			const loadingChild = await loadingOpened;
+			try {
+				await loadingChild.locator(".workspace-preview-html").getByText("Loading preview…", { exact: true }).waitFor();
+			} finally { releasePreview(); }
+			await loadingChild.frameLocator('.workspace-preview-html iframe[title="loading.html"]').getByText("Invented loading snapshot").waitFor();
+			assert(loadingReads === 1, "moving a loading preview preserves its existing content request");
+			const loadingClosed = loadingChild.waitForEvent("close");
+			await loadingChild.getByRole("button", { name: "Return", exact: true }).click();
+			await loadingClosed;
+			await page.frameLocator('.workspace-preview-html iframe[title="loading.html"]').getByText("Invented loading snapshot").waitFor();
+			assert(loadingReads === 1, "Return does not refetch a preview loaded during the move");
+			await page.locator(".workspace-tab", { hasText: "loading.html" }).locator(".workspace-tab-close").click();
+			await page.unroute("**/workspace-preview?*");
 			let htmlReads = 0;
 			context.on("request", (request) => {
 				const url = new URL(request.url());
