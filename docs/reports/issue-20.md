@@ -575,3 +575,7 @@ The detached smoke now specifies opening the real chat Attachments pane while an
 ## Checkpoint: separate detached document selection
 
 The inactive transfer path now retains the selected document in the owner session separately from the chat right pane; document callbacks and snapshots use that selection, and a verified child is focused on file selection. Returning an active document restores it to chat without changing an unrelated pane when the session is empty. UI and scripts typechecks, UI asset build, and the attributed `attachments-panel-ui`, `two-window-room-ui` and `workspace-file-tabs-ui` smokes passed 3/3. The real child/Attachments case remains unexecuted at disabled Detach, and native focus/bounds and full host behavior remain unverified.
+
+## Checkpoint: chat recovery controls case
+
+The detached smoke now specifies the room-labelled strip, Show documents focusing the existing real child, and chat-side Return waiting for child closure and restoring the retained HTML preview. Scripts typecheck passed; the attributed run still stops at disabled Detach, so these controls and child behavior have not run.

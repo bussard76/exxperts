@@ -208,9 +208,17 @@ try {
 			const previewChild = await previewOpened;
 			await previewChild.frameLocator('.workspace-preview-html iframe[title="snapshot.html"]').getByText("Invented original snapshot").waitFor();
 			assert(await previewChild.frameLocator('.workspace-preview-html iframe[title="snapshot.html"]').locator("body").getAttribute("data-executed") === "yes" && htmlReads === 1, "the child executes the retained snapshot without rereading changed disk content");
+			await page.getByText("Cedar Studio · Documents in another window", { exact: true }).waitFor();
+			await previewChild.evaluate(`window.__t20OriginalFocus = window.focus; window.__t20FocusCalls = 0; window.focus = () => { window.__t20FocusCalls++; }`);
+			try {
+				await page.getByRole("button", { name: "Show documents", exact: true }).click();
+				assert(await previewChild.evaluate(`window.__t20FocusCalls`) === 1, "Show documents targets the existing registered child once");
+			} finally { await previewChild.evaluate(`window.focus = window.__t20OriginalFocus; delete window.__t20OriginalFocus; delete window.__t20FocusCalls`); }
 			const previewClosed = previewChild.waitForEvent("close");
-			await previewChild.getByRole("button", { name: "Return", exact: true }).click();
+			await page.getByRole("button", { name: "Return", exact: true }).click();
 			await previewClosed;
+			await page.getByText("Cedar Studio · Documents in another window", { exact: true }).waitFor({ state: "detached" });
+			assert(await page.getByText("Cedar Studio · Documents in another window", { exact: true }).count() === 0, "chat Return clears the strip after the registered child closes");
 			await page.frameLocator('.workspace-preview-html iframe[title="snapshot.html"]').getByText("Invented original snapshot").waitFor();
 			assert(htmlReads === 1, "Return keeps the original HTML snapshot without another content read");
 			let textReads = 0, imageReads = 0, wordReads = 0, pdfReads = 0, sheetReads = 0;
