@@ -9757,6 +9757,12 @@ export function App() {
 							const cleanAction = admitCleanMarkdownEditorAction(async () => { await continueAction(); }, undefined, intent);
 							if (cleanAction) return false;
 							return guardMarkdownEditorAction(continueAction, "navigate", intent);
+						}} onMementoConfirmed={async (target) => {
+							const intent: DocumentLocalAction = { kind: "room-operation", operation: "memento", roomId: target.agentId, conversationId: target.conversationId };
+							const pending = markdownEditorPendingActionRef.current;
+							if (!pending || !sameDocumentLocalAction(pending.admission.intent, intent) || !preparedDocumentAdmissionIsCurrent(pending.admission)) return false;
+							if (documentChildRef.current && !(await closeDocumentChildForExit(pending))) return false;
+							return preparedDocumentAdmissionIsCurrent(pending.admission);
 						}} onOpenSkillsLibrary={() => openSettings("skills")} onOpenConnectors={() => openSettings("connectors")} />
 					)}
 					{modelSwitchAsk && persistentChat && modelSwitchAsk.agentId === persistentChat.agentId && modelSwitchAsk.conversationId === persistentChat.conversationId && (

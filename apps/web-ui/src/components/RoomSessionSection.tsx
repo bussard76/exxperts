@@ -40,7 +40,7 @@ function sessionModelLabel(status: PersistentAgentStatus): { name: string; title
 	return { name: modelDisplayName(input) || model.model, title: modelTooltipName(input) || model.model };
 }
 
-export function RoomSessionSection({ status, answering, onRefresh, onMementoApplied, onMementoForget, onBeforeMemento }: { status: PersistentAgentStatus; answering: boolean; onRefresh: () => void; onMementoApplied?: () => void; onMementoForget?: () => void; onBeforeMemento?: (continueAction: () => void | Promise<void>, target: { agentId: string; conversationId: string }) => boolean }) {
+export function RoomSessionSection({ status, answering, onRefresh, onMementoApplied, onMementoForget, onBeforeMemento, onMementoConfirmed }: { status: PersistentAgentStatus; answering: boolean; onRefresh: () => void; onMementoApplied?: () => void; onMementoForget?: () => void; onBeforeMemento?: (continueAction: () => void | Promise<void>, target: { agentId: string; conversationId: string }) => boolean; onMementoConfirmed?: (target: { agentId: string; conversationId: string }) => Promise<boolean> }) {
 	const [submitting, setSubmitting] = useState(false);
 	const [message, setMessage] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -55,6 +55,7 @@ export function RoomSessionSection({ status, answering, onRefresh, onMementoAppl
 		setError(null);
 		setMessage(null);
 		if (!(await confirmForgetConversation(answering))) return;
+		if (onMementoConfirmed && !(await onMementoConfirmed(target))) return;
 		setSubmitting(true);
 		try {
 			await applyMemento(target.agentId, target.conversationId);
