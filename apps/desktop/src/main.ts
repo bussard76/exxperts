@@ -266,6 +266,7 @@ function wireNavigation(win: BrowserWindow): void {
 
 const documentsPollInFlight = new WeakSet<BrowserWindow>();
 const requestDocumentsAction = new WeakMap<BrowserWindow, (disposition: "hide" | "quit" | "reload") => void>();
+let nativeQuitPermit = false;
 
 // The first C5 transport checkpoint accepts only hello and empty polls. It
 // cannot authorize native actions or register a child until the remaining
@@ -284,6 +285,8 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
   let hideSent = false;
   let hidePhase: "idle" | "preparing" | "abort" | "commit" | "close-evidence" | "completed" = "idle";
   let hideCorrelation: Record<string, unknown> | null = null;
+  let nativeContinuationUsed = false;
+  let nativeReceiptPending = false;
   let popup: NativeDocumentPopup | null = null;
   let retryInput: { version: number; nativeSessionId: string; sequence: number; ack: number; items: Record<string, unknown>[] } | null = null;
   requestDocumentsAction.set(win, (disposition) => {
@@ -320,7 +323,9 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
       } else {
         if (value.items.length !== 1 || !record(reply) || !record(reply.binding) || !keys(reply.binding, "nativeSessionId,ownerGeneration,ownerId") || reply.binding.nativeSessionId !== session || reply.binding.ownerId !== ownerId || reply.binding.ownerGeneration !== ownerGeneration || reply.nativeRequestId !== hideRequest.nativeRequestId) return false;
         if (reply.kind === "no-session") {
-          if (sentKind !== "native-prepare" || !keys(reply, "binding,disposition,kind,nativeRequestId") || hideRequest.observedStamp !== null || value.status.stamp !== null || reply.disposition !== hideRequest.disposition) return false;
+          if (expired || sentKind !== "native-prepare" || !keys(reply, "binding,correlation,disposition,kind,nativeRequestId") || hideRequest.observedStamp !== null || value.status.stamp !== null || reply.disposition !== hideRequest.disposition || !record(reply.correlation) || !keys(reply.correlation, "action,requestId,stamp") || reply.correlation.requestId !== hideRequest.nativeRequestId || !record(reply.correlation.action) || !keys(reply.correlation.action, "disposition,kind") || reply.correlation.action.kind !== "chat-close" || reply.correlation.action.disposition !== hideRequest.disposition || !record(reply.correlation.stamp) || !keys(reply.correlation.stamp, "draftGeneration,hostGeneration,ownerGeneration,ownerId,roomGeneration") || reply.correlation.stamp.ownerId !== binding.ownerId || reply.correlation.stamp.ownerGeneration !== binding.ownerGeneration || !Number.isSafeInteger(reply.correlation.stamp.roomGeneration) || (reply.correlation.stamp.roomGeneration as number) < 0 || !positive(reply.correlation.stamp.hostGeneration) || !positive(reply.correlation.stamp.draftGeneration)) return false;
+          preparedCorrelation = reply.correlation;
+          nextPhase = "commit";
         } else if (reply.kind === "guard-result") {
           const result = reply.result;
           if (!keys(reply, "binding,kind,nativeRequestId,result") || !hideRequest.observedStamp || !record(result) || !record(result.correlation) || !keys(result.correlation, "action,requestId,stamp") || result.correlation.requestId !== hideRequest.nativeRequestId || !record(result.correlation.action) || !keys(result.correlation.action, "disposition,kind") || result.correlation.action.kind !== "chat-close" || result.correlation.action.disposition !== hideRequest.disposition || !record(result.correlation.stamp) || !record(value.status.stamp)) return false;
@@ -343,8 +348,13 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
     } else if ((sentKind === "native-commit" || sentKind === "child-closed") && hideCorrelation) {
       const reply = value.items[0];
       const expectedKind = sentKind === "native-commit" ? "committed" : "completed";
-      if (value.items.length !== 1 || !record(reply) || !keys(reply, "binding,correlation,kind") || reply.kind !== expectedKind || !record(reply.binding) || !keys(reply.binding, "nativeSessionId,ownerGeneration,ownerId") || reply.binding.nativeSessionId !== session || reply.binding.ownerId !== ownerId || reply.binding.ownerGeneration !== ownerGeneration || JSON.stringify(reply.correlation) !== JSON.stringify(hideCorrelation) || !record(hideCorrelation.stamp) || !record(value.status.stamp) || !Object.entries(hideCorrelation.stamp).every(([key, entry]) => record(value.status) && record(value.status.stamp) && value.status.stamp[key] === entry)) return false;
+      if (value.items.length !== 1 || !record(reply) || !keys(reply, "binding,correlation,kind") || reply.kind !== expectedKind || !record(reply.binding) || !keys(reply.binding, "nativeSessionId,ownerGeneration,ownerId") || reply.binding.nativeSessionId !== session || reply.binding.ownerId !== ownerId || reply.binding.ownerGeneration !== ownerGeneration || JSON.stringify(reply.correlation) !== JSON.stringify(hideCorrelation) || !record(hideCorrelation.stamp)) return false;
+      const emptyCorrelation = keys(hideCorrelation.stamp, "draftGeneration,hostGeneration,ownerGeneration,ownerId,roomGeneration");
+      const currentStamp = (value.status as Record<string, unknown>).stamp;
+      if (emptyCorrelation ? currentStamp !== null || hideCorrelation.stamp.ownerId !== ownerId || hideCorrelation.stamp.ownerGeneration !== ownerGeneration : !record(currentStamp) || !Object.entries(hideCorrelation.stamp).every(([key, entry]) => record(currentStamp) && currentStamp[key] === entry)) return false;
       nextPhase = sentKind === "native-commit" ? "close-evidence" : "completed";
+    } else if (sentKind === "native-completed" && hideCorrelation && hidePhase === "completed") {
+      if (value.items.length !== 0) return false;
     } else if (sentKind === "native-abort" && hideCorrelation && hidePhase === "abort") {
       const reply = value.items[0];
       if (value.items.length !== 1 || !record(reply) || !keys(reply, "binding,correlation,kind") || reply.kind !== "abort-ack" || !record(reply.binding) || !keys(reply.binding, "nativeSessionId,ownerGeneration,ownerId") || reply.binding.nativeSessionId !== session || reply.binding.ownerId !== ownerId || reply.binding.ownerGeneration !== ownerGeneration || JSON.stringify(reply.correlation) !== JSON.stringify(hideCorrelation)) return false;
@@ -399,9 +409,10 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
       else if (hideRequest && !hideSent && ownerId !== null) items = [{ kind: "native-prepare", binding, nativeRequestId: hideRequest.nativeRequestId, observedStamp: hideRequest.observedStamp, disposition: hideRequest.disposition }];
       else if (hidePhase === "abort" && hideCorrelation) items = [{ kind: "native-abort", binding, correlation: hideCorrelation }];
       else if (hidePhase === "commit" && hideCorrelation) items = [{ kind: "native-commit", binding, correlation: hideCorrelation }];
+      else if (nativeReceiptPending && hideCorrelation) items = [{ kind: "native-completed", binding, correlation: hideCorrelation }];
       else if (hidePhase === "close-evidence" && hideCorrelation && !popup?.child && record(hideCorrelation.stamp)) {
         const stamp = hideCorrelation.stamp;
-        const context = { ownerId: stamp.ownerId, ownerGeneration: stamp.ownerGeneration, roomId: stamp.roomId, conversationId: stamp.conversationId, roomGeneration: stamp.roomGeneration };
+        const context = "roomId" in stamp ? { ownerId: stamp.ownerId, ownerGeneration: stamp.ownerGeneration, roomId: stamp.roomId, conversationId: stamp.conversationId, roomGeneration: stamp.roomGeneration } : null;
         items = [{ kind: "child-closed", binding, correlation: hideCorrelation, transfer: null, child: null, context, hostGeneration: stamp.hostGeneration }];
       }
       retryInput = { version: 1, nativeSessionId: session, sequence, ack: sequence - 1, items };
@@ -419,7 +430,17 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
       if (!active) return;
       const kind = input.items[0]?.kind;
       if (expired && kind !== "native-prepare" && kind !== "native-abort") { transportPoisoned = true; return; }
-      if (accept(output, kind, expired)) { sequence++; retryInput = null; }
+      if (accept(output, kind, expired)) {
+        sequence++; retryInput = null;
+        if (kind === "child-closed" && hidePhase === "completed" && !nativeContinuationUsed) {
+          nativeContinuationUsed = true;
+          if (hideRequest?.disposition === "hide") { win.hide(); nativeReceiptPending = true; }
+          else if (hideRequest?.disposition === "quit") { nativeQuitPermit = true; app.quit(); }
+          else if (hideRequest?.disposition === "reload") win.webContents.reload();
+        } else if (kind === "native-completed") {
+          nativeReceiptPending = false; hideRequest = null; hideCorrelation = null; hideSent = false; hidePhase = "idle"; nativeContinuationUsed = false;
+        }
+      }
       else if (expired) transportPoisoned = true;
     }).catch(() => {}).finally(() => { clearTimeout(deadline); pending = false; documentsPollInFlight.delete(win); });
   };
@@ -1596,7 +1617,8 @@ if (!gotLock) {
   });
   app.on("before-quit", (event) => {
     if (quitting) return;
-    if (!updaterQuitting && !startupHasFailed && mainWindow && !mainWindow.isDestroyed()) {
+    if (nativeQuitPermit) nativeQuitPermit = false;
+    else if (!updaterQuitting && !startupHasFailed && mainWindow && !mainWindow.isDestroyed()) {
       event.preventDefault();
       requestDocumentsAction.get(mainWindow)?.("quit");
       return;

@@ -210,7 +210,16 @@ try {
 				assert(await application.evaluate(({ BrowserWindow }, count) => BrowserWindow.getAllWindows().length === count, windowsBeforeReuse), "a consumed native popup selector cannot create another child");
 			}
 		} else {
-		if (quit) await application.evaluate(({ app }) => app.quit()).catch(() => {});
+		if (quit) {
+			await application.evaluate(({ app }) => {
+				const original = app.quit.bind(app);
+				(app as any).__t20QuitCalls = 0;
+			(app as any).__t20ExitCalls = 0;
+			app.exit = () => { (app as any).__t20ExitCalls++; };
+			app.quit = () => { (app as any).__t20QuitCalls++; original(); };
+			app.quit();
+		}).catch(() => {});
+		}
 		else if (reloadKey) await application.evaluate(({ BrowserWindow }, id) => {
 			const contents = BrowserWindow.fromId(id)!.webContents;
 			contents.sendInputEvent({ type: "keyDown", keyCode: "R", modifiers: [process.platform === "darwin" ? "meta" : "control"] });
@@ -279,13 +288,18 @@ try {
 		} else await new Promise((resolve) => setTimeout(resolve, 1_000));
 		if (!dirty && !late) assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Prepares === 1, owner), "the actual native action sends exactly one owner prepare");
 		if (quit) assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20QuitPrepares === 1, owner), "the actual Quit uses a quit disposition");
+		if (quit) {
+			await new Promise((resolve) => setTimeout(resolve, 1_000));
+			const emptyClose = await application.evaluate(({ BrowserWindow, app }, id) => ({ visible: Boolean(BrowserWindow.fromId(id)?.isVisible()), commits: (BrowserWindow.fromId(id) as any)?.__t20Commits, completed: (BrowserWindow.fromId(id) as any)?.__t20Completed, quitCalls: (app as any).__t20QuitCalls, exitCalls: (app as any).__t20ExitCalls }), owner);
+			assert(emptyClose.commits === 1 && emptyClose.completed === 1 && emptyClose.quitCalls === 2 && emptyClose.exitCalls === 1, "a no-session quit commits, receives explicit no-child completion and continues exactly once");
+		}
 		if (reload) assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20ReloadPrepares === 1, owner), "the actual View reload uses a reload disposition");
 		if (active && !dirty && !late) {
 			assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Prepared === 1, owner), "the actual owner prepares the active clean room exactly once");
 			assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Completed === 1, owner), "the real owner completes only after the shell sends no-child evidence");
 		}
-		else if (!dirty && !late) assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20NoSession === 1, owner), "the actual owner returns the matching empty-session response");
-		assert(await application.evaluate(({ BrowserWindow }, id) => Boolean(BrowserWindow.fromId(id)?.isVisible()), owner), "the staged no-session response cannot yet continue the native action");
+		else if (!dirty && !late) assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20NoSession === 1 && (BrowserWindow.fromId(id) as any)?.__t20Completed === 1, owner), "the actual owner returns the matching empty-session response and completes only after no-child evidence");
+		if (!quit && !reload && !dirty && !late) assert(!(await application.evaluate(({ BrowserWindow }, id) => Boolean(BrowserWindow.fromId(id)?.isVisible()), owner)), "native close-to-hide continues only after matching completed evidence");
 		}
 	} else {
 	// Fault the shell's actual outbound exchange, retaining its ordinary close entrypoint.

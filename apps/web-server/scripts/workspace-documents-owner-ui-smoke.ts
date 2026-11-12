@@ -43,32 +43,52 @@ try {
 	assert(result.installed && result.enumerable === false, "the actual owner installs a non-enumerable synchronous endpoint");
 	const first = result.first;
 	assert(first?.version === 1 && first.sequence === 1 && first.ack === 1 && first.items?.length === 1 && first.items[0].kind === "hello", "a valid hello receives the owner's binding");
-	assert(first.status?.binding?.nativeSessionId === "11111111-1111-4111-8111-111111111111" && first.status.binding.ownerId === first.items[0].ownerId && first.status.binding.ownerGeneration === first.items[0].ownerGeneration && first.status.stamp === null && first.status.child === null, "the live owner reports its exact binding and empty context");
+	assert(first.status?.binding?.nativeSessionId === "11111111-1111-4111-8111-111111111111" && first.status.binding.ownerId === first.items[0].ownerId && first.status.binding.ownerGeneration === first.items[0].ownerGeneration && first.status.stamp === null && first.status.child === null, `the live owner reports its exact binding and empty context: ${JSON.stringify(first.status)}`);
 	assert(JSON.stringify(result.replay) === JSON.stringify(first), "a repeated sequence returns the cached response");
 	assert(result.changedReplay == null && result.wrongVersion == null && result.gap == null && result.wrongBinding == null && result.malformedStamp == null, "changed replays, invalid versions, sequence gaps, foreign bindings and malformed stamps produce no authorization");
 	const noSession = result.noSession;
-	assert(noSession?.sequence === 2 && noSession.ack === 2 && noSession.items?.length === 1 && noSession.items[0].kind === "no-session" && noSession.items[0].nativeRequestId === "22222222-2222-4222-8222-222222222222" && noSession.items[0].disposition === "hide" && JSON.stringify(noSession.items[0].binding) === JSON.stringify(first.status.binding), "a live empty owner explicitly confirms only the matching no-session request");
+	const emptyCorrelation = noSession?.items?.[0]?.correlation;
+	assert(noSession?.sequence === 2 && noSession.ack === 2 && noSession.items?.length === 1 && noSession.items[0].kind === "no-session" && noSession.items[0].nativeRequestId === "22222222-2222-4222-8222-222222222222" && noSession.items[0].disposition === "hide" && JSON.stringify(noSession.items[0].binding) === JSON.stringify(first.status.binding) && emptyCorrelation?.requestId === noSession.items[0].nativeRequestId && emptyCorrelation.action?.kind === "chat-close" && emptyCorrelation.action.disposition === "hide" && JSON.stringify(emptyCorrelation.stamp) === JSON.stringify({ ownerId: first.status.binding.ownerId, ownerGeneration: first.status.binding.ownerGeneration, roomGeneration: 0, hostGeneration: 1, draftGeneration: 1 }), `an empty owner reserves the native action with a distinct correlated empty stamp: ${JSON.stringify(noSession)}`);
 	assert(JSON.stringify(result.noSessionReplay) === JSON.stringify(noSession), "replayed no-session preparation does not repeat an effect");
+	const expectedEmptyCorrelation = emptyCorrelation ?? { requestId: "22222222-2222-4222-8222-222222222222", stamp: { ownerId: first.status.binding.ownerId, ownerGeneration: first.status.binding.ownerGeneration, roomGeneration: 0, hostGeneration: 1, draftGeneration: 1 }, action: { kind: "chat-close", disposition: "hide" } };
+	await page.evaluate(() => { document.querySelector<HTMLButtonElement>(".persistent-agent-card .landing-action")?.click(); });
+	await page.waitForTimeout(200);
+	const admissionHeld = !(await page.locator(".sidebar-workspace-files").count());
+	const lifecycle = await page.evaluate(({ binding, correlation }) => {
+		const endpoint = (window as any).__exxpertsDocuments;
+		const wrongDisposition = endpoint.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 3, ack: 2, items: [{ kind: "native-commit", binding, correlation: { ...correlation, action: { ...correlation.action, disposition: "quit" } } }] });
+		const activeSubstitution = endpoint.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 3, ack: 2, items: [{ kind: "native-commit", binding, correlation: { ...correlation, stamp: { ...correlation.stamp, roomId: "invented-room", conversationId: "invented-thread", roomGeneration: 1 } } }] });
+		const malformed = endpoint.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 3, ack: 2, items: [{ kind: "native-commit", binding, correlation: { ...correlation, stamp: { ...correlation.stamp, ownerGeneration: "1" } } }] });
+		const staleBinding = endpoint.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 3, ack: 2, items: [{ kind: "native-commit", binding: { ...binding, ownerGeneration: binding.ownerGeneration + 1 }, correlation }] });
+		const commit = endpoint.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 3, ack: 2, items: [{ kind: "native-commit", binding, correlation }] });
+		const childClosed = endpoint.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 4, ack: 3, items: [{ kind: "child-closed", binding, correlation, child: null, transfer: null, context: null, hostGeneration: correlation.stamp.hostGeneration }] });
+		const completedInput = { version: 1, nativeSessionId: binding.nativeSessionId, sequence: 5, ack: 4, items: [{ kind: "native-completed", binding, correlation }] };
+		const completed = endpoint.step(completedInput);
+		const completedReplay = endpoint.step(completedInput);
+		const afterReceipt = endpoint.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 6, ack: 5, items: [] });
+		return { wrongDisposition, activeSubstitution, malformed, staleBinding, commit, childClosed, completed, completedReplay, afterReceipt };
+	}, { binding: first.status.binding, correlation: expectedEmptyCorrelation });
+	assert(admissionHeld && lifecycle.wrongDisposition == null && lifecycle.activeSubstitution == null && lifecycle.malformed == null && lifecycle.staleBinding == null && lifecycle.commit?.items?.[0]?.kind === "committed" && lifecycle.childClosed?.items?.[0]?.kind === "completed" && lifecycle.completed?.sequence === 5 && JSON.stringify(lifecycle.completedReplay) === JSON.stringify(lifecycle.completed) && lifecycle.afterReceipt?.sequence === 6, `empty reservation fences room admission through validated commit, explicit null-child evidence and idempotent completion: ${JSON.stringify({ admissionHeld, lifecycle })}`);
 	const dismiss = page.locator(".whats-new-close");
 	if (await dismiss.count()) await dismiss.click();
 	await page.locator(".persistent-agent-card").filter({ hasText: "Invented Native Owner" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
 	await page.locator(".sidebar-workspace-files").waitFor();
 	const active = await page.evaluate(({ binding }) => {
 		const endpoint = (window as any).__exxpertsDocuments;
-		return endpoint.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 3, ack: 2, items: [{ kind: "native-prepare", binding, nativeRequestId: "33333333-3333-4333-8333-333333333333", observedStamp: null, disposition: "hide" }] });
+		return endpoint.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 7, ack: 6, items: [{ kind: "native-prepare", binding, nativeRequestId: "33333333-3333-4333-8333-333333333333", observedStamp: null, disposition: "hide" }] });
 	}, { binding: first.status.binding });
 	const refusal = active?.items?.[0];
-	assert(active?.sequence === 3 && refusal?.kind === "guard-result" && refusal.result?.kind === "refused" && refusal.result.reason === "invalidated" && refusal.result.correlation?.stamp?.roomId === room.roomId && refusal.result.correlation.stamp.conversationId === room.conversationId && refusal.result.correlation.requestId === "33333333-3333-4333-8333-333333333333" && refusal.result.correlation.action?.kind === "chat-close" && refusal.result.correlation.action.disposition === "hide" && JSON.stringify(refusal.binding) === JSON.stringify(first.status.binding), "a null observed stamp cannot report no-session for a current room");
-	const clean = await page.evaluate(({ binding, stamp }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 4, ack: 3, items: [{ kind: "native-prepare", binding, nativeRequestId: "44444444-4444-4444-8444-444444444444", observedStamp: stamp, disposition: "hide" }] }), { binding: first.status.binding, stamp: refusal.result.correlation.stamp });
+	assert(active?.sequence === 7 && refusal?.kind === "guard-result" && refusal.result?.kind === "refused" && refusal.result.reason === "invalidated" && refusal.result.correlation?.stamp?.roomId === room.roomId && refusal.result.correlation.stamp.conversationId === room.conversationId && refusal.result.correlation.requestId === "33333333-3333-4333-8333-333333333333" && refusal.result.correlation.action?.kind === "chat-close" && refusal.result.correlation.action.disposition === "hide" && JSON.stringify(refusal.binding) === JSON.stringify(first.status.binding), "a null observed stamp cannot report no-session for a current room");
+	const clean = await page.evaluate(({ binding, stamp }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 8, ack: 7, items: [{ kind: "native-prepare", binding, nativeRequestId: "44444444-4444-4444-8444-444444444444", observedStamp: stamp, disposition: "hide" }] }), { binding: first.status.binding, stamp: refusal.result.correlation.stamp });
 	const prepared = clean?.items?.[0];
-	assert(clean?.sequence === 4 && prepared?.kind === "guard-result" && prepared.result?.kind === "prepared" && prepared.result.decision === "allow", "a clean current native close prepares without committing");
+	assert(clean?.sequence === 8 && prepared?.kind === "guard-result" && prepared.result?.kind === "prepared" && prepared.result.decision === "allow", "a clean current native close prepares without committing");
 	await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
 	assert(await page.getByRole("navigation", { name: "Room navigation" }).isVisible(), "the prepared native action reserves the owner against Home");
-	const wrongAbort = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 5, ack: 4, items: [{ kind: "native-abort", binding, correlation: { ...correlation, requestId: "55555555-5555-4555-8555-555555555555" } }] }), { binding: first.status.binding, correlation: prepared.result.correlation });
+	const wrongAbort = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 9, ack: 8, items: [{ kind: "native-abort", binding, correlation: { ...correlation, requestId: "55555555-5555-4555-8555-555555555555" } }] }), { binding: first.status.binding, correlation: prepared.result.correlation });
 	assert(wrongAbort == null, "a foreign abort cannot release the prepared action");
 	await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
 	assert(await page.getByRole("navigation", { name: "Room navigation" }).isVisible(), "the owner stays reserved after a foreign abort");
-	const aborted = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 5, ack: 4, items: [{ kind: "native-abort", binding, correlation }] }), { binding: first.status.binding, correlation: prepared.result.correlation });
+	const aborted = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 9, ack: 8, items: [{ kind: "native-abort", binding, correlation }] }), { binding: first.status.binding, correlation: prepared.result.correlation });
 	assert(aborted?.items?.[0]?.kind === "abort-ack" && aborted.items[0].correlation.requestId === "44444444-4444-4444-8444-444444444444", "matching native abort acknowledges only the prepared attempt");
 	await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
 	await page.getByRole("heading", { name: "Your rooms." }).waitFor();
@@ -79,21 +99,21 @@ try {
 	await editor.getByText("Invented owner draft").waitFor();
 	await editor.click();
 	await page.keyboard.type(" retained local edit");
-	const current = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 6, ack: 5, items: [] }), { binding: first.status.binding });
-	const dirtyPrepare = await page.evaluate(({ binding, stamp }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 7, ack: 6, items: [{ kind: "native-prepare", binding, nativeRequestId: "66666666-6666-4666-8666-666666666666", observedStamp: stamp, disposition: "hide" }] }), { binding: first.status.binding, stamp: current.status.stamp });
-	assert(dirtyPrepare?.sequence === 7 && dirtyPrepare.items?.length === 0, "a dirty native preparation awaits the real guard decision");
+	const current = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 10, ack: 9, items: [] }), { binding: first.status.binding });
+	const dirtyPrepare = await page.evaluate(({ binding, stamp }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 11, ack: 10, items: [{ kind: "native-prepare", binding, nativeRequestId: "66666666-6666-4666-8666-666666666666", observedStamp: stamp, disposition: "hide" }] }), { binding: first.status.binding, stamp: current.status.stamp });
+	assert(dirtyPrepare?.sequence === 11 && dirtyPrepare.items?.length === 0, "a dirty native preparation awaits the real guard decision");
 	const prompt = page.getByRole("dialog", { name: "Unsaved Markdown changes" });
 	await prompt.getByRole("button", { name: "Cancel", exact: true }).click();
-	const refused = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 8, ack: 7, items: [] }), { binding: first.status.binding });
+	const refused = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 12, ack: 11, items: [] }), { binding: first.status.binding });
 	const cancel = refused?.items?.[0];
 	assert(cancel?.kind === "guard-result" && cancel.result?.kind === "refused" && cancel.result.reason === "cancel" && cancel.result.correlation.requestId === "66666666-6666-4666-8666-666666666666", "Cancel returns the matching native refusal");
 	await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
 	assert((await editor.textContent())?.includes("retained local edit"), "a refused native attempt reserves the dirty draft until abort acknowledgement");
-	const dirtyAbort = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 9, ack: 8, items: [{ kind: "native-abort", binding, correlation }] }), { binding: first.status.binding, correlation: cancel.result.correlation });
+	const dirtyAbort = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 13, ack: 12, items: [{ kind: "native-abort", binding, correlation }] }), { binding: first.status.binding, correlation: cancel.result.correlation });
 	assert(dirtyAbort?.items?.[0]?.kind === "abort-ack", "the matching abort releases the refused dirty attempt");
-	const beforeSave = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 10, ack: 9, items: [] }), { binding: first.status.binding });
-	const savePrepare = await page.evaluate(({ binding, stamp }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 11, ack: 10, items: [{ kind: "native-prepare", binding, nativeRequestId: "77777777-7777-4777-8777-777777777777", observedStamp: stamp, disposition: "hide" }] }), { binding: first.status.binding, stamp: beforeSave.status.stamp });
-	assert(savePrepare?.sequence === 11 && savePrepare.items?.length === 0, "a dirty native Save waits for the real guard decision");
+	const beforeSave = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 14, ack: 13, items: [] }), { binding: first.status.binding });
+	const savePrepare = await page.evaluate(({ binding, stamp }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 15, ack: 14, items: [{ kind: "native-prepare", binding, nativeRequestId: "77777777-7777-4777-8777-777777777777", observedStamp: stamp, disposition: "hide" }] }), { binding: first.status.binding, stamp: beforeSave.status.stamp });
+	assert(savePrepare?.sequence === 15 && savePrepare.items?.length === 0, "a dirty native Save waits for the real guard decision");
 	let beginSave!: () => void, releaseSave!: () => void;
 	const saveStarted = new Promise<void>((resolve) => { beginSave = resolve; });
 	const saveReleased = new Promise<void>((resolve) => { releaseSave = resolve; });
@@ -109,21 +129,21 @@ try {
 	try {
 		await page.getByRole("dialog", { name: "Unsaved Markdown changes" }).getByRole("button", { name: "Save and continue" }).click();
 		await saveStarted;
-		const duringSave = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 12, ack: 11, items: [] }), { binding: first.status.binding });
+		const duringSave = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 16, ack: 15, items: [] }), { binding: first.status.binding });
 		assert(duringSave?.items?.length === 0 && writes === 1, "native preparation cannot allow while the actual Save response is held");
 		releaseSave();
 		await page.getByRole("dialog", { name: "Unsaved Markdown changes" }).waitFor({ state: "hidden" });
-		const afterSave = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 13, ack: 12, items: [] }), { binding: first.status.binding });
+		const afterSave = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 17, ack: 16, items: [] }), { binding: first.status.binding });
 		const savedGuard = afterSave?.items?.[0];
 		assert(savedGuard?.kind === "guard-result" && savedGuard.result?.kind === "prepared" && savedGuard.result.decision === "allow" && savedGuard.result.correlation.requestId === "77777777-7777-4777-8777-777777777777" && savedGuard.result.correlation.stamp.draftGeneration > beforeSave.status.stamp.draftGeneration && fs.readFileSync(path.join(workspace, "invented.md"), "utf8").includes("retained local edit"), "the latest confirmed Save publishes its final prepared stamp");
-		const saveAbort = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 14, ack: 13, items: [{ kind: "native-abort", binding, correlation }] }), { binding: first.status.binding, correlation: savedGuard.result.correlation });
+		const saveAbort = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 18, ack: 17, items: [{ kind: "native-abort", binding, correlation }] }), { binding: first.status.binding, correlation: savedGuard.result.correlation });
 		assert(saveAbort?.items?.[0]?.kind === "abort-ack", "the prepared Save action remains reserved until its matching abort");
 	} finally { releaseSave(); await page.unroute("**/workspace-markdown?*"); }
 	await editor.click();
 	await page.keyboard.type(" another frozen edit");
-	const beforeAbortSave = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 15, ack: 14, items: [] }), { binding: first.status.binding });
-	const abortingPrepare = await page.evaluate(({ binding, stamp }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 16, ack: 15, items: [{ kind: "native-prepare", binding, nativeRequestId: "88888888-8888-4888-8888-888888888888", observedStamp: stamp, disposition: "hide" }] }), { binding: first.status.binding, stamp: beforeAbortSave.status.stamp });
-	assert(abortingPrepare?.sequence === 16 && abortingPrepare.items?.length === 0, "a new dirty preparation awaits a decision");
+	const beforeAbortSave = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 19, ack: 18, items: [] }), { binding: first.status.binding });
+	const abortingPrepare = await page.evaluate(({ binding, stamp }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 20, ack: 19, items: [{ kind: "native-prepare", binding, nativeRequestId: "88888888-8888-4888-8888-888888888888", observedStamp: stamp, disposition: "hide" }] }), { binding: first.status.binding, stamp: beforeAbortSave.status.stamp });
+	assert(abortingPrepare?.sequence === 20 && abortingPrepare.items?.length === 0, "a new dirty preparation awaits a decision");
 	const initialCorrelation = { requestId: "88888888-8888-4888-8888-888888888888", stamp: beforeAbortSave.status.stamp, action: { kind: "chat-close", disposition: "hide" } };
 	let beginAbortSave!: () => void, releaseAbortSave!: () => void;
 	const abortSaveStarted = new Promise<void>((resolve) => { beginAbortSave = resolve; });
@@ -138,10 +158,10 @@ try {
 	try {
 		await page.getByRole("dialog", { name: "Unsaved Markdown changes" }).getByRole("button", { name: "Save and continue" }).click();
 		await abortSaveStarted;
-		const abortInput = { version: 1, nativeSessionId: first.status.binding.nativeSessionId, sequence: 17, ack: 16, items: [{ kind: "native-abort", binding: first.status.binding, correlation: initialCorrelation }] };
+		const abortInput = { version: 1, nativeSessionId: first.status.binding.nativeSessionId, sequence: 21, ack: 20, items: [{ kind: "native-abort", binding: first.status.binding, correlation: initialCorrelation }] };
 		const earlyAbort = await page.evaluate((input) => (window as any).__exxpertsDocuments.step(input), abortInput);
 		assert(earlyAbort == null, "abort is not acknowledged while the actual sent write remains unresolved");
-		const changedAttempt = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 17, ack: 16, items: [] }), { binding: first.status.binding });
+		const changedAttempt = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 21, ack: 20, items: [] }), { binding: first.status.binding });
 		assert(changedAttempt == null, "a changed message cannot replace the unacknowledged abort");
 		await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
 		assert(await page.getByRole("navigation", { name: "Room navigation" }).isVisible(), "the owner remains reserved while abort acknowledgement is missing");
@@ -149,7 +169,7 @@ try {
 		await page.locator(".markdown-editor-status").getByText("Saved", { exact: true }).waitFor();
 		const lateAbort = await page.evaluate((input) => (window as any).__exxpertsDocuments.step(input), abortInput);
 		assert(lateAbort?.items?.[0]?.kind === "abort-ack" && lateAbort.items[0].correlation.requestId === initialCorrelation.requestId, "the late matching abort acknowledges the original attempt without reviving its continuation");
-		const afterAbort = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 18, ack: 17, items: [] }), { binding: first.status.binding });
+		const afterAbort = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 22, ack: 21, items: [] }), { binding: first.status.binding });
 		assert(afterAbort?.items?.length === 0, "a late Save result does not publish an allow after the abort");
 	} finally { releaseAbortSave(); await page.unroute("**/workspace-markdown?*"); }
 	await editor.click();
@@ -170,18 +190,18 @@ try {
 	try {
 		await page.locator(".markdown-editor-save").click();
 		await existingStarted;
-		const pendingStatus = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 19, ack: 18, items: [] }), { binding: first.status.binding });
-		const pendingPrepare = await page.evaluate(({ binding, stamp }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 20, ack: 19, items: [{ kind: "native-prepare", binding, nativeRequestId: "99999999-9999-4999-8999-999999999999", observedStamp: stamp, disposition: "hide" }] }), { binding: first.status.binding, stamp: pendingStatus.status.stamp });
-		assert(pendingPrepare?.sequence === 20 && pendingPrepare.items?.length === 0, "a native prepare joins an already-sent Save instead of refusing admission");
-		const whilePending = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 21, ack: 20, items: [] }), { binding: first.status.binding });
+		const pendingStatus = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 23, ack: 22, items: [] }), { binding: first.status.binding });
+		const pendingPrepare = await page.evaluate(({ binding, stamp }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 24, ack: 23, items: [{ kind: "native-prepare", binding, nativeRequestId: "99999999-9999-4999-8999-999999999999", observedStamp: stamp, disposition: "hide" }] }), { binding: first.status.binding, stamp: pendingStatus.status.stamp });
+		assert(pendingPrepare?.sequence === 24 && pendingPrepare.items?.length === 0, "a native prepare joins an already-sent Save instead of refusing admission");
+		const whilePending = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 25, ack: 24, items: [] }), { binding: first.status.binding });
 		assert(whilePending?.items?.length === 0 && existingWrites === 1, "the joined write cannot allow or issue a duplicate PUT while its response is held");
 		releaseExisting();
 		await page.locator(".markdown-editor-status").getByText("Saved", { exact: true }).waitFor();
 		await page.waitForTimeout(100);
-		const afterExisting = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 22, ack: 21, items: [] }), { binding: first.status.binding });
+		const afterExisting = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 26, ack: 25, items: [] }), { binding: first.status.binding });
 		const joined = afterExisting?.items?.[0];
 		assert(joined?.kind === "guard-result" && joined.result?.kind === "prepared" && joined.result.correlation.requestId === "99999999-9999-4999-8999-999999999999" && existingWrites === 1, "the joined Save yields one current prepared result");
-		const joinedAbort = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 23, ack: 22, items: [{ kind: "native-abort", binding, correlation }] }), { binding: first.status.binding, correlation: joined.result.correlation });
+		const joinedAbort = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 27, ack: 26, items: [{ kind: "native-abort", binding, correlation }] }), { binding: first.status.binding, correlation: joined.result.correlation });
 		assert(joinedAbort?.items?.[0]?.kind === "abort-ack", "the joined action remains reserved until its matching abort");
 	} finally { releaseExisting(); if (existingWrites > 0) await existingFinished; await page.unroute("**/workspace-markdown?*"); }
 	await editor.click();
@@ -201,37 +221,37 @@ try {
 	try {
 		await page.locator(".markdown-editor-save").click();
 		await joinedAbortStarted;
-		const status = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 24, ack: 23, items: [] }), { binding: first.status.binding });
+		const status = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 28, ack: 27, items: [] }), { binding: first.status.binding });
 		const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-		const prepared = await page.evaluate(({ binding, stamp, id }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 25, ack: 24, items: [{ kind: "native-prepare", binding, nativeRequestId: id, observedStamp: stamp, disposition: "hide" }] }), { binding: first.status.binding, stamp: status.status.stamp, id });
+		const prepared = await page.evaluate(({ binding, stamp, id }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 29, ack: 28, items: [{ kind: "native-prepare", binding, nativeRequestId: id, observedStamp: stamp, disposition: "hide" }] }), { binding: first.status.binding, stamp: status.status.stamp, id });
 		assert(prepared?.items?.length === 0, "joining an existing write reserves the action");
 		const correlation = { requestId: id, stamp: status.status.stamp, action: { kind: "chat-close", disposition: "hide" } };
-		const abort = () => page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 26, ack: 25, items: [{ kind: "native-abort", binding, correlation }] }), { binding: first.status.binding, correlation });
+		const abort = () => page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 30, ack: 29, items: [{ kind: "native-abort", binding, correlation }] }), { binding: first.status.binding, correlation });
 		assert(await abort() == null, "abort cannot acknowledge while the joined write is unsettled");
 		releaseJoinedAbort();
 		await joinedAbortFinished;
 		await page.locator(".markdown-editor-status").getByText("Saved", { exact: true }).waitFor();
 		await page.waitForTimeout(100);
 		assert((await abort())?.items?.[0]?.kind === "abort-ack", "the same abort releases only after the joined write settles");
-		const after = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 27, ack: 26, items: [] }), { binding: first.status.binding });
+		const after = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 31, ack: 30, items: [] }), { binding: first.status.binding });
 		assert(after?.items?.length === 0, "the aborted joined write cannot publish a late allow");
 	} finally { releaseJoinedAbort(); await joinedAbortFinished; await page.unroute("**/workspace-markdown?*"); }
-	const commitStatus = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 28, ack: 27, items: [] }), { binding: first.status.binding });
-	const prepareCommit = await page.evaluate(({ binding, stamp }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 29, ack: 28, items: [{ kind: "native-prepare", binding, nativeRequestId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", observedStamp: stamp, disposition: "hide" }] }), { binding: first.status.binding, stamp: commitStatus.status.stamp });
+	const commitStatus = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 32, ack: 31, items: [] }), { binding: first.status.binding });
+	const prepareCommit = await page.evaluate(({ binding, stamp }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 33, ack: 32, items: [{ kind: "native-prepare", binding, nativeRequestId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", observedStamp: stamp, disposition: "hide" }] }), { binding: first.status.binding, stamp: commitStatus.status.stamp });
 	const correlation = prepareCommit?.items?.[0]?.result?.correlation;
 	assert(prepareCommit?.items?.[0]?.result?.kind === "prepared", "clean native action is prepared for commit");
-	const committed = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 30, ack: 29, items: [{ kind: "native-commit", binding, correlation }] }), { binding: first.status.binding, correlation });
+	const committed = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 34, ack: 33, items: [{ kind: "native-commit", binding, correlation }] }), { binding: first.status.binding, correlation });
 	assert(committed?.items?.[0]?.kind === "committed", "matching current native commit is acknowledged");
-	const waiting = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 31, ack: 30, items: [] }), { binding: first.status.binding });
+	const waiting = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 35, ack: 34, items: [] }), { binding: first.status.binding });
 	assert(waiting?.items?.length === 0, "commit cannot complete before actual no-child evidence");
 	const stamp = correlation.stamp;
 	const context = { ownerId: stamp.ownerId, ownerGeneration: stamp.ownerGeneration, roomId: stamp.roomId, conversationId: stamp.conversationId, roomGeneration: stamp.roomGeneration };
-	const staleClosed = await page.evaluate(({ binding, correlation, context, hostGeneration }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 32, ack: 31, items: [{ kind: "child-closed", binding, correlation, transfer: null, child: null, context, hostGeneration: hostGeneration + 1 }] }), { binding: first.status.binding, correlation, context, hostGeneration: stamp.hostGeneration });
+	const staleClosed = await page.evaluate(({ binding, correlation, context, hostGeneration }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 36, ack: 35, items: [{ kind: "child-closed", binding, correlation, transfer: null, child: null, context, hostGeneration: hostGeneration + 1 }] }), { binding: first.status.binding, correlation, context, hostGeneration: stamp.hostGeneration });
 	assert(staleClosed == null, "stale no-child evidence cannot complete the action");
-	const closed = await page.evaluate(({ binding, correlation, context, hostGeneration }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 32, ack: 31, items: [{ kind: "child-closed", binding, correlation, transfer: null, child: null, context, hostGeneration }] }), { binding: first.status.binding, correlation, context, hostGeneration: stamp.hostGeneration });
+	const closed = await page.evaluate(({ binding, correlation, context, hostGeneration }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 36, ack: 35, items: [{ kind: "child-closed", binding, correlation, transfer: null, child: null, context, hostGeneration }] }), { binding: first.status.binding, correlation, context, hostGeneration: stamp.hostGeneration });
 	assert(closed?.items?.[0]?.kind === "completed", "explicit matching no-child evidence completes the committed action");
-	const receipt = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 33, ack: 32, items: [{ kind: "native-completed", binding, correlation }] }), { binding: first.status.binding, correlation });
-	assert(receipt?.sequence === 33, "matching completion receipt releases the owner reservation");
+	const receipt = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 37, ack: 36, items: [{ kind: "native-completed", binding, correlation }] }), { binding: first.status.binding, correlation });
+	assert(receipt?.sequence === 37, "matching completion receipt releases the owner reservation");
 	await editor.click();
 	await page.keyboard.type(" timed joined write");
 	let beginTimed!: () => void, releaseTimed!: () => void, finishTimed!: () => void, timedStarted = false;
@@ -250,20 +270,20 @@ try {
 	try {
 		await page.locator(".markdown-editor-save").click();
 		await timedStart;
-		const status = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 34, ack: 33, items: [] }), { binding: first.status.binding });
+		const status = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 38, ack: 37, items: [] }), { binding: first.status.binding });
 		const id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 		const result = await page.evaluate(({ binding, stamp, id }) => {
 			const original = window.setTimeout;
 			window.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: any[]) => original(handler, timeout === 30_000 ? 20 : timeout, ...args)) as typeof window.setTimeout;
-			try { return (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 35, ack: 34, items: [{ kind: "native-prepare", binding, nativeRequestId: id, observedStamp: stamp, disposition: "hide" }] }); }
+			try { return (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 39, ack: 38, items: [{ kind: "native-prepare", binding, nativeRequestId: id, observedStamp: stamp, disposition: "hide" }] }); }
 			finally { window.setTimeout = original; }
 		}, { binding: first.status.binding, stamp: status.status.stamp, id });
 		assert(result?.items?.length === 0, "timed write initially remains pending");
 		await page.waitForTimeout(100);
-		const timed = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 36, ack: 35, items: [] }), { binding: first.status.binding });
+		const timed = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 40, ack: 39, items: [] }), { binding: first.status.binding });
 		assert(timed?.items?.[0]?.result?.kind === "unknown", "the 30-second write join deadline reports unknown");
 		const correlation = { requestId: id, stamp: status.status.stamp, action: { kind: "chat-close", disposition: "hide" } };
-		const abort = () => page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 37, ack: 36, items: [{ kind: "native-abort", binding, correlation }] }), { binding: first.status.binding, correlation });
+		const abort = () => page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 41, ack: 40, items: [{ kind: "native-abort", binding, correlation }] }), { binding: first.status.binding, correlation });
 		assert(await abort() == null, "a timed-out sent write retains its reservation until settled");
 		releaseTimed();
 		await timedFinish;
@@ -274,8 +294,54 @@ try {
 	await page.route("**/workspace-files?*", (route) => route.fulfill({ status: 409, json: { code: "person_changed", error: "Invented identity change" } }));
 	await page.evaluate(() => window.dispatchEvent(new Event("focus")));
 	await page.getByText("Someone else is now signed in on this server.", { exact: true }).waitFor();
-	const invalidated = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 38, ack: 37, items: [] }), { binding: first.status.binding });
+	const invalidated = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 42, ack: 41, items: [] }), { binding: first.status.binding });
 	assert(invalidated == null, "a changed person cannot receive another owner status");
+	const abortPage = await browser.newPage();
+	await abortPage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+	await abortPage.waitForLoadState("networkidle");
+	const emptyAbort = await abortPage.evaluate(() => {
+		const endpoint = (window as any).__exxpertsDocuments;
+		const nativeSessionId = "99999999-9999-4999-8999-999999999999";
+		const hello = endpoint.step({ version: 1, nativeSessionId, sequence: 1, ack: 0, items: [{ kind: "hello" }] });
+		const binding = hello.status.binding;
+		const prepared = endpoint.step({ version: 1, nativeSessionId, sequence: 2, ack: 1, items: [{ kind: "native-prepare", binding, nativeRequestId: "88888888-8888-4888-8888-888888888888", observedStamp: null, disposition: "quit" }] });
+		const correlation = prepared.items[0].correlation;
+		const wrong = endpoint.step({ version: 1, nativeSessionId, sequence: 3, ack: 2, items: [{ kind: "native-abort", binding, correlation: { ...correlation, requestId: "77777777-7777-4777-8777-777777777777" } }] });
+		const abortInput = { version: 1, nativeSessionId, sequence: 3, ack: 2, items: [{ kind: "native-abort", binding, correlation }] };
+		const abort = endpoint.step(abortInput);
+		const replay = endpoint.step(abortInput);
+		const after = endpoint.step({ version: 1, nativeSessionId, sequence: 4, ack: 3, items: [{ kind: "native-commit", binding, correlation }] });
+		return { prepared, wrong, abort, replay, after };
+	});
+	assert(emptyAbort.prepared?.items?.[0]?.kind === "no-session" && emptyAbort.wrong == null && emptyAbort.abort?.items?.[0]?.kind === "abort-ack" && JSON.stringify(emptyAbort.replay) === JSON.stringify(emptyAbort.abort) && emptyAbort.after == null, "a matching empty abort releases only its one-use attempt, replays idempotently and cannot continue late");
+	await abortPage.close();
+	const racePage = await browser.newPage();
+	let releaseRoomEntry!: () => void, beginRoomEntry!: () => void;
+	const roomEntryStarted = new Promise<void>((resolve) => { beginRoomEntry = resolve; });
+	const roomEntryReleased = new Promise<void>((resolve) => { releaseRoomEntry = resolve; });
+	await racePage.route("**/api/persistent-agents/invented-native-owner/threads/*", async (route) => {
+		if (route.request().method() !== "PUT") return route.continue();
+		const response = await route.fetch();
+		beginRoomEntry();
+		await roomEntryReleased;
+		await route.fulfill({ response });
+	});
+	try {
+		await racePage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+		await racePage.waitForLoadState("networkidle");
+		const binding = await racePage.evaluate(() => {
+			const endpoint = (window as any).__exxpertsDocuments;
+			const nativeSessionId = "66666666-6666-4666-8666-666666666666";
+			const hello = endpoint.step({ version: 1, nativeSessionId, sequence: 1, ack: 0, items: [{ kind: "hello" }] });
+			return hello.status.binding;
+		});
+		await racePage.locator(".persistent-agent-card").filter({ hasText: "Invented Native Owner" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+		await roomEntryStarted;
+		const racingPrepare = await racePage.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 2, ack: 1, items: [{ kind: "native-prepare", binding, nativeRequestId: "55555555-5555-4555-8555-555555555555", observedStamp: null, disposition: "quit" }] }), { binding });
+		assert(racingPrepare == null || racingPrepare.items?.[0]?.kind !== "no-session", `an in-flight asynchronous room entry cannot be reclassified as an empty session: ${JSON.stringify(racingPrepare)}`);
+		releaseRoomEntry();
+		await racePage.locator(".sidebar-workspace-files").waitFor();
+	} finally { releaseRoomEntry(); await racePage.close(); }
 	console.log("owner endpoint browser supplement: hello, replay and invalid inputs passed");
 } catch (caught) { error = caught; }
 finally { await browser?.close(); await stopRoomStateServer(error); }

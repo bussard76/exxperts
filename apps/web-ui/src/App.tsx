@@ -769,7 +769,7 @@ export function App() {
 		} else if (intent?.kind === "replace-conversation") {
 			if (typeof intent.roomId !== "string" || !intent.roomId || typeof intent.conversationId !== "string" || !intent.conversationId || !context || context.roomId !== intent.roomId) return null;
 		} else if (intent?.kind === "chat-close") {
-			if (!context || !["hide", "quit", "update", "reload"].includes(intent.disposition)) return null;
+			if ((current.key !== null && !context) || !["hide", "quit", "update", "reload"].includes(intent.disposition)) return null;
 		} else if (intent && ((intent.kind !== "select-file" && intent.kind !== "close-tab") || typeof intent.path !== "string" || !intent.path)) return null;
 		return { requestId, ownerId: documentOwnerId, ownerGeneration, roomGeneration: current.generation, initialHostGeneration: hostGeneration, initialDraftGeneration: draftGeneration, context, intent: intent && { ...intent } };
 	}
@@ -1070,13 +1070,15 @@ export function App() {
 		let lastInput = "";
 		let lastSequence = 0;
 		let lastOutput: unknown = null;
-		let nativePrepared: { admission: DocumentAdmission; correlation: { requestId: string; stamp: DocumentContext & { hostGeneration: number; draftGeneration: number }; action: { kind: "chat-close"; disposition: "hide" | "quit" | "update" | "reload" } }; phase: "preparing" | "prepared" | "refused" | "aborting" | "committed" | "completed" } | null = null;
+		type NativeStamp = (DocumentContext & { hostGeneration: number; draftGeneration: number }) | { ownerId: string; ownerGeneration: number; roomGeneration: number; hostGeneration: number; draftGeneration: number };
+		type NativeCorrelation = { requestId: string; stamp: NativeStamp; action: { kind: "chat-close"; disposition: "hide" | "quit" | "update" | "reload" } };
+		let nativePrepared: { admission: DocumentAdmission; correlation: NativeCorrelation; phase: "preparing" | "prepared" | "refused" | "aborting" | "committed" | "completed" } | null = null;
 		let outbound: unknown[] = [];
 		const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-		const matchesStamp = (value: unknown, expected: DocumentContext & { hostGeneration: number; draftGeneration: number }): boolean => {
+		const matchesStamp = (value: unknown, expected: NativeStamp): boolean => {
 			if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 			const candidate = value as Record<string, unknown>;
-			return Object.keys(candidate).sort().join(",") === "conversationId,draftGeneration,hostGeneration,ownerGeneration,ownerId,roomGeneration,roomId" && Object.entries(expected).every(([key, value]) => candidate[key] === value);
+			return Object.keys(candidate).sort().join(",") === Object.keys(expected).sort().join(",") && Object.entries(expected).every(([key, value]) => candidate[key] === value);
 		};
 		const matchesCorrelation = (value: unknown): boolean => {
 			if (!nativePrepared || !value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -1150,10 +1152,16 @@ export function App() {
 						if (Object.keys(request).sort().join(",") !== "binding,disposition,kind,nativeRequestId,observedStamp" || typeof request.nativeRequestId !== "string" || !uuid.test(request.nativeRequestId) || typeof request.disposition !== "string" || !["hide", "quit", "update", "reload"].includes(request.disposition)) return null;
 						const disposition = request.disposition as "hide" | "quit" | "update" | "reload";
 						if (stamp === null) {
-							if (request.observedStamp !== null || !noDocumentSession()) return null;
-							items = [{ kind: "no-session", binding: currentBinding, nativeRequestId: request.nativeRequestId, disposition }];
+							if (request.observedStamp !== null || !noDocumentSession() || markdownEditorPendingActionRef.current) return null;
+							const admission = captureDocumentAdmission(request.nativeRequestId, { kind: "chat-close", disposition });
+							if (!admission || admission.context || markdownEditorPendingActionRef.current) return null;
+							markdownEditorPendingActionRef.current = { admission, continuation: () => {}, result: null };
+							if (!prepareDocumentAdmission(admission)) { markdownEditorPendingActionRef.current = null; return null; }
+							const correlation: NativeCorrelation = { requestId: request.nativeRequestId, stamp: { ownerId: documentOwnerId, ownerGeneration: admission.ownerGeneration, roomGeneration: admission.roomGeneration, hostGeneration, draftGeneration }, action: { kind: "chat-close", disposition } };
+							nativePrepared = { admission, correlation, phase: "prepared" };
+							items = [{ kind: "no-session", binding: currentBinding, nativeRequestId: request.nativeRequestId, disposition, correlation }];
 						} else {
-							const correlation = { requestId: request.nativeRequestId, stamp, action: { kind: "chat-close" as const, disposition } };
+						const correlation: NativeCorrelation = { requestId: request.nativeRequestId, stamp, action: { kind: "chat-close" as const, disposition } };
 							if (request.observedStamp === null || !matchesStamp(request.observedStamp, stamp)) {
 								if (request.observedStamp !== null && (!request.observedStamp || typeof request.observedStamp !== "object" || Array.isArray(request.observedStamp) || Object.keys(request.observedStamp).sort().join(",") !== "conversationId,draftGeneration,hostGeneration,ownerGeneration,ownerId,roomGeneration,roomId")) return null;
 								items = [{ kind: "guard-result", binding: currentBinding, nativeRequestId: request.nativeRequestId, result: { kind: "refused", correlation, reason: "invalidated" } }];
@@ -1247,10 +1255,10 @@ export function App() {
 						nativePrepared.phase = "committed";
 						items = [{ kind: "committed", binding: currentBinding, correlation: nativePrepared.correlation }];
 					} else if (request.kind === "child-closed") {
-						if (Object.keys(request).sort().join(",") !== "binding,child,context,correlation,hostGeneration,kind,transfer" || !nativePrepared || nativePrepared.phase !== "committed" || !matchesCorrelation(request.correlation) || request.transfer !== null || request.child !== null || request.hostGeneration !== nativePrepared.correlation.stamp.hostGeneration || !request.context || typeof request.context !== "object" || Array.isArray(request.context)) return null;
-						const context = request.context as Record<string, unknown>;
+						if (Object.keys(request).sort().join(",") !== "binding,child,context,correlation,hostGeneration,kind,transfer" || !nativePrepared || nativePrepared.phase !== "committed" || !matchesCorrelation(request.correlation) || request.transfer !== null || request.child !== null || request.hostGeneration !== nativePrepared.correlation.stamp.hostGeneration) return null;
 						const expected = nativePrepared.correlation.stamp;
-						if (Object.keys(context).sort().join(",") !== "conversationId,ownerGeneration,ownerId,roomGeneration,roomId" || !["ownerId", "ownerGeneration", "roomId", "conversationId", "roomGeneration"].every((key) => context[key] === expected[key as keyof typeof expected]) || !preparedDocumentAdmissionIsCurrent(nativePrepared.admission)) return null;
+						if (nativePrepared.admission.context === null ? request.context !== null : !request.context || typeof request.context !== "object" || Array.isArray(request.context) || Object.keys(request.context as object).sort().join(",") !== "conversationId,ownerGeneration,ownerId,roomGeneration,roomId" || !["ownerId", "ownerGeneration", "roomId", "conversationId", "roomGeneration"].every((key) => (request.context as Record<string, unknown>)[key] === (expected as Record<string, unknown>)[key])) return null;
+						if (!preparedDocumentAdmissionIsCurrent(nativePrepared.admission)) return null;
 						nativePrepared.phase = "completed";
 						items = [{ kind: "completed", binding: currentBinding, correlation: nativePrepared.correlation }];
 					} else if (request.kind === "native-completed") {
