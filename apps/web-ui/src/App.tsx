@@ -1828,7 +1828,7 @@ export function App() {
 	}
 
 	// Room exit: leaving the persistent-agent room experience for the launcher.
-	async function closePersistentAgentRoom(thread: PersistentAgentThread, origin: PersistentAgentThreadOrigin): Promise<PersistentAgentThread | null> {
+	async function closePersistentAgentRoom(thread: PersistentAgentThread, origin: PersistentAgentThreadOrigin, isCurrent: () => boolean): Promise<PersistentAgentThread | null> {
 		if (hasUserInput(thread.items) || hasUserVisibleTurn(thread.items)) {
 			const standbyThread: PersistentAgentThread = { ...thread, state: "standby" };
 			setPersistentThread(standbyThread);
@@ -1837,6 +1837,7 @@ export function App() {
 			return standbyThread;
 		}
 		const statuses = await fetchPersistentAgentStatuses();
+		if (!isCurrent()) return null;
 		const status = statuses.find((candidate) => candidate.id === thread.agentId) ?? null;
 		const activeThreadMatches = status?.runtime.activeThreadId === thread.conversationId;
 		const preparedBoundary = activeThreadMatches
@@ -1845,10 +1846,12 @@ export function App() {
 		const hasPreparedBoundaryPrefix = thread.conversationId.startsWith("postcp_") || thread.conversationId.startsWith("postmem_");
 		if (activeThreadMatches && (preparedBoundary || hasPreparedBoundaryPrefix)) {
 			await discardEmptyPreparedBoundaryThread(thread.agentId, thread.conversationId);
+			if (!isCurrent()) return null;
 			setPersistentThread(null);
 			return null;
 		}
 		await discardPersistentAgentThread(thread.agentId, thread.conversationId);
+		if (!isCurrent()) return null;
 		setPersistentThread(null);
 		return null;
 	}
@@ -3580,7 +3583,7 @@ export function App() {
 					busyRef.current = false;
 					const text = typeof msg.message === "string" && msg.message ? msg.message : `${persistentChatRef.current?.displayName || "This room"} holds as many remembered conversations as it can. Memorize them from Maintain on its Home card to start a new conversation.`;
 					// A save refused on the way out has already said so on Home; both stay.
-					void finishLeaveRoom().then(() => setPersistentResumeError((current) => current ? `${current} ${text}` : text));
+					void finishLeaveRoom().then((left) => { if (left) setPersistentResumeError((current) => current ? `${current} ${text}` : text); });
 					return;
 				}
 				if (msg.code === "memory_overflow") {
@@ -8406,10 +8409,13 @@ export function App() {
 				return Boolean(await markdownEditorActionResultRef.current?.promise);
 			}
 		}
+		const originChat = persistentChat;
+		const originGeneration = checkpointContextRef.current.generation;
+		const originCurrent = () => !originChat || checkpointOriginCurrent(originChat, originGeneration);
+		if (!originCurrent()) return false;
 		// Another window has the room: leaving saves nothing over its conversation.
 		if (turnLinkRef.current === "elsewhere") {
-			await finishLeaveRoom({ detachInFlight: true });
-			return true;
+			return await finishLeaveRoom({ detachInFlight: true });
 		}
 		// A fully-received answer may still be revealing its tail (busy
 		// already false); leaving must not persist a truncated tail.
@@ -8423,8 +8429,9 @@ export function App() {
 			// saved thread file (the landing supersedes any partial tail saved
 			// here, so what is persisted now only needs the user's message).
 			try { await savePersistentAgentThread(persistentChat, "active", "home", itemsRef.current, pendingHandoffsRef.current); } catch {}
+			if (!originCurrent()) return false;
 			backgroundCookingRoomsRef.current.add(persistentChat.agentId);
-			await finishLeaveRoom({ detachInFlight: true });
+			if (!(await finishLeaveRoom({ detachInFlight: true }))) return false;
 			// Prime the launcher: the leave path itself does not refetch statuses
 			// (the home screen's arrival does, home-room-order.ts), and the cards
 			// need the still-held lock and in-flight turn to show the answering
@@ -8436,6 +8443,7 @@ export function App() {
 			// A turn the user already stopped is genuinely cancelling — leaving
 			// now keeps the stop semantics instead of detaching a doomed turn.
 			await abortCurrentTurn({ leaveAfter: true });
+			if (!originCurrent()) return false;
 			if (turnCancellingRef.current || isAssistantStreamActive(streamStateRef.current)) markCurrentAssistantInterrupted(turnInterruptedNoteRef.current ?? "Response interrupted because you left the room.");
 			setTurnCancelling(false);
 			turnCancellingRef.current = false;
@@ -8445,8 +8453,7 @@ export function App() {
 		// Leaving no longer stops a running specialist —
 		// the worker survives in the room-scoped registry and the rail's pulsing
 		// row greets the user on return. No guard dialog; nothing to warn about.
-		await finishLeaveRoom();
-		return true;
+		return await finishLeaveRoom();
 	}
 
 	// The tail of goHome, split out so the other leave paths take the exact
@@ -8455,7 +8462,11 @@ export function App() {
 	// server's job then (the landing write parks the thread), and the room's
 	// active-lock badge is deliberately kept — the lock really is still held
 	// while the response finishes.
-	async function finishLeaveRoom(options: { detachInFlight?: boolean } = {}) {
+	async function finishLeaveRoom(options: { detachInFlight?: boolean } = {}): Promise<boolean> {
+		const originChat = persistentChat;
+		const originGeneration = checkpointContextRef.current.generation;
+		const originCurrent = () => !originChat || checkpointOriginCurrent(originChat, originGeneration);
+		if (!originCurrent()) return false;
 		// We're releasing our own lock on the room we're leaving; clear its
 		// active-lock badge locally so the home card doesn't show a stale
 		// "open in app" until the next refresh. (No immediate refetch — that
@@ -8477,8 +8488,9 @@ export function App() {
 			} else {
 				const liveThread: PersistentAgentThread = { ...persistentChat, state: "live", items: itemsRef.current };
 				try {
-					await closePersistentAgentRoom(liveThread, "home");
+					await closePersistentAgentRoom(liveThread, "home", originCurrent);
 				} catch (e) {
+					if (!originCurrent()) return false;
 					// The chat closes on the next line, so a line in it would never be
 					// read: the failed save is said on Home, where the person lands. A
 					// save that got no answer is the service sentence alone: without
@@ -8486,6 +8498,7 @@ export function App() {
 					const message = (e as Error).message;
 					setPersistentResumeError(isServiceUnreachableLine(message) ? message : `${persistentChat.displayName || "This room"}: ${message}`);
 				}
+				if (!originCurrent()) return false;
 			}
 			// The room is left: no turn of it is waited on here any more.
 			setTurnLink("live");
@@ -8500,6 +8513,7 @@ export function App() {
 			setPersistentAgentStatuses((statuses) => statuses.map((s) => (s.id === releasingAgentId ? { ...s, activeLock: null } : s)));
 		}
 		setView("home");
+		return true;
 	}
 
 	// The room's own record wins over the name the thread was opened with, so a

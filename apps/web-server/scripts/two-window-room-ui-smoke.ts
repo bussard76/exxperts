@@ -455,6 +455,43 @@ try {
 			await entry.close();
 		}
 		{
+			const leaveAgent = agents.createPersistentAgentFromScaffoldInput({ displayName: "Invented Late Home", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }).agent.agentId;
+			roomModels.writeRoomModels(leaveAgent, { conversation: CLAUDE });
+			assert((await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(leaveAgent)}/workspace-default`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ root: workspace, workspaceAccessMode: "localFiles" }) })).ok, "the invented Home room uses the temporary workspace");
+			const leaving = await ctx.newPage();
+			await leaving.addInitScript({ content: `window.addEventListener("beforeunload", (event) => { event.preventDefault(); event.returnValue = ""; });` });
+			leaving.on("dialog", (dialog) => { void dialog.dismiss(); });
+			await leaving.goto(`${baseUrl}/#/room/${leaveAgent}`);
+			await leaving.locator('button[title="Send"]').first().waitFor({ timeout: 15000 });
+			await leaving.locator("textarea").first().fill("Invented Home question.");
+			await leaving.locator("textarea").first().press("Enter");
+			await leaving.getByText("Answer from claude-fake.").first().waitFor({ timeout: 20000 });
+			let releaseLeave!: () => void, beginLeave!: () => void, holdLeave = true;
+			const leaveReleased = new Promise<void>((resolve) => { releaseLeave = resolve; });
+			const leaveStarted = new Promise<void>((resolve) => { beginLeave = resolve; });
+			await leaving.route("**/threads/**", async (route) => {
+				if (!holdLeave || route.request().method() !== "PUT") return route.continue();
+				holdLeave = false;
+				const response = await route.fetch();
+				beginLeave();
+				await leaveReleased;
+				await route.fulfill({ response });
+			});
+			await leaving.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+			try {
+				await leaveStarted;
+				await leaving.route("**/workspace-files?*", (route) => route.fulfill({ status: 409, json: { code: "person_changed", error: "Invented identity change" } }));
+				await leaving.evaluate(() => window.dispatchEvent(new Event("focus")));
+				await leaving.getByText("Someone else is now signed in on this server.", { exact: true }).waitFor();
+				const response = leaving.waitForResponse((candidate) => candidate.request().method() === "PUT" && candidate.url().includes("/threads/"));
+				releaseLeave();
+				assert((await response).ok(), "the invented Home save completed before its answer was released");
+				await leaving.waitForTimeout(500);
+				assert(await leaving.getByText("Invented Home question.", { exact: true }).count() === 1, "a late Home save cannot clear an invalidated chat");
+			} finally { releaseLeave(); }
+			await leaving.close();
+		}
+		{
 			const reloadAgent = agents.createPersistentAgentFromScaffoldInput({ displayName: "Invented Late Reload", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }).agent.agentId;
 			roomModels.writeRoomModels(reloadAgent, { conversation: CLAUDE });
 			assert((await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(reloadAgent)}/workspace-default`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ root: workspace, workspaceAccessMode: "localFiles" }) })).ok, "the invented late-Reload room uses the temporary workspace");
