@@ -529,3 +529,7 @@ The detached smoke now specifies a real clean Home action with the registered ch
 ## Checkpoint: typed leave child-close draft
 
 For the existing typed Home/Memory leave intents, the inactive child path now retains the prepared action and editor fence, moves the held surfaces back, requests close, and only permits the original continuation after the exact registered browser child reports closed and context/draft checks still match. File and tab actions do not enter this child-close path. UI and scripts typechecks, UI asset build, and the attributed `remember-job-dialog`, `two-window-room-ui` and `workspace-file-tabs-ui` smokes passed 3/3. The held-child-close case remains unexecuted at disabled Detach; other exit/operation paths, deadlines, abort acknowledgement, recovery and native handling remain incomplete, so this is not a C4 pass.
+
+## Checkpoint: Memento confirmation and closure case
+
+The detached smoke now specifies the real Memento confirmation: Cancel leaves the registered child open and sends no operation, while confirmation holds the real Memento request until the actual child closes. Scripts typecheck passed; the attributed smoke still stops at disabled Detach, so this case did not run and is not evidence of ordering.

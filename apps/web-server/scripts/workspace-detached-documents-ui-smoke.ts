@@ -461,6 +461,40 @@ try {
 				await childClosed;
 				await waitUntil(async () => !(await closePage.evaluate(() => location.hash)).includes("/room/"), "Home continues after actual child closure");
 			} finally { await closePage.close().catch(() => {}); }
+			const mementoRoom = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Invented Memento Ordering", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
+			assert(mementoRoom.status === 201, "the Memento-order room is created");
+			const mementoRoomId = String(mementoRoom.body?.agent?.id ?? "");
+			assert((await api(`/api/persistent-agents/${encodeURIComponent(mementoRoomId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: workspace, workspaceAccessMode: "localFiles" }) })).status === 200, "the Memento-order room uses the invented workspace");
+			const mementoPage = await context.newPage();
+			try {
+				await mementoPage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+				await mementoPage.waitForLoadState("networkidle");
+				const dismissMemento = mementoPage.locator(".whats-new-close");
+				if (await dismissMemento.count()) await dismissMemento.click();
+				await mementoPage.locator(".persistent-agent-card").filter({ hasText: "Invented Memento Ordering" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+				await mementoPage.locator(".sidebar-workspace-files").waitFor();
+				const mementoOpened = mementoPage.waitForEvent("popup");
+				await mementoPage.getByRole("button", { name: "Detach", exact: true }).click();
+				const mementoChild = await mementoOpened;
+				await mementoChild.locator(".workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
+				await mementoChild.evaluate(`window.__t20OriginalClose = window.close; window.__t20CloseCalls = 0; window.close = () => { window.__t20CloseCalls++; }`);
+				let mementoRequests = 0;
+				mementoPage.on("request", (request) => { if (request.method() === "POST" && request.url().endsWith("/memento")) mementoRequests++; });
+				const confirm = mementoPage.getByRole("alertdialog", { name: "Forget this conversation and start fresh?" });
+				await mementoPage.getByRole("button", { name: "Forget", exact: true }).first().click();
+				await confirm.getByRole("button", { name: "Cancel", exact: true }).click();
+				await confirm.waitFor({ state: "detached" });
+				assert(!mementoChild.isClosed() && await mementoChild.evaluate(`window.__t20CloseCalls`) === 0 && mementoRequests === 0, "canceling Memento confirmation leaves the child open without an operation request");
+				await mementoPage.getByRole("button", { name: "Forget", exact: true }).first().click();
+				await confirm.getByRole("button", { name: "Forget", exact: true }).click();
+				await waitUntil(() => mementoChild.evaluate(`window.__t20CloseCalls > 0`), "confirmed Memento requests the registered child close");
+				assert(!mementoChild.isClosed() && mementoRequests === 0, "Memento waits for actual child closure before its request");
+				const mementoClosed = mementoChild.waitForEvent("close");
+				const mementoResponse = mementoPage.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/memento"));
+				await mementoChild.evaluate(`window.close = window.__t20OriginalClose; window.close()`);
+				await mementoClosed;
+				assert((await mementoResponse).ok(), "confirmed Memento reaches its real route after the child closes");
+			} finally { await mementoPage.close().catch(() => {}); }
 		} finally { await context.close(); }
 	} finally { await browser.close(); }
 	console.log("workspace-detached-documents-ui smoke: ok");
