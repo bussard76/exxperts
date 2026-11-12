@@ -107,8 +107,10 @@ try {
 			const dismiss = page.locator(".whats-new-close");
 			if (await dismiss.count()) await dismiss.click();
 			await page.locator(".persistent-agent-card").filter({ hasText: "Cedar Studio" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+			await page.locator(".sidebar-workspace-files").waitFor();
 			const detach = page.getByRole("button", { name: "Detach", exact: true });
-			assert(await detach.count() === 1, "a selected room shows one Detach control before opening a tab");
+			const detachCount = await detach.count();
+			assert(detachCount === 1, `a selected room shows one Detach control before opening a tab (found ${detachCount})`);
 			assert(await detach.isEnabled(), "Detach is available for an empty selected room when safeguards are ready");
 			let releaseLoad!: () => void, beginLoad!: () => void;
 			const loadReleased = new Promise<void>((resolve) => { releaseLoad = resolve; });

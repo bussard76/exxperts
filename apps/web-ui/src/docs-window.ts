@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 
-type PreparedChild = { child: Window; document: Document; treeSlot: HTMLElement; paneSlot: HTMLElement };
+type PreparedChild = { child: Window; document: Document; treeSlot: HTMLElement; paneSlot: HTMLElement; returnButton: HTMLButtonElement };
 
 // The chat owns both portal elements; their contents stay in the same React tree.
 export function useDocumentsHost() {
@@ -73,18 +73,27 @@ export function useDocumentsHost() {
 			if (!pending.length && !target.head.querySelector("style")) throw new Error("No styles");
 			const layout = target.createElement("main");
 			layout.className = "documents-child-layout";
+			const bar = target.createElement("header");
+			bar.className = "documents-child-bar";
+			const heading = target.createElement("span");
+			heading.textContent = title;
+			const returnButton = target.createElement("button");
+			returnButton.type = "button";
+			returnButton.textContent = "Return";
+			returnButton.disabled = true;
+			bar.append(heading, returnButton);
 			const treeSlot = target.createElement("div");
 			treeSlot.className = "documents-child-tree";
 			const paneSlot = target.createElement("div");
 			paneSlot.className = "documents-child-pane";
-			layout.append(treeSlot, paneSlot);
+			layout.append(bar, treeSlot, paneSlot);
 			target.body.replaceChildren(layout);
 			await Promise.race([
 				Promise.all(pending),
 				new Promise<never>((_, reject) => { timer = window.setTimeout(() => reject(new Error("Stylesheet timeout")), 10_000); }),
 			]);
 			if (child.closed || child.opener !== window || child.location.href !== "about:blank" || child.document !== target || target.defaultView !== child || child.getComputedStyle(layout).display !== "grid" || !layout.getBoundingClientRect().width || !layout.getBoundingClientRect().height) throw new Error("Child not ready");
-			const result = { child, document: target, treeSlot, paneSlot };
+			const result = { child, document: target, treeSlot, paneSlot, returnButton };
 			prepared.current = result;
 			return result;
 		} catch {

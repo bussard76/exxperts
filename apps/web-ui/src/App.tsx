@@ -560,10 +560,11 @@ export function App() {
 	const [rightPane, setRightPane] = useState<RightPaneOccupant | null>(null);
 	const [workspaceTabs, setWorkspaceTabs] = useState<{ agentId: string; conversationId: string; paths: string[] } | null>(null);
 	const documentPreviewSnapshotsRef = useRef(new Map<string, { bytes: ArrayBuffer | null; text?: string; nextFrame?: { generation: number; id: string }; word?: { html: string; notice: boolean }; pdf?: { page: number; mimeType: "image/jpeg"; imageBase64: string; widthPx: number; heightPx: number }[]; spreadsheet?: { workbook: unknown; notices: string[] }; imageUrl?: string; disposed?: boolean }>());
-	const { host: documentHost, treeHost: documentTreeHost, mountHost: mountDocumentHost, mountTree: mountDocumentTreeHost, beginChild: beginDocumentChild, abortChild: abortDocumentChild, moveToChild: moveDocumentToChild } = useDocumentsHost();
+	const { host: documentHost, treeHost: documentTreeHost, mountHost: mountDocumentHost, mountTree: mountDocumentTreeHost, beginChild: beginDocumentChild, abortChild: abortDocumentChild, moveToChild: moveDocumentToChild, moveToOwner: moveDocumentToOwner, childClosed: documentChildClosed } = useDocumentsHost();
 	type PreparedDocumentChild = NonNullable<Awaited<ReturnType<typeof beginDocumentChild>>>;
 	const documentChildRef = useRef<PreparedDocumentChild | null>(null);
-	const documentHostCommitRef = useRef<{ admission: DocumentAdmission; child: PreparedDocumentChild; generation: number } | null>(null);
+	const documentHostCommitRef = useRef<{ admission: DocumentAdmission; child: PreparedDocumentChild; generation: number; direction: "detach" | "return" } | null>(null);
+	const documentClosingRef = useRef(false);
 	// Synchronous mirror for the WS handlers (toast suppression / run-view swap
 	// read the pane at event time, not at closure-capture time).
 	const rightPaneRef = useRef<RightPaneOccupant | null>(null);
@@ -788,24 +789,60 @@ export function App() {
 			}
 			const nextGeneration = documentHostGenerationRef.current + 1;
 			if (!Number.isSafeInteger(nextGeneration)) { abortDocumentChild(child); release(); return; }
-			const frameSeeds: { record: { nextFrame?: { generation: number; id: string } }; id: string }[] = [];
-			for (const [path, record] of documentPreviewSnapshotsRef.current) {
-				if (!/\.(?:html?|pptx|excalidraw)$/i.test(path)) continue;
-				const id = allocateDocumentId();
-				if (!id) { abortDocumentChild(child); release(); return; }
-				frameSeeds.push({ record, id });
-			}
-			if (!prepareDocumentAdmission(admission)) { abortDocumentChild(child); release(); return; }
-			for (const seed of frameSeeds) seed.record.nextFrame = { generation: nextGeneration, id: seed.id };
+			if (!prepareDocumentAdmission(admission) || !prepareDocumentFrameSeeds(nextGeneration)) { abortDocumentChild(child); release(); return; }
 			const moved = moveDocumentToChild(child, () => preparedDocumentAdmissionIsCurrent(admission));
 			if (moved === "refused") { abortDocumentChild(child); release(); return; }
 			if (moved !== "moved") return;
 			adopted = true;
 			documentChildRef.current = child;
-			documentHostCommitRef.current = { admission, child, generation: nextGeneration };
+			documentHostCommitRef.current = { admission, child, generation: nextGeneration, direction: "detach" };
 			documentHostGenerationRef.current = nextGeneration;
 			setDocumentHostGeneration(nextGeneration);
 		}).catch(() => { if (!adopted) { if (candidate) abortDocumentChild(candidate); release(); } });
+	}
+
+	function prepareDocumentFrameSeeds(generation: number): boolean {
+		const seeds: { record: { nextFrame?: { generation: number; id: string } }; id: string }[] = [];
+		for (const [path, record] of documentPreviewSnapshotsRef.current) {
+			if (!/\.(?:html?|pptx|excalidraw)$/i.test(path)) continue;
+			const id = allocateDocumentId();
+			if (!id) return false;
+			seeds.push({ record, id });
+		}
+		for (const seed of seeds) seed.record.nextFrame = { generation, id: seed.id };
+		return true;
+	}
+
+	function returnDocuments(): boolean {
+		const child = documentChildRef.current;
+		if (!child || markdownEditorPendingActionRef.current) return false;
+		const requestId = allocateDocumentId();
+		const admission = requestId ? captureDocumentAdmission(requestId, { kind: "transfer", direction: "return" }) : null;
+		if (!admission?.context) return false;
+		markdownEditorPendingActionRef.current = { admission, continuation: () => {}, result: null };
+		preparedDocumentAdmissionRef.current = null;
+		markdownEditorRef.current?.setFence(true);
+		setMarkdownEditorFenced(true);
+		const release = () => {
+			if (markdownEditorPendingActionRef.current?.admission !== admission) return;
+			markdownEditorPendingActionRef.current = null;
+			preparedDocumentAdmissionRef.current = null;
+			markdownEditorRef.current?.setFence(false);
+			setMarkdownEditorFenced(false);
+		};
+		const pane = rightPaneRef.current;
+		const snapshot = documentFileSnapshotRef.current;
+		const load = documentLoadViewRef.current;
+		const nextGeneration = documentHostGenerationRef.current + 1;
+		if (!Number.isSafeInteger(nextGeneration) || !documentAdmissionIsCurrent(admission) || (pane?.kind === "markdownEditor" && !(documentFileSnapshotValidRef.current && snapshot?.file.path === pane.path && snapshot.draftGeneration === documentDraftGenerationRef.current) && !(load?.path === pane.path)) || !prepareDocumentAdmission(admission) || !prepareDocumentFrameSeeds(nextGeneration)) { release(); return false; }
+		const moved = moveDocumentToOwner(child, () => preparedDocumentAdmissionIsCurrent(admission));
+		if (moved === "refused") { release(); return false; }
+		if (moved !== "moved") return false;
+		documentClosingRef.current = true;
+		documentHostCommitRef.current = { admission, child, generation: nextGeneration, direction: "return" };
+		documentHostGenerationRef.current = nextGeneration;
+		setDocumentHostGeneration(nextGeneration);
+		return true;
 	}
 
 	function documentAdmissionIsCurrent(admission: DocumentAdmission): boolean {
@@ -836,12 +873,42 @@ export function App() {
 		const context = commit.admission.context;
 		const current = checkpointContextRef.current;
 		if (!context || unmountedRef.current || personHasChanged() || current.generation !== context.roomGeneration || current.roomId !== context.roomId || current.conversationId !== context.conversationId || documentOwnerGenerationRef.current !== context.ownerGeneration || documentHostGenerationRef.current !== commit.generation) return;
-		documentHostCommitRef.current = null;
-		markdownEditorPendingActionRef.current = null;
-		preparedDocumentAdmissionRef.current = null;
-		markdownEditorRef.current?.setFence(false);
-		setMarkdownEditorFenced(false);
-		try { commit.child.child.focus(); } catch {}
+		const release = () => {
+			if (documentHostCommitRef.current !== commit || markdownEditorPendingActionRef.current?.admission !== commit.admission) return;
+			documentHostCommitRef.current = null;
+			markdownEditorPendingActionRef.current = null;
+			preparedDocumentAdmissionRef.current = null;
+			markdownEditorRef.current?.setFence(false);
+			setMarkdownEditorFenced(false);
+		};
+		if (commit.direction === "detach") {
+			try {
+				if (commit.child.child.closed || commit.child.child.document !== commit.child.document || documentHost.ownerDocument !== commit.child.document || documentTreeHost.ownerDocument !== commit.child.document) return;
+				const beforeUnload = (event: BeforeUnloadEvent) => {
+					if (documentClosingRef.current) return;
+					if (!returnDocuments()) { event.preventDefault(); event.returnValue = ""; }
+				};
+				const onReturn = () => { returnDocuments(); };
+				commit.child.child.addEventListener("beforeunload", beforeUnload);
+				commit.child.returnButton.addEventListener("click", onReturn);
+				commit.child.returnButton.disabled = false;
+				const poll = window.setInterval(() => { try { if (commit.child.child.closed) returnDocuments(); } catch {} }, 100);
+				release();
+				try { commit.child.child.focus(); } catch {}
+				return () => { window.clearInterval(poll); try { commit.child.child.removeEventListener("beforeunload", beforeUnload); } catch {} commit.child.returnButton.removeEventListener("click", onReturn); };
+			} catch { return; }
+		}
+		const settle = () => {
+			if (!documentChildClosed(commit.child)) return;
+			documentChildRef.current = null;
+			documentClosingRef.current = false;
+			window.clearInterval(poll);
+			release();
+		};
+		const poll = window.setInterval(settle, 100);
+		try { if (!commit.child.child.closed) commit.child.child.close(); } catch {}
+		settle();
+		return () => window.clearInterval(poll);
 	}, [documentHostGeneration]);
 
 	function noDocumentSession(): boolean {
