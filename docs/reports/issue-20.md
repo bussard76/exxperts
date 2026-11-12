@@ -475,3 +475,7 @@ A new targeted `workspace-documents-native-ui-smoke.ts` drafts an actual Electro
 ## Checkpoint: owner-held PDF and spreadsheet snapshots
 
 The owner tab record now retains validated PDF page data and the validated spreadsheet model and notices. UI and scripts typechecks, the UI asset build, and the attributed filtered `workspace-file-tabs-ui` smoke passed (1/1). The child-first PDF and spreadsheet cases remain unexecuted at the unavailable Detach assertion; pending/error snapshots, actual host reconstruction, C3/C4, and native lifecycle work remain open.
+
+## Checkpoint: child image animation case
+
+The detached smoke now requires actual child image zoom to schedule animation frames in the child window. Scripts typecheck passed; the attributed run remains red at the first missing Detach control, so this new assertion has not executed and provides no host evidence yet.

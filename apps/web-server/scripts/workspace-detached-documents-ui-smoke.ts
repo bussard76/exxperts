@@ -181,6 +181,11 @@ fs.writeFileSync(path.join(workspace, "snapshot.html"), '<body><p>Invented later
 			await snapshotsChild.locator(".workspace-preview-text pre").getByText("Invented original text snapshot", { exact: true }).waitFor();
 			await snapshotsChild.locator(".workspace-file-browser-file", { hasText: "retained.png" }).click();
 			await snapshotsChild.locator('.workspace-preview-image img[alt="retained.png"]').waitFor();
+			await snapshotsChild.evaluate(`window.__t20ImageFrames = 0; window.__t20ImageFrame = window.requestAnimationFrame; window.requestAnimationFrame = (callback) => { window.__t20ImageFrames++; return window.__t20ImageFrame(callback); }`);
+			try {
+				await snapshotsChild.getByRole("button", { name: "Zoom in", exact: true }).click();
+				await waitUntil(() => snapshotsChild.evaluate(`window.__t20ImageFrames > 0`), "image zoom schedules in its actual child window");
+			} finally { await snapshotsChild.evaluate(`window.requestAnimationFrame = window.__t20ImageFrame; delete window.__t20ImageFrame; delete window.__t20ImageFrames`); }
 			fs.writeFileSync(path.join(workspace, "retained.pdf"), "Invented damaged later PDF");
 			fs.writeFileSync(path.join(workspace, "retained.xlsx"), "Invented damaged later workbook");
 			fs.writeFileSync(path.join(workspace, "retained.docx"), "Invented damaged later document");
