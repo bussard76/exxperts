@@ -559,3 +559,7 @@ The detached smoke now separately specifies the real archive and purge callbacks
 ## Checkpoint: archive and purge child-close draft
 
 The inactive in-room archive and purge paths now check the live busy state before closing a registered child, retain the admitted target while waiting for actual closure, and recheck before changing room state or sending the existing route. UI and scripts typechecks, UI asset build, and the attributed `workspace-file-tabs-ui` smoke passed 1/1, including attached archive/purge and the stale settings Memento regression. The detached archive/purge cases remain unexecuted at disabled Detach; operation ordering and native behavior are not established.
+
+## Checkpoint: checkpoint replacement child-close case
+
+The detached smoke now uses a local scripted fake model and specifies the real checkpoint Save and subsequent replacement-thread read separately: the Save may complete, but the replacement read must wait for the actual registered child to close. Scripts typecheck passed; the attributed run still stops at disabled Detach, so this new case and fake model flow have not executed and provide no checkpoint/child evidence.

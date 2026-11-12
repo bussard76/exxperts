@@ -2,6 +2,7 @@
 // All files and room data in this smoke are invented and confined to a temporary home.
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +27,26 @@ const agentDir = path.join(tempHome, ".exxperts", "agent");
 const appDir = path.join(tempHome, ".exxperts", "app");
 const workspace = path.join(tempRoot, "workspace");
 for (const dir of [agentsRoot, agentDir, workspace]) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+const provider = http.createServer((request, response) => {
+	let body = "";
+	request.on("data", (chunk) => { body += chunk; });
+	request.on("end", () => {
+		const points = Array.from({ length: 12 }, (_, index) => `- Invented checkpoint point ${index + 1} is agreed for the synthetic workspace.`).join("\n");
+		const message = body.includes("Checkpoint Compression Constitution") ? `TITLE:\nInvented checkpoint\n\nSESSION_ARC:\nWe planned an invented task.\n\nBODY:\n${points}\n\nPARKED:\nNone\n` : "Invented fake answer.";
+		response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+		const send = (event: string, payload: unknown) => response.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+		send("message_start", { type: "message_start", message: { id: "invented-message", type: "message", role: "assistant", model: "claude-fake", content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } } });
+		send("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
+		send("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: message } });
+		send("content_block_stop", { type: "content_block_stop", index: 0 });
+		send("message_delta", { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 20 } });
+		send("message_stop", { type: "message_stop" });
+		response.end();
+	});
+});
+await new Promise<void>((resolve) => provider.listen(0, "127.0.0.1", resolve));
+const providerAddress = provider.address();
+assert(providerAddress && typeof providerAddress !== "string", "the fake model listens locally");
 function ninePagePdf(): Buffer {
 	const objects: string[] = [];
 	const kids = Array.from({ length: 9 }, (_, index) => `${3 + index * 2} 0 R`).join(" ");
@@ -62,7 +83,7 @@ fs.writeFileSync(path.join(workspace, "retained.png"), Buffer.from("iVBORw0KGgoA
 fs.writeFileSync(path.join(workspace, "loading.html"), '<body><p>Invented loading snapshot</p></body>');
 fs.writeFileSync(path.join(workspace, "snapshot.html"), '<body><p>Invented original snapshot</p><script>document.body.dataset.executed = "yes"</script></body>');
 fs.writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({ providers: {
-	"fake-claude": { name: "Fake Claude", baseUrl: "http://127.0.0.1:9", api: "anthropic-messages", models: [{ id: "claude-fake", name: "Claude Fake", input: ["text"], contextWindow: 200000, maxTokens: 32000 }] },
+	"fake-claude": { name: "Fake Claude", baseUrl: `http://127.0.0.1:${providerAddress.port}`, api: "anthropic-messages", models: [{ id: "claude-fake", name: "Claude Fake", input: ["text"], contextWindow: 200000, maxTokens: 32000 }] },
 } }), { mode: 0o600 });
 fs.writeFileSync(path.join(agentDir, "auth.json"), JSON.stringify({ "fake-claude": { type: "api_key", key: "synthetic-claude" } }), { mode: 0o600 });
 fs.writeFileSync(path.join(appDir, "custom-ai-profiles.json"), JSON.stringify({ version: 1, profiles: [
@@ -574,6 +595,53 @@ try {
 					assert((await operationResponse).ok(), `${operation} reaches its real route after the child closes`);
 				} finally { await operationPage.close().catch(() => {}); }
 			}
+			const checkpointRoom = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Invented Checkpoint Ordering", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
+			assert(checkpointRoom.status === 201, "the checkpoint ordering room is created");
+			const checkpointRoomId = String(checkpointRoom.body?.agent?.id ?? "");
+			assert((await api(`/api/persistent-agents/${encodeURIComponent(checkpointRoomId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: workspace, workspaceAccessMode: "localFiles" }) })).status === 200, "the checkpoint room uses the invented workspace");
+			const checkpointPage = await context.newPage();
+			try {
+				await checkpointPage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+				await checkpointPage.waitForLoadState("networkidle");
+				const checkpointDismiss = checkpointPage.locator(".whats-new-close");
+				if (await checkpointDismiss.count()) await checkpointDismiss.click();
+				await checkpointPage.locator(".persistent-agent-card").filter({ hasText: "Invented Checkpoint Ordering" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+				await checkpointPage.locator(".sidebar-workspace-files").waitFor();
+				const checkpointComposer = checkpointPage.locator("textarea").first();
+				await checkpointComposer.fill("Invented checkpoint request.");
+				await checkpointComposer.press("Enter");
+				await checkpointPage.getByText("Invented fake answer.", { exact: true }).waitFor({ timeout: 45_000 });
+				await waitUntil(async () => {
+					const status = await api(`/api/persistent-agents/${encodeURIComponent(checkpointRoomId)}/status`);
+					const threadId = status.body?.activeThread?.threadId;
+					if (!threadId || status.body?.activeThread?.inFlight !== false) return false;
+					const thread = await api(`/api/persistent-agents/${encodeURIComponent(checkpointRoomId)}/threads/${encodeURIComponent(threadId)}`);
+					return JSON.stringify(thread.body).includes("Invented fake answer.");
+				}, "the fake answer is saved before checkpointing");
+				const checkpointOpened = checkpointPage.waitForEvent("popup");
+				await checkpointPage.getByRole("button", { name: "Detach", exact: true }).click();
+				const checkpointChild = await checkpointOpened;
+				await checkpointChild.locator(".workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
+				await checkpointChild.evaluate(`window.__t20OriginalClose = window.close; window.__t20CloseCalls = 0; window.close = () => { window.__t20CloseCalls++; }`);
+				await checkpointPage.getByRole("button", { name: "Choose what to keep…", exact: true }).click();
+				const checkpointDialog = checkpointPage.getByRole("dialog", { name: "Remember this conversation" });
+				await checkpointDialog.getByRole("button", { name: "Generate memory proposal" }).click();
+				await checkpointDialog.getByText("Invented checkpoint point 12 is agreed for the synthetic workspace.", { exact: true }).waitFor({ timeout: 30_000 });
+				const threadGets: string[] = [];
+				checkpointPage.on("request", (request) => { if (request.method() === "GET" && request.url().includes("/threads/")) threadGets.push(request.url()); });
+				const approvalResponse = checkpointPage.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/checkpoint/approve") && response.ok());
+				await checkpointDialog.getByRole("button", { name: "Save to memory" }).click();
+				const approval = await (await approvalResponse).json();
+				const nextThread = String(approval.postCheckpoint?.activeThreadId || approval.runtimeBoundary?.newThreadId || "");
+				assert(nextThread, "checkpoint supplies the invented replacement conversation");
+				await waitUntil(() => checkpointChild.evaluate(`window.__t20CloseCalls > 0`), "checkpoint replacement requests child closure");
+				assert(!checkpointChild.isClosed() && !threadGets.some((url) => url.endsWith(`/threads/${encodeURIComponent(nextThread)}`)), "checkpoint save completes but the replacement waits for the actual child close");
+				const checkpointClosed = checkpointChild.waitForEvent("close");
+				await checkpointChild.evaluate(`window.close = window.__t20OriginalClose; window.close()`);
+				await checkpointClosed;
+				await waitUntil(() => Promise.resolve(threadGets.some((url) => url.endsWith(`/threads/${encodeURIComponent(nextThread)}`))), "checkpoint replacement reads the original target after child closure");
+				await checkpointDialog.getByText("Memory updated", { exact: true }).waitFor({ timeout: 20_000 });
+			} finally { await checkpointPage.close().catch(() => {}); }
 		} finally { await context.close(); }
 	} finally { await browser.close(); }
 	console.log("workspace-detached-documents-ui smoke: ok");
@@ -582,5 +650,6 @@ try {
 	throw error;
 } finally {
 	await stopSmokeServer(server);
+	await new Promise<void>((resolve) => provider.close(() => resolve()));
 	fs.rmSync(tempRoot, { recursive: true, force: true });
 }
