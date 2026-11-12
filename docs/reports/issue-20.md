@@ -68,7 +68,9 @@ R1/R2/R3/R4/R7/R9/R10/R11/R12/R14 child portions are specified in `workspace-det
 
 ## Files, tests, assumptions and debt
 
-Pending implementation.
+Interim inventory: the authored UI draft changes `apps/web-ui/src/App.tsx`, `docs-window.ts`, Markdown editor/sync/toolbar/search components, room settings/session components, workspace tree/tabs/preview components, frame entries, `in-room-chat.tsx`, and `styles/43-room-workspace.css`. The existing HTML preview response changes in `apps/web-server/src/room-settings-routes.ts`. The smoke changes and additions are `remember-job-dialog`, `sidebar-reopen-ui`, `two-window-room-ui`, `workspace-detached-documents-ui`, `workspace-documents-native-ui`, `workspace-file-preview`, `workspace-file-tabs-ui`, and `workspace-markdown-images-ui`; earlier checkpoints record which ran and which did not. The accepted spec, design, ADR and independent review documents came from the pinned signed source chain, not a prototype merge.
+
+All workspace contents, rooms, fake model values and test endpoints are invented and isolated; no captures are committed. Open debt/blockers include the C7 pre-readiness identity red pending Sascha's decision, absent sandbox-capable Electron evidence, incomplete native adapter/bounds and C4 deadlines, and every unexecuted child test. A final file/test inventory, final candidate SHA, full scope review and Controller-relayed Mac task are still required.
 
 ## Checkpoint: initial guarded-action admission
 
