@@ -2204,6 +2204,42 @@ try {
 			await waitUntil(async () => (await historyPage.title()).includes("Workshop"), "the first guarded history move reaches its original destination despite a competing move");
 			assert(await historyPage.locator(".workspace-tab").count() === 0, "the old room's document tabs do not follow the history destination");
 		} finally { await historyContext.close(); }
+		const lateSettingsRoom = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Invented Late Settings", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
+		assert(lateSettingsRoom.status === 201, "the late settings Memento room is created");
+		const lateSettingsId = String(lateSettingsRoom.body?.agent?.id ?? "");
+		assert((await api(`/api/persistent-agents/${encodeURIComponent(lateSettingsId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: folder, workspaceAccessMode: "localFiles" }) })).status === 200, "the late settings room uses the invented workspace");
+		const lateSettingsContext = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+		try {
+			const lateSettingsPage = await lateSettingsContext.newPage();
+			await lateSettingsPage.addInitScript({ content: `window.addEventListener("beforeunload", (event) => { event.preventDefault(); event.returnValue = ""; });` });
+			lateSettingsPage.on("dialog", (dialog) => { void dialog.dismiss(); });
+			await lateSettingsPage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+			await lateSettingsPage.waitForLoadState("networkidle");
+			const lateDismiss = lateSettingsPage.locator(".whats-new-close");
+			if (await lateDismiss.count()) await lateDismiss.click();
+			await lateSettingsPage.locator(".persistent-agent-card").filter({ hasText: "Invented Late Settings" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+			await lateSettingsPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "notes.md" }).waitFor();
+			await lateSettingsPage.getByRole("button", { name: "Room settings" }).click();
+			await lateSettingsPage.locator(".settings-dialog-nav-item").filter({ hasText: /^Conversation$/ }).first().click();
+			await lateSettingsPage.locator(".room-session-section").getByRole("button", { name: "Forget…" }).click();
+			let releaseLateSettings!: () => void, beginLateSettings!: () => void;
+			const lateSettingsReleased = new Promise<void>((resolve) => { releaseLateSettings = resolve; });
+			const lateSettingsStarted = new Promise<void>((resolve) => { beginLateSettings = resolve; });
+			await lateSettingsPage.route("**/memento", async (route) => { const response = await route.fetch(); beginLateSettings(); await lateSettingsReleased; await route.fulfill({ response }); });
+			await lateSettingsPage.getByRole("alertdialog", { name: "Forget this conversation and start fresh?" }).getByRole("button", { name: "Forget", exact: true }).click();
+			try {
+				await lateSettingsStarted;
+				await lateSettingsPage.route("**/workspace-files?*", (route) => route.fulfill({ status: 409, json: { code: "person_changed", error: "Invented identity change" } }));
+				await lateSettingsPage.evaluate(() => window.dispatchEvent(new Event("focus")));
+				await lateSettingsPage.getByText("Someone else is now signed in on this server.", { exact: true }).waitFor();
+				const originalHash = await lateSettingsPage.evaluate(() => location.hash);
+				const completed = lateSettingsPage.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/memento"));
+				releaseLateSettings();
+				assert((await completed).ok(), "the invented settings Memento completed before its answer was released");
+				await lateSettingsPage.waitForTimeout(500);
+				assert((await lateSettingsPage.evaluate(() => location.hash)) === originalHash && (await lateSettingsPage.title()).includes("Invented Late Settings"), "a late settings Memento response cannot clear an invalidated chat");
+			} finally { releaseLateSettings(); }
+		} finally { await lateSettingsContext.close(); }
 		const unloadRoom = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Larch", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
 		assert(unloadRoom.status === 201, "the invented close-test room is created");
 		const unloadWorkspace = await api("/api/persistent-agents/larch/workspace-default", { method: "PUT", body: JSON.stringify({ root: folder, workspaceAccessMode: "localFiles" }) });

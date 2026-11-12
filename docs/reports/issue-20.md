@@ -545,3 +545,7 @@ The detached smoke now separately specifies the real room-settings Memento callb
 ## Checkpoint: settings Memento child-close draft
 
 The room-settings Memento callback now revalidates its admitted target after its own confirmation and, when a child is registered, waits for that child's actual close before the existing Memento request. UI and scripts typechecks, UI asset build, and the attributed `workspace-file-tabs-ui` smoke passed (1/1), including the existing attached settings Memento cases. The new detached settings case remains unexecuted because Detach is disabled; this is not evidence of child ordering or full C4.
+
+## Checkpoint: stale settings Memento response regression
+
+A real attached-browser regression holds the settings Memento response after the invented server action, triggers `person_changed` through the existing workspace route, then releases the response and checks that the invalidated chat's hash and title remain unchanged. The attributed `workspace-file-tabs-ui` smoke failed specifically at that new assertion (0/1); this is a real red for the late settings callback, not a child/native result. The failure must be fixed before this step is complete.
