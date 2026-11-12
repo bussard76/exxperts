@@ -49,8 +49,44 @@ try {
 			assert(geometry.hit && geometry.region === "no-drag", `${room} cycle ${cycle + 1}: toggle hit and no-drag: ${JSON.stringify(geometry)}`);
 			await show.click();
 			await page.getByRole("button", { name: "Hide sidebar" }).waitFor();
-			if (room === "Folder Room") await page.locator(".sidebar-workspace-files").getByText("notes.md").waitFor();
+			if (room === "Folder Room") {
+				await page.locator(".sidebar-workspace-files").getByText("notes.md").waitFor();
+				const aligned = async () => page.evaluate(() => {
+					const slot = document.querySelector(".docs-tree-slot")!.getBoundingClientRect();
+					const tree = document.querySelector(".docs-tree-host")!.getBoundingClientRect();
+					return [slot.left - tree.left, slot.top - tree.top, slot.width - tree.width, slot.height - tree.height].every((difference) => Math.abs(difference) < 1);
+				});
+				await page.waitForFunction(() => {
+					const slot = document.querySelector(".docs-tree-slot")!.getBoundingClientRect();
+					const tree = document.querySelector(".docs-tree-host")!.getBoundingClientRect();
+					return [slot.left - tree.left, slot.top - tree.top, slot.width - tree.width, slot.height - tree.height].every((difference) => Math.abs(difference) < 1);
+				});
+				if (cycle === 0) {
+					const beforeWidth = await page.locator(".docs-tree-slot").evaluate((slot) => slot.getBoundingClientRect().width);
+					const resize = page.getByRole("separator", { name: "Resize sidebar" });
+					const rect = await resize.boundingBox();
+					assert(rect, "sidebar resize handle has bounds");
+					await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+					await page.mouse.down();
+					await page.mouse.move(rect.x + 70, rect.y + rect.height / 2, { steps: 5 });
+					await page.mouse.up();
+					await page.waitForFunction(() => {
+						const slot = document.querySelector(".docs-tree-slot")!.getBoundingClientRect();
+						const tree = document.querySelector(".docs-tree-host")!.getBoundingClientRect();
+						return [slot.left - tree.left, slot.top - tree.top, slot.width - tree.width, slot.height - tree.height].every((difference) => Math.abs(difference) < 1);
+					});
+					assert(await page.locator(".docs-tree-slot").evaluate((slot) => slot.getBoundingClientRect().width) > beforeWidth + 30, "the actual sidebar was resized");
+					assert(await aligned(), "tree remains aligned to the actual sidebar after resizing");
+				}
+			}
 			await page.getByRole("button", { name: "Hide sidebar" }).click();
+			if (room === "Folder Room") {
+				await page.waitForFunction(() => {
+					const tree = document.querySelector(".docs-tree-host")!.getBoundingClientRect();
+					return tree.width === 0 && tree.height === 0;
+				});
+				assert(!(await page.locator(".sidebar-workspace-files").getByText("notes.md").isVisible()), "collapsed sidebar does not leave tree entries visible");
+			}
 		}
 		await context.close();
 	}

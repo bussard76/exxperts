@@ -611,3 +611,7 @@ The real detached-document smoke now requires the attached tree to belong to the
 ## Checkpoint: one-container host draft
 
 The workspace tree and document pane now render under one retained portal node; transfers and recovery adopt that one node, while the attached tree is positioned over its existing measured sidebar slot. UI and scripts typechecks and the UI asset build passed; the attributed `sidebar-reopen-ui` and `workspace-markdown-images-ui` smokes passed 2/2. The `workspace-detached-documents-ui` initial same-container assertion now passes and the run stops at intentionally disabled Detach (1 expected failure of 3 cases); real child movement, exact editor identity, partial-recovery behavior, responsive/sidebar stacking and native integration remain unverified. The separate C7 navigation-before-readiness regression remains red and is under Architect review; this checkpoint does not close C3 or claim support.
+
+## Checkpoint: attached tree placement
+
+The `sidebar-reopen-ui` smoke now measures the single host's tree against its real sidebar slot, performs an actual sidebar resize, verifies alignment after the width changes, and checks that collapsed entries are not visible. The attributed smoke passed 1/1 in Chromium's Mac-look CSS mode; this is attached browser evidence, not Mac native or child movement evidence. The Controller reports the independent C7 identity review found the written pre-readiness guarantee applies while the test uses privileged parent authority; options await Sascha, and the regression remains red.
