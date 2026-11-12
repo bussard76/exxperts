@@ -50,7 +50,12 @@ try {
 			await show.click();
 			await page.getByRole("button", { name: "Hide sidebar" }).waitFor();
 			if (room === "Folder Room") {
-				await page.locator(".sidebar-workspace-files").getByText("notes.md").waitFor();
+				const treeNote = page.locator(".sidebar-workspace-files").getByText("notes.md");
+				await treeNote.waitFor();
+				await treeNote.hover();
+				await page.getByRole("tooltip").getByText("notes.md", { exact: true }).waitFor();
+				await page.mouse.move(700, 700);
+				await page.getByRole("tooltip").waitFor({ state: "hidden" });
 				const aligned = async () => page.evaluate(() => {
 					const slot = document.querySelector(".docs-tree-slot")!.getBoundingClientRect();
 					const tree = document.querySelector(".docs-tree-host")!.getBoundingClientRect();
