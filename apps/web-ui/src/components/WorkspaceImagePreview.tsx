@@ -9,8 +9,8 @@ const FIT_PADDING = 16;
 
 type View = { scale: number; x: number; y: number };
 
-export function WorkspaceImagePreview({ agentId, conversationId, path }: { agentId: string; conversationId: string; path: string }) {
-	const [src, setSrc] = useState<string | null>(null);
+export function WorkspaceImagePreview({ agentId, conversationId, path, retained }: { agentId: string; conversationId: string; path: string; retained: { imageUrl?: string; disposed?: boolean } }) {
+	const [src, setSrc] = useState<string | null>(() => retained.imageUrl ?? null);
 	const [error, setError] = useState(false);
 	const [percent, setPercent] = useState<number | null>(null);
 	const [dragging, setDragging] = useState(false);
@@ -25,20 +25,20 @@ export function WorkspaceImagePreview({ agentId, conversationId, path }: { agent
 	const drag = useRef<{ x: number; y: number } | null>(null);
 
 	useEffect(() => {
+		if (retained.imageUrl || retained.disposed) return;
 		const controller = new AbortController();
-		let objectUrl: string | null = null;
 		const query = new URLSearchParams({ conversationId, path });
 		void apiFetch(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-image?${query}`, { signal: controller.signal })
 			.then(async (response) => {
 				if (!response.ok) throw new Error("Image unavailable");
 				const blob = await response.blob();
-				if (controller.signal.aborted) return;
-				objectUrl = URL.createObjectURL(blob);
-				setSrc(objectUrl);
+				if (controller.signal.aborted || retained.disposed) return;
+				retained.imageUrl = URL.createObjectURL(blob);
+				setSrc(retained.imageUrl);
 			})
 			.catch(() => { if (!controller.signal.aborted) setError(true); });
-		return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
-	}, [agentId, conversationId, path]);
+		return () => controller.abort();
+	}, [agentId, conversationId, path, retained]);
 
 	// A picture narrower than the stage stays centred; a larger one cannot leave a gap at its edges.
 	function clampAxis(offset: number, content: number, stage: number): number {

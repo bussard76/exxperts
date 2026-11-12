@@ -445,3 +445,7 @@ During the preceding documentation checkpoint, Git's automatic background packin
 ## Checkpoint: owner-held text snapshot
 
 A successfully loaded text preview now also stores its formatted content in the existing owner-held tab record, which is removed on tab close and replaced on context change. UI and scripts typechecks, UI asset build, and the attributed filtered `workspace-file-tabs-ui` smoke passed (1/1). The child-first text test remains unexecuted because the detached smoke stops at its first unavailable Detach assertion; loading/error retention and every actual transfer/native requirement remain open, so this checkpoint does not establish C7 completion.
+
+## Checkpoint: owner-held image URL
+
+The existing tab record now retains the authorized image object URL and revokes it on tab close or context replacement; a disposed record cannot create a URL from a late fetch. UI typecheck and UI asset build passed, and the attributed filtered `workspace-file-tabs-ui` and `workspace-markdown-images-ui` smokes passed 2/2, including the existing changed-image/reopen and late-response cases. The child-first image case remains unexecuted at the missing Detach assertion, and this does not establish host-loss, all preview state, C4, or native lifecycle correctness.

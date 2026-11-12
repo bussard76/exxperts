@@ -558,7 +558,7 @@ export function App() {
 		| { kind: "taskRun"; taskId: string };
 	const [rightPane, setRightPane] = useState<RightPaneOccupant | null>(null);
 	const [workspaceTabs, setWorkspaceTabs] = useState<{ agentId: string; conversationId: string; paths: string[] } | null>(null);
-	const documentPreviewSnapshotsRef = useRef(new Map<string, { bytes: ArrayBuffer | null; text?: string }>());
+	const documentPreviewSnapshotsRef = useRef(new Map<string, { bytes: ArrayBuffer | null; text?: string; imageUrl?: string; disposed?: boolean }>());
 	const { host: documentHost, treeHost: documentTreeHost, mountHost: mountDocumentHost, mountTree: mountDocumentTreeHost } = useDocumentsHost();
 	// Synchronous mirror for the WS handlers (toast suppression / run-view swap
 	// read the pane at event time, not at closure-capture time).
@@ -975,6 +975,8 @@ export function App() {
 			if (!requestId || !captureDocumentAdmission(requestId, { kind: "close-tab", path })) return;
 		}
 		const remaining = paths.filter((item) => item !== path);
+		const preview = documentPreviewSnapshotsRef.current.get(path);
+		if (preview) { preview.disposed = true; if (preview.imageUrl) URL.revokeObjectURL(preview.imageUrl); }
 		documentPreviewSnapshotsRef.current.delete(path);
 		if (active === path) { documentFileSnapshotRef.current = null; documentFileSnapshotValidRef.current = false; documentLoadViewRef.current = null; }
 		setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths: remaining } : tabs);
@@ -1109,6 +1111,7 @@ export function App() {
 		if (typeof next !== "function") {
 			const key = next ? `${next.agentId}\u0000${next.conversationId}` : null;
 			if (checkpointContextRef.current.key !== key) {
+				for (const preview of documentPreviewSnapshotsRef.current.values()) { preview.disposed = true; if (preview.imageUrl) URL.revokeObjectURL(preview.imageUrl); }
 				documentPreviewSnapshotsRef.current = new Map();
 				documentPaneBindingRef.current = null;
 				documentFileSnapshotRef.current = null;
@@ -9214,7 +9217,7 @@ export function App() {
 						<WorkspacePdfPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />
 					</div>)}
 					{workspaceTabs.paths.filter((path) => /\.(png|jpe?g|gif|webp|svg)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceImage" || rightPane.path !== path}>
-						<WorkspaceImagePreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />
+						<WorkspaceImagePreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} />
 					</div>)}
 				</div>, documentHost)}
 				</>
