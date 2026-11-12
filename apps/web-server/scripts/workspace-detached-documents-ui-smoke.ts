@@ -175,6 +175,16 @@ try {
 				await child.locator(".workspace-tab[data-active='true']", { hasText: "invented.md" }).waitFor();
 				assert(!child.isClosed() && Number(writes) === 0, "child checkbox and internal preview link use the current document host without a write");
 			} finally { await page.evaluate(`window.setTimeout = window.__t20RealmTimeout; delete window.__t20RealmTimeout`); }
+			let childPrompts = 0, ownerPrompts = 0;
+			const onChildPrompt = (dialog: import("playwright").Dialog) => { childPrompts++; void dialog.dismiss(); };
+			const onOwnerPrompt = (dialog: import("playwright").Dialog) => { ownerPrompts++; void dialog.dismiss(); };
+			child.on("dialog", onChildPrompt);
+			page.on("dialog", onOwnerPrompt);
+			try {
+				await child.getByRole("button", { name: "Set or remove link", exact: true }).click();
+				await waitUntil(() => Promise.resolve(childPrompts + ownerPrompts > 0), "the link prompt opens");
+				assert(childPrompts === 1 && ownerPrompts === 0, "the link prompt belongs to the actual child window");
+			} finally { child.off("dialog", onChildPrompt); page.off("dialog", onOwnerPrompt); }
 			await child.getByRole("button", { name: "RAW", exact: true }).click();
 			const childRaw = child.getByRole("textbox", { name: "Raw Markdown source" });
 			const edited = "# Invented child draft\n\n";

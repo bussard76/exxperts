@@ -63,8 +63,10 @@ export function MarkdownEditorToolbar({ editor, canEdit, onSave, isSaving, isDir
 	}, [editor]);
 	const setLink = useCallback(() => {
 		if (!editor) return;
+		const hostWindow = editor.view.dom.ownerDocument.defaultView;
+		if (!hostWindow) return;
 		const oldHref = String(editor.getAttributes("link").href ?? "");
-		const href = window.prompt("Link URL", oldHref);
+		const href = hostWindow.prompt("Link URL", oldHref);
 		if (href === null) return;
 		if (href.trim()) run(() => editor.chain().focus().setLink({ href: href.trim() }).run());
 		else run(() => editor.chain().focus().unsetLink().run());

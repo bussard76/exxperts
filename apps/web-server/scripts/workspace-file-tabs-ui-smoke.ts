@@ -717,6 +717,13 @@ try {
 		await attachedSearch.getByPlaceholder("Find in file…").fill("Invented");
 		await attachedSearch.getByPlaceholder("Find in file…").press("Escape");
 		assert(await attachedSearch.count() === 0 && await tab("notes.md").count() === 1, "Escape closes Find without closing the attached document tab");
+		let attachedLinkPrompts = 0;
+		const dismissLinkPrompt = (dialog: import("playwright").Dialog) => { attachedLinkPrompts++; void dialog.dismiss(); };
+		page.on("dialog", dismissLinkPrompt);
+		try {
+			await page.getByRole("button", { name: "Set or remove link", exact: true }).click();
+			await waitUntil(() => Promise.resolve(attachedLinkPrompts === 1), "the attached editor link prompt opens once");
+		} finally { page.off("dialog", dismissLinkPrompt); }
 		await treeFile("photo.png").click();
 		const image = page.locator(".workspace-preview-image img");
 		await waitUntil(() => image.evaluate((img) => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth > 0).catch(() => false), "the image has loaded");
