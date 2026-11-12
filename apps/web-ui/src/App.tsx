@@ -200,6 +200,12 @@ type PreparedDocumentAdmission = Readonly<{
 	draftGeneration: number;
 }>;
 
+type PendingDocumentAction = Readonly<{
+	admission: DocumentAdmission;
+	continuation: () => void | Promise<unknown>;
+	result: { promise: Promise<unknown>; resolve: (result: unknown) => void } | null;
+}>;
+
 type OwnerDocumentWrite = { kind: "pending" | "unknown"; writeId: string; submittedDraftGeneration: number; agentId: string; conversationId: string; contextGeneration: number; path: string; content: string; revision: string; terminal: boolean };
 
 function allocateDocumentId(): string | null {
@@ -575,11 +581,9 @@ export function App() {
 	const documentFileSnapshotValidRef = useRef(false);
 	const documentLoadViewRef = useRef<{ agentId: string; conversationId: string; contextGeneration: number; path: string; phase: "loading" | "error"; error: string | null } | null>(null);
 	const markdownEditorRef = useRef<MarkdownEditorHandle | null>(null);
-	const markdownEditorAdmissionRef = useRef<DocumentAdmission | null>(null);
 	const preparedDocumentAdmissionRef = useRef<PreparedDocumentAdmission | null>(null);
 	const markdownEditorDirtyRef = useRef(false);
-	const markdownEditorPendingActionRef = useRef<(() => void | Promise<unknown>) | null>(null);
-	const markdownEditorActionResultRef = useRef<{ promise: Promise<unknown>; resolve: (result: unknown) => void } | null>(null);
+	const markdownEditorPendingActionRef = useRef<PendingDocumentAction | null>(null);
 	const markdownEditorCommitBypassRef = useRef<{ intent: DocumentLocalAction | null } | null>(null);
 	const markdownEditorCommittingRef = useRef(false);
 	const markdownEditorPromptTimerRef = useRef<number | null>(null);
@@ -747,7 +751,7 @@ export function App() {
 	}
 
 	function documentAdmissionIsCurrent(admission: DocumentAdmission): boolean {
-		if (markdownEditorAdmissionRef.current !== admission || admission.ownerId !== documentOwnerId || admission.ownerGeneration !== documentOwnerGenerationRef.current || admission.initialHostGeneration !== documentHostGenerationRef.current || unmountedRef.current || personHasChanged()) return false;
+		if (markdownEditorPendingActionRef.current?.admission !== admission || admission.ownerId !== documentOwnerId || admission.ownerGeneration !== documentOwnerGenerationRef.current || admission.initialHostGeneration !== documentHostGenerationRef.current || unmountedRef.current || personHasChanged()) return false;
 		const current = checkpointContextRef.current;
 		if (current.generation !== admission.roomGeneration) return false;
 		const context = admission.context;
@@ -789,15 +793,14 @@ export function App() {
 			void admitCleanMarkdownEditorAction(async () => action(), admission.requestId, intent);
 			return false;
 		}
-		markdownEditorAdmissionRef.current = admission;
 		preparedDocumentAdmissionRef.current = null;
-		markdownEditorPendingActionRef.current = () => {
+		const continuation = () => {
 			if (!preparedDocumentAdmissionIsCurrent(admission)) return Promise.resolve(false);
 			return action();
 		};
 		let resolve!: (result: unknown) => void;
 		const promise = new Promise<unknown>((done) => { resolve = done; });
-		markdownEditorActionResultRef.current = { promise, resolve };
+		markdownEditorPendingActionRef.current = { admission, continuation, result: { promise, resolve } };
 		const timer = window.setTimeout(() => {
 			if (markdownEditorPromptTimerRef.current === timer) cancelMarkdownEditorPrompt();
 		}, 120_000);
@@ -810,21 +813,22 @@ export function App() {
 	}
 
 	function completeMarkdownEditorPrompt(action: (() => void | Promise<unknown>) | null, prepareNow = true): Promise<unknown> {
+		const pending = markdownEditorPendingActionRef.current;
+		if (!pending || pending.continuation !== action) return Promise.resolve(false);
 		if (markdownEditorPromptTimerRef.current !== null) window.clearTimeout(markdownEditorPromptTimerRef.current);
 		markdownEditorPromptTimerRef.current = null;
 		markdownEditorCommittingRef.current = true;
-		const actionResult = markdownEditorActionResultRef.current;
+		const actionResult = pending.result;
 		const release = () => {
+			if (markdownEditorPendingActionRef.current !== pending) return;
 			markdownEditorPendingActionRef.current = null;
-			markdownEditorAdmissionRef.current = null;
 			preparedDocumentAdmissionRef.current = null;
-			markdownEditorActionResultRef.current = null;
 			markdownEditorPromptBusyRef.current = false;
 			markdownEditorCommittingRef.current = false;
 			markdownEditorRef.current?.setFence(false);
 			setMarkdownEditorFenced(false);
 		};
-		const admission = markdownEditorAdmissionRef.current;
+		const admission = pending.admission;
 		if (prepareNow && (!admission || !prepareDocumentAdmission(admission))) {
 			setMarkdownEditorPrompt(null);
 			setMarkdownEditorPromptBusy(false);
@@ -862,7 +866,6 @@ export function App() {
 		const requestId = documentOwnerId && (admittedId ?? allocateDocumentId());
 		const admission = requestId ? captureDocumentAdmission(requestId, intent) : null;
 		if (!admission) return Promise.resolve(false);
-		markdownEditorAdmissionRef.current = admission;
 		preparedDocumentAdmissionRef.current = null;
 		const continueAfterWrite = async () => {
 			const editor = markdownEditorRef.current;
@@ -873,7 +876,7 @@ export function App() {
 			markdownEditorCommitBypassRef.current = { intent: admission.intent };
 			try { return action(); } finally { markdownEditorCommitBypassRef.current = null; }
 		};
-		markdownEditorPendingActionRef.current = continueAfterWrite;
+		markdownEditorPendingActionRef.current = { admission, continuation: continueAfterWrite, result: null };
 		markdownEditorPromptBusyRef.current = true;
 		markdownEditorRef.current?.setFence(true);
 		setMarkdownEditorFenced(true);
@@ -882,10 +885,12 @@ export function App() {
 
 	async function saveMarkdownEditorAndContinue(): Promise<void> {
 		if (markdownEditorPromptBusyRef.current) return;
-		const action = markdownEditorPendingActionRef.current;
+		const pending = markdownEditorPendingActionRef.current;
+		const action = pending?.continuation ?? null;
 		markdownEditorPromptBusyRef.current = true;
 		setMarkdownEditorPromptBusy(true);
 		const saved = await markdownEditorRef.current?.save();
+		if (!pending || markdownEditorPendingActionRef.current !== pending) return;
 		if (!saved || markdownEditorCanceledSaveRef.current) {
 			if (markdownEditorPromptTimerRef.current !== null) window.clearTimeout(markdownEditorPromptTimerRef.current);
 			markdownEditorPromptTimerRef.current = null;
@@ -894,10 +899,8 @@ export function App() {
 			setMarkdownEditorPromptBusy(false);
 			setMarkdownEditorPrompt(null);
 			markdownEditorPendingActionRef.current = null;
-			markdownEditorAdmissionRef.current = null;
 			preparedDocumentAdmissionRef.current = null;
-			markdownEditorActionResultRef.current?.resolve(false);
-			markdownEditorActionResultRef.current = null;
+			pending?.result?.resolve(false);
 			markdownEditorRef.current?.setFence(false);
 			setMarkdownEditorFenced(false);
 			return;
@@ -907,21 +910,21 @@ export function App() {
 
 	async function discardMarkdownEditorAndContinue(): Promise<void> {
 		if (markdownEditorPromptBusyRef.current) return;
-		const action = markdownEditorPendingActionRef.current;
+		const pending = markdownEditorPendingActionRef.current;
+		const action = pending?.continuation ?? null;
 		const editor = markdownEditorRef.current;
 		markdownEditorPromptBusyRef.current = true;
 		setMarkdownEditorPromptBusy(true);
 		const settled = await editor?.settle();
+		if (!pending || markdownEditorPendingActionRef.current !== pending) return;
 		if (markdownEditorCanceledSaveRef.current || !settled || !editor?.discard()) {
 			if (markdownEditorPromptTimerRef.current !== null) window.clearTimeout(markdownEditorPromptTimerRef.current);
 			markdownEditorPromptTimerRef.current = null;
 			markdownEditorCanceledSaveRef.current = false;
 			markdownEditorPromptBusyRef.current = false;
 			markdownEditorPendingActionRef.current = null;
-			markdownEditorAdmissionRef.current = null;
 			preparedDocumentAdmissionRef.current = null;
-			markdownEditorActionResultRef.current?.resolve(false);
-			markdownEditorActionResultRef.current = null;
+			pending?.result?.resolve(false);
 			setMarkdownEditorPrompt(null);
 			setMarkdownEditorPromptBusy(false);
 			markdownEditorRef.current?.setFence(false);
@@ -937,11 +940,10 @@ export function App() {
 		markdownEditorPromptTimerRef.current = null;
 		if (markdownEditorPromptBusyRef.current) markdownEditorCanceledSaveRef.current = true;
 		else {
+			const pending = markdownEditorPendingActionRef.current;
 			markdownEditorPendingActionRef.current = null;
-			markdownEditorAdmissionRef.current = null;
 			preparedDocumentAdmissionRef.current = null;
-			markdownEditorActionResultRef.current?.resolve(false);
-			markdownEditorActionResultRef.current = null;
+			pending?.result?.resolve(false);
 			markdownEditorRef.current?.setFence(false);
 			setMarkdownEditorFenced(false);
 		}
@@ -7480,7 +7482,7 @@ export function App() {
 		const cleanAction = admitCleanMarkdownEditorAction(() => openPersistentAgent(target));
 		if (cleanAction) { await cleanAction; return; }
 		if (!guardMarkdownEditorAction(() => openPersistentAgent(target), "navigate")) return;
-		const admission = markdownEditorAdmissionRef.current;
+		const admission = markdownEditorPendingActionRef.current?.admission;
 		if (!admission || !preparedDocumentAdmissionIsCurrent(admission)) return;
 		const label = shownRoomName(target.displayName) || "Exxpert";
 		// The server decides a new conversation's model (the room's conversation
@@ -7635,7 +7637,7 @@ export function App() {
 		const cleanAction = admitCleanMarkdownEditorAction(() => openPersistentAgentResume(status));
 		if (cleanAction) { await cleanAction; return; }
 		if (!guardMarkdownEditorAction(() => openPersistentAgentResume(status), "navigate")) return;
-		const admission = markdownEditorAdmissionRef.current;
+		const admission = markdownEditorPendingActionRef.current?.admission;
 		if (!admission || !preparedDocumentAdmissionIsCurrent(admission)) return;
 		setPersistentResumeError(null);
 		clearBackgroundActivityBadge(status.id);
@@ -8410,7 +8412,7 @@ export function App() {
 			const alreadyPending = markdownEditorPendingActionRef.current !== null;
 			if (!guardMarkdownEditorAction(() => goHome(), "navigate")) {
 				if (alreadyPending) return false;
-				return Boolean(await markdownEditorActionResultRef.current?.promise);
+				return Boolean(await markdownEditorPendingActionRef.current?.result?.promise);
 			}
 		}
 		const originChat = persistentChat;
