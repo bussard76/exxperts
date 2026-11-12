@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Sidebar } from "./components/Sidebar";
 import { AttachmentsBrowser, AttachmentsEntry, type AttachmentsView } from "./components/attachments-panel";
 import { WorkspaceFileBrowser } from "./components/WorkspaceFileBrowser";
+import { useDocumentsHost } from "./docs-window";
 import { WorkspaceFileTabs } from "./components/WorkspaceFileTabs";
 import { PanelIcon } from "./sidebar-collapse";
 import { WorkspaceHtmlPreview } from "./components/WorkspaceHtmlPreview";
@@ -558,22 +559,7 @@ export function App() {
 	const [rightPane, setRightPane] = useState<RightPaneOccupant | null>(null);
 	const [workspaceTabs, setWorkspaceTabs] = useState<{ agentId: string; conversationId: string; paths: string[] } | null>(null);
 	const documentPreviewSnapshotsRef = useRef(new Map<string, { bytes: ArrayBuffer | null }>());
-	const [documentHost] = useState(() => {
-		const host = document.createElement("div");
-		host.className = "docs-host";
-		return host;
-	});
-	const [documentTreeHost] = useState(() => {
-		const host = document.createElement("div");
-		host.style.display = "contents";
-		return host;
-	});
-	const mountDocumentHost = useCallback((slot: HTMLDivElement | null) => {
-		if (slot) slot.appendChild(documentHost);
-	}, [documentHost]);
-	const mountDocumentTreeHost = useCallback((slot: HTMLDivElement | null) => {
-		if (slot) slot.appendChild(documentTreeHost);
-	}, [documentTreeHost]);
+	const { host: documentHost, treeHost: documentTreeHost, mountHost: mountDocumentHost, mountTree: mountDocumentTreeHost } = useDocumentsHost();
 	// Synchronous mirror for the WS handlers (toast suppression / run-view swap
 	// read the pane at event time, not at closure-capture time).
 	const rightPaneRef = useRef<RightPaneOccupant | null>(null);

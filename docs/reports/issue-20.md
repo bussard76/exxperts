@@ -434,4 +434,6 @@ Search-result scrolling now schedules on the editor document's window and re-eva
 
 Explicit external Markdown preview links now call the document pane's window. The attached file-tabs case substitutes a fake opener and intercepts the invented external address, confirming one opener call and zero network requests; the test-first detached case distinguishes child and owner fake openers but remains unexecuted while Detach is unavailable. UI and scripts typechecks, the UI-only build and attributed file-tabs and Markdown-images smokes passed 2/2. Cross-window opener behavior remains unproven.
 
+The existing stable content and tree elements now live in the private `docs-window.ts` host seam approved by ADR-0009; this is an attached-only refactor and adds no package export or child capability. UI and scripts typechecks, the UI-only build and attributed two-window and file-tabs smokes passed 2/2. Bootstrap, transfer, recovery and all native integration remain unimplemented.
+
 During the preceding documentation checkpoint, Git's automatic background packing printed that object `3fbc2b763829fc56b5972d52603241eee2b50ebe` was a tag rather than a commit; `git cat-file -t` confirmed it is a tag, while the signed commit and push succeeded. Its cause has not been established and is a repository-maintenance debt candidate, not product or gate evidence.
