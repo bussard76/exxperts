@@ -146,10 +146,23 @@ export function useDocumentsHost() {
 			return "moved";
 		} catch { return "unknown"; }
 	}, [host, treeHost]);
+	const recoverToOwner = useCallback((candidate: PreparedChild, current: () => boolean): "moved" | "refused" | "unknown" => {
+		const hostSlot = ownerHostSlot.current, treeSlot = ownerTreeSlot.current;
+		if ((prepared.current !== candidate && registered.current !== candidate) || !hostSlot || !treeSlot || !current()) return "refused";
+		try {
+			if (!candidate.child.closed && (candidate.child.opener !== window || candidate.child.document !== candidate.document)) return "unknown";
+			if ((host.ownerDocument !== document && host.ownerDocument !== candidate.document) || (treeHost.ownerDocument !== document && treeHost.ownerDocument !== candidate.document) || !current()) return "unknown";
+			treeSlot.appendChild(document.adoptNode(treeHost));
+			hostSlot.appendChild(document.adoptNode(host));
+			prepared.current = null;
+			registered.current = candidate;
+			return "moved";
+		} catch { return "unknown"; }
+	}, [host, treeHost]);
 	const childClosed = useCallback((candidate: PreparedChild) => {
 		if (registered.current !== candidate || !candidate.child.closed || host.ownerDocument !== document || treeHost.ownerDocument !== document) return false;
 		registered.current = null;
 		return true;
 	}, [host, treeHost]);
-	return { host, treeHost, mountHost, mountTree, beginChild, abortChild, moveToChild, moveToOwner, childClosed };
+	return { host, treeHost, mountHost, mountTree, beginChild, abortChild, moveToChild, moveToOwner, recoverToOwner, childClosed };
 }

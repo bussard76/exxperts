@@ -587,3 +587,7 @@ The inactive child path now records its owner/room incarnation and renders the b
 ## Checkpoint: partial-adoption recovery case
 
 The detached smoke now specifies a controlled real child adoption failure followed by a rollback failure, restoration of those fault seams, and chat Return recovering the same empty owner session without a write. Scripts typecheck passed; the attributed run still stops at disabled Detach, so the fault and recovery assertions did not execute.
+
+## Checkpoint: same-attempt partial-move recovery draft
+
+The inactive host path now retains the exact child and admission after an unknown partial move. The chat Return draft can revalidate that same owner/context and current retained editor state, re-adopt only those held surfaces, wait for the exact child's actual closure, and refuse any interrupted exit continuation. UI and scripts typechecks and UI asset build passed; the attributed detached smoke still stops at disabled Detach, so the new fault/recovery case did not execute. This is not evidence of C3 recovery, native closure, or support.

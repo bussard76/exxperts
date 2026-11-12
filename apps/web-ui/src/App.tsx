@@ -561,13 +561,14 @@ export function App() {
 	const [rightPane, setRightPane] = useState<RightPaneOccupant | null>(null);
 	const [workspaceTabs, setWorkspaceTabs] = useState<{ agentId: string; conversationId: string; paths: string[] } | null>(null);
 	const documentPreviewSnapshotsRef = useRef(new Map<string, { bytes: ArrayBuffer | null; text?: string; nextFrame?: { generation: number; id: string }; word?: { html: string; notice: boolean }; pdf?: { page: number; mimeType: "image/jpeg"; imageBase64: string; widthPx: number; heightPx: number }[]; spreadsheet?: { workbook: unknown; notices: string[] }; imageUrl?: string; disposed?: boolean }>());
-	const { host: documentHost, treeHost: documentTreeHost, mountHost: mountDocumentHost, mountTree: mountDocumentTreeHost, beginChild: beginDocumentChild, abortChild: abortDocumentChild, moveToChild: moveDocumentToChild, moveToOwner: moveDocumentToOwner, childClosed: documentChildClosed } = useDocumentsHost();
+	const { host: documentHost, treeHost: documentTreeHost, mountHost: mountDocumentHost, mountTree: mountDocumentTreeHost, beginChild: beginDocumentChild, abortChild: abortDocumentChild, moveToChild: moveDocumentToChild, moveToOwner: moveDocumentToOwner, recoverToOwner: recoverDocumentToOwner, childClosed: documentChildClosed } = useDocumentsHost();
 	type PreparedDocumentChild = NonNullable<Awaited<ReturnType<typeof beginDocumentChild>>>;
 	const documentChildRef = useRef<PreparedDocumentChild | null>(null);
 	const documentChildContextRef = useRef<DocumentContext | null>(null);
 	const [documentHostStatus, setDocumentHostStatus] = useState<"attached" | "opening" | "detached" | "returning" | "recovering">("attached");
 	const [documentHostError, setDocumentHostError] = useState<string | null>(null);
-	const documentHostCommitRef = useRef<{ admission: DocumentAdmission; child: PreparedDocumentChild; generation: number; direction: "detach" | "return" | "exit"; resolve?: (closed: boolean) => void } | null>(null);
+	const documentHostCommitRef = useRef<{ admission: DocumentAdmission; child: PreparedDocumentChild; generation: number; direction: "detach" | "return" | "exit" | "recovery"; resolve?: (closed: boolean) => void } | null>(null);
+	const documentRecoveryRef = useRef<{ admission: DocumentAdmission; child: PreparedDocumentChild; resolve?: (closed: boolean) => void } | null>(null);
 	const documentClosingRef = useRef(false);
 	// Synchronous mirror for the WS handlers (toast suppression / run-view swap
 	// read the pane at event time, not at closure-capture time).
@@ -804,7 +805,7 @@ export function App() {
 			if (!prepareDocumentAdmission(admission) || !prepareDocumentFrameSeeds(nextGeneration)) { abortDocumentChild(child); release(); return; }
 			const moved = moveDocumentToChild(child, () => preparedDocumentAdmissionIsCurrent(admission));
 			if (moved === "refused") { abortDocumentChild(child); release(); return; }
-			if (moved !== "moved") { setDocumentHostStatus("recovering"); return; }
+			if (moved !== "moved") { stageDocumentRecovery(admission, child); return; }
 			adopted = true;
 			const detachedPane = activeWorkspacePath(documentPaneRef.current) ? documentPaneRef.current : null;
 			documentPaneRef.current = detachedPane;
@@ -815,7 +816,7 @@ export function App() {
 			documentHostCommitRef.current = { admission, child, generation: nextGeneration, direction: "detach" };
 			documentHostGenerationRef.current = nextGeneration;
 			setDocumentHostGeneration(nextGeneration);
-		}).catch(() => { if (!adopted) { if (candidate) abortDocumentChild(candidate); release(true); } else setDocumentHostStatus("recovering"); });
+		}).catch(() => { if (!adopted) { if (candidate) abortDocumentChild(candidate); release(true); } else if (candidate) stageDocumentRecovery(admission, candidate); });
 	}
 
 	function prepareDocumentFrameSeeds(generation: number): boolean {
@@ -862,13 +863,52 @@ export function App() {
 		if (!Number.isSafeInteger(nextGeneration) || !documentAdmissionIsCurrent(admission) || (pane?.kind === "markdownEditor" && !(documentFileSnapshotValidRef.current && snapshot?.file.path === pane.path && snapshot.draftGeneration === documentDraftGenerationRef.current) && !(load?.path === pane.path)) || !prepareDocumentAdmission(admission) || !prepareDocumentFrameSeeds(nextGeneration)) { release(); return false; }
 		const moved = moveDocumentToOwner(child, () => preparedDocumentAdmissionIsCurrent(admission));
 		if (moved === "refused") { release(); return false; }
-		if (moved !== "moved") { setDocumentHostStatus("recovering"); return false; }
+		if (moved !== "moved") { stageDocumentRecovery(admission, child); return false; }
 		if (activeWorkspacePath(documentPaneRef.current)) setRightPane(documentPaneRef.current);
 		documentClosingRef.current = true;
 		documentHostCommitRef.current = { admission, child, generation: nextGeneration, direction: "return" };
 		documentHostGenerationRef.current = nextGeneration;
 		setDocumentHostGeneration(nextGeneration);
 		return true;
+	}
+
+	function stageDocumentRecovery(admission: DocumentAdmission, child: PreparedDocumentChild, resolve?: (closed: boolean) => void): void {
+		if (markdownEditorPendingActionRef.current?.admission !== admission || !admission.context) return;
+		if (!documentChildRef.current) {
+			const pane = activeWorkspacePath(documentPaneRef.current) ? documentPaneRef.current : null;
+			documentPaneRef.current = pane;
+			setDetachedDocumentPane(pane);
+			documentChildRef.current = child;
+			documentChildContextRef.current = admission.context;
+		}
+		documentRecoveryRef.current = { admission, child, resolve };
+		setDocumentHostStatus("recovering");
+	}
+
+	function recoverDocuments(): void {
+		const recovery = documentRecoveryRef.current;
+		const prepared = preparedDocumentAdmissionRef.current;
+		const priorCommit = documentHostCommitRef.current;
+		if (!recovery || !prepared || prepared.admission !== recovery.admission || markdownEditorPendingActionRef.current?.admission !== recovery.admission || documentChildRef.current !== recovery.child || !documentAdmissionContextIsCurrent(recovery.admission)) return;
+		const hostGeneration = documentHostGenerationRef.current;
+		const draftGeneration = documentDraftGenerationRef.current;
+		const pane = documentPaneRef.current;
+		const snapshot = documentFileSnapshotRef.current;
+		const load = documentLoadViewRef.current;
+		if (hostGeneration !== prepared.hostGeneration && !(priorCommit?.admission === recovery.admission && priorCommit.generation === hostGeneration)) return;
+		if (!Number.isSafeInteger(draftGeneration) || draftGeneration < 1 || (pane?.kind === "markdownEditor" && !(documentFileSnapshotValidRef.current && snapshot?.file.path === pane.path && snapshot.draftGeneration === draftGeneration) && !(load?.path === pane.path))) return;
+		const nextGeneration = hostGeneration + 1;
+		if (!Number.isSafeInteger(nextGeneration) || !prepareDocumentFrameSeeds(nextGeneration)) return;
+		const current = () => documentAdmissionContextIsCurrent(recovery.admission) && documentChildRef.current === recovery.child && documentHostGenerationRef.current === hostGeneration && documentDraftGenerationRef.current === draftGeneration;
+		const moved = recoverDocumentToOwner(recovery.child, current);
+		if (moved !== "moved") return;
+		if (activeWorkspacePath(documentPaneRef.current)) setRightPane(documentPaneRef.current);
+		documentClosingRef.current = true;
+		documentHostCommitRef.current = { admission: recovery.admission, child: recovery.child, generation: nextGeneration, direction: "recovery", resolve: recovery.resolve };
+		documentRecoveryRef.current = null;
+		setDocumentHostStatus("returning");
+		documentHostGenerationRef.current = nextGeneration;
+		setDocumentHostGeneration(nextGeneration);
 	}
 
 	function documentAdmissionContextIsCurrent(admission: DocumentAdmission): boolean {
@@ -911,7 +951,7 @@ export function App() {
 		if (!Number.isSafeInteger(nextGeneration) || !prepareDocumentFrameSeeds(nextGeneration)) return Promise.resolve(false);
 		const moved = moveDocumentToOwner(child, () => preparedDocumentAdmissionIsCurrent(pending.admission));
 		if (moved === "refused") return Promise.resolve(false);
-		if (moved !== "moved") { setDocumentHostStatus("recovering"); return new Promise(() => {}); }
+		if (moved !== "moved") return new Promise<boolean>((resolve) => stageDocumentRecovery(pending.admission, child, resolve));
 		setDocumentHostStatus("returning");
 		if (activeWorkspacePath(documentPaneRef.current)) setRightPane(documentPaneRef.current);
 		documentClosingRef.current = true;
@@ -962,6 +1002,11 @@ export function App() {
 			setDetachedDocumentPane(null);
 			documentClosingRef.current = false;
 			window.clearInterval(poll);
+			if (commit.direction === "recovery") {
+				release();
+				commit.resolve?.(false);
+				return;
+			}
 			if (commit.direction === "exit") {
 				const prepared = preparedDocumentAdmissionRef.current;
 				const valid = Boolean(prepared && prepared.admission === commit.admission && documentAdmissionContextIsCurrent(commit.admission) && documentHostGenerationRef.current === commit.generation && prepared.draftGeneration === documentDraftGenerationRef.current);
@@ -9584,8 +9629,8 @@ export function App() {
 							{documentHostError && documentHostStatus === "attached" && <span className="docs-window-error" role="status">{documentHostError}</span>}
 							{documentHostStatus !== "attached" && <span className="docs-window-actions">
 								<span>{persistentChat.displayName} · {documentHostStatus === "opening" ? "Opening documents…" : documentHostStatus === "returning" ? "Returning documents…" : documentHostStatus === "recovering" ? "Documents unavailable" : "Documents in another window"}</span>
-								<button type="button" disabled={!documentChildRef.current || !!markdownEditorPendingActionRef.current} onClick={focusDocumentChild}>Show documents</button>
-								<button type="button" disabled={!documentChildRef.current || !!markdownEditorPendingActionRef.current} onClick={() => { returnDocuments(); }}>Return</button>
+								<button type="button" disabled={!documentChildRef.current || (!!markdownEditorPendingActionRef.current && !(documentHostStatus === "recovering" && documentRecoveryRef.current?.admission === markdownEditorPendingActionRef.current.admission))} onClick={focusDocumentChild}>Show documents</button>
+								<button type="button" disabled={!documentChildRef.current || (!!markdownEditorPendingActionRef.current && !(documentHostStatus === "recovering" && documentRecoveryRef.current?.admission === markdownEditorPendingActionRef.current.admission))} onClick={() => { if (documentHostStatus === "recovering") recoverDocuments(); else returnDocuments(); }}>Return</button>
 							</span>}
 							{rightPaneVisible && !artifactPaneMaximized && <button className="icon-btn icon-btn-square right-pane-toggle" aria-label={rightCollapsed ? "Show right pane" : "Hide right pane"} aria-expanded={!rightCollapsed} title={rightCollapsed ? "Show right pane" : "Hide right pane"} onClick={() => setRightPaneCollapsed((collapsed) => !collapsed)}><PanelIcon side="right" /></button>}
 						</>
