@@ -119,10 +119,43 @@ try {
 		const saveAbort = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 14, ack: 13, items: [{ kind: "native-abort", binding, correlation }] }), { binding: first.status.binding, correlation: savedGuard.result.correlation });
 		assert(saveAbort?.items?.[0]?.kind === "abort-ack", "the prepared Save action remains reserved until its matching abort");
 	} finally { releaseSave(); await page.unroute("**/workspace-markdown?*"); }
+	await editor.click();
+	await page.keyboard.type(" another frozen edit");
+	const beforeAbortSave = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 15, ack: 14, items: [] }), { binding: first.status.binding });
+	const abortingPrepare = await page.evaluate(({ binding, stamp }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 16, ack: 15, items: [{ kind: "native-prepare", binding, nativeRequestId: "88888888-8888-4888-8888-888888888888", observedStamp: stamp, disposition: "hide" }] }), { binding: first.status.binding, stamp: beforeAbortSave.status.stamp });
+	assert(abortingPrepare?.sequence === 16 && abortingPrepare.items?.length === 0, "a new dirty preparation awaits a decision");
+	const initialCorrelation = { requestId: "88888888-8888-4888-8888-888888888888", stamp: beforeAbortSave.status.stamp, action: { kind: "chat-close", disposition: "hide" } };
+	let beginAbortSave!: () => void, releaseAbortSave!: () => void;
+	const abortSaveStarted = new Promise<void>((resolve) => { beginAbortSave = resolve; });
+	const abortSaveReleased = new Promise<void>((resolve) => { releaseAbortSave = resolve; });
+	await page.route("**/workspace-markdown?*", async (route) => {
+		if (route.request().method() !== "PUT") return route.continue();
+		const response = await route.fetch();
+		beginAbortSave();
+		await abortSaveReleased;
+		await route.fulfill({ response });
+	});
+	try {
+		await page.getByRole("dialog", { name: "Unsaved Markdown changes" }).getByRole("button", { name: "Save and continue" }).click();
+		await abortSaveStarted;
+		const abortInput = { version: 1, nativeSessionId: first.status.binding.nativeSessionId, sequence: 17, ack: 16, items: [{ kind: "native-abort", binding: first.status.binding, correlation: initialCorrelation }] };
+		const earlyAbort = await page.evaluate((input) => (window as any).__exxpertsDocuments.step(input), abortInput);
+		assert(earlyAbort == null, "abort is not acknowledged while the actual sent write remains unresolved");
+		const changedAttempt = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 17, ack: 16, items: [] }), { binding: first.status.binding });
+		assert(changedAttempt == null, "a changed message cannot replace the unacknowledged abort");
+		await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+		assert(await page.getByRole("navigation", { name: "Room navigation" }).isVisible(), "the owner remains reserved while abort acknowledgement is missing");
+		releaseAbortSave();
+		await page.locator(".markdown-editor-status").getByText("Saved", { exact: true }).waitFor();
+		const lateAbort = await page.evaluate((input) => (window as any).__exxpertsDocuments.step(input), abortInput);
+		assert(lateAbort?.items?.[0]?.kind === "abort-ack" && lateAbort.items[0].correlation.requestId === initialCorrelation.requestId, "the late matching abort acknowledges the original attempt without reviving its continuation");
+		const afterAbort = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 18, ack: 17, items: [] }), { binding: first.status.binding });
+		assert(afterAbort?.items?.length === 0, "a late Save result does not publish an allow after the abort");
+	} finally { releaseAbortSave(); await page.unroute("**/workspace-markdown?*"); }
 	await page.route("**/workspace-files?*", (route) => route.fulfill({ status: 409, json: { code: "person_changed", error: "Invented identity change" } }));
 	await page.evaluate(() => window.dispatchEvent(new Event("focus")));
 	await page.getByText("Someone else is now signed in on this server.", { exact: true }).waitFor();
-	const invalidated = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 15, ack: 14, items: [] }), { binding: first.status.binding });
+	const invalidated = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 19, ack: 18, items: [] }), { binding: first.status.binding });
 	assert(invalidated == null, "a changed person cannot receive another owner status");
 	console.log("owner endpoint browser supplement: hello, replay and invalid inputs passed");
 } catch (caught) { error = caught; }

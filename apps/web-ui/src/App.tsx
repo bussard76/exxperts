@@ -1069,7 +1069,7 @@ export function App() {
 		let lastInput = "";
 		let lastSequence = 0;
 		let lastOutput: unknown = null;
-		let nativePrepared: { admission: DocumentAdmission; correlation: { requestId: string; stamp: DocumentContext & { hostGeneration: number; draftGeneration: number }; action: { kind: "chat-close"; disposition: "hide" | "quit" | "update" | "reload" } }; phase: "preparing" | "prepared" | "refused" } | null = null;
+		let nativePrepared: { admission: DocumentAdmission; correlation: { requestId: string; stamp: DocumentContext & { hostGeneration: number; draftGeneration: number }; action: { kind: "chat-close"; disposition: "hide" | "quit" | "update" | "reload" } }; phase: "preparing" | "prepared" | "refused" | "aborting" } | null = null;
 		let outbound: unknown[] = [];
 		const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 		const matchesStamp = (value: unknown, expected: DocumentContext & { hostGeneration: number; draftGeneration: number }): boolean => {
@@ -1099,6 +1099,7 @@ export function App() {
 				items = [{ kind: "hello", ownerId: documentOwnerId, ownerGeneration: documentOwnerGenerationRef.current }];
 			} else {
 				if (envelope.nativeSessionId !== nativeSessionId || envelope.sequence !== lastSequence + 1 || envelope.ack !== lastSequence) return null;
+				if (nativePrepared?.phase === "aborting" && (envelope.items.length !== 1 || !envelope.items[0] || typeof envelope.items[0] !== "object" || (envelope.items[0] as Record<string, unknown>).kind !== "native-abort")) return null;
 				if (envelope.items.length === 0) { items = outbound; outbound = []; }
 				else {
 					const item = envelope.items[0];
@@ -1178,7 +1179,16 @@ export function App() {
 						const correlation = request.correlation as Record<string, unknown>;
 						const action = correlation.action;
 						if (Object.keys(correlation).sort().join(",") !== "action,requestId,stamp" || correlation.requestId !== nativePrepared.correlation.requestId || !matchesStamp(correlation.stamp, nativePrepared.correlation.stamp) || !action || typeof action !== "object" || Array.isArray(action) || Object.keys(action).sort().join(",") !== "disposition,kind" || (action as Record<string, unknown>).kind !== "chat-close" || (action as Record<string, unknown>).disposition !== nativePrepared.correlation.action.disposition || markdownEditorPendingActionRef.current?.admission !== nativePrepared.admission) return null;
-						if (markdownEditorPromptBusyRef.current || documentSaveInFlightRef.current || documentKeepMineInFlightRef.current || documentWriteRef.current) return null;
+						if (markdownEditorPromptBusyRef.current || documentSaveInFlightRef.current || documentKeepMineInFlightRef.current || documentWriteRef.current) {
+							nativePrepared.phase = "aborting";
+							outbound = [];
+							if (markdownEditorPromptTimerRef.current !== null) window.clearTimeout(markdownEditorPromptTimerRef.current);
+							markdownEditorPromptTimerRef.current = null;
+							markdownEditorCanceledSaveRef.current = true;
+							setMarkdownEditorPrompt(null);
+							setMarkdownEditorPromptBusy(false);
+							return null;
+						}
 						const aborted = nativePrepared.correlation;
 						if (markdownEditorPromptTimerRef.current !== null) window.clearTimeout(markdownEditorPromptTimerRef.current);
 						markdownEditorPromptTimerRef.current = null;

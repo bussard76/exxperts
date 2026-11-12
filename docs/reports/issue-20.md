@@ -776,3 +776,7 @@ The owner endpoint now enters the existing dirty-document guard for a matching n
 ## Checkpoint: native owner Save supplement
 
 The supplemental owner smoke now holds the actual invented Markdown PUT response during a native prepare, verifies that no allow is emitted while it is pending, and then checks the confirmed source and newer prepared draft stamp before a matching abort. The attributed browser run passed 1/1. This exercises the real UI editor and owner endpoint with a controlled requester, not the native shell, and does not yet establish native close/commit or child behavior.
+
+## Checkpoint: abort during a sent Save
+
+The real UI owner test held an invented Markdown PUT, sent native abort before its response, and initially failed because the later Save replaced the requester's original correlation with a prepared allow. The owner now marks that attempt as aborting, keeps the arbiter and editor fenced, rejects changed messages while acknowledgement is missing, and acknowledges only the original matching abort after the sent write settles; it does not publish a late allow. The attributed `workspace-documents-owner-ui` browser supplement passed 1/1 after the fix, including competing Home and a subsequent empty poll; UI and scripts typechecks and UI asset build passed. This is not yet a shell-to-owner/native close round trip, and unknown-write, child and native commit paths remain open.
