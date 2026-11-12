@@ -68,6 +68,7 @@ try {
 		const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
 		try {
 			const page = await context.newPage();
+			await page.addInitScript({ content: `(() => { const original = window.setInterval; window.__t20RestoreInterval = () => { window.setInterval = original; }; window.setInterval = (callback, delay, ...args) => original(callback, delay === 2000 ? 30000 : delay, ...args); })();` });
 			let writes = 0;
 			page.on("request", (request) => { if (request.method() === "PUT" && request.url().includes("/workspace-markdown?")) writes++; });
 			await page.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
@@ -90,6 +91,11 @@ try {
 			await detach.click();
 			const emptyChild = await emptyOpened;
 			assert(await emptyChild.locator(".workspace-tab").count() === 0, "an empty document session has no invented tab");
+			await emptyChild.locator(".workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
+			fs.writeFileSync(path.join(workspace, "focused.md"), "# Invented focus refresh\n");
+			await emptyChild.evaluate(() => window.dispatchEvent(new Event("focus")));
+			await emptyChild.locator(".workspace-file-browser-file", { hasText: "focused.md" }).waitFor({ timeout: 1500 });
+			await page.evaluate(() => (window as any).__t20RestoreInterval());
 			try {
 				await emptyChild.locator(".workspace-file-browser-file", { hasText: "invented.md" }).click();
 				await loadStarted;

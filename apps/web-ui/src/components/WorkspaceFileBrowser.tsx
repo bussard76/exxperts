@@ -6,6 +6,7 @@ import { useHoverTooltip } from "./workspace-hover-tooltip";
 interface Props {
 	agentId: string;
 	conversationId: string;
+	hostGeneration: number;
 	selectedPath?: string | null;
 	onFileSelect?: (entry: WorkspaceFileEntry) => void;
 }
@@ -13,7 +14,8 @@ interface Props {
 const ROOT_PATH = "";
 const FILE_TREE_REFRESH_MS = 2000;
 
-export function WorkspaceFileBrowser({ agentId, conversationId, selectedPath = null, onFileSelect }: Props) {
+export function WorkspaceFileBrowser({ agentId, conversationId, hostGeneration, selectedPath = null, onFileSelect }: Props) {
+	const rootRef = useRef<HTMLElement | null>(null);
 	const [root, setRoot] = useState<{ displayLabel: string; basename: string } | null>(null);
 	const fileButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 	const previousSelectedPathRef = useRef<string | null>(selectedPath);
@@ -42,10 +44,13 @@ export function WorkspaceFileBrowser({ agentId, conversationId, selectedPath = n
 	}, [agentId, conversationId]);
 
 	useEffect(() => {
+		const hostDocument = rootRef.current?.ownerDocument;
+		const hostWindow = hostDocument?.defaultView;
+		if (!hostDocument || !hostWindow) return;
 		let active = true;
 		const generation = generationRef.current;
 		const refreshLoadedDirectories = async (): Promise<void> => {
-			if (!active || document.visibilityState === "hidden" || refreshInFlightRef.current) return;
+			if (!active || hostDocument.visibilityState === "hidden" || refreshInFlightRef.current) return;
 			const paths = Object.keys(entriesByPathRef.current);
 			if (paths.length === 0) return;
 			refreshInFlightRef.current = true;
@@ -56,24 +61,26 @@ export function WorkspaceFileBrowser({ agentId, conversationId, selectedPath = n
 			}
 		};
 		const onFocus = () => { void refreshLoadedDirectories(); };
-		const onVisibilityChange = () => { if (document.visibilityState === "visible") void refreshLoadedDirectories(); };
+		const onVisibilityChange = () => { if (hostDocument.visibilityState === "visible") void refreshLoadedDirectories(); };
 		const timer = window.setInterval(() => { void refreshLoadedDirectories(); }, FILE_TREE_REFRESH_MS);
-		window.addEventListener("focus", onFocus);
-		document.addEventListener("visibilitychange", onVisibilityChange);
+		hostWindow.addEventListener("focus", onFocus);
+		hostDocument.addEventListener("visibilitychange", onVisibilityChange);
 		return () => {
 			active = false;
 			window.clearInterval(timer);
-			window.removeEventListener("focus", onFocus);
-			document.removeEventListener("visibilitychange", onVisibilityChange);
+			hostWindow.removeEventListener("focus", onFocus);
+			hostDocument.removeEventListener("visibilitychange", onVisibilityChange);
 		};
-	}, [agentId, conversationId]);
+	}, [agentId, conversationId, hostGeneration]);
 
 	useEffect(() => {
 		const previousPath = previousSelectedPathRef.current;
 		previousSelectedPathRef.current = selectedPath;
 		if (!previousPath || selectedPath) return;
-		const frame = window.requestAnimationFrame(() => fileButtonRefs.current[previousPath]?.focus());
-		return () => window.cancelAnimationFrame(frame);
+		const hostWindow = fileButtonRefs.current[previousPath]?.ownerDocument.defaultView;
+		if (!hostWindow) return;
+		const frame = hostWindow.requestAnimationFrame(() => fileButtonRefs.current[previousPath]?.focus());
+		return () => hostWindow.cancelAnimationFrame(frame);
 	}, [selectedPath]);
 
 	async function loadDirectory(relativePath: string, generation = generationRef.current, isRoot = false, background = false): Promise<void> {
@@ -170,7 +177,7 @@ export function WorkspaceFileBrowser({ agentId, conversationId, selectedPath = n
 	}
 
 	return (
-		<section className="sidebar-workspace-files" aria-label="Workspace files">
+		<section ref={rootRef} className="sidebar-workspace-files" aria-label="Workspace files">
 			<header className="workspace-file-browser-head">
 				<span className="workspace-file-browser-head-label">{root?.displayLabel || root?.basename || "Workspace"}</span>
 				{root && <span className="workspace-file-browser-count">{entriesByPath[ROOT_PATH]?.length ?? 0}</span>}

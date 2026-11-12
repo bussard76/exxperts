@@ -9315,7 +9315,7 @@ export function App() {
 					appearance={appearance}
 					onSetAppearance={setAppearance}
 					onSettings={openSettings}
-					workspaceSlot={persistentChat ? <><div ref={mountDocumentTreeHost} style={{ display: "contents" }} />{createPortal(<WorkspaceFileBrowser agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} selectedPath={activeWorkspacePath(rightPane)} onFileSelect={openWorkspaceMarkdown} />, documentTreeHost)}</> : undefined}
+					workspaceSlot={persistentChat ? <><div ref={mountDocumentTreeHost} style={{ display: "contents" }} />{createPortal(<WorkspaceFileBrowser agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} hostGeneration={documentHostGenerationRef.current} selectedPath={activeWorkspacePath(rightPane)} onFileSelect={openWorkspaceMarkdown} />, documentTreeHost)}</> : undefined}
 					assetsSlot={persistentChat ? <AttachmentsEntry count={attachmentRows.length} open={attachmentsView !== null} onClick={toggleAttachments} /> : undefined}
 				/>
 			}
