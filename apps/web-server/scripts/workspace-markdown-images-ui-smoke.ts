@@ -544,6 +544,13 @@ try {
 		await tree.locator(".workspace-file-browser-file", { hasText: "guide.md" }).dragTo(composer);
 		await waitUntil(async () => (await composer.inputValue()).includes("docs/guide.md"), "the dragged path is in the composer");
 		console.log("  ok  a file dragged onto the composer inserts its path");
+		const afterRealDrag = await composer.inputValue();
+		await composer.evaluate((node) => {
+			const transfer = new DataTransfer();
+			transfer.setData("application/x-exxperts-workspace-path", "docs/guide.md");
+			node.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+		});
+		assert(await composer.inputValue() === afterRealDrag, "an unrelated forged drop cannot reuse a completed workspace drag");
 
 		const conversationId = imageUrl.searchParams.get("conversationId")!;
 		const treeRoute = (relative: string) => `/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-files?${new URLSearchParams({ conversationId, path: relative })}`;

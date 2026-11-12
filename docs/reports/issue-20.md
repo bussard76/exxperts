@@ -591,3 +591,7 @@ The detached smoke now specifies a controlled real child adoption failure follow
 ## Checkpoint: same-attempt partial-move recovery draft
 
 The inactive host path now retains the exact child and admission after an unknown partial move. The chat Return draft can revalidate that same owner/context and current retained editor state, re-adopt only those held surfaces, wait for the exact child's actual closure, and refuse any interrupted exit continuation. UI and scripts typechecks and UI asset build passed; the attributed detached smoke still stops at disabled Detach, so the new fault/recovery case did not execute. This is not evidence of C3 recovery, native closure, or support.
+
+## Checkpoint: workspace drag provenance regression
+
+The attached `workspace-markdown-images-ui` smoke first performs the real existing tree-to-composer drag, then attempts an unrelated forged drop with the same MIME and path. The attributed run failed specifically because the forged drop inserted again (0/1), while the real drag succeeded. This is an attached negative regression only; it is not cross-window or native drag evidence and must be fixed.
