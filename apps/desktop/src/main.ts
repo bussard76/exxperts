@@ -9,7 +9,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
-import { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, screen, shell, Tray } from "electron";
 import { payloadVersion, PORT, probePort, SERVER_ORIGIN, ServerHandle, serverRoot, stateHome, stateProfilesModule, takeOverPort } from "./server";
 import { bootWindowOpen, bootWindowWasShown, closeBootWindow, setBootStatus, showBootWindow } from "./boot-window";
 import { showHealthCheck, showTextWindow } from "./health";
@@ -415,7 +415,11 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
             displayEvents.removeListener("display-removed", onDisplayChange);
             displayEvents.removeListener("display-metrics-changed", onDisplayChange);
           } catch {}
-          if (popup?.child === child) popup.child = null;
+          if (popup?.child === child) {
+            popup.child = null;
+            popup = null;
+            documentPopupPermits.delete(win);
+          }
         });
       }
     }

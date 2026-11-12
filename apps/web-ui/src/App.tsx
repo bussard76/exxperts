@@ -567,6 +567,7 @@ export function App() {
 	const documentChildRef = useRef<PreparedDocumentChild | null>(null);
 	const documentChildContextRef = useRef<DocumentContext | null>(null);
 	const nativePopupRef = useRef<{ request: { requestId: string; stamp: DocumentContext & { hostGeneration: number; draftGeneration: number }; direction: "detach" }; permit: { frameName: string; permitId: string } | null; expiresAt: number; registered: boolean; disarmed: boolean } | null>(null);
+	const [nativePopupReady, setNativePopupReady] = useState(false);
 	const [documentHostStatus, setDocumentHostStatus] = useState<"attached" | "opening" | "detached" | "returning" | "recovering">("attached");
 	const [documentHostError, setDocumentHostError] = useState<string | null>(null);
 	const documentHostCommitRef = useRef<{ admission: DocumentAdmission; child: PreparedDocumentChild; generation: number; direction: "detach" | "return" | "exit" | "recovery"; resolve?: (closed: boolean) => void } | null>(null);
@@ -776,9 +777,14 @@ export function App() {
 
 	function detachDocuments(): void {
 		if (markdownEditorPendingActionRef.current || documentChildRef.current || !persistentChat) return;
-		const requestId = allocateDocumentId();
+		const nativeShell = Object.getOwnPropertyDescriptor(window, "__exxpertsDocuments") !== undefined;
+		const armed = nativeShell ? nativePopupRef.current : null;
+		if (nativeShell && (!armed?.permit || armed.disarmed || armed.registered || performance.now() >= armed.expiresAt)) return;
+		const requestId = armed?.request.requestId ?? allocateDocumentId();
 		const admission = requestId ? captureDocumentAdmission(requestId, { kind: "transfer", direction: "detach" }) : null;
 		if (!admission?.context) return;
+		if (armed && (!armed.permit || !["ownerId", "ownerGeneration", "roomId", "conversationId", "roomGeneration"].every((key) => armed.request.stamp[key as keyof typeof armed.request.stamp] === admission.context?.[key as keyof typeof admission.context]) || armed.request.stamp.hostGeneration !== admission.initialHostGeneration)) return;
+		setNativePopupReady(false);
 		markdownEditorPendingActionRef.current = { admission, continuation: () => {}, result: null };
 		preparedDocumentAdmissionRef.current = null;
 		setDocumentHostStatus("opening");
@@ -794,12 +800,19 @@ export function App() {
 			setMarkdownEditorFenced(false);
 			if (current) { setDocumentHostStatus("attached"); if (failed) setDocumentHostError("Documents could not be opened in another window."); }
 		};
-		const name = `exxperts-documents-${admission.ownerId}-${admission.roomGeneration}-${admission.requestId}`;
+		const name = armed?.permit?.frameName ?? `exxperts-documents-${admission.ownerId}-${admission.roomGeneration}-${admission.requestId}`;
 		let adopted = false;
 		let candidate: PreparedDocumentChild | null = null;
-		void beginDocumentChild(name, `${persistentChat.displayName} · Documents`).then((child) => {
+		void beginDocumentChild(name, `${persistentChat.displayName} · Documents`).then(async (child) => {
 			if (!child) { release(true); return; }
 			candidate = child;
+			if (armed) {
+				const deadline = performance.now() + 2_000;
+				while (nativePopupRef.current === armed && !armed.registered && !armed.disarmed && performance.now() < deadline) await new Promise((resolve) => window.setTimeout(resolve, 20));
+				if (nativePopupRef.current !== armed || !armed.registered || child.child.name !== armed.permit?.frameName || child.child.opener !== window) {
+					abortDocumentChild(child); release(true); return;
+				}
+			}
 			const pane = documentPaneRef.current;
 			const snapshot = documentFileSnapshotRef.current;
 			const load = documentLoadViewRef.current;
@@ -1019,7 +1032,6 @@ export function App() {
 				setDocumentHostStatus("detached");
 				const poll = window.setInterval(() => { try { if (commit.child.child.closed) returnDocuments(); } catch {} }, 100);
 				release();
-				try { commit.child.child.focus(); } catch {}
 				return () => { window.clearInterval(poll); try { commit.child.child.removeEventListener("beforeunload", beforeUnload); } catch {} commit.child.returnButton.removeEventListener("click", onReturn); };
 			} catch { setDocumentHostStatus("recovering"); return; }
 		}
@@ -1036,6 +1048,10 @@ export function App() {
 				release();
 				commit.resolve?.(false);
 				return;
+			}
+			if (commit.direction === "return") {
+				nativePopupRef.current = null;
+				setNativePopupReady(false);
 			}
 			if (commit.direction === "exit") {
 				const prepared = preparedDocumentAdmissionRef.current;
@@ -1065,7 +1081,7 @@ export function App() {
 	// Only the staged hello, preparation and abort paths are accepted here;
 	// unsupported native requests fail closed.
 	useEffect(() => {
-		if (!documentOwnerId || Object.getOwnPropertyDescriptor(window, "__exxpertsDocuments")) return;
+		if (!documentOwnerId || !document.documentElement.classList.contains("desktop-app") || Object.getOwnPropertyDescriptor(window, "__exxpertsDocuments")) return;
 		let nativeSessionId: string | null = null;
 		let lastInput = "";
 		let lastSequence = 0;
@@ -1093,7 +1109,7 @@ export function App() {
 			let serialized: string;
 			try { serialized = JSON.stringify([envelope.version, envelope.nativeSessionId, envelope.sequence, envelope.ack, envelope.items]); } catch { return null; }
 			if (nativeSessionId && envelope.nativeSessionId === nativeSessionId && envelope.sequence === lastSequence && serialized === lastInput) return lastOutput;
-			if (documentChildRef.current || !Number.isSafeInteger(documentOwnerGenerationRef.current) || documentOwnerGenerationRef.current < 1) return null;
+			if (!Number.isSafeInteger(documentOwnerGenerationRef.current) || documentOwnerGenerationRef.current < 1) return null;
 			const current = checkpointContextRef.current;
 			const hostGeneration = documentHostGenerationRef.current;
 			const draftGeneration = documentDraftGenerationRef.current;
@@ -1114,7 +1130,10 @@ export function App() {
 					const armed = nativePopupRef.current;
 					const bound = armed?.request.stamp;
 					const stillCurrent = !!stamp && !!bound && ["ownerId", "ownerGeneration", "roomId", "conversationId", "roomGeneration", "hostGeneration"].every((key) => stamp[key as keyof typeof stamp] === bound[key as keyof typeof bound]);
-					if (armed && !armed.disarmed && items.length === 0 && (!stillCurrent || performance.now() >= armed.expiresAt || !!markdownEditorPendingActionRef.current)) {
+					const pending = markdownEditorPendingActionRef.current;
+					const ownDetachAdmission = !!pending && pending.admission.requestId === armed?.request.requestId && pending.admission.intent?.kind === "transfer" && pending.admission.intent.direction === "detach";
+					if (armed && !armed.registered && !armed.disarmed && items.length === 0 && (!stillCurrent || performance.now() >= armed.expiresAt || (!!pending && !ownDetachAdmission))) {
+						setNativePopupReady(false);
 						if (armed.permit) items.push({ kind: "disarm-popup", binding: { nativeSessionId, ownerId: documentOwnerId, ownerGeneration: documentOwnerGenerationRef.current }, permitId: armed.permit.permitId });
 						if (armed.registered) armed.disarmed = true; else nativePopupRef.current = null;
 					}
@@ -1123,6 +1142,7 @@ export function App() {
 						if (requestId) {
 							const request = { requestId, stamp, direction: "detach" as const };
 							nativePopupRef.current = { request, permit: null, expiresAt: performance.now() + 9_000, registered: false, disarmed: false };
+							setNativePopupReady(false);
 							items.push({ kind: "arm-popup", binding: { nativeSessionId, ownerId: documentOwnerId, ownerGeneration: documentOwnerGenerationRef.current }, request });
 						}
 					}
@@ -1142,11 +1162,13 @@ export function App() {
 						const candidate = permit as Record<string, unknown>;
 						if (Object.keys(candidate).sort().join(",") !== "frameName,permitId" || typeof candidate.frameName !== "string" || !/^exxperts-doc-[0-9a-f-]{36}$/.test(candidate.frameName) || typeof candidate.permitId !== "string" || !uuid.test(candidate.permitId) || !uuid.test(candidate.frameName.slice("exxperts-doc-".length)) || !stamp || !["ownerId", "ownerGeneration", "roomId", "conversationId", "roomGeneration", "hostGeneration"].every((key) => stamp[key as keyof typeof stamp] === armed.request.stamp[key as keyof typeof stamp])) return null;
 						armed.permit = { frameName: candidate.frameName, permitId: candidate.permitId };
+						setNativePopupReady(true);
 						items = [];
 					} else if (request.kind === "child-registered") {
 						const armed = nativePopupRef.current;
 						if (Object.keys(request).sort().join(",") !== "binding,kind,permitId,request" || !armed || !armed.permit || armed.registered || armed.disarmed || performance.now() >= armed.expiresAt || request.permitId !== armed.permit.permitId || JSON.stringify(request.request) !== JSON.stringify(armed.request) || !stamp || !["ownerId", "ownerGeneration", "roomId", "conversationId", "roomGeneration", "hostGeneration"].every((key) => stamp[key as keyof typeof stamp] === armed.request.stamp[key as keyof typeof stamp])) return null;
 						armed.registered = true;
+						setNativePopupReady(false);
 						items = [];
 					} else if (request.kind === "native-prepare") {
 						if (Object.keys(request).sort().join(",") !== "binding,disposition,kind,nativeRequestId,observedStamp" || typeof request.nativeRequestId !== "string" || !uuid.test(request.nativeRequestId) || typeof request.disposition !== "string" || !["hide", "quit", "update", "reload"].includes(request.disposition)) return null;
@@ -9808,7 +9830,7 @@ export function App() {
 				<>
 				<div className="docs-slot" ref={mountDocumentHost} />
 				{createPortal(<><div className="docs-tree-host"><WorkspaceFileBrowser agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} hostGeneration={documentHostGeneration} selectedPath={activeWorkspacePath(documentPane)} onFileSelect={openWorkspaceMarkdown} onPathDragStart={startDocumentPathDrag} onPathDragEnd={endDocumentPathDrag} /></div><div className="workspace-pane" hidden={activeWorkspacePath(documentPane) === null}>
-					<WorkspaceFileTabs onDetach={documentHostStatus === "attached" ? detachDocuments : undefined} tabs={workspaceTabs.paths} active={activeWorkspacePath(documentPane)} onSelect={(path) => openWorkspaceMarkdown({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} onReorder={(paths) => setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths } : tabs)} />
+					<WorkspaceFileTabs onDetach={documentHostStatus === "attached" && (!document.documentElement.classList.contains("desktop-app") || nativePopupReady) ? detachDocuments : undefined} tabs={workspaceTabs.paths} active={activeWorkspacePath(documentPane)} onSelect={(path) => openWorkspaceMarkdown({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} onReorder={(paths) => setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths } : tabs)} />
 					{documentPane && (documentPane.kind === "workspaceImage" || documentPane.kind === "workspacePdf" || documentPane.kind === "workspaceWord" || documentPane.kind === "workspaceHtml" || documentPane.kind === "workspaceFramed" || documentPane.kind === "workspaceText" || documentPane.kind === "workspaceSpreadsheet" || (documentPane.kind === "workspaceLegacyDoc" && !/\.doc$/i.test(documentPane.path))) && <WorkspaceOpenAction key={JSON.stringify([persistentChat.agentId, persistentChat.conversationId, documentPane.path])} agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={documentPane.path} />}
 					{documentPane?.kind === "markdownEditor" && <MarkdownEditorPane
 						key={checkpointContextRef.current.generation}
@@ -9959,7 +9981,7 @@ export function App() {
 				persistentChat
 					? (
 						<>
-							{documentHostStatus === "attached" && workspaceTabs?.paths.length === 0 && <button type="button" className="workspace-tabs-window" onClick={detachDocuments}>Detach</button>}
+							{documentHostStatus === "attached" && workspaceTabs?.paths.length === 0 && <button type="button" className="workspace-tabs-window" disabled={document.documentElement.classList.contains("desktop-app") && !nativePopupReady} onClick={detachDocuments}>Detach</button>}
 							{documentHostError && documentHostStatus === "attached" && <span className="docs-window-error" role="status">{documentHostError}</span>}
 							{documentHostStatus !== "attached" && <span className="docs-window-actions">
 								<span>{persistentChat.displayName} · {documentHostStatus === "opening" ? "Opening documents…" : documentHostStatus === "returning" ? "Returning documents…" : documentHostStatus === "recovering" ? "Documents unavailable" : "Documents in another window"}</span>

@@ -137,9 +137,16 @@ try {
 			await page.evaluate(`window.__t20AppendOpen = window.open; window.open = function (...args) { const child = window.__t20AppendOpen.apply(this, args); if (child) { child.__t20Append = child.Node.prototype.appendChild; child.Node.prototype.appendChild = function (node) { if (node.className === "docs-host") throw new Error("invented post-adoption fault"); return child.__t20Append.call(this, node); }; } return child; };`);
 			let appendChild: import("playwright").Page | undefined;
 			try {
+				const rendererErrors: string[] = [];
+				page.on("console", (message) => { if (message.type() === "error") rendererErrors.push(message.text()); });
+				page.on("pageerror", (error) => rendererErrors.push(error.message));
+				await page.evaluate(() => { const testOpen = window.open; (window as any).__t20AppendCalls = 0; window.open = function (...args) { (window as any).__t20AppendCalls++; return testOpen.apply(this, args); }; });
 				const appendOpened = page.waitForEvent("popup");
 				await detach.click();
-				appendChild = await appendOpened;
+				appendChild = await appendOpened.catch(async (error) => {
+					const state = await Promise.race([page.evaluate(() => ({ openCalls: (window as any).__t20AppendCalls, text: document.body.innerText.slice(-800), detachedHosts: document.querySelectorAll(".docs-host").length })), new Promise<"owner-renderer-evaluation-stalled">((resolve) => setTimeout(() => resolve("owner-renderer-evaluation-stalled"), 2_000))]);
+					throw new Error(`${error instanceof Error ? error.message : String(error)} (${JSON.stringify({ state, rendererErrors })})`, { cause: error });
+				});
 				await page.getByText("Cedar Studio · Documents unavailable", { exact: true }).waitFor();
 				assert(await page.locator(".sidebar-workspace-files").count() === 0 && writes === 0, "a post-adoption failure retains the fenced host rather than reporting an ordinary refusal");
 				await page.evaluate(`window.open = window.__t20AppendOpen;`);

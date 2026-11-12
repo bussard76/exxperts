@@ -23,16 +23,25 @@ const dirty = process.env.T20_NATIVE_DIRTY === "1" || save || lateAbort;
 const lateEmpty = process.env.T20_NATIVE_EMPTY_LATE === "1";
 const late = process.env.T20_NATIVE_LATE === "1" || lateEmpty;
 const foreignOpener = process.env.T20_NATIVE_FOREIGN === "1";
+const nativeDetach = process.env.T20_NATIVE_DETACH === "1";
+const nativeDetachTrace = nativeDetach ? path.join(os.tmpdir(), `t20-native-detach-phase-${process.pid}.log`) : null;
+const markNativeDetachPhase = (phase: string): void => {
+	if (!nativeDetachTrace) return;
+	fs.appendFileSync(nativeDetachTrace, `${phase}\n`);
+	console.error(`T20 native Detach phase: ${phase}`);
+};
 const fallbackBounds = process.env.T20_NATIVE_BOUNDS_FALLBACK === "1";
 const bounds = process.env.T20_NATIVE_BOUNDS === "1" || fallbackBounds;
-const popup = process.env.T20_NATIVE_POPUP === "1" || bounds;
+const popup = process.env.T20_NATIVE_POPUP === "1" || bounds || nativeDetach;
 const armOnly = process.env.T20_NATIVE_ARM === "1" || popup || foreignOpener;
 const active = process.env.T20_NATIVE_ACTIVE === "1" || dirty || (late && !lateEmpty) || armOnly;
 const quit = process.env.T20_NATIVE_QUIT === "1";
 const reloadKey = process.env.T20_NATIVE_RELOAD_KEY === "1";
 const reload = process.env.T20_NATIVE_RELOAD === "1" || reloadKey;
 const prepare = process.env.T20_NATIVE_PREPARE === "1" || active || quit || reload;
+let externalOpens = 0;
 const feed = http.createServer((_request, response) => {
+	if (_request.url === "/external-open") { externalOpens++; response.writeHead(204); response.end(); return; }
 	response.writeHead(200, { "content-type": "application/json" });
 	response.end(JSON.stringify({ tag_name: "v0.0.0", prerelease: false, draft: false }));
 });
@@ -204,9 +213,25 @@ try {
 				}
 				const foreign = await page.evaluate(() => window.open("about:blank", "exxperts-doc-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "popup") !== null);
 				assert(!foreign, "an unsolicited native document popup is denied");
-				const opened = await page.evaluate((name) => window.open("about:blank", name, "popup,width=900,height=700") !== null, selector);
-				assert(opened, "the live permit opens one actual native child");
-				await waitUntil(() => application!.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20RegisteredAck === 1, owner), "the real owner accepts registration of the concrete child");
+				if (nativeDetach) {
+					markNativeDetachPhase("before-first-detach-click");
+					const detach = page.getByRole("button", { name: "Detach", exact: true });
+					await waitUntil(() => detach.isEnabled(), "the owner has a current native detach permit");
+					await detach.click({ timeout: 30_000 });
+				} else {
+					const opened = await page.evaluate((name) => window.open("about:blank", name, "popup,width=900,height=700") !== null, selector);
+					assert(opened, "the live permit opens one actual native child");
+				}
+				await waitUntil(() => Promise.race([
+					application!.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20RegisteredAck === 1, owner),
+					new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1_000)),
+				]), "the real owner accepts registration of the concrete child").catch(async (error) => {
+					const state = await Promise.race([
+						application!.evaluate(({ BrowserWindow }, id) => ({ counters: Object.fromEntries(["__t20Arms", "__t20Permits", "__t20Registered", "__t20RegisteredAck", "__t20OpaquePermit", "__t20PermitName"].map((key) => [key, (BrowserWindow.fromId(id) as any)?.[key]])), windows: BrowserWindow.getAllWindows().map((window: any) => ({ id: window.id, visible: window.isVisible(), bounds: window.getBounds(), url: window.webContents.getURL(), openerMatches: window.webContents.opener === BrowserWindow.fromId(id)!.webContents.mainFrame })) }), owner),
+						new Promise<"shell-main-eval-timeout">((resolve) => setTimeout(() => resolve("shell-main-eval-timeout"), 2_000)),
+					]);
+					throw new Error(`${error instanceof Error ? error.message : String(error)} (${JSON.stringify({ state })})`);
+				});
 				const childId = await application.evaluate(({ BrowserWindow }, id) => {
 					const parent = BrowserWindow.fromId(id)!;
 					const child = BrowserWindow.getAllWindows().find((candidate: any) => candidate.webContents.opener === parent.webContents.mainFrame);
@@ -220,29 +245,132 @@ try {
 						const child = BrowserWindow.fromId(fixture.id);
 						if (!child?.isVisible()) return false;
 						const actual = child.getBounds(), area = fixture.bounds;
-						return actual.x === area.x && actual.y === area.y && Math.abs(actual.width - area.width) <= 1 && Math.abs(actual.height - area.height) <= 1;
+						return JSON.stringify(actual) === JSON.stringify(area);
 						}, { id: childId, bounds: expectedChildBounds }), "the registered child is placed and shown after its owner acknowledges registration").then(() => true, () => false),
 						new Promise<false>((resolve) => setTimeout(() => resolve(false), 5_000)),
 					]);
 					if (!childWasPlaced) {
-						const state = await application.evaluate(({ BrowserWindow }, id) => ({ windows: BrowserWindow.getAllWindows().map((window: any) => ({ id: window.id, visible: window.isVisible(), bounds: window.getBounds(), url: window.webContents.getURL(), isChild: window.webContents.opener === BrowserWindow.fromId(id)!.webContents.mainFrame })) }), owner);
+						const state = await application.evaluate(({ BrowserWindow, screen }, id) => ({ workArea: screen.getDisplayNearestPoint({ x: BrowserWindow.fromId(id)!.getBounds().x + 1, y: BrowserWindow.fromId(id)!.getBounds().y + 1 }).workArea, windows: BrowserWindow.getAllWindows().map((window: any) => ({ id: window.id, visible: window.isVisible(), bounds: window.getBounds(), normal: window.getNormalBounds(), content: window.getContentBounds(), url: window.webContents.getURL(), isChild: window.webContents.opener === BrowserWindow.fromId(id)!.webContents.mainFrame })) }), owner);
 						throw new Error(`registered child placement timeout (${JSON.stringify(state)})`);
 					}
 					const restored = await application.evaluate(({ BrowserWindow }, id) => ({ visible: BrowserWindow.fromId(id)!.isVisible(), bounds: BrowserWindow.fromId(id)!.getBounds() }), childId);
-					assert(restored.visible && restored.bounds.x === expectedChildBounds!.x && restored.bounds.y === expectedChildBounds!.y && Math.abs(restored.bounds.width - expectedChildBounds!.width) <= 1 && Math.abs(restored.bounds.height - expectedChildBounds!.height) <= 1, `the registered child restores validated current-workarea bounds before use (actual=${JSON.stringify(restored)}, expected=${JSON.stringify(expectedChildBounds)})`);
+					assert(restored.visible && JSON.stringify(restored.bounds) === JSON.stringify(expectedChildBounds), `the registered child restores validated current-workarea bounds before use (actual=${JSON.stringify(restored)}, expected=${JSON.stringify(expectedChildBounds)})`);
 				}
 				assert(await application.evaluate(({ BrowserWindow }, id) => { const prefs = BrowserWindow.fromId(id)!.webContents.getLastWebPreferences(); return prefs.sandbox === true && prefs.nodeIntegration === false && prefs.contextIsolation === true; }, childId), "the actual registered child keeps sandbox and context isolation");
-				await application.evaluate(({ BrowserWindow, shell }, ids) => {
-					const parent = BrowserWindow.fromId(ids.owner)!;
-					(parent as any).__t20External = 0;
-					(shell as any).openExternal = async () => { (parent as any).__t20External++; };
-					void BrowserWindow.fromId(ids.child)!.webContents.executeJavaScript(`location.href = "https://example.invalid/"`);
-				}, { owner, child: childId });
-				await new Promise((resolve) => setTimeout(resolve, 300));
-				assert(await application.evaluate(({ BrowserWindow }, ids) => BrowserWindow.fromId(ids.child)?.webContents.getURL() === "about:blank" && (BrowserWindow.fromId(ids.owner) as any)?.__t20External === 0, { owner, child: childId }), "registered child navigation cannot open an external URL");
+				if (nativeDetach) {
+					markNativeDetachPhase("first-child-registered");
+					const childPage = application.windows().find((candidate) => candidate.url() === "about:blank");
+					assert(childPage, "the one-use native permit created a real child page");
+					await childPage.locator(".docs-host").waitFor();
+					markNativeDetachPhase("first-child-adopted");
+					assert(await childPage.locator(".docs-host").count() === 1 && await page.locator(".docs-host").count() === 0 && await childPage.getByRole("button", { name: "Return", exact: true }).isEnabled(), "the owner moves its existing host into the acknowledged child before showing Return");
+					const ownerURL = page.url();
+					void childPage.evaluate((url) => { window.location.href = url; }, `http://localhost:${port}/`).catch(() => {});
+					await waitUntil(() => page.locator(".docs-host").count().then((count) => count === 1), "an attempted in-app navigation rehosts the documents to chat");
+					await waitUntil(() => application!.evaluate(({ BrowserWindow }, id) => !BrowserWindow.fromId(id), childId), "in-app navigation cannot replace the registered child");
+					markNativeDetachPhase("returned-after-in-app-navigation");
+					assert(childPage.url() === "about:blank" && page.url() === ownerURL && await page.locator(".docs-host").count() === 1, "in-app navigation is denied and the existing host remains with its original chat");
+					const registeredBeforeReturn = await Promise.race([application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20RegisteredAck ?? 0, owner), new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("owner registration count evaluation stalled")), 5_000))]);
+					const detachAgain = page.getByRole("button", { name: "Detach", exact: true });
+					await waitUntil(() => Promise.race([detachAgain.isEnabled(), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1_000))]), "the owner receives a fresh one-use permit after Return").catch(async (error) => {
+						const state = await Promise.race([application!.evaluate(({ BrowserWindow }, id) => ({ counters: Object.fromEntries(["__t20Arms", "__t20Permits", "__t20Registered", "__t20RegisteredAck", "__t20OpaquePermit", "__t20PermitName", "__t20Trace"].map((key) => [key, (BrowserWindow.fromId(id) as any)?.[key]])), windows: BrowserWindow.getAllWindows().map((window: any) => ({ id: window.id, visible: window.isVisible(), url: window.webContents.getURL() })) }), owner), new Promise((resolve) => setTimeout(() => resolve("owner state evaluation stalled"), 5_000))]);
+						throw new Error(`${error instanceof Error ? error.message : String(error)} (${JSON.stringify({ state })})`);
+					});
+					markNativeDetachPhase("fresh-permit-enabled");
+					const ownerConsole: string[] = [];
+					page.on("console", (message) => ownerConsole.push(`${message.type()}: ${message.text()}`));
+					const returnedChildPagePromise = application.waitForEvent("window", { timeout: 30_000 }).catch(async (error) => {
+						const state = await Promise.race([application!.evaluate(({ BrowserWindow }, id) => ({ counters: Object.fromEntries(["__t20Arms", "__t20Permits", "__t20Registered", "__t20RegisteredAck", "__t20OpaquePermit", "__t20PermitName"].map((key) => [key, (BrowserWindow.fromId(id) as any)?.[key]])), windows: BrowserWindow.getAllWindows().map((window: any) => ({ id: window.id, visible: window.isVisible(), url: window.webContents.getURL() })) }), owner), new Promise<"owner-state-evaluation-stalled">((resolve) => setTimeout(() => resolve("owner-state-evaluation-stalled"), 2_000))]);
+						throw new Error(`fresh Detach did not create its registered native child (${JSON.stringify(state)})`, { cause: error });
+					});
+					await detachAgain.click();
+					markNativeDetachPhase("second-detach-clicked");
+					await waitUntil(() => Promise.race([application!.evaluate(({ BrowserWindow }, fixture) => (BrowserWindow.fromId(fixture.owner) as any)?.__t20RegisteredAck > fixture.before, { owner, before: registeredBeforeReturn }), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1_000))]), "the fresh native permit registers its concrete child").catch(async (error) => {
+						const state = await application!.evaluate(({ BrowserWindow }, id) => ({ counters: Object.fromEntries(["__t20Arms", "__t20Permits", "__t20Registered", "__t20RegisteredAck", "__t20OpaquePermit", "__t20PermitName"].map((key) => [key, (BrowserWindow.fromId(id) as any)?.[key]])), windows: BrowserWindow.getAllWindows().map((window: any) => ({ id: window.id, visible: window.isVisible(), url: window.webContents.getURL() })) }), owner);
+						throw new Error(`${error instanceof Error ? error.message : String(error)} (${JSON.stringify(state)})`);
+					});
+					const returnedChildPage = await returnedChildPagePromise;
+					markNativeDetachPhase("second-child-window-event");
+					assert(returnedChildPage.url() === "about:blank" && !returnedChildPage.isClosed() && application.windows().includes(returnedChildPage), "the fresh permit creates a second actual child page");
+					const childConsole: string[] = [];
+					const nativeDialogs: string[] = [];
+					const recordNativeDialog = (dialog: import("playwright").Dialog) => {
+						nativeDialogs.push(`${dialog.type()}: ${dialog.message()}`);
+						markNativeDetachPhase(`native-dialog-${dialog.type()}`);
+						void dialog.dismiss().catch(() => {});
+					};
+					returnedChildPage.on("console", (message) => childConsole.push(`${message.type()}: ${message.text()}`));
+					returnedChildPage.on("pageerror", (error) => childConsole.push(`pageerror: ${error.message}`));
+					returnedChildPage.on("close", () => markNativeDetachPhase("second-child-page-closed"));
+					returnedChildPage.on("dialog", recordNativeDialog);
+					page.on("dialog", recordNativeDialog);
+					page.on("crash", () => markNativeDetachPhase("owner-page-crashed"));
+					await returnedChildPage.getByRole("button", { name: "Return", exact: true }).waitFor({ state: "visible", timeout: 30_000 }).catch(async (error) => {
+						const pageState = { selectedUrl: returnedChildPage.url(), selectedClosed: returnedChildPage.isClosed(), pages: application!.windows().map((candidate) => ({ url: candidate.url(), closed: candidate.isClosed(), selected: candidate === returnedChildPage })) };
+						const nativeState = await Promise.race([application!.evaluate(({ BrowserWindow }, id) => BrowserWindow.getAllWindows().map((window: any) => ({ id: window.id, owner: window.id === id, visible: window.isVisible(), bounds: window.getBounds(), url: window.webContents.getURL(), loading: window.webContents.isLoading(), crashed: window.webContents.isCrashed(), pid: window.webContents.getOSProcessId(), child: window.webContents.opener === BrowserWindow.fromId(id)?.webContents.mainFrame })), owner), new Promise<"native-state-evaluation-stalled">((resolve) => setTimeout(() => resolve("native-state-evaluation-stalled"), 2_000))]);
+						const childDom = await Promise.race([returnedChildPage.evaluate(() => {
+							const host = document.querySelector(".docs-host");
+							return { ready: document.readyState, count: document.querySelectorAll(".docs-host").length, host: host?.outerHTML.slice(0, 500) ?? null, parent: host?.parentElement?.className ?? null, body: document.body.className, title: document.title };
+						}), new Promise((resolve) => setTimeout(() => resolve("child-renderer-evaluation-stalled"), 2_000))]).catch((value) => ({ error: String(value) }));
+						throw new Error(`second child did not adopt the owner host (${JSON.stringify({ pageState, nativeState, childDom, childConsole, ownerConsole })})`, { cause: error });
+					});
+					markNativeDetachPhase("second-child-host-visible");
+					try {
+						assert(await returnedChildPage.getByRole("button", { name: "Return", exact: true }).isEnabled() && await page.locator(".docs-host").count() === 0, "the second acknowledged child owns the retained host");
+					} catch (error) {
+						const nativeState = await Promise.race([application!.evaluate(({ BrowserWindow }, id) => BrowserWindow.getAllWindows().map((window: any) => ({ id: window.id, owner: window.id === id, visible: window.isVisible(), url: window.webContents.getURL(), loading: window.webContents.isLoading(), crashed: window.webContents.isCrashed(), child: window.webContents.opener === BrowserWindow.fromId(id)?.webContents.mainFrame })), owner), new Promise<"native-state-evaluation-stalled">((resolve) => setTimeout(() => resolve("native-state-evaluation-stalled"), 2_000))]);
+						const state = await Promise.race([returnedChildPage.evaluate(() => ({ ready: document.readyState, body: document.body.innerHTML.slice(0, 1_000), returnButtons: [...document.querySelectorAll("button")].map((button) => ({ text: button.textContent, disabled: button.disabled, className: button.className })), hostCount: document.querySelectorAll(".docs-host").length })), new Promise<"child-renderer-evaluation-stalled">((resolve) => setTimeout(() => resolve("child-renderer-evaluation-stalled"), 2_000))]);
+						throw new Error(`second child did not expose Return with the retained host (${JSON.stringify({ nativeState, state })})`, { cause: error });
+					}
+					markNativeDetachPhase("second-return-enabled");
+					await application.evaluate(({ shell }, fixture) => {
+						(shell as any).openExternal = async () => { await fetch(`http://127.0.0.1:${fixture.port}/external-open`); };
+					}, { port: address.port });
+					await application.evaluate(({ BrowserWindow }, ownerId) => {
+						const owner = BrowserWindow.fromId(ownerId)!;
+						const child = BrowserWindow.getAllWindows().find((window: any) => window.webContents.opener === owner.webContents.mainFrame);
+						if (!child) throw new Error("registered native child disappeared before the external navigation probe");
+						(owner as any).__t20ExternalNavigation = { target: null, closed: false };
+						child.webContents.once("will-navigate", (_event: unknown, url: string) => { (owner as any).__t20ExternalNavigation.target = url; });
+						child.once("closed", () => { (owner as any).__t20ExternalNavigation.closed = true; });
+					}, owner);
+					await application.evaluate(({ BrowserWindow }, ownerId) => {
+						const owner = BrowserWindow.fromId(ownerId)!;
+						const child = BrowserWindow.getAllWindows().find((window: any) => window.webContents.opener === owner.webContents.mainFrame);
+						if (!child) throw new Error("registered native child disappeared before the external navigation probe");
+						void child.webContents.executeJavaScript("window.location.href = 'https://example.invalid/'").catch(() => {});
+					}, owner);
+					markNativeDetachPhase("external-navigation-evaluate-settled");
+					await Promise.race([returnedChildPage.waitForEvent("close", { timeout: 5_000 }).catch(() => {}), new Promise((resolve) => setTimeout(resolve, 5_000))]);
+					await (returnedChildPage.isClosed() ? page : returnedChildPage).locator(".docs-host").waitFor({ state: "attached", timeout: 30_000 });
+					const navigationState = await Promise.race([
+						application.evaluate(({ BrowserWindow }, id) => ({ navigation: (BrowserWindow.fromId(id) as any)?.__t20ExternalNavigation, windows: BrowserWindow.getAllWindows().map((window: any) => ({ id: window.id, owner: window.id === id, visible: window.isVisible(), url: window.webContents.getURL(), loading: window.webContents.isLoading(), crashed: window.webContents.isCrashed(), child: window.webContents.opener === BrowserWindow.fromId(id)?.webContents.mainFrame })) }), owner),
+						new Promise<"native-state-evaluation-stalled">((resolve) => setTimeout(() => resolve("native-state-evaluation-stalled"), 2_000)),
+					]);
+					const ownerHostCount = await Promise.race([page.locator(".docs-host").count(), new Promise<"owner-dom-evaluation-stalled">((resolve) => setTimeout(() => resolve("owner-dom-evaluation-stalled"), 2_000))]);
+					const childHostCount = returnedChildPage.isClosed() ? 0 : await Promise.race([returnedChildPage.locator(".docs-host").count(), new Promise<"child-dom-evaluation-stalled">((resolve) => setTimeout(() => resolve("child-dom-evaluation-stalled"), 2_000))]);
+					assert(typeof ownerHostCount === "number" && typeof childHostCount === "number", `native external navigation reached a responsive host state (${JSON.stringify({ navigationState, nativeDialogs, childConsole, ownerConsole })})`);
+					assert(nativeDialogs.length === 0, `external navigation did not prompt for confirmation (${nativeDialogs.join("; ")})`);
+					assert(returnedChildPage.url() === "about:blank" && externalOpens === 0 && ((returnedChildPage.isClosed() && ownerHostCount === 1 && childHostCount === 0) || (!returnedChildPage.isClosed() && ownerHostCount === 0 && childHostCount === 1)), `registered child navigation cannot open an external URL and retains the host exactly once (url=${returnedChildPage.url()}, externalOpens=${externalOpens}, owner=${ownerHostCount}, child=${childHostCount}, closed=${returnedChildPage.isClosed()})`);
+					assert(await page.locator(".docs-host").count() === 1, "Return rehosts the same documents container in the owner");
+					markNativeDetachPhase("native-detach-scenario-passed");
+				} else {
+					await application.evaluate(({ BrowserWindow, shell }, ids) => {
+						const parent = BrowserWindow.fromId(ids.owner)!;
+						(parent as any).__t20External = 0;
+						(shell as any).openExternal = async () => { (parent as any).__t20External++; };
+						void BrowserWindow.fromId(ids.child)!.webContents.executeJavaScript(`location.href = "https://example.invalid/"`);
+					}, { owner, child: childId });
+					await new Promise((resolve) => setTimeout(resolve, 300));
+					const externalNavigation = await application.evaluate(({ BrowserWindow }, ids) => ({ url: BrowserWindow.fromId(ids.child)?.webContents.getURL(), external: (BrowserWindow.fromId(ids.owner) as any)?.__t20External }), { owner, child: childId });
+					assert(externalNavigation.url === "about:blank" && externalNavigation.external === 0, `registered child navigation cannot open an external URL (${JSON.stringify(externalNavigation)})`);
 				await application.evaluate(({ BrowserWindow }, fixture) => { void BrowserWindow.fromId(fixture.child)!.webContents.executeJavaScript(`location.href = "http://localhost:${fixture.port}/"`); }, { child: childId, port });
 				await new Promise((resolve) => setTimeout(resolve, 300));
-				assert(await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.webContents.getURL() === "about:blank", childId), "registered child cannot navigate even to another app page");
+				const inAppNavigation = await Promise.race([
+					application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.webContents.getURL(), childId),
+					new Promise<"evaluation-timeout">((resolve) => setTimeout(() => resolve("evaluation-timeout"), 5_000)),
+				]);
+				assert(inAppNavigation === "about:blank", `registered child cannot navigate even to another app page (observed=${String(inAppNavigation)})`);
 				if (bounds && expectedChildBounds && originalMainBounds) {
 					const finalBounds = { x: expectedChildBounds.x + 12, y: expectedChildBounds.y + 18, width: Math.min(900, expectedChildBounds.width), height: Math.min(700, expectedChildBounds.height) };
 					const immediateBounds = await application.evaluate(({ BrowserWindow }, fixture) => { const child = BrowserWindow.fromId(fixture.id)!; child.setBounds(fixture.bounds); return child.getBounds(); }, { id: childId, bounds: finalBounds });
@@ -255,7 +383,8 @@ try {
 				}
 				await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.close(), owner);
 				await page.waitForTimeout(500);
-				assert(await application.evaluate(({ BrowserWindow }, ids) => Boolean(BrowserWindow.fromId(ids.child)) && (BrowserWindow.fromId(ids.owner) as any)?.__t20Completed === 0, { owner, child: childId }), "a registered child cannot be mistaken for no-child evidence");
+				const ownerCloseState = await application.evaluate(({ BrowserWindow }, ids) => ({ child: !!BrowserWindow.fromId(ids.child), completed: (BrowserWindow.fromId(ids.owner) as any)?.__t20Completed }), { owner, child: childId });
+				assert(ownerCloseState.child && ownerCloseState.completed === 0, "a registered child cannot be mistaken for no-child evidence");
 				await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.close(), childId);
 				await waitUntil(() => application!.evaluate(({ BrowserWindow }, id) => !BrowserWindow.fromId(id), childId), "the concrete popup is actually closed");
 				if (bounds && expectedChildBounds) {
@@ -268,6 +397,7 @@ try {
 				await page.evaluate((name) => { window.open("about:blank", name, "popup"); }, selector);
 				await page.waitForTimeout(300);
 				assert(await application.evaluate(({ BrowserWindow }, count) => BrowserWindow.getAllWindows().length === count, windowsBeforeReuse), "a consumed native popup selector cannot create another child");
+					}
 			}
 		} else {
 		if (quit) {
@@ -406,9 +536,9 @@ try {
 				}
 			} catch { /* The owned port may already have closed. */ }
 		}
-		await application.evaluate(({ app }) => app.exit(0)).catch(() => {});
+		await Promise.race([application.evaluate(({ app }) => app.exit(0)).catch(() => {}), new Promise((resolve) => setTimeout(resolve, 2_000))]);
 		for (const pid of ownedServers) { try { process.kill(pid, "SIGTERM"); } catch { /* It already stopped. */ } }
-		await application.close().catch(() => {});
+		await Promise.race([application.close().catch(() => {}), new Promise((resolve) => setTimeout(resolve, 3_000))]);
 	}
 	await new Promise<void>((resolve) => feed.close(() => resolve()));
 	fs.rmSync(scratch, { recursive: true, force: true });
