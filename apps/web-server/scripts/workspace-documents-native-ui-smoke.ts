@@ -16,7 +16,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "exxperts-documents-native-"));
 const port = await freePort();
 const stuck = process.env.T20_NATIVE_STUCK === "1";
-const active = process.env.T20_NATIVE_ACTIVE === "1";
+const dirty = process.env.T20_NATIVE_DIRTY === "1";
+const active = process.env.T20_NATIVE_ACTIVE === "1" || dirty;
 const prepare = process.env.T20_NATIVE_PREPARE === "1" || active;
 const feed = http.createServer((_request, response) => {
 	response.writeHead(200, { "content-type": "application/json" });
@@ -53,19 +54,34 @@ try {
 		return window.id;
 	}, port);
 	if (prepare) {
+		const page = application.windows().find((candidate) => candidate.url().startsWith(`http://localhost:${port}/`));
 		if (active) {
-			const page = application.windows().find((candidate) => candidate.url().startsWith(`http://localhost:${port}/`));
 			assert(page, "the real owner page is available");
-			const created = await page.evaluate(async () => {
+			const workspace = path.join(scratch, "invented-workspace");
+			if (dirty) { fs.mkdirSync(workspace); fs.writeFileSync(path.join(workspace, "invented.md"), "# Invented native draft\n"); }
+			const created = await page.evaluate(async ({ dirty, workspace }) => {
 				const response = await fetch("/api/persistent-agents", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ displayName: "Invented Native Room", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
+				if (response.status !== 201) return response.status;
+				if (dirty) {
+					const body = await response.json();
+					const configured = await fetch(`/api/persistent-agents/${body.agent.id}/workspace-default`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ root: workspace, workspaceAccessMode: "localFiles" }) });
+					if (!configured.ok) return configured.status;
+				}
 				return response.status;
-			});
+			}, { dirty, workspace });
 			assert(created === 201, "the isolated native test creates an invented room");
 			await page.reload();
 			const dismiss = page.locator(".whats-new-close");
 			if (await dismiss.count()) await dismiss.click();
 			await page.locator(".persistent-agent-card").filter({ hasText: "Invented Native Room" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
 			await page.locator(".sidebar-workspace-files").waitFor();
+			if (dirty) {
+				await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "invented.md" }).click();
+				const editor = page.locator(".markdown-editor-tiptap .ProseMirror");
+				await editor.getByText("Invented native draft").waitFor();
+				await editor.click();
+				await page.keyboard.type(" retained native edit");
+			}
 		}
 		await application.evaluate(({ BrowserWindow }, id) => {
 			const window = BrowserWindow.fromId(id)!;
@@ -75,6 +91,7 @@ try {
 			(window as any).__t20NoSession = 0;
 			(window as any).__t20Prepared = 0;
 			(window as any).__t20Completed = 0;
+			(window as any).__t20AbortAck = 0;
 			(window.webContents as any).executeJavaScript = (script: string, ...args: unknown[]) => {
 				if (script.includes("__exxpertsDocuments")) {
 					(window as any).__t20Polls++;
@@ -84,6 +101,7 @@ try {
 				if (script.includes("__exxpertsDocuments")) return Promise.resolve(result).then((output: any) => {
 					if (output?.items?.[0]?.kind === "no-session") (window as any).__t20NoSession++;
 					if (output?.items?.[0]?.kind === "completed") (window as any).__t20Completed++;
+					if (output?.items?.[0]?.kind === "abort-ack") (window as any).__t20AbortAck++;
 					if (output?.items?.[0]?.kind === "guard-result" && output.items[0].result?.kind === "prepared") (window as any).__t20Prepared++;
 					return output;
 				});
@@ -92,13 +110,23 @@ try {
 		}, owner);
 		await waitUntil(() => application!.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Polls >= 2, owner), "the real owner has been polled");
 		await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.close(), owner);
-		await new Promise((resolve) => setTimeout(resolve, 1_000));
-		assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Prepares === 1, owner), "the actual native close sends exactly one owner prepare");
-		if (active) {
+		if (dirty) {
+			assert(page, "the owner page is available for the native prompt");
+			const prompt = page.getByRole("dialog", { name: "Unsaved Markdown changes" });
+			await prompt.getByRole("button", { name: "Cancel", exact: true }).click();
+			await new Promise((resolve) => setTimeout(resolve, 1_000));
+			assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20AbortAck === 1, owner), "the native shell aborts a cancelled dirty action and receives its matching acknowledgement");
+			assert((await page.locator(".markdown-editor-tiptap .ProseMirror").textContent())?.includes("retained native edit"), "native Cancel retains the actual edited draft");
+			await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.close(), owner);
+			await prompt.waitFor({ state: "visible", timeout: 5_000 });
+			await prompt.getByRole("button", { name: "Cancel", exact: true }).click();
+		} else await new Promise((resolve) => setTimeout(resolve, 1_000));
+		if (!dirty) assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Prepares === 1, owner), "the actual native close sends exactly one owner prepare");
+		if (active && !dirty) {
 			assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Prepared === 1, owner), "the actual owner prepares the active clean room exactly once");
 			assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Completed === 1, owner), "the real owner completes only after the shell sends no-child evidence");
 		}
-		else assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20NoSession === 1, owner), "the actual owner returns the matching empty-session response");
+		else if (!dirty) assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20NoSession === 1, owner), "the actual owner returns the matching empty-session response");
 		assert(await application.evaluate(({ BrowserWindow }, id) => Boolean(BrowserWindow.fromId(id)?.isVisible()), owner), "the staged no-session response cannot yet continue the native close");
 	} else {
 	// Fault the shell's actual outbound exchange, retaining its ordinary close entrypoint.
