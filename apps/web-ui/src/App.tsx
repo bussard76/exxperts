@@ -7957,12 +7957,16 @@ export function App() {
 		const cleanAction = admitCleanMarkdownEditorAction(() => restAfterCheckpoint(target), undefined, intent);
 		if (cleanAction) return await cleanAction as boolean;
 		if (!guardMarkdownEditorAction(() => restAfterCheckpoint(target), "navigate", intent)) return false;
+		const admission = markdownEditorPendingActionRef.current?.admission;
+		if (!admission || !preparedDocumentAdmissionIsCurrent(admission)) return false;
 		const approval = checkpointApprovalResult;
 		const postCheckpointThreadId = approval?.postCheckpoint.activeThreadId;
 		if (approval && postCheckpointThreadId) {
 			try {
 				await discardEmptyPreparedBoundaryThread(approval.agentId, postCheckpointThreadId);
+				if (!preparedDocumentAdmissionIsCurrent(admission)) return false;
 			} catch (e) {
+				if (!preparedDocumentAdmissionIsCurrent(admission)) return false;
 				setCheckpointApprovalError(formatRememberError((e as Error).message));
 				return false;
 			}

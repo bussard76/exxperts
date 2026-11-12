@@ -706,6 +706,47 @@ try {
 				assert((await reentryEditor.textContent())?.includes("new incarnation draft") && await reentryPage.getByText("Memory updated", { exact: true }).count() === 0 && await reentryPage.getByRole("dialog", { name: "Unsaved Markdown changes" }).count() === 0, "the old approval cannot prompt, replace the re-entered session or render its result");
 			} finally { releaseReentryApproval(); }
 		} finally { await closeContext(reentryContext); }
+		const lateRestId = agents.createPersistentAgentFromScaffoldInput({ displayName: "Invented Late Rest", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }).agent.agentId;
+		roomModels.writeRoomModels(lateRestId, { conversation: CLAUDE });
+		assert((await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(lateRestId)}/workspace-default`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ root: workspace, workspaceAccessMode: "localFiles" }) })).ok, "the invented late-Rest room uses the test workspace");
+		const lateRestContext = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+		try {
+			const lateRestPage = await lateRestContext.newPage();
+			await lateRestPage.addInitScript({ content: `window.addEventListener("beforeunload", (event) => { event.preventDefault(); event.returnValue = ""; });` });
+			lateRestPage.on("dialog", (dialog) => { void dialog.dismiss(); });
+			await lateRestPage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+			await lateRestPage.waitForLoadState("networkidle");
+			const lateDismiss = lateRestPage.locator(".whats-new-close");
+			if (await lateDismiss.count()) await lateDismiss.click();
+			await lateRestPage.locator(".persistent-agent-card").filter({ hasText: "Invented Late Rest" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+			const lateComposer = lateRestPage.locator("textarea").first();
+			await lateComposer.fill("Invented late Rest question.");
+			await lateComposer.press("Enter");
+			await lateRestPage.getByText("Answer from claude-fake.").first().waitFor({ timeout: 45000 });
+			const lateDialog = lateRestPage.getByRole("dialog", { name: "Remember this conversation" });
+			await lateRestPage.getByRole("button", { name: "Choose what to keep…", exact: true }).click();
+			await lateDialog.getByRole("button", { name: "Generate memory proposal" }).click();
+			await lateDialog.getByText(POINTS[11]!, { exact: true }).waitFor({ timeout: 20000 });
+			await lateDialog.getByRole("button", { name: "Save to memory" }).click();
+			await lateDialog.getByText("Memory updated", { exact: true }).waitFor({ timeout: 20000 });
+			let releaseLateRest!: () => void, beginLateRest!: () => void;
+			const lateRestReleased = new Promise<void>((resolve) => { releaseLateRest = resolve; });
+			const lateRestStarted = new Promise<void>((resolve) => { beginLateRest = resolve; });
+			await lateRestPage.route("**/runtime/discard-empty-prepared-boundary", async (route) => { const response = await route.fetch(); beginLateRest(); await lateRestReleased; await route.fulfill({ response }); });
+			await lateDialog.getByRole("button", { name: "Return Home" }).click();
+			try {
+				await lateRestStarted;
+				await lateRestPage.route("**/workspace-files?*", (route) => route.fulfill({ status: 409, json: { code: "person_changed", error: "Invented identity change" } }));
+				await lateRestPage.evaluate(() => window.dispatchEvent(new Event("focus")));
+				await lateRestPage.getByText("Someone else is now signed in on this server.", { exact: true }).waitFor();
+				assert((await lateRestPage.title()).includes("Invented Late Rest") && (await lateRestPage.evaluate(() => location.hash)).includes("/room/"), "the invalidated Rest page still shows its original room before the response");
+				const response = lateRestPage.waitForResponse((candidate) => candidate.url().includes("/runtime/discard-empty-prepared-boundary"));
+				releaseLateRest();
+				assert((await response).ok(), "the invented Rest request completed before its answer was released");
+				await lateRestPage.waitForTimeout(500);
+				assert((await lateRestPage.title()).includes("Invented Late Rest") && (await lateRestPage.evaluate(() => location.hash)).includes("/room/"), "a late Rest response cannot clear an invalidated chat");
+			} finally { releaseLateRest(); }
+		} finally { await closeContext(lateRestContext); }
 		await closeContext(ctx);
 	} finally {
 		await closeBrowser(browser);
