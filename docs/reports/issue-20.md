@@ -49,7 +49,22 @@ All scenarios are pending; R15 requires separately authorized packed Mac work.
 
 ## Checks and self-review
 
-Pending implementation.
+Interim only: no acceptance item is complete, and the scenario tests must be rerun against the final candidate. The test names below describe the evidence so far and its limits.
+
+| Item | Current test evidence and remaining gap |
+| --- | --- |
+| I1 | `workspace-markdown-images-ui` proves the attached tree/editor share one host; `workspace-detached-documents-ui` stops at disabled Detach, so real transfer, empty/error states and second-monitor behavior remain unproved. |
+| I2 | `two-window-room-ui` covers independent attached owners; registered child uniqueness, Show and absence of duplicate child writers remain unproved. |
+| I3 | `two-window-room-ui` exercises attached guarded file selection; child focus and stale-child results remain unproved. |
+| I4 | `workspace-markdown-raw-ui` covers attached RAW/source behavior; child Return and native child close are unexecuted. |
+| I5 | `workspace-file-tabs-ui` and `two-window-room-ui` cover attached guards; actual dependent-child and native entrypoints remain unexecuted. |
+| I6 | `two-window-room-ui` exercises attached save/unknown/conflict guards; transfer and native-close combinations remain unexecuted. |
+| I7 | `sidebar-reopen-ui` covers attached sidebar recovery/layout only; real child bounds, popup failure and registered native recovery remain unexecuted. |
+| I8 | `sidebar-reopen-ui` covers an attached tooltip; child events, overlays and real snapshot transfers remain unexecuted, and `workspace-file-tabs-ui` has the open pre-readiness frame failure. |
+| I9 | `workspace-markdown-images-ui` proves a real attached drag and rejects a synthetic replay; actual cross-window drag remains unexecuted. |
+| I10 | `workspace-documents-native-ui` cannot launch with this host's sandbox configuration; packed Mac evidence and final candidate MAC-TASK remain outstanding. |
+
+R1/R2/R3/R4/R7/R9/R10/R11/R12/R14 child portions are specified in `workspace-detached-documents-ui` but have not executed. R5/R6/R13 native adapter and fault tests require actual sandboxed shell endpoints; `workspace-documents-native-ui` is blocked before launch and does not prove them. R8 has attached `two-window-room-ui` and `workspace-markdown-raw-ui` evidence but not the full child/native scenarios. R15 requires the Controller-relayed packed Mac task on the final candidate. `workspace-file-tabs-ui` is currently red on real pre-readiness frame navigation, awaiting the independent architecture decision.
 
 ## Files, tests, assumptions and debt
 
