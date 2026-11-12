@@ -21,7 +21,9 @@ const save = process.env.T20_NATIVE_SAVE === "1";
 const lateAbort = process.env.T20_NATIVE_LATE_ABORT === "1";
 const dirty = process.env.T20_NATIVE_DIRTY === "1" || save || lateAbort;
 const late = process.env.T20_NATIVE_LATE === "1";
-const armOnly = process.env.T20_NATIVE_ARM === "1";
+const foreignOpener = process.env.T20_NATIVE_FOREIGN === "1";
+const popup = process.env.T20_NATIVE_POPUP === "1";
+const armOnly = process.env.T20_NATIVE_ARM === "1" || popup || foreignOpener;
 const active = process.env.T20_NATIVE_ACTIVE === "1" || dirty || late || armOnly;
 const quit = process.env.T20_NATIVE_QUIT === "1";
 const reloadKey = process.env.T20_NATIVE_RELOAD_KEY === "1";
@@ -74,6 +76,9 @@ try {
 			(window as any).__t20ActivePolls = 0;
 			(window as any).__t20Permits = 0;
 			(window as any).__t20OpaquePermit = false;
+			(window as any).__t20PermitName = null;
+			(window as any).__t20Registered = 0;
+			(window as any).__t20RegisteredAck = 0;
 			(window as any).__t20NoSession = 0;
 			(window as any).__t20Prepared = 0;
 			(window as any).__t20Completed = 0;
@@ -86,11 +91,13 @@ try {
 					if (script.includes('"native-prepare"')) { (window as any).__t20Prepares++; (window as any).__t20Trace.push("prepare"); if (script.includes('"disposition":"quit"')) (window as any).__t20QuitPrepares++; if (script.includes('"disposition":"reload"')) (window as any).__t20ReloadPrepares++; }
 					if (script.includes('"native-abort"')) (window as any).__t20Trace.push("abort");
 					if (script.includes('"native-commit"')) (window as any).__t20Commits++;
+					if (script.includes('"child-registered"')) (window as any).__t20Registered++;
 					if (script.includes('"popup-permit"')) {
 						(window as any).__t20Permits++;
 						const match = script.match(/endpoint\.step\((.*)\) : null/);
 						if (match) {
 							const item = JSON.parse(match[1]).items[0];
+							(window as any).__t20PermitName = item.permit?.frameName;
 							(window as any).__t20OpaquePermit = /^exxperts-doc-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(item.permit?.frameName) && item.permit.frameName !== item.permit.permitId;
 						}
 					}
@@ -98,6 +105,7 @@ try {
 				const result = (original as any)(script, ...args);
 				const tracked = Promise.resolve(result).then((output: any) => {
 					if (output?.status?.stamp?.roomId) (window as any).__t20ActivePolls++;
+					if (script.includes('"child-registered"') && output?.items?.length === 0 && output?.sequence === output?.ack) (window as any).__t20RegisteredAck++;
 					if (output?.items?.[0]?.kind === "no-session") (window as any).__t20NoSession++;
 					if (output?.items?.[0]?.kind === "arm-popup") (window as any).__t20Arms++;
 					if (output?.items?.[0]?.kind === "completed") (window as any).__t20Completed++;
@@ -129,6 +137,7 @@ try {
 			assert(created === 201, "the isolated native test creates an invented room");
 			if (lateAbort) await page.addInitScript({ content: `const realTimeout = window.setTimeout; window.setTimeout = (callback, delay, ...args) => realTimeout(callback, delay === 1000 ? 30000 : delay, ...args);` });
 			await page.reload();
+			await page.waitForLoadState("networkidle");
 			const dismiss = page.locator(".whats-new-close");
 			if (await dismiss.count()) await dismiss.click();
 			await page.locator(".persistent-agent-card").filter({ hasText: "Invented Native Room" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
@@ -151,6 +160,55 @@ try {
 			assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Arms === 1, owner), "the real current owner arms one native popup");
 			assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Permits === 1, owner), "the shell returns one native popup permit");
 			assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20OpaquePermit === true, owner), "the popup selector contains only a fresh opaque UUID");
+			if (foreignOpener) {
+				assert(page, "the owner page is available for the foreign opener test");
+				const selector = await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any).__t20PermitName as string, owner);
+				const before = await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
+				await page.evaluate((name) => {
+					const frame = document.createElement("iframe");
+					document.body.appendChild(frame);
+					frame.contentWindow!.open("about:blank", name, "popup");
+				}, selector);
+				await page.waitForTimeout(500);
+				assert(await application.evaluate(({ BrowserWindow }, fixture) => BrowserWindow.getAllWindows().length === fixture.before && (BrowserWindow.fromId(fixture.owner) as any).__t20Registered === 0, { before, owner }), "a subframe opener cannot register a native document child");
+			} else if (popup) {
+				assert(page, "the owner page is available for the popup");
+				const selector = await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any).__t20PermitName as string, owner);
+				const foreign = await page.evaluate(() => window.open("about:blank", "exxperts-doc-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "popup") !== null);
+				assert(!foreign, "an unsolicited native document popup is denied");
+				const opened = await page.evaluate((name) => window.open("about:blank", name, "popup,width=900,height=700") !== null, selector);
+				assert(opened, "the live permit opens one actual native child");
+				await waitUntil(() => application!.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20RegisteredAck === 1, owner), "the real owner accepts registration of the concrete child");
+				const childId = await application.evaluate(({ BrowserWindow }, id) => {
+					const parent = BrowserWindow.fromId(id)!;
+					const child = BrowserWindow.getAllWindows().find((candidate: any) => candidate.webContents.opener === parent.webContents.mainFrame);
+					return child?.id ?? null;
+				}, owner);
+				assert(childId !== null, "registration binds the actual top-frame opener and child");
+				assert(await application.evaluate(({ BrowserWindow }, id) => { const prefs = BrowserWindow.fromId(id)!.webContents.getLastWebPreferences(); return prefs.sandbox === true && prefs.nodeIntegration === false && prefs.contextIsolation === true; }, childId), "the actual registered child keeps sandbox and context isolation");
+				await application.evaluate(({ BrowserWindow, shell }, ids) => {
+					const parent = BrowserWindow.fromId(ids.owner)!;
+					(parent as any).__t20External = 0;
+					(shell as any).openExternal = async () => { (parent as any).__t20External++; };
+					void BrowserWindow.fromId(ids.child)!.webContents.executeJavaScript(`location.href = "https://example.invalid/"`);
+				}, { owner, child: childId });
+				await new Promise((resolve) => setTimeout(resolve, 300));
+				assert(await application.evaluate(({ BrowserWindow }, ids) => BrowserWindow.fromId(ids.child)?.webContents.getURL() === "about:blank" && (BrowserWindow.fromId(ids.owner) as any)?.__t20External === 0, { owner, child: childId }), "registered child navigation cannot open an external URL");
+				await application.evaluate(({ BrowserWindow }, fixture) => { void BrowserWindow.fromId(fixture.child)!.webContents.executeJavaScript(`location.href = "http://localhost:${fixture.port}/"`); }, { child: childId, port });
+				await new Promise((resolve) => setTimeout(resolve, 300));
+				assert(await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.webContents.getURL() === "about:blank", childId), "registered child cannot navigate even to another app page");
+				await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.close(), owner);
+				await page.waitForTimeout(500);
+				assert(await application.evaluate(({ BrowserWindow }, ids) => Boolean(BrowserWindow.fromId(ids.child)) && (BrowserWindow.fromId(ids.owner) as any)?.__t20Completed === 0, { owner, child: childId }), "a registered child cannot be mistaken for no-child evidence");
+				await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.close(), childId);
+				await waitUntil(() => application!.evaluate(({ BrowserWindow }, id) => !BrowserWindow.fromId(id), childId), "the concrete popup is actually closed");
+				await page.waitForTimeout(300);
+				assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Completed === 0, owner), "child destruction without a matching registered closure message cannot authorize no-child completion");
+				const windowsBeforeReuse = await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
+				await page.evaluate((name) => { window.open("about:blank", name, "popup"); }, selector);
+				await page.waitForTimeout(300);
+				assert(await application.evaluate(({ BrowserWindow }, count) => BrowserWindow.getAllWindows().length === count, windowsBeforeReuse), "a consumed native popup selector cannot create another child");
+			}
 		} else {
 		if (quit) await application.evaluate(({ app }) => app.quit()).catch(() => {});
 		else if (reloadKey) await application.evaluate(({ BrowserWindow }, id) => {

@@ -215,8 +215,17 @@ function isAppOrigin(url: string): boolean {
   }
 }
 
+type NativeDocumentPopup = { request: Record<string, unknown>; permit: { frameName: string; permitId: string }; expiresAt: number; pending: boolean; revoked: boolean; opening: boolean; registrationPending: boolean; child: BrowserWindow | null };
+const documentPopupPermits = new WeakMap<BrowserWindow, NativeDocumentPopup>();
+
 function wireNavigation(win: BrowserWindow): void {
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  win.webContents.setWindowOpenHandler(({ url, frameName }) => {
+    const popup = documentPopupPermits.get(win);
+    if (url === "about:blank" && popup && !popup.pending && !popup.revoked && !popup.opening && !popup.child && Date.now() < popup.expiresAt && frameName === popup.permit.frameName) {
+      popup.revoked = true;
+      popup.opening = true;
+      return { action: "allow", overrideBrowserWindowOptions: { show: false, webPreferences: { sandbox: true, nodeIntegration: false, contextIsolation: true } } };
+    }
     if (isAppOrigin(url)) return { action: "allow" };
     if (url.startsWith("exxperts:")) {
       handleDeepLink(url);
@@ -237,7 +246,18 @@ function wireNavigation(win: BrowserWindow): void {
   });
   // Child windows inherit the same policy, else a popup could navigate
   // anywhere in-app.
-  win.webContents.on("did-create-window", (child) => {
+  win.webContents.on("did-create-window", (child, details) => {
+    const popup = documentPopupPermits.get(win);
+    if (popup?.opening && details.frameName === popup.permit.frameName) {
+      popup.opening = false;
+      if (win.isDestroyed() || child.webContents.opener !== win.webContents.mainFrame || Date.now() >= popup.expiresAt) { child.destroy(); return; }
+      popup.child = child;
+      popup.registrationPending = true;
+      child.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+      child.webContents.on("will-navigate", (event) => event.preventDefault());
+      wireContextMenu(child);
+      return;
+    }
     wireNavigation(child);
     wireContextMenu(child);
   });
@@ -264,7 +284,7 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
   let hideSent = false;
   let hidePhase: "idle" | "preparing" | "abort" | "commit" | "close-evidence" | "completed" = "idle";
   let hideCorrelation: Record<string, unknown> | null = null;
-  let popup: { request: Record<string, unknown>; permit: { frameName: string; permitId: string }; expiresAt: number; pending: boolean; revoked: boolean } | null = null;
+  let popup: NativeDocumentPopup | null = null;
   let retryInput: { version: number; nativeSessionId: string; sequence: number; ack: number; items: Record<string, unknown>[] } | null = null;
   requestDocumentsAction.set(win, (disposition) => {
     if (!active || hideRequest || ownerId === null || latestStamp === undefined) return;
@@ -351,8 +371,15 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
     }
     if (releasedAttempt) { hideRequest = null; hideSent = false; hideCorrelation = null; hidePhase = "idle"; }
     if (sentKind === "popup-permit" && popup) popup.pending = false;
-    if (disarmPermit && popup?.permit.permitId === disarmPermit) popup = null;
-    if (armRequest) popup = { request: armRequest, permit: { frameName: `exxperts-doc-${randomUUID()}`, permitId: randomUUID() }, expiresAt: Date.now() + 10_000, pending: true, revoked: false };
+    if (sentKind === "child-registered" && popup) popup.registrationPending = false;
+    if (disarmPermit && popup?.permit.permitId === disarmPermit) {
+      popup.revoked = true;
+      if (!popup.child) { popup = null; documentPopupPermits.delete(win); }
+    }
+    if (armRequest) {
+      popup = { request: armRequest, permit: { frameName: `exxperts-doc-${randomUUID()}`, permitId: randomUUID() }, expiresAt: Date.now() + 10_000, pending: true, revoked: false, opening: false, registrationPending: false, child: null };
+      documentPopupPermits.set(win, popup);
+    }
     if (receivedPreparation) hideSent = true;
     if (preparedCorrelation) hideCorrelation = preparedCorrelation;
     if (nextPhase) hidePhase = nextPhase;
@@ -368,10 +395,11 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
       let items: Record<string, unknown>[] = [];
       if (sequence === 1) items = [{ kind: "hello" }];
       else if (popup?.pending && ownerId !== null) items = [{ kind: "popup-permit", binding, request: popup.request, permit: popup.permit }];
+      else if (popup?.registrationPending && popup.child && !popup.child.isDestroyed() && ownerId !== null) items = [{ kind: "child-registered", binding, request: popup.request, permitId: popup.permit.permitId }];
       else if (hideRequest && !hideSent && ownerId !== null) items = [{ kind: "native-prepare", binding, nativeRequestId: hideRequest.nativeRequestId, observedStamp: hideRequest.observedStamp, disposition: hideRequest.disposition }];
       else if (hidePhase === "abort" && hideCorrelation) items = [{ kind: "native-abort", binding, correlation: hideCorrelation }];
       else if (hidePhase === "commit" && hideCorrelation) items = [{ kind: "native-commit", binding, correlation: hideCorrelation }];
-      else if (hidePhase === "close-evidence" && hideCorrelation && record(hideCorrelation.stamp)) {
+      else if (hidePhase === "close-evidence" && hideCorrelation && !popup?.child && record(hideCorrelation.stamp)) {
         const stamp = hideCorrelation.stamp;
         const context = { ownerId: stamp.ownerId, ownerGeneration: stamp.ownerGeneration, roomId: stamp.roomId, conversationId: stamp.conversationId, roomGeneration: stamp.roomGeneration };
         items = [{ kind: "child-closed", binding, correlation: hideCorrelation, transfer: null, child: null, context, hostGeneration: stamp.hostGeneration }];
@@ -397,7 +425,7 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
   };
   const timer = setInterval(poll, 100);
   poll();
-  return () => { active = false; clearInterval(timer); requestDocumentsAction.delete(win); };
+  return () => { active = false; clearInterval(timer); requestDocumentsAction.delete(win); documentPopupPermits.delete(win); };
 }
 
 function createMainWindow(): BrowserWindow {

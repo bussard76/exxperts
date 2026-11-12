@@ -566,7 +566,7 @@ export function App() {
 	type PreparedDocumentChild = NonNullable<Awaited<ReturnType<typeof beginDocumentChild>>>;
 	const documentChildRef = useRef<PreparedDocumentChild | null>(null);
 	const documentChildContextRef = useRef<DocumentContext | null>(null);
-	const nativePopupRef = useRef<{ request: { requestId: string; stamp: DocumentContext & { hostGeneration: number; draftGeneration: number }; direction: "detach" }; permit: { frameName: string; permitId: string } | null; expiresAt: number } | null>(null);
+	const nativePopupRef = useRef<{ request: { requestId: string; stamp: DocumentContext & { hostGeneration: number; draftGeneration: number }; direction: "detach" }; permit: { frameName: string; permitId: string } | null; expiresAt: number; registered: boolean; disarmed: boolean } | null>(null);
 	const [documentHostStatus, setDocumentHostStatus] = useState<"attached" | "opening" | "detached" | "returning" | "recovering">("attached");
 	const [documentHostError, setDocumentHostError] = useState<string | null>(null);
 	const documentHostCommitRef = useRef<{ admission: DocumentAdmission; child: PreparedDocumentChild; generation: number; direction: "detach" | "return" | "exit" | "recovery"; resolve?: (closed: boolean) => void } | null>(null);
@@ -1112,15 +1112,15 @@ export function App() {
 					const armed = nativePopupRef.current;
 					const bound = armed?.request.stamp;
 					const stillCurrent = !!stamp && !!bound && ["ownerId", "ownerGeneration", "roomId", "conversationId", "roomGeneration", "hostGeneration"].every((key) => stamp[key as keyof typeof stamp] === bound[key as keyof typeof bound]);
-					if (armed && items.length === 0 && (!stillCurrent || performance.now() >= armed.expiresAt || !!markdownEditorPendingActionRef.current)) {
+					if (armed && !armed.disarmed && items.length === 0 && (!stillCurrent || performance.now() >= armed.expiresAt || !!markdownEditorPendingActionRef.current)) {
 						if (armed.permit) items.push({ kind: "disarm-popup", binding: { nativeSessionId, ownerId: documentOwnerId, ownerGeneration: documentOwnerGenerationRef.current }, permitId: armed.permit.permitId });
-						nativePopupRef.current = null;
+						if (armed.registered) armed.disarmed = true; else nativePopupRef.current = null;
 					}
 					if (items.length === 0 && !nativePopupRef.current && stamp && !nativePrepared && !markdownEditorPendingActionRef.current) {
 						const requestId = allocateDocumentId();
 						if (requestId) {
 							const request = { requestId, stamp, direction: "detach" as const };
-							nativePopupRef.current = { request, permit: null, expiresAt: performance.now() + 9_000 };
+							nativePopupRef.current = { request, permit: null, expiresAt: performance.now() + 9_000, registered: false, disarmed: false };
 							items.push({ kind: "arm-popup", binding: { nativeSessionId, ownerId: documentOwnerId, ownerGeneration: documentOwnerGenerationRef.current }, request });
 						}
 					}
@@ -1140,6 +1140,11 @@ export function App() {
 						const candidate = permit as Record<string, unknown>;
 						if (Object.keys(candidate).sort().join(",") !== "frameName,permitId" || typeof candidate.frameName !== "string" || !/^exxperts-doc-[0-9a-f-]{36}$/.test(candidate.frameName) || typeof candidate.permitId !== "string" || !uuid.test(candidate.permitId) || !uuid.test(candidate.frameName.slice("exxperts-doc-".length)) || !stamp || !["ownerId", "ownerGeneration", "roomId", "conversationId", "roomGeneration", "hostGeneration"].every((key) => stamp[key as keyof typeof stamp] === armed.request.stamp[key as keyof typeof stamp])) return null;
 						armed.permit = { frameName: candidate.frameName, permitId: candidate.permitId };
+						items = [];
+					} else if (request.kind === "child-registered") {
+						const armed = nativePopupRef.current;
+						if (Object.keys(request).sort().join(",") !== "binding,kind,permitId,request" || !armed || !armed.permit || armed.registered || armed.disarmed || performance.now() >= armed.expiresAt || request.permitId !== armed.permit.permitId || JSON.stringify(request.request) !== JSON.stringify(armed.request) || !stamp || !["ownerId", "ownerGeneration", "roomId", "conversationId", "roomGeneration", "hostGeneration"].every((key) => stamp[key as keyof typeof stamp] === armed.request.stamp[key as keyof typeof stamp])) return null;
+						armed.registered = true;
 						items = [];
 					} else if (request.kind === "native-prepare") {
 						if (Object.keys(request).sort().join(",") !== "binding,disposition,kind,nativeRequestId,observedStamp" || typeof request.nativeRequestId !== "string" || !uuid.test(request.nativeRequestId) || typeof request.disposition !== "string" || !["hide", "quit", "update", "reload"].includes(request.disposition)) return null;
