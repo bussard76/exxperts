@@ -584,7 +584,7 @@ export function App() {
 	const preparedDocumentAdmissionRef = useRef<PreparedDocumentAdmission | null>(null);
 	const markdownEditorDirtyRef = useRef(false);
 	const markdownEditorPendingActionRef = useRef<PendingDocumentAction | null>(null);
-	const markdownEditorCommitBypassRef = useRef<{ intent: DocumentLocalAction | null } | null>(null);
+	const markdownEditorCommitBypassRef = useRef<{ pending: PendingDocumentAction } | null>(null);
 	const markdownEditorCommittingRef = useRef(false);
 	const markdownEditorPromptTimerRef = useRef<number | null>(null);
 	const markdownEditorCanceledSaveRef = useRef(false);
@@ -779,7 +779,7 @@ export function App() {
 	function guardMarkdownEditorAction(action: () => void | Promise<unknown>, prompt: "close" | "switch" | "navigate", intent: DocumentLocalAction | null = null): boolean {
 		const bypass = markdownEditorCommitBypassRef.current;
 		if (bypass) {
-			if (!sameDocumentLocalAction(bypass.intent, intent)) return false;
+			if (markdownEditorPendingActionRef.current !== bypass.pending || !preparedDocumentAdmissionIsCurrent(bypass.pending.admission) || !sameDocumentLocalAction(bypass.pending.admission.intent, intent)) return false;
 			markdownEditorCommitBypassRef.current = null;
 			return true;
 		}
@@ -840,7 +840,7 @@ export function App() {
 		setMarkdownEditorPromptBusy(false);
 		markdownEditorDirtyRef.current = false;
 		try {
-			markdownEditorCommitBypassRef.current = { intent: admission?.intent ?? null };
+			markdownEditorCommitBypassRef.current = { pending };
 			const result = action?.();
 			markdownEditorCommitBypassRef.current = null;
 			return Promise.resolve(result).then((value) => {
@@ -873,7 +873,9 @@ export function App() {
 			if (pending === "pending" && !(await editor!.save())) return false;
 			if (pending === "unknown" && (!(await editor!.settle()) || !(await editor!.save()))) return false;
 			if (!prepareDocumentAdmission(admission) || !preparedDocumentAdmissionIsCurrent(admission)) return false;
-			markdownEditorCommitBypassRef.current = { intent: admission.intent };
+			const current = markdownEditorPendingActionRef.current;
+			if (!current || current.admission !== admission) return false;
+			markdownEditorCommitBypassRef.current = { pending: current };
 			try { return action(); } finally { markdownEditorCommitBypassRef.current = null; }
 		};
 		markdownEditorPendingActionRef.current = { admission, continuation: continueAfterWrite, result: null };
@@ -7621,7 +7623,9 @@ export function App() {
 			const status = (await fetchPersistentAgentStatuses()).find((candidate) => candidate.id === chat.agentId);
 			if (!checkpointOriginCurrent(chat, generation)) return;
 			if (!status) throw new Error("This room is no longer available. Refresh Home and try again.");
-			markdownEditorCommitBypassRef.current = { intent: null };
+			const pending = markdownEditorPendingActionRef.current;
+			if (!pending || !preparedDocumentAdmissionIsCurrent(pending.admission)) return;
+			markdownEditorCommitBypassRef.current = { pending };
 			let opening: Promise<void>;
 			try { opening = openRoomFromAddress(status); } finally { markdownEditorCommitBypassRef.current = null; }
 			await opening;
