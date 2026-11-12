@@ -44,6 +44,7 @@ const releaseMarker = path.join(tempRoot, "preview-release");
 const killMarker = path.join(tempRoot, "dispatcher-killed");
 const nativeMarker = path.join(tempRoot, "native-calls");
 const networkMarker = path.join(tempRoot, "network-probes");
+const htmlReadMarker = path.join(tempRoot, "html-content-reads");
 let validJpeg = "";
 if (revokeChild || replaceChild) {
 	const { createCanvas } = await import("@napi-rs/canvas");
@@ -107,6 +108,7 @@ if (${htmlRaceChild}) {
   for (const method of ["readFileSync", "openSync"]) {
     const originalRead = fs[method];
     fs[method] = function(file, ...args) {
+      if (typeof file === "string" && /(?:encoding\\.htm|(?:race|late)-(?:json|frame)\\.html)$/.test(file)) fs.appendFileSync(${JSON.stringify(htmlReadMarker)}, file + "\\n");
       if (typeof file === "string" && /race-(json|frame)\\.(html|txt|pptx)$/.test(file)) {
         const replacement = file + ".replacement";
         if (fs.existsSync(replacement)) fs.renameSync(replacement, file);
@@ -371,7 +373,7 @@ if (htmlRaceChild) for (const name of ["growing.txt", "growing.pptx", "changing.
 if (htmlRaceChild) {
 	fs.writeFileSync(path.join(folder, "utf8.txt"), Buffer.from([0x3c, 0x73, 0x63, 0x72, 0x69, 0x70, 0x74, 0x3e, 0xc3, 0x28]));
 	fs.writeFileSync(path.join(folder, "invalid.json"), "{bad json");
-	for (const [name, size] of [["large.txt", 16_777_217], ["large.pptx", 26_214_401]] as const) { fs.writeFileSync(path.join(folder, name), ""); fs.truncateSync(path.join(folder, name), size); }
+	for (const [name, size] of [["large.txt", 16_777_217], ["large.pptx", 26_214_401], ["large.html", 16_777_217]] as const) { fs.writeFileSync(path.join(folder, name), ""); fs.truncateSync(path.join(folder, name), size); }
 }
 if (excelChild) {
 	const { default: ExcelJS } = await import("exceljs");
@@ -436,6 +438,7 @@ fs.writeFileSync(path.join(folder, "old.xls"), "invented");
 if (openChild) for (const name of ["example.json", "deck.pptx", "drawing.excalidraw"]) fs.writeFileSync(path.join(folder, name), "invented");
 fs.symlinkSync(path.join(folder, "book.xlsx"), path.join(folder, "link.xlsx"));
 if (htmlRaceChild) for (const name of ["link.txt", "link.pptx"]) fs.symlinkSync(path.join(folder, "book.xlsx"), path.join(folder, name));
+if (htmlRaceChild) fs.symlinkSync(path.join(folder, "example.html"), path.join(folder, "link.html"));
 fs.mkdirSync(path.join(folder, "directory.xlsx"));
 
 // A provider at an address nobody answers: the room only has to open, never answer.
@@ -548,12 +551,22 @@ try {
 	const restored = await api(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ toolSelection: { kind: "standard" } }) });
 	assert(restored.status === 200, "workspace read restored");
 	if (htmlRaceChild) {
-        for (const suffix of ["", "&frame=1"]) {
-            const encoding = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=encoding.htm${suffix}`);
-            assert(encoding.status === 200 && (suffix ? await encoding.text() : (await encoding.json()).html) === "A�(B", "malformed UTF-8 decodes with replacement in both responses");
+        for (const name of ["encoding.htm", "race-json.html", "race-frame.html", "late-json.html", "late-frame.html"]) {
+            const shell = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=${name}&frame=1`);
+            const body = await shell.text();
+            assert(shell.status === 200 && shell.headers.get("content-security-policy") === "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'" && body.includes("frame-ready") && !body.includes("invented document") && !body.includes("A�(B"), `${name} frame supplies only the fixed sandboxed shell`);
         }
-        for (const [name, suffix] of [["race-json.html", ""], ["race-frame.html", "&frame=1"], ["late-json.html", ""], ["late-frame.html", "&frame=1"]]) {
-            const result = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=${name}${suffix}`);
+        assert(!fs.existsSync(htmlReadMarker), "fixed frame shells never open or read workspace HTML content");
+        const anonymousShell = await fetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=example.html&frame=1`);
+        assert(anonymousShell.status === 401, "the fixed HTML shell requires the existing authentication");
+        for (const [query, status] of [["conversationId=missing-thread&path=example.html", 404], ["conversationId=demo-thread&path=absent.html", 404], ["conversationId=demo-thread&path=link.html", 403], ["conversationId=demo-thread&path=large.html", 413], ["conversationId=demo-thread&path=..%2Fexample.html", 400]] as const) {
+            const refused = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?${query}&frame=1`);
+            assert(refused.status === status, `HTML frame guard refuses ${query} with ${status}`);
+        }
+        const encoding = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=encoding.htm`);
+        assert(encoding.status === 200 && (await encoding.json()).html === "A�(B", "malformed UTF-8 decodes with replacement in the retained content response");
+        for (const name of ["race-json.html", "race-frame.html", "late-json.html", "late-frame.html"]) {
+			const result = await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?conversationId=demo-thread&path=${name}`);
             assert(result.status === 409 && (await result.json()).code === "file_changed", `HTML replacement is refused for ${name}`);
         }
         for (const name of ["race-json.txt", "race-frame.pptx", "late-json.txt", "late-frame.pptx"]) {

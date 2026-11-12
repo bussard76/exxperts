@@ -380,6 +380,10 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 	}
 	if (extension === ".html" || extension === ".htm") {
 		if (guarded.stat.size > 16_777_216) return reply.code(413).send({ code: "file_too_large", error: "This file is too large or complex to preview here." });
+		if (query.frame === "1") {
+			const bootstrap = `<!doctype html><html><head></head><body><script>const receive = (event) => { if (event.source !== parent || event.origin !== location.origin || !(event.data instanceof ArrayBuffer)) return; removeEventListener("message", receive); const html = new TextDecoder().decode(event.data); document.open(); document.write(html); document.close(); }; addEventListener("message", receive); parent.postMessage({kind:"frame-ready"}, "*");</script></body></html>`;
+			return reply.header("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'").type("text/html; charset=utf-8").send(bootstrap);
+		}
 		let html: string;
 		try {
 			const expected = guarded.stat;
@@ -402,8 +406,6 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 			if (again.absolutePath !== guarded.absolutePath || again.rootRealpath !== guarded.rootRealpath || !matches(again.stat)) throw new Error("file changed");
 		}
 		catch { return reply.code(409).send({ code: "file_changed", error: "This file changed while the preview was loading; close the tab and open it again." }); }
-		// The frame's document: the CSP sandbox gives it an opaque origin even when opened directly, so its scripts have no cookies or API.
-		if (query.frame === "1") return reply.header("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'").type("text/html; charset=utf-8").send(html);
 		return reply.send({ schemaVersion: 1, agentId, conversationId: query.conversationId, path: relativePath, kind: "html", html, notices: [] });
 	}
 	if (![".xlsx", ".docx", ".pdf"].includes(extension)) {
