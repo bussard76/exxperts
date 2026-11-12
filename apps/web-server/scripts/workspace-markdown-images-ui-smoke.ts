@@ -539,6 +539,12 @@ try {
 		assert(writableSetting.status === 200, "restore demo writer");
 		await tree.locator(".workspace-file-browser-file", { hasText: "other.md" }).click();
 		await page.getByRole("complementary", { name: "Markdown editor: other.md" }).waitFor();
+		assert(await page.evaluate(() => {
+			const tree = document.querySelector(".sidebar-workspace-files");
+			const editor = document.querySelector('[aria-label="Markdown editor: other.md"]');
+			const host = editor?.closest(".docs-host");
+			return Boolean(host && tree && host.contains(tree) && document.querySelectorAll(".docs-host").length === 1);
+		}), "the attached tree and actual editor share one document host");
 		const composer = page.locator("textarea").first();
 		await composer.fill("Read ");
 		await tree.locator(".workspace-file-browser-file", { hasText: "guide.md" }).dragTo(composer);

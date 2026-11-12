@@ -623,3 +623,7 @@ An added real 390px browser check failed because the fixed attached tree is unde
 ## Checkpoint: narrow-screen tree stacking
 
 The attached single-container draft now gives the narrow-screen drawer background, tree and footer menu separate stacking layers. The attributed `sidebar-reopen-ui` smoke passed 1/1 after exercising a 390px real sidebar tree click, settings-menu hit and settings overlay, backdrop dismissal and reopening, in addition to the desktop resize/collapse checks; the UI asset build passed. This resolves the two recorded browser regressions for those entry points only; child movement and broader responsive/native evidence remain open.
+
+## Checkpoint: attached editor and tree identity
+
+The real `workspace-markdown-images-ui` smoke now verifies that the opened Markdown editor and workspace tree are descendants of the same sole document host before exercising the real drag and forged drop. The attributed smoke passed 1/1. This establishes the attached DOM relationship only; the retained identity across an actual child move is still unexecuted behind disabled Detach.
