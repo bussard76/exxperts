@@ -965,7 +965,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			area.removeEventListener("input", onInput);
 			area.removeEventListener("select", syncRawTaskActive);
 		};
-	}, [hostGeneration, mode, syncRawTaskActive]);
+	}, [hostGeneration, mode, phase, syncRawTaskActive]);
 	useLayoutEffect(() => {
 		const root = paneRootRef.current;
 		if (!root || !conflict) return;

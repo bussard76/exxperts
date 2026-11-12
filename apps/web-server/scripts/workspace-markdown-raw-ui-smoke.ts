@@ -162,6 +162,7 @@ try {
 		await raw.click();
 		await raw.evaluate((el) => { const t = el as HTMLTextAreaElement; t.setSelectionRange(t.value.length, t.value.length); });
 		await page.keyboard.type("mine");
+		assert(await raw.inputValue() === "# Changed outside\nmine" && await page.locator(".markdown-editor-save").isEnabled(), `typing after Reload updates the raw editor state (value=${JSON.stringify(await raw.inputValue())}, status=${await page.locator(".markdown-editor-status").textContent()})`);
 		await waitUntil(() => fs.readFileSync(notes, "utf8") === "# Changed outside\nmine", "the next RAW edit is saved on top of the reloaded file");
 		console.log("  ok  RAW saves again after a reload");
 
