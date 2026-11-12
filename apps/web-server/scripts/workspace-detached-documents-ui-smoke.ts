@@ -532,6 +532,48 @@ try {
 				await settingsClosed;
 				assert((await settingsResponse).ok(), "room-settings Memento reaches its real route after child closure");
 			} finally { await settingsPage.close().catch(() => {}); }
+			for (const operation of ["archive", "purge"] as const) {
+				const roomName = operation === "archive" ? "Invented Archive Ordering" : "Invented Purge Ordering";
+				const room = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: roomName, userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
+				assert(room.status === 201, `the ${operation} ordering room is created`);
+				const roomId = String(room.body?.agent?.id ?? "");
+				assert((await api(`/api/persistent-agents/${encodeURIComponent(roomId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: workspace, workspaceAccessMode: "localFiles" }) })).status === 200, `the ${operation} ordering room uses the invented workspace`);
+				const operationPage = await context.newPage();
+				try {
+					await operationPage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+					await operationPage.waitForLoadState("networkidle");
+					const operationDismiss = operationPage.locator(".whats-new-close");
+					if (await operationDismiss.count()) await operationDismiss.click();
+					await operationPage.locator(".persistent-agent-card").filter({ hasText: roomName }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+					await operationPage.locator(".sidebar-workspace-files").waitFor();
+					const operationOpened = operationPage.waitForEvent("popup");
+					await operationPage.getByRole("button", { name: "Detach", exact: true }).click();
+					const operationChild = await operationOpened;
+					await operationChild.locator(".workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
+					await operationChild.evaluate(`window.__t20OriginalClose = window.close; window.__t20CloseCalls = 0; window.close = () => { window.__t20CloseCalls++; }`);
+					let operationRequests = 0;
+					operationPage.on("request", (request) => { if (request.method() === "POST" && request.url().endsWith(`/${operation}`)) operationRequests++; });
+					await operationPage.getByRole("button", { name: "Room settings" }).click();
+					await operationPage.locator(".settings-dialog-nav-item").filter({ hasText: /^Archive or delete$/ }).first().click();
+					const operationButton = operationPage.locator(".room-danger-zone").getByRole("button", { name: operation === "archive" ? "Archive" : "Delete room", exact: true });
+					if (operation === "purge") {
+						await operationButton.click();
+						const confirmation = operationPage.getByRole("alertdialog", { name: `Delete ${roomName}?` });
+						await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+						await confirmation.waitFor({ state: "detached" });
+						assert(!operationChild.isClosed() && await operationChild.evaluate(`window.__t20CloseCalls`) === 0 && operationRequests === 0, "canceling purge confirmation leaves the child open and sends no request");
+					}
+					await operationButton.click();
+					if (operation === "purge") await operationPage.getByRole("alertdialog", { name: `Delete ${roomName}?` }).getByRole("button", { name: "Delete room", exact: true }).click();
+					await waitUntil(() => operationChild.evaluate(`window.__t20CloseCalls > 0`), `${operation} requests the registered child close`);
+					assert(!operationChild.isClosed() && operationRequests === 0, `${operation} waits for actual child closure before its route`);
+					const operationClosed = operationChild.waitForEvent("close");
+					const operationResponse = operationPage.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith(`/${operation}`) && response.ok());
+					await operationChild.evaluate(`window.close = window.__t20OriginalClose; window.close()`);
+					await operationClosed;
+					assert((await operationResponse).ok(), `${operation} reaches its real route after the child closes`);
+				} finally { await operationPage.close().catch(() => {}); }
+			}
 		} finally { await context.close(); }
 	} finally { await browser.close(); }
 	console.log("workspace-detached-documents-ui smoke: ok");
