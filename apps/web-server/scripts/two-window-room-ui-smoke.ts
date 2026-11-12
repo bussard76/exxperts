@@ -350,7 +350,7 @@ try {
 			assert(await loading.locator(".markdown-editor-tiptap .ProseMirror").count() === 0 && writes === 0, "a denied load shows its error without creating or writing an empty draft");
 			await loading.close();
 		}
-		{
+		for (const denied of [false, true]) {
 			const unknownPolicy = await ctx.newPage();
 			await unknownPolicy.goto(`${baseUrl}/#/room/${agentId}`);
 			await unknownPolicy.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "unknown-permission.md" }).click();
@@ -360,6 +360,7 @@ try {
 			let writes = 0;
 			await unknownPolicy.route("**/workspace-markdown?*", async (route) => {
 				if (route.request().method() !== "GET") { writes++; return route.abort(); }
+				if (denied) return route.fulfill({ status: 403, json: { code: "workspace_read_forbidden", error: "Workspace reading is not enabled for this room." } });
 				const response = await route.fetch();
 				await route.fulfill({ response, json: { ...(await response.json()), readOnly: true } });
 			});

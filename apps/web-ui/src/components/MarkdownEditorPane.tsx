@@ -680,7 +680,8 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 					return latest.revision;
 				}
 				revision = latest.revision;
-			} catch {
+			} catch (cause) {
+				if (cause instanceof WorkspaceMarkdownApiError && cause.status === 403) setCanEdit(false);
 				return null;
 			}
 		}
@@ -745,7 +746,8 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 						setPhase("conflict");
 						return null;
 					}
-				} catch {
+				} catch (readCause) {
+					if (readCause instanceof WorkspaceMarkdownApiError && readCause.status === 403) setCanEdit(false);
 					// The write remains unknown until its outcome can be reconciled.
 				}
 			}
@@ -830,7 +832,8 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			setError(null);
 			setPhase("ready");
 			return true;
-		} catch {
+		} catch (cause) {
+			if (cause instanceof WorkspaceMarkdownApiError && cause.status === 403) setCanEdit(false);
 			return false;
 		}
 	}, [agentId, contextGeneration, conversationId, path, reconcileServerContent, recordConfirmedWrite, saveInFlight, setDirty]);
