@@ -365,10 +365,10 @@ try {
 				if (this.url.includes("path=single.excalidraw")) (window as any).originalPreviewBuffer = buffer;
 				return buffer;
 			};
-			(window as any).replacementBytes = 0; (window as any).replacementReady = false; (window as any).repeatBytes = 0; window.addEventListener("message", (event) => { if (event.data?.kind === "replacement-ready") (window as any).replacementReady = true; if (event.data?.kind === "repeat-received") (window as any).repeatBytes = event.data.length; if (event.data?.kind === "replacement-received") (window as any).replacementBytes = event.data.length; });
+			(window as any).replacementBytes = 0; (window as any).replacementPayloads = []; (window as any).replacementReady = false; (window as any).repeatBytes = 0; window.addEventListener("message", (event) => { if (event.data?.kind === "replacement-ready") (window as any).replacementReady = true; if (event.data?.kind === "repeat-received") (window as any).repeatBytes = event.data.length; if (event.data?.kind === "replacement-received") { (window as any).replacementBytes = event.data.length; (window as any).replacementPayloads.push(event.data.bytes); } });
 		});
 		const fakeFrame = `<script>const frameId = new URLSearchParams(location.hash.slice(1)).get("frameId"); let received = false; onmessage = e => { if (e.data instanceof ArrayBuffer) { if (received) parent.postMessage({kind: "repeat-received", length: e.data.byteLength}, "*"); else { received = true; parent.postMessage({kind: "frame-rendered"}, "*"); parent.postMessage({kind: "frame-ready", frameId}, "*"); setTimeout(() => location.href = "/replacement-frame" + location.hash, 100); } } }; parent.postMessage({kind: "frame-ready", frameId}, "*");</script>`;
-		const replacement = `<body>Invented framed replacement<script>onmessage = e => { if (e.data instanceof ArrayBuffer) parent.postMessage({kind: "replacement-received", length: e.data.byteLength}, "*"); }; parent.postMessage({kind: "replacement-ready"}, "*"); parent.postMessage({kind: "frame-ready", frameId: new URLSearchParams(location.hash.slice(1)).get("frameId")}, "*");</script></body>`;
+		const replacement = `<body>Invented framed replacement<script>onmessage = e => { if (e.data instanceof ArrayBuffer) parent.postMessage({kind: "replacement-received", length: e.data.byteLength, bytes: Array.from(new Uint8Array(e.data))}, "*"); }; parent.postMessage({kind: "replacement-ready"}, "*"); parent.postMessage({kind: "frame-ready", frameId: new URLSearchParams(location.hash.slice(1)).get("frameId")}, "*");</script></body>`;
 		await page.route("**/replacement-frame", (route) => route.fulfill({ status: 200, contentType: "text/html", body: replacement }));
 		await page.route("**/workspace-preview?*", (route) => {
 			const url = new URL(route.request().url());
@@ -396,7 +396,7 @@ try {
 			await framedShellReleased;
 			await route.fulfill({ response }).catch(() => {});
 		});
-		await page.evaluate(() => { (window as any).replacementBytes = 0; (window as any).replacementReady = false; });
+		await page.evaluate(() => { (window as any).replacementBytes = 0; (window as any).replacementPayloads = []; (window as any).replacementReady = false; });
 		await treeFile("premature.excalidraw").click();
 		try {
 			await framedShellStarted;
@@ -405,8 +405,31 @@ try {
 			await page.frameLocator('.workspace-preview-html iframe[title="premature.excalidraw"]').getByText("Invented framed replacement").waitFor();
 			await waitUntil(() => page.evaluate(() => (window as any).replacementReady), "the prematurely navigated framed preview sent readiness");
 			await page.waitForTimeout(300);
-			assert(await page.evaluate(() => (window as any).replacementBytes) === 0, "a framed preview navigated before readiness cannot receive its snapshot");
+			// The trusted parent already holds this snapshot; its pre-ready navigation is excluded by ADR-0009 option B. The old zero-byte assertion failed here.
+			const observed = await page.evaluate(() => ({ length: (window as any).replacementBytes, payloads: (window as any).replacementPayloads as number[][] }));
+			assert(observed.length === 500 && observed.payloads.length === 1 && Buffer.from(observed.payloads[0]).equals(fs.readFileSync(path.join(folder, "premature.excalidraw"))), "trusted-parent pre-ready navigation receives exactly one copy of the original 500-byte snapshot");
 		} finally { releaseFramedShell(); }
+		await tab("premature.excalidraw").getByRole("button", { name: /close/i }).click();
+		await page.unroute("**/workspace-preview?*");
+		let releaseChangedFramedShell!: () => void, startChangedFramedShell!: () => void;
+		const changedFramedReleased = new Promise<void>((resolve) => { releaseChangedFramedShell = resolve; });
+		const changedFramedStarted = new Promise<void>((resolve) => { startChangedFramedShell = resolve; });
+		await page.route("**/workspace-preview?*", async (route) => {
+			const url = new URL(route.request().url());
+			if (url.searchParams.get("path") !== "premature.excalidraw" || url.searchParams.get("frame") !== "1") return route.continue();
+			const response = await route.fetch(); startChangedFramedShell(); await changedFramedReleased; await route.fulfill({ response }).catch(() => {});
+		});
+		await page.evaluate(() => { (window as any).replacementBytes = 0; (window as any).replacementPayloads = []; (window as any).replacementReady = false; });
+		await treeFile("premature.excalidraw").click();
+		try {
+			await changedFramedStarted;
+			const frame = page.locator('.workspace-preview-html iframe[title="premature.excalidraw"]');
+			await frame.evaluate((node) => { const iframe = node as HTMLIFrameElement; iframe.src = `/replacement-frame${new URL(iframe.src).hash}`; });
+			await page.frameLocator('.workspace-preview-html iframe[title="premature.excalidraw"]').getByText("Invented framed replacement").waitFor();
+			await waitUntil(() => page.evaluate(() => (window as any).replacementReady), "the src-changed framed preview sent readiness");
+			await page.waitForTimeout(300);
+			assert(await page.evaluate(() => (window as any).replacementBytes) === 0, "a framed preview whose src changed before readiness cannot receive its snapshot");
+		} finally { releaseChangedFramedShell(); }
 		await tab("premature.excalidraw").getByRole("button", { name: /close/i }).click();
 		await page.unroute("**/workspace-preview?*");
 		await page.unroute("**/replacement-frame");
@@ -581,8 +604,8 @@ try {
 		}
         const forbiddenRequests: string[] = [];
         context.on("requestfinished", request => { if (/hostile-(fetch|api|xhr|ws|image|form)/.test(request.url())) forbiddenRequests.push(request.url()); });
-        await page.evaluate(() => { (window as any).htmlRepeatedBytes = 0; (window as any).htmlReplacementBytes = 0; (window as any).htmlReplacementReady = 0; window.addEventListener("message", (event) => { if (event.data?.kind === "html-repeat-received") (window as any).htmlRepeatedBytes = event.data.length; if (event.data?.kind === "html-replacement-received") (window as any).htmlReplacementBytes = event.data.length; if (event.data?.kind === "html-replacement-ready") (window as any).htmlReplacementReady++; }); });
-        await page.route("**/replacement-html-frame*", (route) => route.fulfill({ status: 200, contentType: "text/html", body: `<body>Invented replacement<script>onmessage = event => { if (event.data instanceof ArrayBuffer) parent.postMessage({kind: "html-replacement-received", length: event.data.byteLength}, "*"); }; parent.postMessage({kind:"html-replacement-ready"}, "*"); parent.postMessage({kind:"frame-ready", frameId:location.hash.slice(1)}, "*"); setTimeout(() => parent.postMessage({kind:"frame-failed"}, "*"), 100);</script></body>` }));
+        await page.evaluate(() => { (window as any).htmlRepeatedBytes = 0; (window as any).htmlReplacementBytes = 0; (window as any).htmlReplacementPayloads = []; (window as any).htmlReplacementReady = 0; window.addEventListener("message", (event) => { if (event.data?.kind === "html-repeat-received") (window as any).htmlRepeatedBytes = event.data.length; if (event.data?.kind === "html-replacement-received") { (window as any).htmlReplacementBytes = event.data.length; (window as any).htmlReplacementPayloads.push(event.data.bytes); } if (event.data?.kind === "html-replacement-ready") (window as any).htmlReplacementReady++; }); });
+        await page.route("**/replacement-html-frame*", (route) => route.fulfill({ status: 200, contentType: "text/html", body: `<body>Invented replacement<script>onmessage = event => { if (event.data instanceof ArrayBuffer) parent.postMessage({kind: "html-replacement-received", length: event.data.byteLength, bytes: Array.from(new Uint8Array(event.data))}, "*"); }; parent.postMessage({kind:"html-replacement-ready"}, "*"); parent.postMessage({kind:"frame-ready", frameId:location.hash.slice(1)}, "*"); setTimeout(() => parent.postMessage({kind:"frame-failed"}, "*"), 100);</script></body>` }));
         let releaseHtmlShell!: () => void, startHtmlShell!: () => void;
         const htmlShellReleased = new Promise<void>((resolve) => { releaseHtmlShell = resolve; });
         const htmlShellStarted = new Promise<void>((resolve) => { startHtmlShell = resolve; });
@@ -618,7 +641,7 @@ try {
         await direct.waitForTimeout(300);
         assert(await page.evaluate(() => (window as any).htmlRepeatedBytes) === 0, "repeated HTML frame readiness cannot receive a second snapshot");
         assert(forbiddenRequests.length === 0 && !/hostile-(fetch|api|xhr|ws|image|form)/.test(serverOutput.join("")), "HTML cannot send API, connect, image or form requests");
-        await htmlFrame.evaluate((frame) => { const iframe = frame as HTMLIFrameElement; iframe.contentWindow!.location.href = `/replacement-html-frame${new URL(iframe.src).hash}`; });
+        await htmlFrame.evaluate((frame) => { const iframe = frame as HTMLIFrameElement; iframe.src = `/replacement-html-frame${new URL(iframe.src).hash}`; });
         await page.frameLocator(".workspace-preview-html iframe").getByText("Invented replacement").waitFor();
         await waitUntil(() => page.evaluate(() => (window as any).htmlReplacementReady === 2), "the navigated frame sent readiness");
         await page.waitForTimeout(300);
@@ -643,8 +666,32 @@ try {
             await page.frameLocator('.workspace-preview-html iframe[title="premature.html"]').getByText("Invented replacement").waitFor();
             await waitUntil(() => page.evaluate(() => (window as any).htmlReplacementReady === 3), "the prematurely navigated frame sent readiness");
             await page.waitForTimeout(300);
-            assert(await page.evaluate(() => (window as any).htmlReplacementBytes) === 0, "a frame navigated before its first readiness cannot receive the HTML snapshot");
+            // The trusted parent already holds this snapshot; its pre-ready navigation is excluded by ADR-0009 option B. The old zero-byte assertion was not reached.
+            const observed = await page.evaluate(() => ({ length: (window as any).htmlReplacementBytes, payloads: (window as any).htmlReplacementPayloads as number[][] }));
+            const original = fs.readFileSync(path.join(folder, "premature.html"));
+            assert(observed.length === original.length && observed.payloads.length === 1 && Buffer.from(observed.payloads[0]).equals(original), "trusted-parent pre-ready navigation receives exactly one copy of the original UTF-8 HTML snapshot");
         } finally { releasePrematureShell(); }
+        await tab("premature.html").locator(".workspace-tab-close").click();
+        await page.unroute("**/workspace-preview?*");
+        let releaseChangedHtmlShell!: () => void, startChangedHtmlShell!: () => void;
+        const changedHtmlReleased = new Promise<void>((resolve) => { releaseChangedHtmlShell = resolve; });
+        const changedHtmlStarted = new Promise<void>((resolve) => { startChangedHtmlShell = resolve; });
+        await page.route("**/workspace-preview?*", async (route) => {
+            const url = new URL(route.request().url());
+            if (url.searchParams.get("path") !== "premature.html" || url.searchParams.get("frame") !== "1") return route.continue();
+            const response = await route.fetch(); startChangedHtmlShell(); await changedHtmlReleased; await route.fulfill({ response }).catch(() => {});
+        });
+        await page.evaluate(() => { (window as any).htmlReplacementBytes = 0; (window as any).htmlReplacementPayloads = []; });
+        await treeFile("premature.html").click();
+        try {
+            await changedHtmlStarted;
+            const frame = page.locator('.workspace-preview-html iframe[title="premature.html"]');
+            await frame.evaluate((node) => { const iframe = node as HTMLIFrameElement; iframe.src = `/replacement-html-frame${new URL(iframe.src).hash}`; });
+            await page.frameLocator('.workspace-preview-html iframe[title="premature.html"]').getByText("Invented replacement").waitFor();
+            await waitUntil(() => page.evaluate(() => (window as any).htmlReplacementReady === 4), "the src-changed HTML frame sent readiness");
+            await page.waitForTimeout(300);
+            assert(await page.evaluate(() => (window as any).htmlReplacementBytes) === 0, "an HTML frame whose src changed before readiness cannot receive its snapshot");
+        } finally { releaseChangedHtmlShell(); }
         await tab("premature.html").locator(".workspace-tab-close").click();
         await page.unroute("**/workspace-preview?*");
         await page.unroute("**/replacement-html-frame*");
