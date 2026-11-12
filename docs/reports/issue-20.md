@@ -487,3 +487,7 @@ Image zoom now obtains animation scheduling, cancellation, reduced-motion prefer
 ## Checkpoint: private child bootstrap draft
 
 The existing private host hook can now open an empty about:blank child, verify its opener/name/document, copy the owner's root attributes and styles, wait for stylesheet success and a bounded styled-layout check, and return empty tree/pane slots. It does not move either owner surface, expose Detach, register a native child, or acquire the action arbiter; an unverified returned window is not closed by failure cleanup. UI and scripts typechecks and the UI asset build passed; the attributed detached smoke remained red at the first unavailable Detach assertion and did not exercise this draft. Actual bootstrap/adoption/security behavior, C3/C4 and native safeguards still need integration and real tests.
+
+## Checkpoint: empty owner session
+
+A selected room now initializes its owner tab session with an empty path list, so the hidden document host exists before the first file is selected. UI and scripts typechecks, the UI asset build, and the attributed `two-window-room-ui` and `workspace-file-tabs-ui` smokes passed 2/2. The real empty-child acceptance remains unexecuted because Detach is unavailable; bootstrap, adoption, C4 and native safeguards are not complete.

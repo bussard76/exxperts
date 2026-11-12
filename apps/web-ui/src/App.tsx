@@ -1127,7 +1127,7 @@ export function App() {
 		setPersistentChatState(next);
 	}
 	useEffect(() => {
-		setWorkspaceTabs(null);
+		setWorkspaceTabs(persistentChat && !personChanged ? { agentId: persistentChat.agentId, conversationId: persistentChat.conversationId, paths: [] } : null);
 		setRightPane((pane) => pane?.kind === "markdownEditor" || pane?.kind === "workspaceImage" || pane?.kind === "workspaceLegacyDoc" || pane?.kind === "workspacePdf" || pane?.kind === "workspaceWord" || pane?.kind === "workspaceHtml" || pane?.kind === "workspaceFramed" || pane?.kind === "workspaceText" || pane?.kind === "workspaceSpreadsheet" ? null : pane);
 	}, [persistentChat?.agentId, persistentChat?.conversationId, personChanged]);
 	// Another conversation holds none of this one's edit.
