@@ -20,11 +20,12 @@ const stuck = process.env.T20_NATIVE_STUCK === "1";
 const save = process.env.T20_NATIVE_SAVE === "1";
 const lateAbort = process.env.T20_NATIVE_LATE_ABORT === "1";
 const dirty = process.env.T20_NATIVE_DIRTY === "1" || save || lateAbort;
-const late = process.env.T20_NATIVE_LATE === "1";
+const lateEmpty = process.env.T20_NATIVE_EMPTY_LATE === "1";
+const late = process.env.T20_NATIVE_LATE === "1" || lateEmpty;
 const foreignOpener = process.env.T20_NATIVE_FOREIGN === "1";
 const popup = process.env.T20_NATIVE_POPUP === "1";
 const armOnly = process.env.T20_NATIVE_ARM === "1" || popup || foreignOpener;
-const active = process.env.T20_NATIVE_ACTIVE === "1" || dirty || late || armOnly;
+const active = process.env.T20_NATIVE_ACTIVE === "1" || dirty || (late && !lateEmpty) || armOnly;
 const quit = process.env.T20_NATIVE_QUIT === "1";
 const reloadKey = process.env.T20_NATIVE_RELOAD_KEY === "1";
 const reload = process.env.T20_NATIVE_RELOAD === "1" || reloadKey;
@@ -239,7 +240,8 @@ try {
 			await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any).__t20Release(), owner);
 			await new Promise((resolve) => setTimeout(resolve, 1_000));
 			assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Commits === 0, owner), "a late prepared reply cannot revive native commit");
-			assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20AbortAck === 1, owner), "the late prepared attempt is aborted and acknowledged");
+			if (lateEmpty) assert(await application.evaluate(({ BrowserWindow }, id) => Boolean(BrowserWindow.fromId(id)?.isVisible()) && (BrowserWindow.fromId(id) as any)?.__t20Commits === 0 && (BrowserWindow.fromId(id) as any)?.__t20AbortAck === 0, owner), "a late empty no-session reply keeps Quit prevented without commit or inferred abort acknowledgement");
+			else assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20AbortAck === 1, owner), "the late prepared attempt is aborted and acknowledged");
 		} else if (dirty) {
 			assert(page, "the owner page is available for the native prompt");
 			const prompt = page.getByRole("dialog", { name: "Unsaved Markdown changes" });
