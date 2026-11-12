@@ -441,3 +441,7 @@ During the preceding documentation checkpoint, Git's automatic background packin
 ## Checkpoint: child-first text and image snapshot cases
 
 `workspace-detached-documents-ui-smoke.ts` now specifies real child-first text and image opens, changes the invented files on disk, returns to chat, and checks original content and a single authorized read. The attributed filtered detached smoke remains red at its first missing Detach assertion; these added cases were not reached and do not establish snapshot retention. The scripts typecheck passed; actual host, image lifetime, text reconstruction, remaining preview types, C4 and native safeguards remain required.
+
+## Checkpoint: owner-held text snapshot
+
+A successfully loaded text preview now also stores its formatted content in the existing owner-held tab record, which is removed on tab close and replaced on context change. UI and scripts typechecks, UI asset build, and the attributed filtered `workspace-file-tabs-ui` smoke passed (1/1). The child-first text test remains unexecuted because the detached smoke stops at its first unavailable Detach assertion; loading/error retention and every actual transfer/native requirement remain open, so this checkpoint does not establish C7 completion.
