@@ -175,12 +175,13 @@ type DocumentContext = Readonly<{
 	roomGeneration: number;
 }>;
 
-type DocumentLocalAction = Readonly<{ kind: "select-file" | "close-tab"; path: string } | { kind: "room-operation"; operation: "memento" | "archive" | "purge"; roomId: string; conversationId: string }>;
+type DocumentLocalAction = Readonly<{ kind: "select-file" | "close-tab"; path: string } | { kind: "leave-room"; target: "home" | "memory" } | { kind: "room-operation"; operation: "memento" | "archive" | "purge"; roomId: string; conversationId: string }>;
 
 function sameDocumentLocalAction(a: DocumentLocalAction | null, b: DocumentLocalAction | null): boolean {
 	if (!a || !b) return a === b;
 	if (a.kind === "room-operation") return b.kind === "room-operation" && a.operation === b.operation && a.roomId === b.roomId && a.conversationId === b.conversationId;
-	return b.kind !== "room-operation" && a.kind === b.kind && a.path === b.path;
+	if (a.kind === "leave-room") return b.kind === "leave-room" && a.target === b.target;
+	return (b.kind === "select-file" || b.kind === "close-tab") && a.kind === b.kind && a.path === b.path;
 }
 
 type DocumentAdmission = Readonly<{
@@ -746,6 +747,8 @@ export function App() {
 		if (current.key !== null && !context) return null;
 		if (intent?.kind === "room-operation") {
 			if ((intent.operation !== "memento" && intent.operation !== "archive" && intent.operation !== "purge") || typeof intent.roomId !== "string" || !intent.roomId || typeof intent.conversationId !== "string" || !intent.conversationId || !context || context.roomId !== intent.roomId || context.conversationId !== intent.conversationId) return null;
+		} else if (intent?.kind === "leave-room") {
+			if (intent.target !== "home" && intent.target !== "memory") return null;
 		} else if (intent && ((intent.kind !== "select-file" && intent.kind !== "close-tab") || typeof intent.path !== "string" || !intent.path)) return null;
 		return { requestId, ownerId: documentOwnerId, ownerGeneration, roomGeneration: current.generation, initialHostGeneration: hostGeneration, initialDraftGeneration: draftGeneration, context, intent: intent && { ...intent } };
 	}
@@ -7949,10 +7952,11 @@ export function App() {
 		keepChatting();
 	}
 
-	async function restAfterCheckpoint() {
-		const cleanAction = admitCleanMarkdownEditorAction(() => restAfterCheckpoint());
+	async function restAfterCheckpoint(target: "home" | "memory" = "home") {
+		const intent: DocumentLocalAction = { kind: "leave-room", target };
+		const cleanAction = admitCleanMarkdownEditorAction(() => restAfterCheckpoint(target), undefined, intent);
 		if (cleanAction) return await cleanAction as boolean;
-		if (!guardMarkdownEditorAction(() => restAfterCheckpoint(), "navigate")) return false;
+		if (!guardMarkdownEditorAction(() => restAfterCheckpoint(target), "navigate", intent)) return false;
 		const approval = checkpointApprovalResult;
 		const postCheckpointThreadId = approval?.postCheckpoint.activeThreadId;
 		if (approval && postCheckpointThreadId) {
@@ -7983,7 +7987,7 @@ export function App() {
 	// The Remember that filled the room: Home, and Memorize starts on it.
 	async function memorizeAfterCheckpoint() {
 		const target = persistentChat ? { agentId: persistentChat.agentId, displayName: persistentChat.displayName } : null;
-		if (await restAfterCheckpoint() && target) void startAbsorbWorkflow({ target });
+		if (await restAfterCheckpoint("memory") && target) void startAbsorbWorkflow({ target });
 	}
 
 	const resolveApproval = useCallback((requestId: string, value: any, label: string) => {
@@ -8409,15 +8413,16 @@ export function App() {
 	// without reading state that only settles on the next render.
 	async function goHome(): Promise<boolean> {
 		const noSession = noDocumentSession();
+		const intent: DocumentLocalAction = { kind: "leave-room", target: "home" };
 		if (!noSession) {
-			const cleanAction = admitCleanMarkdownEditorAction(() => goHome());
+			const cleanAction = admitCleanMarkdownEditorAction(() => goHome(), undefined, intent);
 			if (cleanAction) return await cleanAction as boolean;
 		}
 		// A conversation the save that filled the room closed leaves the way Return Home does: nothing is saved into it.
 		if (closedByFullSaveRef.current) return restAfterCheckpoint();
 		if (!noSession) {
 			const alreadyPending = markdownEditorPendingActionRef.current !== null;
-			if (!guardMarkdownEditorAction(() => goHome(), "navigate")) {
+			if (!guardMarkdownEditorAction(() => goHome(), "navigate", intent)) {
 				if (alreadyPending) return false;
 				return Boolean(await markdownEditorPendingActionRef.current?.result?.promise);
 			}
@@ -9535,7 +9540,7 @@ export function App() {
 				</>
 			) : undefined}
 			previewSlot={rightPaneSlot}
-			checkpointPreviewSlot={checkpointPreviewOpen && persistentChat && <CheckpointPreviewShell chat={persistentChat} itemCount={items.length} rememberText={checkpointRememberText} density={checkpointDensity} proposal={checkpointProposal} loading={checkpointProposalLoading} progress={checkpointProgress} onCancelGenerate={() => cancelCheckpointProposal()} error={checkpointProposalError} notice={checkpointProposalNotice} onChooseModel={() => openRoomSettings("model")} onSignIn={(provider) => openSignIn(provider ?? persistentChat.model.provider)} approvalLoading={checkpointApprovalLoading} approvalError={checkpointApprovalError} approvalResult={checkpointApprovalResult} quickRequested={checkpointQuickRequested} skipsPreview={rememberSkipsPreview} quickBlockedReasons={checkpointQuickBlockedReasons} consultRunning={consultState.phase === "streaming"} taskRunning={taskState.phase === "running"} pendingConsultHandoffCount={pendingHandoffs.filter((block) => !isSpecialistHandoffBlock(block)).length} pendingTaskHandoffCount={pendingHandoffs.filter(isSpecialistHandoffBlock).length} approvedFields={checkpointFields} onFieldsChange={(fields) => { if (checkpointProposal) setCheckpointEdits({ key: checkpointEditsKey(checkpointProposal), fields }); }} onRememberTextChange={(text) => { setCheckpointRememberText(text); setCheckpointProposal(null); setCheckpointProposalError(null); setCheckpointProposalNotice(null); setCheckpointApprovalError(null); setCheckpointApprovalResult(null); }} onDensityChange={(next) => { setCheckpointDensity(next); setCheckpointProposal(null); setCheckpointProposalError(null); setCheckpointProposalNotice(null); setCheckpointApprovalError(null); setCheckpointApprovalResult(null); }} onGenerate={generateCheckpointProposal} onApprove={approveCheckpointProposal} onDiscard={() => { discardCheckpointProposalOnServer(); setCheckpointEdits(null); setCheckpointProposal(null); setCheckpointProposalError(null); setCheckpointProposalNotice(null); setCheckpointApprovalError(null); setCheckpointApprovalResult(null); setCheckpointQuickRequested(false); setCheckpointQuickBlockedReasons(null); setCheckpointPreviewOpen(false); }} onContinueAfterCheckpoint={continueAfterCheckpoint} onRestAfterCheckpoint={restAfterCheckpoint} onMemorizeAfterCheckpoint={memorizeAfterCheckpoint} onClose={() => { if (roomFilledBy(checkpointApprovalResult)) void restAfterCheckpoint(); else setCheckpointPreviewOpen(false); }} />}
+			checkpointPreviewSlot={checkpointPreviewOpen && persistentChat && <CheckpointPreviewShell chat={persistentChat} itemCount={items.length} rememberText={checkpointRememberText} density={checkpointDensity} proposal={checkpointProposal} loading={checkpointProposalLoading} progress={checkpointProgress} onCancelGenerate={() => cancelCheckpointProposal()} error={checkpointProposalError} notice={checkpointProposalNotice} onChooseModel={() => openRoomSettings("model")} onSignIn={(provider) => openSignIn(provider ?? persistentChat.model.provider)} approvalLoading={checkpointApprovalLoading} approvalError={checkpointApprovalError} approvalResult={checkpointApprovalResult} quickRequested={checkpointQuickRequested} skipsPreview={rememberSkipsPreview} quickBlockedReasons={checkpointQuickBlockedReasons} consultRunning={consultState.phase === "streaming"} taskRunning={taskState.phase === "running"} pendingConsultHandoffCount={pendingHandoffs.filter((block) => !isSpecialistHandoffBlock(block)).length} pendingTaskHandoffCount={pendingHandoffs.filter(isSpecialistHandoffBlock).length} approvedFields={checkpointFields} onFieldsChange={(fields) => { if (checkpointProposal) setCheckpointEdits({ key: checkpointEditsKey(checkpointProposal), fields }); }} onRememberTextChange={(text) => { setCheckpointRememberText(text); setCheckpointProposal(null); setCheckpointProposalError(null); setCheckpointProposalNotice(null); setCheckpointApprovalError(null); setCheckpointApprovalResult(null); }} onDensityChange={(next) => { setCheckpointDensity(next); setCheckpointProposal(null); setCheckpointProposalError(null); setCheckpointProposalNotice(null); setCheckpointApprovalError(null); setCheckpointApprovalResult(null); }} onGenerate={generateCheckpointProposal} onApprove={approveCheckpointProposal} onDiscard={() => { discardCheckpointProposalOnServer(); setCheckpointEdits(null); setCheckpointProposal(null); setCheckpointProposalError(null); setCheckpointProposalNotice(null); setCheckpointApprovalError(null); setCheckpointApprovalResult(null); setCheckpointQuickRequested(false); setCheckpointQuickBlockedReasons(null); setCheckpointPreviewOpen(false); }} onContinueAfterCheckpoint={continueAfterCheckpoint} onRestAfterCheckpoint={() => void restAfterCheckpoint()} onMemorizeAfterCheckpoint={memorizeAfterCheckpoint} onClose={() => { if (roomFilledBy(checkpointApprovalResult)) void restAfterCheckpoint(); else setCheckpointPreviewOpen(false); }} />}
 			globalOverlaySlot={
 				<>
 					{markdownEditorPrompt && (
