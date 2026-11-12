@@ -414,6 +414,17 @@ try {
 		assert(await page.locator(".workspace-preview-html iframe").count() === 1, "the actual Excalidraw renderer accepts the route bytes");
 		await page.emulateMedia({ reducedMotion: "reduce" });
 		const drawing = page.frameLocator(".workspace-preview-html iframe");
+		await drawing.locator("html").evaluate(() => {
+			const decode = TextDecoder.prototype.decode;
+			(window as any).extraFramedDecodes = 0;
+			TextDecoder.prototype.decode = function (...args: Parameters<TextDecoder["decode"]>) { (window as any).extraFramedDecodes++; return decode.apply(this, args); };
+		});
+		await page.locator(".workspace-preview-html iframe").evaluate((node) => {
+			const extra = new TextEncoder().encode('{"elements":[]}').buffer;
+			(node as HTMLIFrameElement).contentWindow!.postMessage(extra, "*", [extra]);
+		});
+		await page.waitForTimeout(300);
+		assert(await drawing.locator("html").evaluate(() => (window as any).extraFramedDecodes) === 0, "the actual renderer removes its receiver after the first authorized snapshot");
 		const zoom = drawing.locator(".tools span");
 		const initialZoom = parseInt((await zoom.textContent())!, 10);
 		await drawing.getByRole("button", { name: "Zoom in" }).click();
