@@ -80,7 +80,7 @@ import { createTaskState, reduceTask, type TaskAction, type TaskState } from "./
 import { ConsultDock } from "./components/delegation-card";
 import { TaskRunView } from "./components/task-run-view";
 import { ArtifactViewer } from "./components/ArtifactViewer";
-import { MarkdownEditorPane, type MarkdownEditorHandle } from "./components/MarkdownEditorPane";
+import { MarkdownEditorPane, type DocumentFileSnapshot, type MarkdownEditorHandle } from "./components/MarkdownEditorPane";
 import { ModelPickControl } from "./components/model-pick-control";
 import { ModelSwitchWindow } from "./components/model-switch-window";
 import { GearIcon, PaperclipIcon, TrashIcon } from "./components/icons";
@@ -560,6 +560,9 @@ export function App() {
 	const documentKeepMineInFlightRef = useRef<Promise<boolean> | null>(null);
 	const documentWriteRef = useRef<OwnerDocumentWrite | null>(null);
 	const documentWriteSequenceRef = useRef(0);
+	const documentPaneBindingRef = useRef<{ agentId: string; conversationId: string; contextGeneration: number; path: string; token: object } | null>(null);
+	const documentFileSnapshotRef = useRef<{ agentId: string; conversationId: string; contextGeneration: number; draftGeneration: number; file: DocumentFileSnapshot } | null>(null);
+	const documentFileSnapshotValidRef = useRef(false);
 	const markdownEditorRef = useRef<MarkdownEditorHandle | null>(null);
 	const markdownEditorAdmissionRef = useRef<DocumentAdmission | null>(null);
 	const preparedDocumentAdmissionRef = useRef<PreparedDocumentAdmission | null>(null);
@@ -660,6 +663,28 @@ export function App() {
 		if (context.roomId !== agentId || context.conversationId !== conversationId || context.generation !== generation) return;
 		const old = documentDraftGenerationRef.current;
 		documentDraftGenerationRef.current = Number.isSafeInteger(old) && old < Number.MAX_SAFE_INTEGER ? old + 1 : Number.NaN;
+	}, []);
+	const onDocumentBind = useCallback((agentId: string, conversationId: string, generation: number, path: string, token: object, active: boolean) => {
+		const bound = documentPaneBindingRef.current;
+		if (!active) {
+			if (bound?.token === token && bound.path === path) documentPaneBindingRef.current = null;
+			return;
+		}
+		const current = checkpointContextRef.current;
+		const pane = rightPaneRef.current;
+		if (unmountedRef.current || personHasChanged() || current.roomId !== agentId || current.conversationId !== conversationId || current.generation !== generation || pane?.kind !== "markdownEditor" || pane.path !== path) return;
+		documentPaneBindingRef.current = { agentId, conversationId, contextGeneration: generation, path, token };
+		documentFileSnapshotValidRef.current = false;
+	}, []);
+	const onDocumentSnapshot = useCallback((agentId: string, conversationId: string, generation: number, path: string, token: object, file: DocumentFileSnapshot | null) => {
+		const current = checkpointContextRef.current;
+		const pane = rightPaneRef.current;
+		const bound = documentPaneBindingRef.current;
+		const draftGeneration = documentDraftGenerationRef.current;
+		if (unmountedRef.current || personHasChanged() || current.roomId !== agentId || current.conversationId !== conversationId || current.generation !== generation || pane?.kind !== "markdownEditor" || pane.path !== path || !bound || bound.token !== token || bound.agentId !== agentId || bound.conversationId !== conversationId || bound.contextGeneration !== generation || bound.path !== path) return;
+		if (!file || file.path !== path || !Number.isSafeInteger(draftGeneration) || draftGeneration < 1) { documentFileSnapshotValidRef.current = false; return; }
+		documentFileSnapshotRef.current = { agentId, conversationId, contextGeneration: generation, draftGeneration, file };
+		documentFileSnapshotValidRef.current = true;
 	}, []);
 	const beginDocumentWrite = useCallback((agentId: string, conversationId: string, generation: number, path: string, content: string, revision: string): OwnerDocumentWrite | null => {
 		const current = checkpointContextRef.current;
@@ -924,6 +949,7 @@ export function App() {
 			if (!requestId || !captureDocumentAdmission(requestId)) return;
 		}
 		const remaining = paths.filter((item) => item !== path);
+		if (active === path && documentFileSnapshotRef.current?.file.path === path) { documentFileSnapshotRef.current = null; documentFileSnapshotValidRef.current = false; }
 		setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths: remaining } : tabs);
 		if (active === path) {
 			const next = remaining[index] ?? remaining[index - 1];
@@ -943,6 +969,8 @@ export function App() {
 		if (!/\.(md|doc|docx|pptx|excalidraw|drawio|dio|txt|json|pdf|html?|xls|xlsx|xlsm|png|jpe?g|gif|webp|svg)$/i.test(path) || !persistentChat) return;
 		if (activeWorkspacePath(rightPaneRef.current) === path && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId) return;
 		if (!guardMarkdownEditorAction(() => openWorkspaceMarkdown(entry), "switch")) return;
+		documentFileSnapshotRef.current = null;
+		documentFileSnapshotValidRef.current = false;
 		setArtifactMaximized(false);
 		setWorkspaceTabs((tabs) => {
 			const same = tabs?.agentId === persistentChat.agentId && tabs.conversationId === persistentChat.conversationId;
@@ -1051,6 +1079,9 @@ export function App() {
 		if (typeof next !== "function") {
 			const key = next ? `${next.agentId}\u0000${next.conversationId}` : null;
 			if (checkpointContextRef.current.key !== key) {
+				documentPaneBindingRef.current = null;
+				documentFileSnapshotRef.current = null;
+				documentFileSnapshotValidRef.current = false;
 				const old = checkpointContextRef.current.generation;
 				const generation = Number.isSafeInteger(old) && old < Number.MAX_SAFE_INTEGER ? old + 1 : Number.NaN;
 				checkpointContextRef.current = { key, generation, roomId: next?.agentId ?? null, conversationId: next?.conversationId ?? null };
@@ -9070,6 +9101,8 @@ export function App() {
 						keepMineInFlight={documentKeepMineInFlightRef}
 						documentWrite={documentWriteRef}
 						beginWrite={beginDocumentWrite}
+						onBind={onDocumentBind}
+						onSnapshot={onDocumentSnapshot}
 						onClose={requestCloseMarkdownEditor}
 						onDirtyChange={onMarkdownEditorDirtyChange}
 						onOpenMarkdown={(path) => openWorkspaceMarkdown({ relativePath: path, extension: ".md" })}

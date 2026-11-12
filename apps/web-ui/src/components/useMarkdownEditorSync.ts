@@ -13,6 +13,7 @@ interface Options {
 	isSettled: boolean;
 	onDirtyChange?: (isDirty: boolean) => void;
 	onMutation?: () => void;
+	onSettled?: () => void;
 	setContentRef?: RefObject<((content: string) => void) | null>;
 }
 
@@ -25,6 +26,7 @@ interface Result {
 	dismissExternalUpdate: () => void;
 	markSaved: (content: string) => void;
 	reconcileServerContent: (serverContent: string) => boolean;
+	getRetained: () => { dirty: boolean; externalContent: string | null; lastSavedContent: string | null; settled: boolean; fileContent: string };
 }
 
 export function useMarkdownEditorSync({
@@ -33,6 +35,7 @@ export function useMarkdownEditorSync({
 	isSettled,
 	onDirtyChange,
 	onMutation,
+	onSettled,
 	setContentRef,
 }: Options): Result {
 	const [editorKey, setEditorKey] = useState(0);
@@ -82,6 +85,7 @@ export function useMarkdownEditorSync({
 		if (prevContentRef.current === content) return;
 		if (content === lastSavedRef.current) {
 			prevContentRef.current = content;
+			onSettled?.();
 			return;
 		}
 		prevContentRef.current = content;
@@ -89,11 +93,13 @@ export function useMarkdownEditorSync({
 		if (isDirtyRef.current) {
 			setPendingContent(content);
 			setHasExternalUpdate(true);
+			onSettled?.();
 			return;
 		}
 		if (setContentRef?.current) setContentRef.current(content);
 		else setEditorKey((key) => key + 1);
-	}, [content, setContentRef, setHasExternalUpdate, setPendingContent]);
+		onSettled?.();
+	}, [content, onSettled, setContentRef, setHasExternalUpdate, setPendingContent]);
 
 	useEffect(() => {
 		if (isDirty || pendingContentRef.current === null) return;
@@ -144,5 +150,6 @@ export function useMarkdownEditorSync({
 		dismissExternalUpdate,
 		markSaved,
 		reconcileServerContent,
+		getRetained: () => ({ dirty: isDirtyRef.current, externalContent: pendingContentRef.current, lastSavedContent: lastSavedRef.current, settled: prevPathRef.current === path && prevContentRef.current === content && !pendingRemountRef.current, fileContent: content }),
 	};
 }
