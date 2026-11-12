@@ -47,18 +47,25 @@ try {
 			const original = window.webContents.executeJavaScript.bind(window.webContents);
 			(window as any).__t20Polls = 0;
 			(window as any).__t20Prepares = 0;
+			(window as any).__t20NoSession = 0;
 			(window.webContents as any).executeJavaScript = (script: string, ...args: unknown[]) => {
 				if (script.includes("__exxpertsDocuments")) {
 					(window as any).__t20Polls++;
 					if (script.includes('"native-prepare"')) (window as any).__t20Prepares++;
 				}
-				return (original as any)(script, ...args);
+				const result = (original as any)(script, ...args);
+				if (script.includes('"native-prepare"')) return Promise.resolve(result).then((output: any) => {
+					if (output?.items?.[0]?.kind === "no-session") (window as any).__t20NoSession++;
+					return output;
+				});
+				return result;
 			};
 		}, owner);
 		await waitUntil(() => application!.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Polls >= 2, owner), "the real owner has been polled");
 		await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.close(), owner);
 		await new Promise((resolve) => setTimeout(resolve, 1_000));
 		assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Prepares === 1, owner), "the actual native close sends exactly one owner prepare");
+		assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20NoSession === 1, owner), "the actual owner returns the matching empty-session response");
 		assert(await application.evaluate(({ BrowserWindow }, id) => Boolean(BrowserWindow.fromId(id)?.isVisible()), owner), "the staged no-session response cannot yet continue the native close");
 	} else {
 	// Fault the shell's actual outbound exchange, retaining its ordinary close entrypoint.
