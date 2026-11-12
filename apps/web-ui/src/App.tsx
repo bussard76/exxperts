@@ -202,6 +202,7 @@ type PreparedDocumentAdmission = Readonly<{
 	admission: DocumentAdmission;
 	hostGeneration: number;
 	draftGeneration: number;
+	committedHostGeneration?: number;
 }>;
 
 type PendingDocumentAction = Readonly<{
@@ -563,7 +564,7 @@ export function App() {
 	const { host: documentHost, treeHost: documentTreeHost, mountHost: mountDocumentHost, mountTree: mountDocumentTreeHost, beginChild: beginDocumentChild, abortChild: abortDocumentChild, moveToChild: moveDocumentToChild, moveToOwner: moveDocumentToOwner, childClosed: documentChildClosed } = useDocumentsHost();
 	type PreparedDocumentChild = NonNullable<Awaited<ReturnType<typeof beginDocumentChild>>>;
 	const documentChildRef = useRef<PreparedDocumentChild | null>(null);
-	const documentHostCommitRef = useRef<{ admission: DocumentAdmission; child: PreparedDocumentChild; generation: number; direction: "detach" | "return" } | null>(null);
+	const documentHostCommitRef = useRef<{ admission: DocumentAdmission; child: PreparedDocumentChild; generation: number; direction: "detach" | "return" | "exit"; resolve?: (closed: boolean) => void } | null>(null);
 	const documentClosingRef = useRef(false);
 	// Synchronous mirror for the WS handlers (toast suppression / run-view swap
 	// read the pane at event time, not at closure-capture time).
@@ -845,12 +846,16 @@ export function App() {
 		return true;
 	}
 
-	function documentAdmissionIsCurrent(admission: DocumentAdmission): boolean {
-		if (markdownEditorPendingActionRef.current?.admission !== admission || admission.ownerId !== documentOwnerId || admission.ownerGeneration !== documentOwnerGenerationRef.current || admission.initialHostGeneration !== documentHostGenerationRef.current || unmountedRef.current || personHasChanged()) return false;
+	function documentAdmissionContextIsCurrent(admission: DocumentAdmission): boolean {
+		if (markdownEditorPendingActionRef.current?.admission !== admission || admission.ownerId !== documentOwnerId || admission.ownerGeneration !== documentOwnerGenerationRef.current || unmountedRef.current || personHasChanged()) return false;
 		const current = checkpointContextRef.current;
 		if (current.generation !== admission.roomGeneration) return false;
 		const context = admission.context;
 		return context === null ? current.key === null : context.ownerId === admission.ownerId && context.ownerGeneration === admission.ownerGeneration && current.key === `${context.roomId}\u0000${context.conversationId}` && current.roomId === context.roomId && current.conversationId === context.conversationId && current.generation === context.roomGeneration;
+	}
+
+	function documentAdmissionIsCurrent(admission: DocumentAdmission): boolean {
+		return admission.initialHostGeneration === documentHostGenerationRef.current && documentAdmissionContextIsCurrent(admission);
 	}
 
 	function prepareDocumentAdmission(admission: DocumentAdmission): boolean {
@@ -864,7 +869,24 @@ export function App() {
 
 	function preparedDocumentAdmissionIsCurrent(admission: DocumentAdmission): boolean {
 		const prepared = preparedDocumentAdmissionRef.current;
-		return Boolean(prepared && prepared.admission === admission && documentAdmissionIsCurrent(admission) && prepared.hostGeneration === documentHostGenerationRef.current && prepared.draftGeneration === documentDraftGenerationRef.current);
+		return Boolean(prepared && prepared.admission === admission && documentAdmissionContextIsCurrent(admission) && (prepared.committedHostGeneration ?? prepared.hostGeneration) === documentHostGenerationRef.current && prepared.draftGeneration === documentDraftGenerationRef.current);
+	}
+
+	function closeDocumentChildForExit(pending: PendingDocumentAction): Promise<boolean> {
+		const child = documentChildRef.current;
+		if (!child) return Promise.resolve(true);
+		if (!preparedDocumentAdmissionIsCurrent(pending.admission) || documentWriteRef.current || documentSaveInFlightRef.current || documentKeepMineInFlightRef.current) return Promise.resolve(false);
+		const nextGeneration = documentHostGenerationRef.current + 1;
+		if (!Number.isSafeInteger(nextGeneration) || !prepareDocumentFrameSeeds(nextGeneration)) return Promise.resolve(false);
+		const moved = moveDocumentToOwner(child, () => preparedDocumentAdmissionIsCurrent(pending.admission));
+		if (moved === "refused") return Promise.resolve(false);
+		if (moved !== "moved") return new Promise(() => {});
+		documentClosingRef.current = true;
+		return new Promise<boolean>((resolve) => {
+			documentHostCommitRef.current = { admission: pending.admission, child, generation: nextGeneration, direction: "exit", resolve };
+			documentHostGenerationRef.current = nextGeneration;
+			setDocumentHostGeneration(nextGeneration);
+		});
 	}
 
 	useEffect(() => {
@@ -903,6 +925,14 @@ export function App() {
 			documentChildRef.current = null;
 			documentClosingRef.current = false;
 			window.clearInterval(poll);
+			if (commit.direction === "exit") {
+				const prepared = preparedDocumentAdmissionRef.current;
+				const valid = Boolean(prepared && prepared.admission === commit.admission && documentAdmissionContextIsCurrent(commit.admission) && documentHostGenerationRef.current === commit.generation && prepared.draftGeneration === documentDraftGenerationRef.current);
+				if (valid && prepared) preparedDocumentAdmissionRef.current = { ...prepared, committedHostGeneration: commit.generation };
+				documentHostCommitRef.current = null;
+				commit.resolve?.(valid);
+				return;
+			}
 			release();
 		};
 		const poll = window.setInterval(settle, 100);
@@ -912,7 +942,7 @@ export function App() {
 	}, [documentHostGeneration]);
 
 	function noDocumentSession(): boolean {
-		return !unmountedRef.current && !personHasChanged() && checkpointContextRef.current.key === null && !markdownEditorRef.current && !documentSaveInFlightRef.current && !documentKeepMineInFlightRef.current && !documentWriteRef.current && !markdownEditorPendingActionRef.current;
+		return !unmountedRef.current && !personHasChanged() && checkpointContextRef.current.key === null && !markdownEditorRef.current && !documentSaveInFlightRef.current && !documentKeepMineInFlightRef.current && !documentWriteRef.current && !documentChildRef.current && !markdownEditorPendingActionRef.current;
 	}
 
 	function guardMarkdownEditorAction(action: () => void | Promise<unknown>, prompt: "close" | "switch" | "navigate", intent: DocumentLocalAction | null = null): boolean {
@@ -928,7 +958,7 @@ export function App() {
 		const admission = requestId ? captureDocumentAdmission(requestId, intent) : null;
 		if (!admission) return false;
 		if (!markdownEditorDirtyRef.current) {
-			if (!markdownEditorRef.current?.pendingWrite()) return true;
+			if (!markdownEditorRef.current?.pendingWrite() && !(intent?.kind === "leave-room" && documentChildRef.current)) return true;
 			void admitCleanMarkdownEditorAction(async () => action(), admission.requestId, intent);
 			return false;
 		}
@@ -979,9 +1009,13 @@ export function App() {
 		setMarkdownEditorPromptBusy(false);
 		markdownEditorDirtyRef.current = false;
 		try {
-			markdownEditorCommitBypassRef.current = { pending };
-			const result = action?.();
-			markdownEditorCommitBypassRef.current = null;
+			const invoke = () => {
+				markdownEditorCommitBypassRef.current = { pending };
+				try { return action?.(); } finally { markdownEditorCommitBypassRef.current = null; }
+			};
+			const result = prepareNow && admission.intent?.kind === "leave-room" && documentChildRef.current
+				? closeDocumentChildForExit(pending).then((closed) => closed ? invoke() : false)
+				: invoke();
 			return Promise.resolve(result).then((value) => {
 				release();
 				actionResult?.resolve(value);
@@ -1014,6 +1048,8 @@ export function App() {
 			if (!prepareDocumentAdmission(admission) || !preparedDocumentAdmissionIsCurrent(admission)) return false;
 			const current = markdownEditorPendingActionRef.current;
 			if (!current || current.admission !== admission) return false;
+			if (intent?.kind === "leave-room" && documentChildRef.current && !(await closeDocumentChildForExit(current))) return false;
+			if (!preparedDocumentAdmissionIsCurrent(admission)) return false;
 			markdownEditorCommitBypassRef.current = { pending: current };
 			try { return action(); } finally { markdownEditorCommitBypassRef.current = null; }
 		};

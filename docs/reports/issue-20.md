@@ -525,3 +525,7 @@ The private child bootstrap now creates a disabled Return control, and the inact
 ## Checkpoint: held child-close case
 
 The detached smoke now specifies a real clean Home action with the registered child window's actual `close` method held: Home must stay in the room until that same child really closes, then continue. Scripts typecheck passed; the attributed run still stops at disabled Detach, so the new ordering case was not reached and provides no close evidence yet.
+
+## Checkpoint: typed leave child-close draft
+
+For the existing typed Home/Memory leave intents, the inactive child path now retains the prepared action and editor fence, moves the held surfaces back, requests close, and only permits the original continuation after the exact registered browser child reports closed and context/draft checks still match. File and tab actions do not enter this child-close path. UI and scripts typechecks, UI asset build, and the attributed `remember-job-dialog`, `two-window-room-ui` and `workspace-file-tabs-ui` smokes passed 3/3. The held-child-close case remains unexecuted at disabled Detach; other exit/operation paths, deadlines, abort acknowledgement, recovery and native handling remain incomplete, so this is not a C4 pass.
