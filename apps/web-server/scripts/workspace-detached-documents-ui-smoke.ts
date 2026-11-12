@@ -525,6 +525,28 @@ try {
 				await childClosed;
 				await waitUntil(async () => !(await closePage.evaluate(() => location.hash)).includes("/room/"), "Home continues after actual child closure");
 			} finally { await closePage.close().catch(() => {}); }
+			const historyPage = await context.newPage();
+			try {
+				await historyPage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+				await historyPage.waitForLoadState("networkidle");
+				const dismissHistory = historyPage.locator(".whats-new-close");
+				if (await dismissHistory.count()) await dismissHistory.click();
+				await historyPage.locator(".persistent-agent-card").filter({ hasText: "Invented Close Ordering" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+				await historyPage.locator(".sidebar-workspace-files").waitFor();
+				await waitUntil(async () => (await historyPage.evaluate(() => location.hash)).includes("/room/"), "the history source room is recorded");
+				const historyOpened = historyPage.waitForEvent("popup");
+				await historyPage.getByRole("button", { name: "Detach", exact: true }).click();
+				const historyChild = await historyOpened;
+				await historyChild.locator(".workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
+				await historyChild.evaluate(`window.__t20OriginalClose = window.close; window.__t20CloseCalls = 0; window.close = () => { window.__t20CloseCalls++; }`);
+				await historyPage.evaluate(() => window.history.back());
+				await waitUntil(() => historyChild.evaluate(`window.__t20CloseCalls > 0`), "browser Back requests the registered child close");
+				assert(!historyChild.isClosed() && await historyPage.getByRole("navigation", { name: "Room navigation" }).isVisible(), "browser Back keeps the current room visible until the child actually closes");
+				const historyClosed = historyChild.waitForEvent("close");
+				await historyChild.evaluate(`window.close = window.__t20OriginalClose; window.close()`);
+				await historyClosed;
+				await historyPage.getByRole("heading", { name: "Your rooms." }).waitFor();
+			} finally { await historyPage.close().catch(() => {}); }
 			const mementoRoom = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Invented Memento Ordering", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
 			assert(mementoRoom.status === 201, "the Memento-order room is created");
 			const mementoRoomId = String(mementoRoom.body?.agent?.id ?? "");

@@ -684,3 +684,7 @@ The detached smoke now exercises a real hover in the child tree and requires the
 ## Checkpoint: attached tree scroll retention
 
 The attributed `sidebar-reopen-ui` smoke passed 1/1 after verifying that an actual scrolled tree keeps its scroll position through sidebar collapse and reopening. This is attached browser behavior only; it does not add a scroll-history guarantee across host transfers.
+
+## Checkpoint: browser Back with a dependent child
+
+The detached smoke now specifies a real browser Back action while an actual registered child refuses to close: the room must remain visible, and the original history continuation may proceed only after that exact child closes. Scripts typecheck passed before the final equivalent history trigger refinement; the case remains unexecuted behind disabled Detach and does not establish R4.
