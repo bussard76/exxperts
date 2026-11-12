@@ -306,6 +306,27 @@ try {
 		await waitUntil(() => policyRaw.isEditable(), "a later successful policy read re-enables the real editor", 5000);
 		await policy.close();
 		{
+			const loading = await ctx.newPage();
+			await loading.goto(`${baseUrl}/#/room/${agentId}`);
+			let releaseLoad!: () => void, beginLoad!: () => void, writes = 0;
+			const loadReleased = new Promise<void>((resolve) => { releaseLoad = resolve; });
+			const loadStarted = new Promise<void>((resolve) => { beginLoad = resolve; });
+			await loading.route("**/workspace-markdown?*", async (route) => {
+				if (route.request().method() !== "GET") { writes++; return route.continue(); }
+				beginLoad();
+				await loadReleased;
+				await route.fulfill({ status: 403, json: { code: "workspace_read_forbidden", error: "Invented read refusal" } });
+			});
+			try {
+				await loading.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "identity.md" }).click();
+				await loadStarted;
+				await loading.getByText("Loading file…", { exact: true }).waitFor();
+			} finally { releaseLoad(); }
+			await loading.getByText("Invented read refusal", { exact: true }).waitFor();
+			assert(await loading.locator(".markdown-editor-tiptap .ProseMirror").count() === 0 && writes === 0, "a denied load shows its error without creating or writing an empty draft");
+			await loading.close();
+		}
+		{
 			const unknownPolicy = await ctx.newPage();
 			await unknownPolicy.goto(`${baseUrl}/#/room/${agentId}`);
 			await unknownPolicy.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "unknown-permission.md" }).click();
