@@ -30,6 +30,8 @@ const original = "# Invented source\r\n\r\n";
 const rawDisplay = original.replaceAll("\r\n", "\n");
 fs.writeFileSync(path.join(workspace, "invented.md"), original);
 fs.writeFileSync(path.join(workspace, "interaction.md"), "- [ ] Invented child task\n\n[Open invented](invented.md)\n\n[External invented](https://example.invalid/invented)\n");
+fs.writeFileSync(path.join(workspace, "retained.txt"), "Invented original text snapshot");
+fs.writeFileSync(path.join(workspace, "retained.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==", "base64"));
 fs.writeFileSync(path.join(workspace, "snapshot.html"), '<body><p>Invented original snapshot</p><script>document.body.dataset.executed = "yes"</script></body>');
 fs.writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({ providers: {
 	"fake-claude": { name: "Fake Claude", baseUrl: "http://127.0.0.1:9", api: "anthropic-messages", models: [{ id: "claude-fake", name: "Claude Fake", input: ["text"], contextWindow: 200000, maxTokens: 32000 }] },
@@ -116,7 +118,9 @@ try {
 			await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "snapshot.html" }).click();
 			await page.frameLocator('.workspace-preview-html iframe[title="snapshot.html"]').getByText("Invented original snapshot").waitFor();
 			assert(await page.frameLocator('.workspace-preview-html iframe[title="snapshot.html"]').locator("body").getAttribute("data-executed") === "yes", "the authorized original HTML snapshot executes in its opaque frame");
-			fs.writeFileSync(path.join(workspace, "snapshot.html"), '<body><p>Invented later disk content</p></body>');
+			fs.writeFileSync(path.join(workspace, "retained.txt"), "Invented original text snapshot");
+fs.writeFileSync(path.join(workspace, "retained.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==", "base64"));
+fs.writeFileSync(path.join(workspace, "snapshot.html"), '<body><p>Invented later disk content</p></body>');
 			const previewOpened = page.waitForEvent("popup");
 			await detach.click();
 			const previewChild = await previewOpened;
@@ -127,6 +131,31 @@ try {
 			await previewClosed;
 			await page.frameLocator('.workspace-preview-html iframe[title="snapshot.html"]').getByText("Invented original snapshot").waitFor();
 			assert(htmlReads === 1, "Return keeps the original HTML snapshot without another content read");
+			let textReads = 0, imageReads = 0;
+			context.on("request", (request) => {
+				const url = new URL(request.url());
+				if (url.searchParams.get("path") === "retained.txt" && url.pathname.endsWith("/workspace-preview")) textReads++;
+				if (url.searchParams.get("path") === "retained.png" && url.pathname.endsWith("/workspace-image")) imageReads++;
+			});
+			const snapshotsOpened = page.waitForEvent("popup");
+			await detach.click();
+			const snapshotsChild = await snapshotsOpened;
+			await snapshotsChild.locator(".workspace-file-browser-file", { hasText: "retained.txt" }).click();
+			await snapshotsChild.locator(".workspace-preview-text pre").getByText("Invented original text snapshot", { exact: true }).waitFor();
+			await snapshotsChild.locator(".workspace-file-browser-file", { hasText: "retained.png" }).click();
+			await snapshotsChild.locator('.workspace-preview-image img[alt="retained.png"]').waitFor();
+			fs.writeFileSync(path.join(workspace, "retained.txt"), "Invented later text snapshot");
+			fs.writeFileSync(path.join(workspace, "retained.png"), "Invented invalid later image");
+			const snapshotsClosed = snapshotsChild.waitForEvent("close");
+			await snapshotsChild.getByRole("button", { name: "Return", exact: true }).click();
+			await snapshotsClosed;
+			await page.locator('.workspace-preview-image img[alt="retained.png"]').waitFor();
+			await waitUntil(() => page.locator('.workspace-preview-image img[alt="retained.png"]').evaluate((image) => (image as HTMLImageElement).naturalWidth === 1).catch(() => false), "Return retains the image snapshot opened first in the child");
+			await page.locator(".workspace-tab", { hasText: "retained.txt" }).click();
+			await page.locator(".workspace-preview-text pre").getByText("Invented original text snapshot", { exact: true }).waitFor();
+			assert(textReads === 1 && imageReads === 1, "Return does not refetch text or image snapshots opened first in the child");
+			await page.locator(".workspace-tab", { hasText: "retained.txt" }).locator(".workspace-tab-close").click();
+			await page.locator(".workspace-tab", { hasText: "retained.png" }).locator(".workspace-tab-close").click();
 			await page.locator(".workspace-tab", { hasText: "snapshot.html" }).locator(".workspace-tab-close").click();
 			await page.locator(".workspace-tab", { hasText: "invented.md" }).locator(".workspace-tab-close").click();
 			await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "invented.md" }).click();

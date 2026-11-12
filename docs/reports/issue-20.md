@@ -437,3 +437,7 @@ Explicit external Markdown preview links now call the document pane's window. Th
 The existing stable content and tree elements now live in the private `docs-window.ts` host seam approved by ADR-0009; this is an attached-only refactor and adds no package export or child capability. UI and scripts typechecks, the UI-only build and attributed two-window and file-tabs smokes passed 2/2. Bootstrap, transfer, recovery and all native integration remain unimplemented.
 
 During the preceding documentation checkpoint, Git's automatic background packing printed that object `3fbc2b763829fc56b5972d52603241eee2b50ebe` was a tag rather than a commit; `git cat-file -t` confirmed it is a tag, while the signed commit and push succeeded. Its cause has not been established and is a repository-maintenance debt candidate, not product or gate evidence.
+
+## Checkpoint: child-first text and image snapshot cases
+
+`workspace-detached-documents-ui-smoke.ts` now specifies real child-first text and image opens, changes the invented files on disk, returns to chat, and checks original content and a single authorized read. The attributed filtered detached smoke remains red at its first missing Detach assertion; these added cases were not reached and do not establish snapshot retention. The scripts typecheck passed; actual host, image lifetime, text reconstruction, remaining preview types, C4 and native safeguards remain required.
