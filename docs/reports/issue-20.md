@@ -672,3 +672,7 @@ The detached smoke now specifies that an actual Home request held behind a real 
 ## Checkpoint: native stuck and late exchange case
 
 The actual-shell `workspace-documents-native-ui` smoke now has an independent `T20_NATIVE_STUCK=1` mode that holds a real owner exchange, requests native close, checks one outstanding evaluation and retained visibility after the exchange deadline, then releases the real late result and checks it cannot revive the expired close. Scripts typecheck passed; neither this mode nor its assertions have executed because the host's sandbox-capable Electron environment has not been supplied. The existing malformed case remains separately unexecuted, and native behavior is not claimed.
+
+## Checkpoint: scrolled tree tooltip
+
+The attributed `sidebar-reopen-ui` smoke passed 1/1 with an invented long tree, including a real hover on its last scrolled entry and an intersection check that the tooltip remains visible. This checks the attached host's clipping behavior; it is not evidence for child-window overlays.

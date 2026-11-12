@@ -13,6 +13,7 @@ try {
 	const folder = path.join(tempHome, "demo-folder");
 	fs.mkdirSync(folder);
 	fs.writeFileSync(path.join(folder, "notes.md"), "# Invented notes\n");
+	for (let index = 0; index < 35; index++) fs.writeFileSync(path.join(folder, `z-invented-${String(index).padStart(2, "0")}.md`), "# Invented item\n");
 	await openRoom("Folder Room", async (roomId) => {
 		const saved = await requestJson(`/api/persistent-agents/${roomId}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: folder, workspaceAccessMode: "localFiles" }) });
 		assert(saved.status === 200, `folder saved: ${saved.status}`);
@@ -54,6 +55,14 @@ try {
 				await treeNote.waitFor();
 				await treeNote.hover();
 				await page.getByRole("tooltip").getByText("notes.md", { exact: true }).waitFor();
+				await page.mouse.move(700, 700);
+				await page.getByRole("tooltip").waitFor({ state: "hidden" });
+				const lastTreeNote = page.locator(".sidebar-workspace-files").getByText("z-invented-34.md", { exact: true });
+				await lastTreeNote.scrollIntoViewIfNeeded();
+				await lastTreeNote.hover();
+				const lastTooltip = page.getByRole("tooltip").getByText("z-invented-34.md", { exact: true });
+				await lastTooltip.waitFor();
+				assert(await lastTooltip.evaluate((node) => new Promise<boolean>((resolve) => { const observer = new IntersectionObserver(([entry]) => { observer.disconnect(); resolve(entry.intersectionRect.width > 0 && entry.intersectionRect.height >= entry.boundingClientRect.height - 1); }); observer.observe(node); })), "the tooltip remains visible at the bottom of the scrolled tree");
 				await page.mouse.move(700, 700);
 				await page.getByRole("tooltip").waitFor({ state: "hidden" });
 				const aligned = async () => page.evaluate(() => {
