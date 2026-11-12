@@ -175,7 +175,13 @@ type DocumentContext = Readonly<{
 	roomGeneration: number;
 }>;
 
-type DocumentTabAction = Readonly<{ kind: "select-file" | "close-tab"; path: string }>;
+type DocumentLocalAction = Readonly<{ kind: "select-file" | "close-tab"; path: string } | { kind: "room-operation"; operation: "memento"; roomId: string; conversationId: string }>;
+
+function sameDocumentLocalAction(a: DocumentLocalAction | null, b: DocumentLocalAction | null): boolean {
+	if (!a || !b) return a === b;
+	if (a.kind === "room-operation") return b.kind === "room-operation" && a.operation === b.operation && a.roomId === b.roomId && a.conversationId === b.conversationId;
+	return b.kind !== "room-operation" && a.kind === b.kind && a.path === b.path;
+}
 
 type DocumentAdmission = Readonly<{
 	requestId: string;
@@ -185,7 +191,7 @@ type DocumentAdmission = Readonly<{
 	initialHostGeneration: number;
 	initialDraftGeneration: number;
 	context: DocumentContext | null;
-	tabAction: DocumentTabAction | null;
+	intent: DocumentLocalAction | null;
 }>;
 
 type PreparedDocumentAdmission = Readonly<{
@@ -573,7 +579,7 @@ export function App() {
 	const markdownEditorDirtyRef = useRef(false);
 	const markdownEditorPendingActionRef = useRef<(() => void | Promise<unknown>) | null>(null);
 	const markdownEditorActionResultRef = useRef<{ promise: Promise<unknown>; resolve: (result: unknown) => void } | null>(null);
-	const markdownEditorCommitBypassRef = useRef<{ tabAction: DocumentTabAction | null } | null>(null);
+	const markdownEditorCommitBypassRef = useRef<{ intent: DocumentLocalAction | null } | null>(null);
 	const markdownEditorCommittingRef = useRef(false);
 	const markdownEditorPromptTimerRef = useRef<number | null>(null);
 	const markdownEditorCanceledSaveRef = useRef(false);
@@ -723,7 +729,7 @@ export function App() {
 		return () => window.removeEventListener("beforeunload", beforeUnload);
 	}, []);
 
-	function captureDocumentAdmission(requestId: string, tabAction: DocumentTabAction | null = null): DocumentAdmission | null {
+	function captureDocumentAdmission(requestId: string, intent: DocumentLocalAction | null = null): DocumentAdmission | null {
 		const ownerGeneration = documentOwnerGenerationRef.current;
 		const current = checkpointContextRef.current;
 		const hostGeneration = documentHostGenerationRef.current;
@@ -732,8 +738,11 @@ export function App() {
 		const context = current.key === null ? null : current.roomId && current.conversationId && current.generation > 0 ? {
 			ownerId: documentOwnerId, ownerGeneration, roomId: current.roomId, conversationId: current.conversationId, roomGeneration: current.generation,
 		} : null;
-		if ((current.key !== null && !context) || (tabAction && ((tabAction.kind !== "select-file" && tabAction.kind !== "close-tab") || typeof tabAction.path !== "string" || !tabAction.path))) return null;
-		return { requestId, ownerId: documentOwnerId, ownerGeneration, roomGeneration: current.generation, initialHostGeneration: hostGeneration, initialDraftGeneration: draftGeneration, context, tabAction: tabAction && { ...tabAction } };
+		if (current.key !== null && !context) return null;
+		if (intent?.kind === "room-operation") {
+			if (intent.operation !== "memento" || typeof intent.roomId !== "string" || !intent.roomId || typeof intent.conversationId !== "string" || !intent.conversationId || !context || context.roomId !== intent.roomId || context.conversationId !== intent.conversationId) return null;
+		} else if (intent && ((intent.kind !== "select-file" && intent.kind !== "close-tab") || typeof intent.path !== "string" || !intent.path)) return null;
+		return { requestId, ownerId: documentOwnerId, ownerGeneration, roomGeneration: current.generation, initialHostGeneration: hostGeneration, initialDraftGeneration: draftGeneration, context, intent: intent && { ...intent } };
 	}
 
 	function documentAdmissionIsCurrent(admission: DocumentAdmission): boolean {
@@ -762,21 +771,21 @@ export function App() {
 		return !unmountedRef.current && !personHasChanged() && checkpointContextRef.current.key === null && !markdownEditorRef.current && !documentSaveInFlightRef.current && !documentKeepMineInFlightRef.current && !documentWriteRef.current && !markdownEditorPendingActionRef.current;
 	}
 
-	function guardMarkdownEditorAction(action: () => void | Promise<unknown>, prompt: "close" | "switch" | "navigate", tabAction: DocumentTabAction | null = null): boolean {
+	function guardMarkdownEditorAction(action: () => void | Promise<unknown>, prompt: "close" | "switch" | "navigate", intent: DocumentLocalAction | null = null): boolean {
 		const bypass = markdownEditorCommitBypassRef.current;
 		if (bypass) {
-			if (bypass.tabAction?.kind !== tabAction?.kind || bypass.tabAction?.path !== tabAction?.path) return false;
+			if (!sameDocumentLocalAction(bypass.intent, intent)) return false;
 			markdownEditorCommitBypassRef.current = null;
 			return true;
 		}
 		if (markdownEditorPendingActionRef.current || !documentOwnerId) return false;
 		if (!markdownEditorRef.current && (documentSaveInFlightRef.current || documentKeepMineInFlightRef.current || documentWriteRef.current)) return false;
 		const requestId = allocateDocumentId();
-		const admission = requestId ? captureDocumentAdmission(requestId, tabAction) : null;
+		const admission = requestId ? captureDocumentAdmission(requestId, intent) : null;
 		if (!admission) return false;
 		if (!markdownEditorDirtyRef.current) {
 			if (!markdownEditorRef.current?.pendingWrite()) return true;
-			void admitCleanMarkdownEditorAction(async () => action(), admission.requestId, tabAction);
+			void admitCleanMarkdownEditorAction(async () => action(), admission.requestId, intent);
 			return false;
 		}
 		markdownEditorAdmissionRef.current = admission;
@@ -826,7 +835,7 @@ export function App() {
 		setMarkdownEditorPromptBusy(false);
 		markdownEditorDirtyRef.current = false;
 		try {
-			markdownEditorCommitBypassRef.current = { tabAction: admission?.tabAction ?? null };
+			markdownEditorCommitBypassRef.current = { intent: admission?.intent ?? null };
 			const result = action?.();
 			markdownEditorCommitBypassRef.current = null;
 			return Promise.resolve(result).then((value) => {
@@ -846,11 +855,11 @@ export function App() {
 		}
 	}
 
-	function admitCleanMarkdownEditorAction(action: () => Promise<unknown>, admittedId?: string, tabAction: DocumentTabAction | null = null): Promise<unknown> | null {
+	function admitCleanMarkdownEditorAction(action: () => Promise<unknown>, admittedId?: string, intent: DocumentLocalAction | null = null): Promise<unknown> | null {
 		if (markdownEditorDirtyRef.current || markdownEditorPendingActionRef.current || markdownEditorCommitBypassRef.current) return null;
 		if (!markdownEditorRef.current && (documentSaveInFlightRef.current || documentKeepMineInFlightRef.current || documentWriteRef.current)) return Promise.resolve(false);
 		const requestId = documentOwnerId && (admittedId ?? allocateDocumentId());
-		const admission = requestId ? captureDocumentAdmission(requestId, tabAction) : null;
+		const admission = requestId ? captureDocumentAdmission(requestId, intent) : null;
 		if (!admission) return Promise.resolve(false);
 		markdownEditorAdmissionRef.current = admission;
 		preparedDocumentAdmissionRef.current = null;
@@ -860,7 +869,7 @@ export function App() {
 			if (pending === "pending" && !(await editor!.save())) return false;
 			if (pending === "unknown" && (!(await editor!.settle()) || !(await editor!.save()))) return false;
 			if (!prepareDocumentAdmission(admission) || !preparedDocumentAdmissionIsCurrent(admission)) return false;
-			markdownEditorCommitBypassRef.current = { tabAction: admission.tabAction };
+			markdownEditorCommitBypassRef.current = { intent: admission.intent };
 			try { return action(); } finally { markdownEditorCommitBypassRef.current = null; }
 		};
 		markdownEditorPendingActionRef.current = continueAfterWrite;
@@ -7590,7 +7599,7 @@ export function App() {
 			const status = (await fetchPersistentAgentStatuses()).find((candidate) => candidate.id === chat.agentId);
 			if (!checkpointOriginCurrent(chat, generation)) return;
 			if (!status) throw new Error("This room is no longer available. Refresh Home and try again.");
-			markdownEditorCommitBypassRef.current = { tabAction: null };
+			markdownEditorCommitBypassRef.current = { intent: null };
 			let opening: Promise<void>;
 			try { opening = openRoomFromAddress(status); } finally { markdownEditorCommitBypassRef.current = null; }
 			await opening;
@@ -9495,10 +9504,11 @@ export function App() {
 						</div>
 					)}
 					{roomSettingsOpen && currentPersistentStatus && (
-						<RoomSettingsModal status={currentPersistentStatus} answering={persistentRoomInFlight} initialPane={roomSettingsPane} onClose={() => setRoomSettingsOpen(false)} onArchive={archivePersistentAgentRoom} onPurge={purgePersistentAgentRoom} onRefresh={refreshPersistentAgentStatus} onMementoApplied={() => leaveRoomAfterMemento(true)} onBeforeMemento={(continueAction) => {
-							const cleanAction = admitCleanMarkdownEditorAction(async () => { await continueAction(); });
+						<RoomSettingsModal status={currentPersistentStatus} answering={persistentRoomInFlight} initialPane={roomSettingsPane} onClose={() => setRoomSettingsOpen(false)} onArchive={archivePersistentAgentRoom} onPurge={purgePersistentAgentRoom} onRefresh={refreshPersistentAgentStatus} onMementoApplied={() => leaveRoomAfterMemento(true)} onBeforeMemento={(continueAction, target) => {
+							const intent: DocumentLocalAction = { kind: "room-operation", operation: "memento", roomId: target.agentId, conversationId: target.conversationId };
+							const cleanAction = admitCleanMarkdownEditorAction(async () => { await continueAction(); }, undefined, intent);
 							if (cleanAction) return false;
-							return guardMarkdownEditorAction(continueAction, "navigate");
+							return guardMarkdownEditorAction(continueAction, "navigate", intent);
 						}} onOpenSkillsLibrary={() => openSettings("skills")} onOpenConnectors={() => openSettings("connectors")} />
 					)}
 					{modelSwitchAsk && persistentChat && modelSwitchAsk.agentId === persistentChat.agentId && modelSwitchAsk.conversationId === persistentChat.conversationId && (

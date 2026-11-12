@@ -40,7 +40,7 @@ function sessionModelLabel(status: PersistentAgentStatus): { name: string; title
 	return { name: modelDisplayName(input) || model.model, title: modelTooltipName(input) || model.model };
 }
 
-export function RoomSessionSection({ status, answering, onRefresh, onMementoApplied, onMementoForget, onBeforeMemento }: { status: PersistentAgentStatus; answering: boolean; onRefresh: () => void; onMementoApplied?: () => void; onMementoForget?: () => void; onBeforeMemento?: (continueAction: () => void | Promise<void>) => boolean }) {
+export function RoomSessionSection({ status, answering, onRefresh, onMementoApplied, onMementoForget, onBeforeMemento }: { status: PersistentAgentStatus; answering: boolean; onRefresh: () => void; onMementoApplied?: () => void; onMementoForget?: () => void; onBeforeMemento?: (continueAction: () => void | Promise<void>, target: { agentId: string; conversationId: string }) => boolean }) {
 	const [submitting, setSubmitting] = useState(false);
 	const [message, setMessage] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -51,7 +51,7 @@ export function RoomSessionSection({ status, answering, onRefresh, onMementoAppl
 	async function forgetConversation(captured?: { agentId: string; conversationId: string }): Promise<void> {
 		const target = captured ?? (activeThread ? { agentId: status.id, conversationId: activeThread.threadId } : null);
 		if (!target) return;
-		if (onBeforeMemento && !onBeforeMemento(() => forgetConversation(target))) return;
+		if (onBeforeMemento && !onBeforeMemento(() => forgetConversation(target), target)) return;
 		setError(null);
 		setMessage(null);
 		if (!(await confirmForgetConversation(answering))) return;

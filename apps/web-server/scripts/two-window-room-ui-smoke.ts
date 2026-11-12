@@ -323,6 +323,13 @@ try {
 			await memento.locator(".room-session-section").getByRole("button", { name: "Forget…" }).waitFor();
 			const originalThread = await memento.evaluate(`(() => { window.__t20MementoTarget = window.__t20Statuses.find((status) => status.id === ${JSON.stringify(agentId)}).activeThread; return window.__t20MementoTarget.threadId; })()`);
 			assert(typeof originalThread === "string" && originalThread, "the real room status supplies the current conversation");
+			let mementoRequests = 0;
+			memento.on("request", (candidate) => { if (candidate.method() === "POST" && candidate.url().includes("/memento")) mementoRequests++; });
+			await memento.evaluate(`window.__t20MementoTarget.threadId = "invented-foreign-thread"`);
+			await memento.locator(".room-session-section").getByRole("button", { name: "Forget…" }).click();
+			await memento.waitForTimeout(200);
+			assert(await memento.getByRole("dialog", { name: "Unsaved Markdown changes" }).count() === 0 && await memento.getByRole("alertdialog", { name: "Forget this conversation and start fresh?" }).count() === 0 && mementoRequests === 0, "a room-settings target outside the current conversation is refused before prompting or posting");
+			await memento.evaluate(`window.__t20MementoTarget.threadId = ${JSON.stringify(originalThread)}`);
 			await memento.locator(".room-session-section").getByRole("button", { name: "Forget…" }).click();
 			const guard = memento.getByRole("dialog", { name: "Unsaved Markdown changes" });
 			await guard.waitFor();
