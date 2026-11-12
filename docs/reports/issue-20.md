@@ -513,3 +513,7 @@ The detached browser smoke now captures the real `window.open` arguments while s
 ## Checkpoint: browser placement draft
 
 The private child bootstrap now requests best-effort size/position hints, clamps against an exposed browser work area, and remembers a successfully returned child's outer position and inner size only in the same owner session. UI and scripts typechecks and the UI asset build passed; the attributed detached smoke still stops at unavailable Detach, so popup arguments and placement are untested. Browsers may ignore hints; there is no Electron geometry implementation or monitor evidence here.
+
+## Checkpoint: disabled owner-admitted Detach draft
+
+A selected room now shows one disabled Detach control even with no tabs; an attached tab shows the approved tab-strip control. The inactive handler reserves the existing owner admission, fences the editor, preallocates per-frame IDs, checks the retained editor/load view and current stamp, and calls the private bootstrap/adoption draft; it keeps the fence on an unknown or post-adoption failure. It remains explicitly disabled because child Return, dependent-close ordering, C4 settlement and native registration are incomplete. UI and scripts typechecks, UI asset build and the attributed `two-window-room-ui` and `workspace-file-tabs-ui` smokes passed 2/2. The detached smoke now passes its one-control assertion and fails at the expected enabled assertion; no popup, transfer or child behavior was reached, so this does not establish C3/C4/C7 correctness.

@@ -6,10 +6,10 @@ import "../excalidraw-frame-entry.ts?worker&url";
 
 // PPTX and Excalidraw: third-party renderers reading an untrusted file, so they stay in a frame with an
 // opaque origin (no allow-same-origin) that may fetch nothing. The parent fetches the file and hands the bytes over.
-export function WorkspaceFramedPreview({ agentId, conversationId, path, retained, createFrameId, hostGeneration }: { agentId: string; conversationId: string; path: string; retained: { bytes: ArrayBuffer | null }; createFrameId: () => string | null; hostGeneration: number }) {
+export function WorkspaceFramedPreview({ agentId, conversationId, path, retained, createFrameId, hostGeneration }: { agentId: string; conversationId: string; path: string; retained: { bytes: ArrayBuffer | null; nextFrame?: { generation: number; id: string } }; createFrameId: () => string | null; hostGeneration: number }) {
 	const [firstFrameId] = useState(createFrameId);
 	const activeFrame = useRef({ generation: hostGeneration, id: firstFrameId, delivered: false, terminal: false });
-	if (activeFrame.current.generation !== hostGeneration) activeFrame.current = { generation: hostGeneration, id: createFrameId(), delivered: false, terminal: false };
+	if (activeFrame.current.generation !== hostGeneration) activeFrame.current = { generation: hostGeneration, id: retained.nextFrame?.generation === hostGeneration ? retained.nextFrame.id : null, delivered: false, terminal: false };
 	const instance = activeFrame.current;
 	const frameId = instance.id;
 	const [bytes, setBytes] = useState<ArrayBuffer | null>(() => retained.bytes);

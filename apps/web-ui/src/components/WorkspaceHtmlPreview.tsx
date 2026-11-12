@@ -3,10 +3,10 @@ import { apiFetch } from "../api";
 
 // The frame loads the same route with frame=1. Its sandbox has no allow-same-origin, so a file's scripts
 // run without the app's cookies or API, and the route's own policy blocks every network request.
-export function WorkspaceHtmlPreview({ agentId, conversationId, path, retained, createFrameId, hostGeneration }: { agentId: string; conversationId: string; path: string; retained: { bytes: ArrayBuffer | null }; createFrameId: () => string | null; hostGeneration: number }) {
+export function WorkspaceHtmlPreview({ agentId, conversationId, path, retained, createFrameId, hostGeneration }: { agentId: string; conversationId: string; path: string; retained: { bytes: ArrayBuffer | null; nextFrame?: { generation: number; id: string } }; createFrameId: () => string | null; hostGeneration: number }) {
 	const [firstFrameId] = useState(createFrameId);
 	const activeFrame = useRef({ generation: hostGeneration, id: firstFrameId, delivered: false, terminal: false });
-	if (activeFrame.current.generation !== hostGeneration) activeFrame.current = { generation: hostGeneration, id: createFrameId(), delivered: false, terminal: false };
+	if (activeFrame.current.generation !== hostGeneration) activeFrame.current = { generation: hostGeneration, id: retained.nextFrame?.generation === hostGeneration ? retained.nextFrame.id : null, delivered: false, terminal: false };
 	const instance = activeFrame.current;
 	const frameId = instance.id;
 	const [snapshot, setSnapshot] = useState<ArrayBuffer | null>(() => retained.bytes);

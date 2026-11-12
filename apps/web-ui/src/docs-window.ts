@@ -33,20 +33,21 @@ export function useDocumentsHost() {
 	const beginChild = useCallback(async (frameName: string, title: string) => {
 		if (opening.current || prepared.current || registered.current) return null;
 		opening.current = true;
-		const screen = window.screen as Screen & { availLeft?: number; availTop?: number };
-		const hasOrigin = typeof screen.availLeft === "number" && Number.isFinite(screen.availLeft) && typeof screen.availTop === "number" && Number.isFinite(screen.availTop);
-		const hasArea = hasOrigin && Number.isFinite(screen.availWidth) && screen.availWidth > 0 && Number.isFinite(screen.availHeight) && screen.availHeight > 0;
-		const areaLeft = hasOrigin ? screen.availLeft! : 0;
-		const areaTop = hasOrigin ? screen.availTop! : 0;
-		const width = Math.round(hasArea ? Math.min(lastBounds.current?.width ?? 900, screen.availWidth) : 900);
-		const height = Math.round(hasArea ? Math.min(lastBounds.current?.height ?? 700, screen.availHeight) : 700);
-		const wantedLeft = (hasArea ? lastBounds.current?.left : undefined) ?? (Number.isFinite(window.screenX) ? window.screenX + 40 : 0);
-		const wantedTop = (hasArea ? lastBounds.current?.top : undefined) ?? (Number.isFinite(window.screenY) ? window.screenY + 40 : 0);
-		const left = Math.round(hasArea ? Math.max(areaLeft, Math.min(wantedLeft, areaLeft + screen.availWidth - width)) : wantedLeft);
-		const top = Math.round(hasArea ? Math.max(areaTop, Math.min(wantedTop, areaTop + screen.availHeight - height)) : wantedTop);
 		let child: Window | null;
-		try { child = window.open("about:blank", frameName, `popup,width=${width},height=${height},left=${left},top=${top}`); }
-		catch { opening.current = false; return null; }
+		try {
+			const screen = window.screen as Screen & { availLeft?: number; availTop?: number };
+			const hasOrigin = typeof screen.availLeft === "number" && Number.isFinite(screen.availLeft) && typeof screen.availTop === "number" && Number.isFinite(screen.availTop);
+			const hasArea = hasOrigin && Number.isFinite(screen.availWidth) && screen.availWidth > 0 && Number.isFinite(screen.availHeight) && screen.availHeight > 0;
+			const areaLeft = hasOrigin ? screen.availLeft! : 0;
+			const areaTop = hasOrigin ? screen.availTop! : 0;
+			const width = Math.round(hasArea ? Math.min(lastBounds.current?.width ?? 900, screen.availWidth) : 900);
+			const height = Math.round(hasArea ? Math.min(lastBounds.current?.height ?? 700, screen.availHeight) : 700);
+			const wantedLeft = (hasArea ? lastBounds.current?.left : undefined) ?? (Number.isFinite(window.screenX) ? window.screenX + 40 : 0);
+			const wantedTop = (hasArea ? lastBounds.current?.top : undefined) ?? (Number.isFinite(window.screenY) ? window.screenY + 40 : 0);
+			const left = Math.round(hasArea ? Math.max(areaLeft, Math.min(wantedLeft, areaLeft + screen.availWidth - width)) : wantedLeft);
+			const top = Math.round(hasArea ? Math.max(areaTop, Math.min(wantedTop, areaTop + screen.availHeight - height)) : wantedTop);
+			child = window.open("about:blank", frameName, `popup,width=${width},height=${height},left=${left},top=${top}`);
+		} catch { opening.current = false; return null; }
 		if (!child) { opening.current = false; return null; }
 		let timer: number | null = null;
 		let verified = false;

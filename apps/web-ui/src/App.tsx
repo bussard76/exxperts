@@ -176,10 +176,11 @@ type DocumentContext = Readonly<{
 	roomGeneration: number;
 }>;
 
-type DocumentLocalAction = Readonly<{ kind: "select-file" | "close-tab"; path: string } | { kind: "leave-room"; target: "home" | "memory" } | { kind: "replace-conversation"; roomId: string; conversationId: string } | { kind: "room-operation"; operation: "memento" | "archive" | "purge"; roomId: string; conversationId: string }>;
+type DocumentLocalAction = Readonly<{ kind: "transfer"; direction: "detach" | "return" } | { kind: "select-file" | "close-tab"; path: string } | { kind: "leave-room"; target: "home" | "memory" } | { kind: "replace-conversation"; roomId: string; conversationId: string } | { kind: "room-operation"; operation: "memento" | "archive" | "purge"; roomId: string; conversationId: string }>;
 
 function sameDocumentLocalAction(a: DocumentLocalAction | null, b: DocumentLocalAction | null): boolean {
 	if (!a || !b) return a === b;
+	if (a.kind === "transfer") return b.kind === "transfer" && a.direction === b.direction;
 	if (a.kind === "room-operation") return b.kind === "room-operation" && a.operation === b.operation && a.roomId === b.roomId && a.conversationId === b.conversationId;
 	if (a.kind === "leave-room") return b.kind === "leave-room" && a.target === b.target;
 	if (a.kind === "replace-conversation") return b.kind === "replace-conversation" && a.roomId === b.roomId && a.conversationId === b.conversationId;
@@ -558,8 +559,11 @@ export function App() {
 		| { kind: "taskRun"; taskId: string };
 	const [rightPane, setRightPane] = useState<RightPaneOccupant | null>(null);
 	const [workspaceTabs, setWorkspaceTabs] = useState<{ agentId: string; conversationId: string; paths: string[] } | null>(null);
-	const documentPreviewSnapshotsRef = useRef(new Map<string, { bytes: ArrayBuffer | null; text?: string; word?: { html: string; notice: boolean }; pdf?: { page: number; mimeType: "image/jpeg"; imageBase64: string; widthPx: number; heightPx: number }[]; spreadsheet?: { workbook: unknown; notices: string[] }; imageUrl?: string; disposed?: boolean }>());
-	const { host: documentHost, treeHost: documentTreeHost, mountHost: mountDocumentHost, mountTree: mountDocumentTreeHost } = useDocumentsHost();
+	const documentPreviewSnapshotsRef = useRef(new Map<string, { bytes: ArrayBuffer | null; text?: string; nextFrame?: { generation: number; id: string }; word?: { html: string; notice: boolean }; pdf?: { page: number; mimeType: "image/jpeg"; imageBase64: string; widthPx: number; heightPx: number }[]; spreadsheet?: { workbook: unknown; notices: string[] }; imageUrl?: string; disposed?: boolean }>());
+	const { host: documentHost, treeHost: documentTreeHost, mountHost: mountDocumentHost, mountTree: mountDocumentTreeHost, beginChild: beginDocumentChild, abortChild: abortDocumentChild, moveToChild: moveDocumentToChild } = useDocumentsHost();
+	type PreparedDocumentChild = NonNullable<Awaited<ReturnType<typeof beginDocumentChild>>>;
+	const documentChildRef = useRef<PreparedDocumentChild | null>(null);
+	const documentHostCommitRef = useRef<{ admission: DocumentAdmission; child: PreparedDocumentChild; generation: number } | null>(null);
 	// Synchronous mirror for the WS handlers (toast suppression / run-view swap
 	// read the pane at event time, not at closure-capture time).
 	const rightPaneRef = useRef<RightPaneOccupant | null>(null);
@@ -742,7 +746,9 @@ export function App() {
 			ownerId: documentOwnerId, ownerGeneration, roomId: current.roomId, conversationId: current.conversationId, roomGeneration: current.generation,
 		} : null;
 		if (current.key !== null && !context) return null;
-		if (intent?.kind === "room-operation") {
+		if (intent?.kind === "transfer") {
+			if (!context || (intent.direction !== "detach" && intent.direction !== "return")) return null;
+		} else if (intent?.kind === "room-operation") {
 			if ((intent.operation !== "memento" && intent.operation !== "archive" && intent.operation !== "purge") || typeof intent.roomId !== "string" || !intent.roomId || typeof intent.conversationId !== "string" || !intent.conversationId || !context || context.roomId !== intent.roomId || context.conversationId !== intent.conversationId) return null;
 		} else if (intent?.kind === "leave-room") {
 			if (intent.target !== "home" && intent.target !== "memory") return null;
@@ -750,6 +756,56 @@ export function App() {
 			if (typeof intent.roomId !== "string" || !intent.roomId || typeof intent.conversationId !== "string" || !intent.conversationId || !context || context.roomId !== intent.roomId) return null;
 		} else if (intent && ((intent.kind !== "select-file" && intent.kind !== "close-tab") || typeof intent.path !== "string" || !intent.path)) return null;
 		return { requestId, ownerId: documentOwnerId, ownerGeneration, roomGeneration: current.generation, initialHostGeneration: hostGeneration, initialDraftGeneration: draftGeneration, context, intent: intent && { ...intent } };
+	}
+
+	function detachDocuments(): void {
+		if (markdownEditorPendingActionRef.current || documentChildRef.current || !persistentChat) return;
+		const requestId = allocateDocumentId();
+		const admission = requestId ? captureDocumentAdmission(requestId, { kind: "transfer", direction: "detach" }) : null;
+		if (!admission?.context) return;
+		markdownEditorPendingActionRef.current = { admission, continuation: () => {}, result: null };
+		preparedDocumentAdmissionRef.current = null;
+		markdownEditorRef.current?.setFence(true);
+		setMarkdownEditorFenced(true);
+		const release = () => {
+			if (markdownEditorPendingActionRef.current?.admission !== admission) return;
+			markdownEditorPendingActionRef.current = null;
+			preparedDocumentAdmissionRef.current = null;
+			markdownEditorRef.current?.setFence(false);
+			setMarkdownEditorFenced(false);
+		};
+		const name = `exxperts-documents-${admission.ownerId}-${admission.roomGeneration}-${admission.requestId}`;
+		let adopted = false;
+		let candidate: PreparedDocumentChild | null = null;
+		void beginDocumentChild(name, `${persistentChat.displayName} · Documents`).then((child) => {
+			if (!child) { release(); return; }
+			candidate = child;
+			const pane = rightPaneRef.current;
+			const snapshot = documentFileSnapshotRef.current;
+			const load = documentLoadViewRef.current;
+			if (!documentAdmissionIsCurrent(admission) || (pane?.kind === "markdownEditor" && !(documentFileSnapshotValidRef.current && snapshot?.file.path === pane.path && snapshot.draftGeneration === documentDraftGenerationRef.current) && !(load?.path === pane.path))) {
+				abortDocumentChild(child); release(); return;
+			}
+			const nextGeneration = documentHostGenerationRef.current + 1;
+			if (!Number.isSafeInteger(nextGeneration)) { abortDocumentChild(child); release(); return; }
+			const frameSeeds: { record: { nextFrame?: { generation: number; id: string } }; id: string }[] = [];
+			for (const [path, record] of documentPreviewSnapshotsRef.current) {
+				if (!/\.(?:html?|pptx|excalidraw)$/i.test(path)) continue;
+				const id = allocateDocumentId();
+				if (!id) { abortDocumentChild(child); release(); return; }
+				frameSeeds.push({ record, id });
+			}
+			if (!prepareDocumentAdmission(admission)) { abortDocumentChild(child); release(); return; }
+			for (const seed of frameSeeds) seed.record.nextFrame = { generation: nextGeneration, id: seed.id };
+			const moved = moveDocumentToChild(child, () => preparedDocumentAdmissionIsCurrent(admission));
+			if (moved === "refused") { abortDocumentChild(child); release(); return; }
+			if (moved !== "moved") return;
+			adopted = true;
+			documentChildRef.current = child;
+			documentHostCommitRef.current = { admission, child, generation: nextGeneration };
+			documentHostGenerationRef.current = nextGeneration;
+			setDocumentHostGeneration(nextGeneration);
+		}).catch(() => { if (!adopted) { if (candidate) abortDocumentChild(candidate); release(); } });
 	}
 
 	function documentAdmissionIsCurrent(admission: DocumentAdmission): boolean {
@@ -773,6 +829,20 @@ export function App() {
 		const prepared = preparedDocumentAdmissionRef.current;
 		return Boolean(prepared && prepared.admission === admission && documentAdmissionIsCurrent(admission) && prepared.hostGeneration === documentHostGenerationRef.current && prepared.draftGeneration === documentDraftGenerationRef.current);
 	}
+
+	useEffect(() => {
+		const commit = documentHostCommitRef.current;
+		if (!commit || commit.generation !== documentHostGeneration || documentChildRef.current !== commit.child || markdownEditorPendingActionRef.current?.admission !== commit.admission) return;
+		const context = commit.admission.context;
+		const current = checkpointContextRef.current;
+		if (!context || unmountedRef.current || personHasChanged() || current.generation !== context.roomGeneration || current.roomId !== context.roomId || current.conversationId !== context.conversationId || documentOwnerGenerationRef.current !== context.ownerGeneration || documentHostGenerationRef.current !== commit.generation) return;
+		documentHostCommitRef.current = null;
+		markdownEditorPendingActionRef.current = null;
+		preparedDocumentAdmissionRef.current = null;
+		markdownEditorRef.current?.setFence(false);
+		setMarkdownEditorFenced(false);
+		try { commit.child.child.focus(); } catch {}
+	}, [documentHostGeneration]);
 
 	function noDocumentSession(): boolean {
 		return !unmountedRef.current && !personHasChanged() && checkpointContextRef.current.key === null && !markdownEditorRef.current && !documentSaveInFlightRef.current && !documentKeepMineInFlightRef.current && !documentWriteRef.current && !markdownEditorPendingActionRef.current;
@@ -9177,7 +9247,7 @@ export function App() {
 				<>
 				<div className="docs-slot" ref={mountDocumentHost} />
 				{createPortal(<div className="workspace-pane" hidden={activeWorkspacePath(rightPane) === null}>
-					<WorkspaceFileTabs tabs={workspaceTabs.paths} active={activeWorkspacePath(rightPane)} onSelect={(path) => openWorkspaceMarkdown({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} onReorder={(paths) => setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths } : tabs)} />
+					<WorkspaceFileTabs onDetach={detachDocuments} detachDisabled tabs={workspaceTabs.paths} active={activeWorkspacePath(rightPane)} onSelect={(path) => openWorkspaceMarkdown({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} onReorder={(paths) => setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths } : tabs)} />
 					{rightPane && (rightPane.kind === "workspaceImage" || rightPane.kind === "workspacePdf" || rightPane.kind === "workspaceWord" || rightPane.kind === "workspaceHtml" || rightPane.kind === "workspaceFramed" || rightPane.kind === "workspaceText" || rightPane.kind === "workspaceSpreadsheet" || (rightPane.kind === "workspaceLegacyDoc" && !/\.doc$/i.test(rightPane.path))) && <WorkspaceOpenAction key={JSON.stringify([persistentChat.agentId, persistentChat.conversationId, rightPane.path])} agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={rightPane.path} />}
 					{rightPane?.kind === "markdownEditor" && <MarkdownEditorPane
 						key={checkpointContextRef.current.generation}
@@ -9333,6 +9403,7 @@ export function App() {
 							    would be the worst possible moment to lose it. */}
 							<button className="icon-btn icon-btn-square icon-btn-danger" aria-label="Forget" title="Forget this conversation and start fresh. Nothing is saved to memory" onClick={() => void mementoPersistentThread()}><TrashIcon /></button>
 							{currentPersistentStatus?.exists && <button className="icon-btn icon-btn-square" aria-label="Room settings" title={`Room settings — ${roomSettingsChordHint()}`} onClick={() => openRoomSettings()}><GearIcon /></button>}
+							{workspaceTabs?.paths.length === 0 && <button type="button" className="workspace-tabs-window" disabled onClick={detachDocuments}>Detach</button>}
 							{rightPaneVisible && !artifactPaneMaximized && <button className="icon-btn icon-btn-square right-pane-toggle" aria-label={rightCollapsed ? "Show right pane" : "Hide right pane"} aria-expanded={!rightCollapsed} title={rightCollapsed ? "Show right pane" : "Hide right pane"} onClick={() => setRightPaneCollapsed((collapsed) => !collapsed)}><PanelIcon side="right" /></button>}
 						</>
 					)

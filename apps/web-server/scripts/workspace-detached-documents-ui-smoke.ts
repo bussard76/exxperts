@@ -108,7 +108,8 @@ try {
 			if (await dismiss.count()) await dismiss.click();
 			await page.locator(".persistent-agent-card").filter({ hasText: "Cedar Studio" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
 			const detach = page.getByRole("button", { name: "Detach", exact: true });
-			assert(await detach.count() === 1 && await detach.isEnabled(), "a selected room offers Detach even before opening a tab");
+			assert(await detach.count() === 1, "a selected room shows one Detach control before opening a tab");
+			assert(await detach.isEnabled(), "Detach is available for an empty selected room when safeguards are ready");
 			let releaseLoad!: () => void, beginLoad!: () => void;
 			const loadReleased = new Promise<void>((resolve) => { releaseLoad = resolve; });
 			const loadStarted = new Promise<void>((resolve) => { beginLoad = resolve; });

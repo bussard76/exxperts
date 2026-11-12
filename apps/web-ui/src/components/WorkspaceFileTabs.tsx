@@ -6,7 +6,7 @@ const TAB_DRAG_TYPE = "application/x-exxperts-workspace-tab";
 
 type DropTarget = { path: string; side: "before" | "after" };
 
-export function WorkspaceFileTabs({ tabs, active, onSelect, onClose, onReorder }: { tabs: string[]; active: string | null; onSelect: (path: string) => void; onClose: (path: string) => void; onReorder: (paths: string[]) => void }) {
+export function WorkspaceFileTabs({ tabs, active, onSelect, onClose, onReorder, onDetach, detachDisabled }: { tabs: string[]; active: string | null; onSelect: (path: string) => void; onClose: (path: string) => void; onReorder: (paths: string[]) => void; onDetach?: () => void; detachDisabled?: boolean }) {
 	const [dragged, setDragged] = useState<string | null>(null);
 	const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
 	const { show: showTooltip, hide: hideTooltip, tooltip } = useHoverTooltip();
@@ -58,5 +58,6 @@ export function WorkspaceFileTabs({ tabs, active, onSelect, onClose, onReorder }
 			</div>;
 		})}
 		{tooltip}
+		{onDetach && <button type="button" className="workspace-tabs-window" disabled={detachDisabled} onClick={onDetach} title="Open the documents in their own window">Detach</button>}
 	</div>;
 }
