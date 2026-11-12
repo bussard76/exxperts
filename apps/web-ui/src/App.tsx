@@ -1026,6 +1026,7 @@ export function App() {
 			setDetachedDocumentPane(null);
 			documentClosingRef.current = false;
 			window.clearInterval(poll);
+			window.clearTimeout(settlementDeadline);
 			if (commit.direction === "recovery") {
 				release();
 				commit.resolve?.(false);
@@ -1042,9 +1043,12 @@ export function App() {
 			release();
 		};
 		const poll = window.setInterval(settle, 100);
+		const settlementDeadline = window.setTimeout(() => {
+			if (documentHostCommitRef.current === commit && markdownEditorPendingActionRef.current?.admission === commit.admission) setDocumentHostStatus("recovering");
+		}, 5_000);
 		try { if (!commit.child.child.closed) commit.child.child.close(); } catch {}
 		settle();
-		return () => window.clearInterval(poll);
+		return () => { window.clearInterval(poll); window.clearTimeout(settlementDeadline); };
 	}, [documentHostGeneration]);
 
 	function noDocumentSession(): boolean {
