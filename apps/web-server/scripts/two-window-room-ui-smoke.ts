@@ -420,6 +420,41 @@ try {
 			await rebind.close();
 		}
 		{
+			const entryAgent = agents.createPersistentAgentFromScaffoldInput({ displayName: "Invented Late Entry", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }).agent.agentId;
+			roomModels.writeRoomModels(entryAgent, { conversation: CLAUDE });
+			const entry = await ctx.newPage();
+			await entry.addInitScript({ content: `window.addEventListener("beforeunload", (event) => { event.preventDefault(); event.returnValue = ""; });` });
+			entry.on("dialog", (dialog) => { void dialog.dismiss(); });
+			await entry.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+			await entry.waitForLoadState("networkidle");
+			const card = entry.locator(".persistent-agent-card").filter({ hasText: "Invented Late Entry" });
+			await card.waitFor();
+			let releaseEntry!: () => void, beginEntry!: () => void;
+			const entryReleased = new Promise<void>((resolve) => { releaseEntry = resolve; });
+			const entryStarted = new Promise<void>((resolve) => { beginEntry = resolve; });
+			await entry.route("**/threads/**", async (route) => {
+				if (route.request().method() !== "PUT") return route.continue();
+				const response = await route.fetch();
+				beginEntry();
+				await entryReleased;
+				await route.fulfill({ response });
+			});
+			await card.getByRole("button", { name: "Enter", exact: true }).click();
+			try {
+				await entryStarted;
+				await entry.route("**/api/persistent-agents", (route) => route.fulfill({ status: 409, json: { code: "person_changed", error: "Invented identity change" } }));
+				await entry.evaluate(() => window.dispatchEvent(new Event("focus")));
+				await entry.getByText("Someone else is now signed in on this server.", { exact: true }).waitFor();
+				assert(await card.count() === 1, "the invalidated entry remains on Home before the late save reply");
+				const response = entry.waitForResponse((candidate) => candidate.request().method() === "PUT" && candidate.url().includes("/threads/"));
+				releaseEntry();
+				assert((await response).ok(), "the invented entry save completed before its answer was released");
+				await entry.waitForTimeout(500);
+				assert(await card.count() === 1, "a late entry save cannot open a chat after page identity changes");
+			} finally { releaseEntry(); }
+			await entry.close();
+		}
+		{
 			const reloadAgent = agents.createPersistentAgentFromScaffoldInput({ displayName: "Invented Late Reload", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }).agent.agentId;
 			roomModels.writeRoomModels(reloadAgent, { conversation: CLAUDE });
 			assert((await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(reloadAgent)}/workspace-default`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ root: workspace, workspaceAccessMode: "localFiles" }) })).ok, "the invented late-Reload room uses the temporary workspace");

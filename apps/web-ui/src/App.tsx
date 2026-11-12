@@ -7473,6 +7473,8 @@ export function App() {
 		const cleanAction = admitCleanMarkdownEditorAction(() => openPersistentAgent(target));
 		if (cleanAction) { await cleanAction; return; }
 		if (!guardMarkdownEditorAction(() => openPersistentAgent(target), "navigate")) return;
+		const admission = markdownEditorAdmissionRef.current;
+		if (!admission || !preparedDocumentAdmissionIsCurrent(admission)) return;
 		const label = shownRoomName(target.displayName) || "Exxpert";
 		// The server decides a new conversation's model (the room's conversation
 		// row); the resolved row only fills the room's header until the saved
@@ -7499,16 +7501,20 @@ export function App() {
 		if (preparedThreadId && targetPreparedBoundary && !targetStatus?.activeThread?.hasUserVisibleTurns) {
 			try {
 				await discardEmptyPreparedBoundaryThread(target.id, preparedThreadId);
+				if (!preparedDocumentAdmissionIsCurrent(admission)) return;
 			} catch (e) {
+				if (!preparedDocumentAdmissionIsCurrent(admission)) return;
 				// The snapshot may be stale (another tab already retired the prepared
 				// thread). Re-check: only fall through to a fresh entry when the room
 				// runtime is idle now; any remaining thread still blocks fresh entry.
 				let blocked = true;
 				try {
 					const statuses = await fetchPersistentAgentStatuses();
+					if (!preparedDocumentAdmissionIsCurrent(admission)) return;
 					const fresh = statuses.find((candidate) => candidate.id === target.id) ?? null;
 					blocked = !fresh || (fresh.runtime.state !== "idle" && !!fresh.runtime.activeThreadId);
 				} catch {}
+				if (!preparedDocumentAdmissionIsCurrent(admission)) return;
 				if (blocked) {
 					setPersistentResumeError((e as Error).message);
 					await refreshPersistentAgentStatus();
@@ -7532,17 +7538,20 @@ export function App() {
 		setItems([]);
 		setPersistentThread(nextThread);
 		setPersistentChat({ agentId: nextThread.agentId, displayName: nextThread.displayName, conversationId: nextThread.conversationId, model: nextThread.model });
+		const newGeneration = checkpointContextRef.current.generation;
 		// A fresh conversation starts with an empty pending-transfer queue.
 		applyPendingHandoffs([], new Set());
 		let savedModel: WebChatModelOption = model;
 		try {
 			const record = await savePersistentAgentThread(nextThread, "active", "launcher", [], []);
+			if (!checkpointOriginCurrent(nextThread, newGeneration)) return;
 			if (record.model && (record.model.provider !== model.provider || record.model.model !== model.model)) {
 				savedModel = { provider: record.model.provider, model: record.model.model, label: record.model.label || record.model.model };
 				setPersistentThread((thread) => thread && thread.conversationId === nextConversationId ? { ...thread, model: savedModel } : thread);
 				setPersistentChat((chat) => chat && chat.conversationId === nextConversationId ? { ...chat, model: savedModel } : chat);
 			}
 		} catch (e) {
+			if (!checkpointOriginCurrent(nextThread, newGeneration)) return;
 			// The server rejected the new conversation (no provider can run it,
 			// or the room's state moved). Entering
 			// anyway would drop the user's first message into a thread the server
