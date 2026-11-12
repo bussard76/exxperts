@@ -772,3 +772,7 @@ The actual sandboxed Electron harness first failed because malformed owner outpu
 ## Checkpoint: dirty native Cancel draft
 
 The owner endpoint now enters the existing dirty-document guard for a matching native prepare, queues the matching Cancel refusal, and retains the draft and arbiter until a matching abort; Save/Discard paths are staged to publish their prepared result rather than execute a continuation. The supplemental browser owner test first failed on the missing dirty preparation and then passed 1/1 with a real edited Markdown file, Cancel, competing Home and matching abort. UI and scripts typechecks and UI asset build passed. Native shell integration, sent-write/Save/Discard/commit evidence and child handling remain open; the browser owner check is not native proof.
+
+## Checkpoint: native owner Save supplement
+
+The supplemental owner smoke now holds the actual invented Markdown PUT response during a native prepare, verifies that no allow is emitted while it is pending, and then checks the confirmed source and newer prepared draft stamp before a matching abort. The attributed browser run passed 1/1. This exercises the real UI editor and owner endpoint with a controlled requester, not the native shell, and does not yet establish native close/commit or child behavior.

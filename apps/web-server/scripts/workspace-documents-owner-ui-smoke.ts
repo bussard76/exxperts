@@ -91,10 +91,38 @@ try {
 	assert((await editor.textContent())?.includes("retained local edit"), "a refused native attempt reserves the dirty draft until abort acknowledgement");
 	const dirtyAbort = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 9, ack: 8, items: [{ kind: "native-abort", binding, correlation }] }), { binding: first.status.binding, correlation: cancel.result.correlation });
 	assert(dirtyAbort?.items?.[0]?.kind === "abort-ack", "the matching abort releases the refused dirty attempt");
+	const beforeSave = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 10, ack: 9, items: [] }), { binding: first.status.binding });
+	const savePrepare = await page.evaluate(({ binding, stamp }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 11, ack: 10, items: [{ kind: "native-prepare", binding, nativeRequestId: "77777777-7777-4777-8777-777777777777", observedStamp: stamp, disposition: "hide" }] }), { binding: first.status.binding, stamp: beforeSave.status.stamp });
+	assert(savePrepare?.sequence === 11 && savePrepare.items?.length === 0, "a dirty native Save waits for the real guard decision");
+	let beginSave!: () => void, releaseSave!: () => void;
+	const saveStarted = new Promise<void>((resolve) => { beginSave = resolve; });
+	const saveReleased = new Promise<void>((resolve) => { releaseSave = resolve; });
+	let writes = 0;
+	await page.route("**/workspace-markdown?*", async (route) => {
+		if (route.request().method() !== "PUT") return route.continue();
+		writes++;
+		const response = await route.fetch();
+		beginSave();
+		await saveReleased;
+		await route.fulfill({ response });
+	});
+	try {
+		await page.getByRole("dialog", { name: "Unsaved Markdown changes" }).getByRole("button", { name: "Save and continue" }).click();
+		await saveStarted;
+		const duringSave = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 12, ack: 11, items: [] }), { binding: first.status.binding });
+		assert(duringSave?.items?.length === 0 && writes === 1, "native preparation cannot allow while the actual Save response is held");
+		releaseSave();
+		await page.getByRole("dialog", { name: "Unsaved Markdown changes" }).waitFor({ state: "hidden" });
+		const afterSave = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 13, ack: 12, items: [] }), { binding: first.status.binding });
+		const savedGuard = afterSave?.items?.[0];
+		assert(savedGuard?.kind === "guard-result" && savedGuard.result?.kind === "prepared" && savedGuard.result.decision === "allow" && savedGuard.result.correlation.requestId === "77777777-7777-4777-8777-777777777777" && savedGuard.result.correlation.stamp.draftGeneration > beforeSave.status.stamp.draftGeneration && fs.readFileSync(path.join(workspace, "invented.md"), "utf8").includes("retained local edit"), "the latest confirmed Save publishes its final prepared stamp");
+		const saveAbort = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 14, ack: 13, items: [{ kind: "native-abort", binding, correlation }] }), { binding: first.status.binding, correlation: savedGuard.result.correlation });
+		assert(saveAbort?.items?.[0]?.kind === "abort-ack", "the prepared Save action remains reserved until its matching abort");
+	} finally { releaseSave(); await page.unroute("**/workspace-markdown?*"); }
 	await page.route("**/workspace-files?*", (route) => route.fulfill({ status: 409, json: { code: "person_changed", error: "Invented identity change" } }));
 	await page.evaluate(() => window.dispatchEvent(new Event("focus")));
 	await page.getByText("Someone else is now signed in on this server.", { exact: true }).waitFor();
-	const invalidated = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 10, ack: 9, items: [] }), { binding: first.status.binding });
+	const invalidated = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 15, ack: 14, items: [] }), { binding: first.status.binding });
 	assert(invalidated == null, "a changed person cannot receive another owner status");
 	console.log("owner endpoint browser supplement: hello, replay and invalid inputs passed");
 } catch (caught) { error = caught; }
