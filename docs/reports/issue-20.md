@@ -483,3 +483,7 @@ The detached smoke now requires actual child image zoom to schedule animation fr
 ## Checkpoint: image host-bound animation
 
 Image zoom now obtains animation scheduling, cancellation, reduced-motion preference and resize observation from the preview element's actual window; host generation changes rebind the observer and cancel the old host's frame. The UI typecheck, UI asset build and attributed `workspace-file-tabs-ui` smoke passed (1/1), covering attached image zoom, wheel and drag. The new child animation assertion did not run because Detach is unavailable; no child-host evidence or full C7 completion is claimed.
+
+## Checkpoint: private child bootstrap draft
+
+The existing private host hook can now open an empty about:blank child, verify its opener/name/document, copy the owner's root attributes and styles, wait for stylesheet success and a bounded styled-layout check, and return empty tree/pane slots. It does not move either owner surface, expose Detach, register a native child, or acquire the action arbiter; an unverified returned window is not closed by failure cleanup. UI and scripts typechecks and the UI asset build passed; the attributed detached smoke remained red at the first unavailable Detach assertion and did not exercise this draft. Actual bootstrap/adoption/security behavior, C3/C4 and native safeguards still need integration and real tests.
