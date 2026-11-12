@@ -289,6 +289,10 @@ try {
 			await child.locator(".workspace-tab[data-active='true']", { hasText: "invented.md" }).waitFor();
 			assert(await child.getByRole("textbox", { name: "Raw Markdown source" }).inputValue() === rawDisplay, "the child presents the source and active tab");
 			assert(await page.locator("textarea").first().isVisible(), "chat remains usable in the owner window");
+			await page.getByRole("button", { name: "Attachments", exact: true }).click();
+			await page.getByRole("region", { name: "Attachments" }).waitFor();
+			assert(await child.getByRole("textbox", { name: "Raw Markdown source" }).inputValue() === rawDisplay && await child.locator(".workspace-tab[data-active='true']", { hasText: "invented.md" }).isVisible(), "opening the chat Attachments pane keeps the same active child document");
+			await page.getByRole("button", { name: "Attachments", exact: true }).click();
 			await child.locator(".workspace-tab", { hasText: "invented.md" }).locator(".workspace-tab-close").click();
 			assert(!child.isClosed() && await child.locator(".workspace-tab").count() === 0, "closing a tab leaves the document child open");
 			await child.locator(".workspace-file-browser-file", { hasText: "invented.md" }).click();

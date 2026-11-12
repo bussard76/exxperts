@@ -567,3 +567,7 @@ The detached smoke now uses a local scripted fake model and specifies the real c
 ## Checkpoint: checkpoint replacement draft
 
 The inactive dependent-close path now applies to a typed replacement only when its captured destination differs from the current conversation. The explicit Keep chatting continuation captures the checkpoint approval and destination before waiting; checkpoint Save itself is not classified as a child close. UI and scripts typechecks, UI asset build, and the attributed `remember-job-dialog` and `workspace-file-tabs-ui` smokes passed 2/2. The new detached checkpoint case remains unexecuted at disabled Detach, and other room-entry/exit paths, abort deadlines, child recovery and native handling remain open.
+
+## Checkpoint: chat pane versus child document case
+
+The detached smoke now specifies opening the real chat Attachments pane while an active RAW document remains visible in the child. Scripts typecheck passed; the attributed run still stops at disabled Detach, so the new case did not execute. This is needed because the existing `rightPane` value currently also chooses the document shown by the child.
