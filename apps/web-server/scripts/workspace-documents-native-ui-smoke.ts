@@ -1,4 +1,5 @@
 // Exercise the actual desktop shell and owner with isolated state and a fake feed.
+// Invoke with --stuck for the independent outstanding-exchange case.
 import { _electron as electron, type ElectronApplication } from "playwright";
 import fs from "node:fs";
 import http from "node:http";
@@ -14,6 +15,7 @@ function assert(condition: unknown, message: string): asserts condition {
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "exxperts-documents-native-"));
 const port = await freePort();
+const stuck = process.argv.includes("--stuck");
 const feed = http.createServer((_request, response) => {
 	response.writeHead(200, { "content-type": "application/json" });
 	response.end(JSON.stringify({ tag_name: "v0.0.0", prerelease: false, draft: false }));
@@ -39,19 +41,33 @@ try {
 		return window.id;
 	}, port);
 	// Fault the shell's actual outbound exchange, retaining its ordinary close entrypoint.
-	await application.evaluate(({ BrowserWindow }, id) => {
-		const window = BrowserWindow.fromId(id)!;
+	await application.evaluate(({ BrowserWindow }, fault) => {
+		const window = BrowserWindow.fromId(fault.id)!;
+		(window as any).__t20Stuck = fault.stuck;
 		const original = window.webContents.executeJavaScript.bind(window.webContents);
 		(window as any).__t20Exchanges = 0;
 		(window.webContents as any).executeJavaScript = (script: string, ...args: unknown[]) => {
-			if (script.includes("__exxpertsDocuments")) { (window as any).__t20Exchanges++; return Promise.resolve({ malformed: true }); }
+			if (script.includes("__exxpertsDocuments")) {
+				(window as any).__t20Exchanges++;
+				if ((window as any).__t20Stuck) {
+					const actual = Promise.resolve((original as any)(script, ...args)).catch(() => null);
+					return new Promise((resolve, reject) => { (window as any).__t20Release = () => actual.then(resolve, reject); });
+				}
+				return Promise.resolve({ malformed: true });
+			}
 			return (original as any)(script, ...args);
 		};
-	}, owner);
+	}, { id: owner, stuck });
 	await waitUntil(() => application!.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Exchanges > 0, owner), "the shell polls the owner endpoint");
 	await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.close(), owner);
-	await new Promise((resolve) => setTimeout(resolve, 500));
-	assert(await application.evaluate(({ BrowserWindow }, id) => Boolean(BrowserWindow.fromId(id)?.isVisible()), owner), "a malformed owner exchange cannot authorize native close-to-hide");
+	await new Promise((resolve) => setTimeout(resolve, stuck ? 2_300 : 500));
+	assert(await application.evaluate(({ BrowserWindow }, id) => Boolean(BrowserWindow.fromId(id)?.isVisible()), owner), `${stuck ? "a stuck" : "a malformed"} owner exchange cannot authorize native close-to-hide`);
+	if (stuck) {
+		assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any).__t20Exchanges === 1, owner), "a stuck exchange never overlaps a second evaluation");
+		await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any).__t20Release(), owner);
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		assert(await application.evaluate(({ BrowserWindow }, id) => Boolean(BrowserWindow.fromId(id)?.isVisible()), owner), "a late owner reply cannot revive the expired native close");
+	}
 } finally {
 	if (application) await application.close().catch(() => {});
 	await new Promise<void>((resolve) => feed.close(() => resolve()));

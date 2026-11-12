@@ -666,3 +666,7 @@ The attributed `workspace-markdown-raw-ui` and `workspace-markdown-images-ui` sm
 ## Checkpoint: child-close settlement deadline case
 
 The detached smoke now specifies that an actual Home request held behind a real child close reaches the existing unavailable strip by the five-second settlement deadline, keeps the original room and rejects a competing Home, then continues only after the same child actually closes. Scripts typecheck passed. This case has not executed because Detach remains disabled; the deadline implementation and native abort/ack semantics remain open, and no passing child-close claim is made.
+
+## Checkpoint: native stuck and late exchange case
+
+The actual-shell `workspace-documents-native-ui` smoke now has an independent `--stuck` mode that holds a real owner exchange, requests native close, checks one outstanding evaluation and retained visibility after the exchange deadline, then releases the real late result and checks it cannot revive the expired close. Scripts typecheck passed; neither this mode nor its assertions have executed because the host's sandbox-capable Electron environment has not been supplied. The existing malformed case remains separately unexecuted, and native behavior is not claimed.
