@@ -245,7 +245,7 @@ function wireNavigation(win: BrowserWindow): void {
 
 
 const documentsPollInFlight = new WeakSet<BrowserWindow>();
-const requestDocumentsHide = new WeakMap<BrowserWindow, () => void>();
+const requestDocumentsAction = new WeakMap<BrowserWindow, (disposition: "hide" | "quit") => void>();
 
 // The first C5 transport checkpoint accepts only hello and empty polls. It
 // cannot authorize native actions or register a child until the remaining
@@ -260,14 +260,14 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
   let ownerId: string | null = null;
   let ownerGeneration = 0;
   let latestStamp: Record<string, unknown> | null | undefined;
-  let hideRequest: { nativeRequestId: string; observedStamp: Record<string, unknown> | null } | null = null;
+  let hideRequest: { nativeRequestId: string; observedStamp: Record<string, unknown> | null; disposition: "hide" | "quit" } | null = null;
   let hideSent = false;
   let hidePhase: "idle" | "preparing" | "abort" | "commit" | "close-evidence" | "completed" = "idle";
   let hideCorrelation: Record<string, unknown> | null = null;
   let retryInput: { version: number; nativeSessionId: string; sequence: number; ack: number; items: Record<string, unknown>[] } | null = null;
-  requestDocumentsHide.set(win, () => {
+  requestDocumentsAction.set(win, (disposition) => {
     if (!active || hideRequest || ownerId === null || latestStamp === undefined) return;
-    hideRequest = { nativeRequestId: randomUUID(), observedStamp: latestStamp };
+    hideRequest = { nativeRequestId: randomUUID(), observedStamp: latestStamp, disposition };
   });
   const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
   const keys = (value: Record<string, unknown>, expected: string) => Object.keys(value).sort().join(",") === expected;
@@ -291,10 +291,10 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
       } else {
         if (value.items.length !== 1 || !record(reply) || !record(reply.binding) || !keys(reply.binding, "nativeSessionId,ownerGeneration,ownerId") || reply.binding.nativeSessionId !== session || reply.binding.ownerId !== ownerId || reply.binding.ownerGeneration !== ownerGeneration || reply.nativeRequestId !== hideRequest.nativeRequestId) return false;
         if (reply.kind === "no-session") {
-          if (sentKind !== "native-prepare" || !keys(reply, "binding,disposition,kind,nativeRequestId") || hideRequest.observedStamp !== null || value.status.stamp !== null || reply.disposition !== "hide") return false;
+          if (sentKind !== "native-prepare" || !keys(reply, "binding,disposition,kind,nativeRequestId") || hideRequest.observedStamp !== null || value.status.stamp !== null || reply.disposition !== hideRequest.disposition) return false;
         } else if (reply.kind === "guard-result") {
           const result = reply.result;
-          if (!keys(reply, "binding,kind,nativeRequestId,result") || !hideRequest.observedStamp || !record(result) || !record(result.correlation) || !keys(result.correlation, "action,requestId,stamp") || result.correlation.requestId !== hideRequest.nativeRequestId || !record(result.correlation.action) || !keys(result.correlation.action, "disposition,kind") || result.correlation.action.kind !== "chat-close" || result.correlation.action.disposition !== "hide" || !record(result.correlation.stamp) || !record(value.status.stamp)) return false;
+          if (!keys(reply, "binding,kind,nativeRequestId,result") || !hideRequest.observedStamp || !record(result) || !record(result.correlation) || !keys(result.correlation, "action,requestId,stamp") || result.correlation.requestId !== hideRequest.nativeRequestId || !record(result.correlation.action) || !keys(result.correlation.action, "disposition,kind") || result.correlation.action.kind !== "chat-close" || result.correlation.action.disposition !== hideRequest.disposition || !record(result.correlation.stamp) || !record(value.status.stamp)) return false;
           const stamp = result.correlation.stamp;
           if (!keys(stamp, "conversationId,draftGeneration,hostGeneration,ownerGeneration,ownerId,roomGeneration,roomId") || !Object.entries(hideRequest.observedStamp).every(([key, entry]) => key === "draftGeneration" ? positive(stamp[key]) && positive(entry) && (stamp[key] as number) >= entry : stamp[key] === entry)) return false;
           if (result.kind === "prepared") {
@@ -326,7 +326,7 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
       if (!record(stamp) || !keys(stamp, "conversationId,draftGeneration,hostGeneration,ownerGeneration,ownerId,roomGeneration,roomId") || stamp.ownerId !== binding.ownerId || stamp.ownerGeneration !== binding.ownerGeneration || typeof stamp.roomId !== "string" || !stamp.roomId || typeof stamp.conversationId !== "string" || !stamp.conversationId || !positive(stamp.roomGeneration) || !positive(stamp.hostGeneration) || !positive(stamp.draftGeneration)) return false;
     }
     if (expired && sentKind === "native-prepare" && hideRequest?.observedStamp) {
-      preparedCorrelation ??= { requestId: hideRequest.nativeRequestId, stamp: hideRequest.observedStamp, action: { kind: "chat-close", disposition: "hide" } };
+      preparedCorrelation ??= { requestId: hideRequest.nativeRequestId, stamp: hideRequest.observedStamp, action: { kind: "chat-close", disposition: hideRequest.disposition } };
       nextPhase = "abort";
       receivedPreparation = true;
     }
@@ -345,7 +345,7 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
       const binding = { nativeSessionId: session, ownerId, ownerGeneration };
       let items: Record<string, unknown>[] = [];
       if (sequence === 1) items = [{ kind: "hello" }];
-      else if (hideRequest && !hideSent && ownerId !== null) items = [{ kind: "native-prepare", binding, nativeRequestId: hideRequest.nativeRequestId, observedStamp: hideRequest.observedStamp, disposition: "hide" }];
+      else if (hideRequest && !hideSent && ownerId !== null) items = [{ kind: "native-prepare", binding, nativeRequestId: hideRequest.nativeRequestId, observedStamp: hideRequest.observedStamp, disposition: hideRequest.disposition }];
       else if (hidePhase === "abort" && hideCorrelation) items = [{ kind: "native-abort", binding, correlation: hideCorrelation }];
       else if (hidePhase === "commit" && hideCorrelation) items = [{ kind: "native-commit", binding, correlation: hideCorrelation }];
       else if (hidePhase === "close-evidence" && hideCorrelation && record(hideCorrelation.stamp)) {
@@ -374,7 +374,7 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
   };
   const timer = setInterval(poll, 100);
   poll();
-  return () => { active = false; clearInterval(timer); requestDocumentsHide.delete(win); };
+  return () => { active = false; clearInterval(timer); requestDocumentsAction.delete(win); };
 }
 
 function createMainWindow(): BrowserWindow {
@@ -415,7 +415,7 @@ function createMainWindow(): BrowserWindow {
       // The C5 continuation is not connected yet. A missing or untrusted
       // owner result cannot authorize hiding the live window.
       event.preventDefault();
-      requestDocumentsHide.get(win)?.();
+      requestDocumentsAction.get(win)?.("hide");
     }
   });
   win.on("show", () => setTrayBadge(false));
@@ -1542,6 +1542,11 @@ if (!gotLock) {
   });
   app.on("before-quit", (event) => {
     if (quitting) return;
+    if (!updaterQuitting && !startupHasFailed && mainWindow && !mainWindow.isDestroyed()) {
+      event.preventDefault();
+      requestDocumentsAction.get(mainWindow)?.("quit");
+      return;
+    }
     quitting = true;
     // The re-check timer is unref'd, but a quitting app should not leave a
     // scheduled network call behind either way.

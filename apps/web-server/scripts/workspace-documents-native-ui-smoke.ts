@@ -2,6 +2,7 @@
 // Set T20_NATIVE_STUCK=1 for the independent outstanding-exchange case.
 import { _electron as electron, type ElectronApplication } from "playwright";
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -21,7 +22,8 @@ const lateAbort = process.env.T20_NATIVE_LATE_ABORT === "1";
 const dirty = process.env.T20_NATIVE_DIRTY === "1" || save || lateAbort;
 const late = process.env.T20_NATIVE_LATE === "1";
 const active = process.env.T20_NATIVE_ACTIVE === "1" || dirty || late;
-const prepare = process.env.T20_NATIVE_PREPARE === "1" || active;
+const quit = process.env.T20_NATIVE_QUIT === "1";
+const prepare = process.env.T20_NATIVE_PREPARE === "1" || active || quit;
 const feed = http.createServer((_request, response) => {
 	response.writeHead(200, { "content-type": "application/json" });
 	response.end(JSON.stringify({ tag_name: "v0.0.0", prerelease: false, draft: false }));
@@ -92,6 +94,7 @@ try {
 			const original = window.webContents.executeJavaScript.bind(window.webContents);
 			(window as any).__t20Polls = 0;
 			(window as any).__t20Prepares = 0;
+			(window as any).__t20QuitPrepares = 0;
 			(window as any).__t20NoSession = 0;
 			(window as any).__t20Prepared = 0;
 			(window as any).__t20Completed = 0;
@@ -101,7 +104,7 @@ try {
 			(window.webContents as any).executeJavaScript = (script: string, ...args: unknown[]) => {
 				if (script.includes("__exxpertsDocuments")) {
 					(window as any).__t20Polls++;
-					if (script.includes('"native-prepare"')) { (window as any).__t20Prepares++; (window as any).__t20Trace.push("prepare"); }
+					if (script.includes('"native-prepare"')) { (window as any).__t20Prepares++; (window as any).__t20Trace.push("prepare"); if (script.includes('"disposition":"quit"')) (window as any).__t20QuitPrepares++; }
 					if (script.includes('"native-abort"')) (window as any).__t20Trace.push("abort");
 					if (script.includes('"native-commit"')) (window as any).__t20Commits++;
 				}
@@ -121,7 +124,8 @@ try {
 			};
 		}, { id: owner, late, lateAbort });
 		await waitUntil(() => application!.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Polls >= 2, owner), "the real owner has been polled");
-		await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.close(), owner);
+		if (quit) await application.evaluate(({ app }) => app.quit()).catch(() => {});
+		else await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.close(), owner);
 		if (late) {
 			await waitUntil(() => application!.evaluate(({ BrowserWindow }, id) => typeof (BrowserWindow.fromId(id) as any)?.__t20Release === "function", owner), "the real prepare reply is held");
 			await new Promise((resolve) => setTimeout(resolve, 2_300));
@@ -176,13 +180,14 @@ try {
 				await prompt.getByRole("button", { name: "Cancel", exact: true }).click();
 			}
 		} else await new Promise((resolve) => setTimeout(resolve, 1_000));
-		if (!dirty && !late) assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Prepares === 1, owner), "the actual native close sends exactly one owner prepare");
+		if (!dirty && !late) assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Prepares === 1, owner), "the actual native action sends exactly one owner prepare");
+		if (quit) assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20QuitPrepares === 1, owner), "the actual Quit uses a quit disposition");
 		if (active && !dirty && !late) {
 			assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Prepared === 1, owner), "the actual owner prepares the active clean room exactly once");
 			assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Completed === 1, owner), "the real owner completes only after the shell sends no-child evidence");
 		}
 		else if (!dirty && !late) assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20NoSession === 1, owner), "the actual owner returns the matching empty-session response");
-		assert(await application.evaluate(({ BrowserWindow }, id) => Boolean(BrowserWindow.fromId(id)?.isVisible()), owner), "the staged no-session response cannot yet continue the native close");
+		assert(await application.evaluate(({ BrowserWindow }, id) => Boolean(BrowserWindow.fromId(id)?.isVisible()), owner), "the staged no-session response cannot yet continue the native action");
 	} else {
 	// Fault the shell's actual outbound exchange, retaining its ordinary close entrypoint.
 	await application.evaluate(({ BrowserWindow }, fault) => {
@@ -214,7 +219,23 @@ try {
 	}
 	}
 } finally {
-	if (application) await application.close().catch(() => {});
+	if (application) {
+		const ownedServers: number[] = [];
+		if (process.platform === "linux") {
+			try {
+				const pids = execFileSync("fuser", ["-n", "tcp", String(port)], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim().split(/\s+/).filter(Boolean).map(Number);
+				for (const pid of pids) {
+					try {
+						const args = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
+						if (args.includes(path.join(root, "apps/web-server/dist/server.mjs"))) ownedServers.push(pid);
+					} catch { /* The owned server may already have exited. */ }
+				}
+			} catch { /* The owned port may already have closed. */ }
+		}
+		await application.evaluate(({ app }) => app.exit(0)).catch(() => {});
+		for (const pid of ownedServers) { try { process.kill(pid, "SIGTERM"); } catch { /* It already stopped. */ } }
+		await application.close().catch(() => {});
+	}
 	await new Promise<void>((resolve) => feed.close(() => resolve()));
 	fs.rmSync(scratch, { recursive: true, force: true });
 }
