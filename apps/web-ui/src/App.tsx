@@ -570,6 +570,10 @@ export function App() {
 	// read the pane at event time, not at closure-capture time).
 	const rightPaneRef = useRef<RightPaneOccupant | null>(null);
 	rightPaneRef.current = rightPane;
+	const [detachedDocumentPane, setDetachedDocumentPane] = useState<RightPaneOccupant | null>(null);
+	const documentPane = documentChildRef.current ? detachedDocumentPane : rightPane;
+	const documentPaneRef = useRef<RightPaneOccupant | null>(null);
+	documentPaneRef.current = documentPane;
 	const [documentOwnerId] = useState(allocateDocumentId);
 	const documentOwnerGenerationRef = useRef(1);
 	const documentHostGenerationRef = useRef(1);
@@ -689,14 +693,14 @@ export function App() {
 			return;
 		}
 		const current = checkpointContextRef.current;
-		const pane = rightPaneRef.current;
+		const pane = documentPaneRef.current;
 		if (unmountedRef.current || personHasChanged() || current.roomId !== agentId || current.conversationId !== conversationId || current.generation !== generation || pane?.kind !== "markdownEditor" || pane.path !== path) return;
 		documentPaneBindingRef.current = { agentId, conversationId, contextGeneration: generation, path, token };
 		documentFileSnapshotValidRef.current = false;
 	}, []);
 	const onDocumentSnapshot = useCallback((agentId: string, conversationId: string, generation: number, path: string, token: object, file: DocumentFileSnapshot | null, loadView: { phase: "loading" | "error"; error: string | null } | null) => {
 		const current = checkpointContextRef.current;
-		const pane = rightPaneRef.current;
+		const pane = documentPaneRef.current;
 		const bound = documentPaneBindingRef.current;
 		const draftGeneration = documentDraftGenerationRef.current;
 		if (unmountedRef.current || personHasChanged() || current.roomId !== agentId || current.conversationId !== conversationId || current.generation !== generation || pane?.kind !== "markdownEditor" || pane.path !== path || !bound || bound.token !== token || bound.agentId !== agentId || bound.conversationId !== conversationId || bound.contextGeneration !== generation || bound.path !== path) return;
@@ -782,7 +786,7 @@ export function App() {
 		void beginDocumentChild(name, `${persistentChat.displayName} · Documents`).then((child) => {
 			if (!child) { release(); return; }
 			candidate = child;
-			const pane = rightPaneRef.current;
+			const pane = documentPaneRef.current;
 			const snapshot = documentFileSnapshotRef.current;
 			const load = documentLoadViewRef.current;
 			if (!documentAdmissionIsCurrent(admission) || (pane?.kind === "markdownEditor" && !(documentFileSnapshotValidRef.current && snapshot?.file.path === pane.path && snapshot.draftGeneration === documentDraftGenerationRef.current) && !(load?.path === pane.path))) {
@@ -795,7 +799,11 @@ export function App() {
 			if (moved === "refused") { abortDocumentChild(child); release(); return; }
 			if (moved !== "moved") return;
 			adopted = true;
+			const detachedPane = activeWorkspacePath(documentPaneRef.current) ? documentPaneRef.current : null;
+			documentPaneRef.current = detachedPane;
+			setDetachedDocumentPane(detachedPane);
 			documentChildRef.current = child;
+			if (activeWorkspacePath(rightPaneRef.current)) setRightPane(null);
 			documentHostCommitRef.current = { admission, child, generation: nextGeneration, direction: "detach" };
 			documentHostGenerationRef.current = nextGeneration;
 			setDocumentHostGeneration(nextGeneration);
@@ -831,7 +839,7 @@ export function App() {
 			markdownEditorRef.current?.setFence(false);
 			setMarkdownEditorFenced(false);
 		};
-		const pane = rightPaneRef.current;
+		const pane = documentPaneRef.current;
 		const snapshot = documentFileSnapshotRef.current;
 		const load = documentLoadViewRef.current;
 		const nextGeneration = documentHostGenerationRef.current + 1;
@@ -839,6 +847,7 @@ export function App() {
 		const moved = moveDocumentToOwner(child, () => preparedDocumentAdmissionIsCurrent(admission));
 		if (moved === "refused") { release(); return false; }
 		if (moved !== "moved") return false;
+		if (activeWorkspacePath(documentPaneRef.current)) setRightPane(documentPaneRef.current);
 		documentClosingRef.current = true;
 		documentHostCommitRef.current = { admission, child, generation: nextGeneration, direction: "return" };
 		documentHostGenerationRef.current = nextGeneration;
@@ -886,6 +895,7 @@ export function App() {
 		const moved = moveDocumentToOwner(child, () => preparedDocumentAdmissionIsCurrent(pending.admission));
 		if (moved === "refused") return Promise.resolve(false);
 		if (moved !== "moved") return new Promise(() => {});
+		if (activeWorkspacePath(documentPaneRef.current)) setRightPane(documentPaneRef.current);
 		documentClosingRef.current = true;
 		return new Promise<boolean>((resolve) => {
 			documentHostCommitRef.current = { admission: pending.admission, child, generation: nextGeneration, direction: "exit", resolve };
@@ -928,6 +938,7 @@ export function App() {
 		const settle = () => {
 			if (!documentChildClosed(commit.child)) return;
 			documentChildRef.current = null;
+			setDetachedDocumentPane(null);
 			documentClosingRef.current = false;
 			window.clearInterval(poll);
 			if (commit.direction === "exit") {
@@ -1141,13 +1152,25 @@ export function App() {
 		return pane?.kind === "markdownEditor" || pane?.kind === "workspaceImage" || pane?.kind === "workspaceLegacyDoc" || pane?.kind === "workspacePdf" || pane?.kind === "workspaceWord" || pane?.kind === "workspaceHtml" || pane?.kind === "workspaceFramed" || pane?.kind === "workspaceText" || pane?.kind === "workspaceSpreadsheet" ? pane.path : null;
 	}
 
+	function setDocumentPane(pane: RightPaneOccupant | null): void {
+		documentPaneRef.current = pane;
+		if (documentChildRef.current) setDetachedDocumentPane(pane);
+		else setRightPane(pane);
+	}
+
+	function focusDocumentChild(): void {
+		const child = documentChildRef.current;
+		if (!child || unmountedRef.current || personHasChanged()) return;
+		try { if (!child.child.closed && child.child.opener === window && child.child.document === child.document) child.child.focus(); } catch {}
+	}
+
 	function requestCloseWorkspaceTab(path: string): void {
 		if (markdownEditorPendingActionRef.current && !markdownEditorCommitBypassRef.current) return;
-		const active = activeWorkspacePath(rightPaneRef.current);
+		const active = activeWorkspacePath(documentPaneRef.current);
 		const paths = workspaceTabs?.paths ?? [];
 		const index = paths.indexOf(path);
 		if (index < 0) return;
-		if (active === path && rightPaneRef.current?.kind === "markdownEditor") {
+		if (active === path && documentPaneRef.current?.kind === "markdownEditor") {
 			if (!guardMarkdownEditorAction(() => requestCloseWorkspaceTab(path), "close", { kind: "close-tab", path })) return;
 		} else {
 			const requestId = documentOwnerId && allocateDocumentId();
@@ -1161,34 +1184,35 @@ export function App() {
 		setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths: remaining } : tabs);
 		if (active === path) {
 			const next = remaining[index] ?? remaining[index - 1];
-			setArtifactMaximized(false);
-			setRightPane(next ? workspacePaneFor(next) : null);
+			if (!documentChildRef.current) setArtifactMaximized(false);
+			setDocumentPane(next ? workspacePaneFor(next) : null);
 		}
 	}
 
 	function requestCloseMarkdownEditor(): void {
-		const path = activeWorkspacePath(rightPaneRef.current);
+		const path = activeWorkspacePath(documentPaneRef.current);
 		if (path) requestCloseWorkspaceTab(path);
 	}
 
 	function openWorkspaceMarkdown(entry: { relativePath: string; extension: string }): void {
-		if (markdownEditorPendingActionRef.current && !markdownEditorCommitBypassRef.current) return;
+		if (unmountedRef.current || personHasChanged() || (markdownEditorPendingActionRef.current && !markdownEditorCommitBypassRef.current)) return;
 		const path = entry.relativePath;
 		if (!/\.(md|doc|docx|pptx|excalidraw|drawio|dio|txt|json|pdf|html?|xls|xlsx|xlsm|png|jpe?g|gif|webp|svg)$/i.test(path) || !persistentChat) return;
-		if (activeWorkspacePath(rightPaneRef.current) === path && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId) return;
+		if (activeWorkspacePath(documentPaneRef.current) === path && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId) { focusDocumentChild(); return; }
 		const target = { relativePath: path, extension: entry.extension };
 		if (!guardMarkdownEditorAction(() => openWorkspaceMarkdown(target), "switch", { kind: "select-file", path })) return;
 		if (!documentPreviewSnapshotsRef.current.has(path)) documentPreviewSnapshotsRef.current.set(path, { bytes: null });
 		documentFileSnapshotRef.current = null;
 		documentFileSnapshotValidRef.current = false;
 		documentLoadViewRef.current = null;
-		setArtifactMaximized(false);
+		if (!documentChildRef.current) setArtifactMaximized(false);
 		setWorkspaceTabs((tabs) => {
 			const same = tabs?.agentId === persistentChat.agentId && tabs.conversationId === persistentChat.conversationId;
 			const paths = same ? tabs.paths : [];
 			return { agentId: persistentChat.agentId, conversationId: persistentChat.conversationId, paths: paths.includes(path) ? paths : [...paths, path] };
 		});
-		setRightPane(workspacePaneFor(path));
+		setDocumentPane(workspacePaneFor(path));
+		focusDocumentChild();
 	}
 
 	useEffect(() => {
@@ -9377,10 +9401,10 @@ export function App() {
 			{persistentChat && !personChanged && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId && (
 				<>
 				<div className="docs-slot" ref={mountDocumentHost} />
-				{createPortal(<div className="workspace-pane" hidden={activeWorkspacePath(rightPane) === null}>
-					<WorkspaceFileTabs onDetach={detachDocuments} detachDisabled tabs={workspaceTabs.paths} active={activeWorkspacePath(rightPane)} onSelect={(path) => openWorkspaceMarkdown({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} onReorder={(paths) => setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths } : tabs)} />
-					{rightPane && (rightPane.kind === "workspaceImage" || rightPane.kind === "workspacePdf" || rightPane.kind === "workspaceWord" || rightPane.kind === "workspaceHtml" || rightPane.kind === "workspaceFramed" || rightPane.kind === "workspaceText" || rightPane.kind === "workspaceSpreadsheet" || (rightPane.kind === "workspaceLegacyDoc" && !/\.doc$/i.test(rightPane.path))) && <WorkspaceOpenAction key={JSON.stringify([persistentChat.agentId, persistentChat.conversationId, rightPane.path])} agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={rightPane.path} />}
-					{rightPane?.kind === "markdownEditor" && <MarkdownEditorPane
+				{createPortal(<div className="workspace-pane" hidden={activeWorkspacePath(documentPane) === null}>
+					<WorkspaceFileTabs onDetach={detachDocuments} detachDisabled tabs={workspaceTabs.paths} active={activeWorkspacePath(documentPane)} onSelect={(path) => openWorkspaceMarkdown({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} onReorder={(paths) => setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths } : tabs)} />
+					{documentPane && (documentPane.kind === "workspaceImage" || documentPane.kind === "workspacePdf" || documentPane.kind === "workspaceWord" || documentPane.kind === "workspaceHtml" || documentPane.kind === "workspaceFramed" || documentPane.kind === "workspaceText" || documentPane.kind === "workspaceSpreadsheet" || (documentPane.kind === "workspaceLegacyDoc" && !/\.doc$/i.test(documentPane.path))) && <WorkspaceOpenAction key={JSON.stringify([persistentChat.agentId, persistentChat.conversationId, documentPane.path])} agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={documentPane.path} />}
+					{documentPane?.kind === "markdownEditor" && <MarkdownEditorPane
 						key={checkpointContextRef.current.generation}
 						ref={markdownEditorRef}
 						agentId={persistentChat.agentId}
@@ -9388,7 +9412,7 @@ export function App() {
 						contextGeneration={checkpointContextRef.current.generation}
 						hostGeneration={documentHostGeneration}
 						onMutation={onDocumentMutation}
-						path={rightPane.path}
+						path={documentPane.path}
 						fenced={markdownEditorFenced}
 						saveInFlight={documentSaveInFlightRef}
 						keepMineInFlight={documentKeepMineInFlightRef}
@@ -9400,26 +9424,26 @@ export function App() {
 						onDirtyChange={onMarkdownEditorDirtyChange}
 						onOpenMarkdown={(path) => openWorkspaceMarkdown({ relativePath: path, extension: ".md" })}
 					/>}
-					{rightPane?.kind === "workspaceLegacyDoc" && <p className="workspace-preview-error">{/\.doc$/i.test(rightPane.path) ? "Save this old .doc file as .docx to preview it here." : "This file type cannot be previewed here."}</p>}
-					{workspaceTabs.paths.filter((path) => /\.docx$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceWord" || rightPane.path !== path}>
+					{documentPane?.kind === "workspaceLegacyDoc" && <p className="workspace-preview-error">{/\.doc$/i.test(documentPane.path) ? "Save this old .doc file as .docx to preview it here." : "This file type cannot be previewed here."}</p>}
+					{workspaceTabs.paths.filter((path) => /\.docx$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={documentPane?.kind !== "workspaceWord" || documentPane.path !== path}>
 						<WorkspaceWordPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} />
 					</div>)}
-					{workspaceTabs.paths.filter((path) => /\.html?$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceHtml" || rightPane.path !== path}>
+					{workspaceTabs.paths.filter((path) => /\.html?$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={documentPane?.kind !== "workspaceHtml" || documentPane.path !== path}>
 						<WorkspaceHtmlPreview hostGeneration={documentHostGeneration} agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} createFrameId={allocateDocumentId} />
 					</div>)}
-					{workspaceTabs.paths.filter((path) => /\.(?:txt|json)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceText" || rightPane.path !== path}>
+					{workspaceTabs.paths.filter((path) => /\.(?:txt|json)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={documentPane?.kind !== "workspaceText" || documentPane.path !== path}>
 						<WorkspaceTextPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} />
 					</div>)}
-					{workspaceTabs.paths.filter((path) => /\.(?:pptx|excalidraw)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceFramed" || rightPane.path !== path}>
+					{workspaceTabs.paths.filter((path) => /\.(?:pptx|excalidraw)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={documentPane?.kind !== "workspaceFramed" || documentPane.path !== path}>
 						<WorkspaceFramedPreview hostGeneration={documentHostGeneration} agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} createFrameId={allocateDocumentId} />
 					</div>)}
-					{workspaceTabs.paths.filter((path) => /\.xlsx$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceSpreadsheet" || rightPane.path !== path}>
+					{workspaceTabs.paths.filter((path) => /\.xlsx$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={documentPane?.kind !== "workspaceSpreadsheet" || documentPane.path !== path}>
 						<WorkspaceSpreadsheetPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} />
 					</div>)}
-					{workspaceTabs.paths.filter((path) => /\.pdf$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspacePdf" || rightPane.path !== path}>
+					{workspaceTabs.paths.filter((path) => /\.pdf$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={documentPane?.kind !== "workspacePdf" || documentPane.path !== path}>
 						<WorkspacePdfPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} />
 					</div>)}
-					{workspaceTabs.paths.filter((path) => /\.(png|jpe?g|gif|webp|svg)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceImage" || rightPane.path !== path}>
+					{workspaceTabs.paths.filter((path) => /\.(png|jpe?g|gif|webp|svg)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={documentPane?.kind !== "workspaceImage" || documentPane.path !== path}>
 						<WorkspaceImagePreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} hostGeneration={documentHostGeneration} />
 					</div>)}
 				</div>, documentHost)}
@@ -9508,7 +9532,7 @@ export function App() {
 					appearance={appearance}
 					onSetAppearance={setAppearance}
 					onSettings={openSettings}
-					workspaceSlot={persistentChat ? <><div ref={mountDocumentTreeHost} style={{ display: "contents" }} />{createPortal(<WorkspaceFileBrowser agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} hostGeneration={documentHostGeneration} selectedPath={activeWorkspacePath(rightPane)} onFileSelect={openWorkspaceMarkdown} />, documentTreeHost)}</> : undefined}
+					workspaceSlot={persistentChat ? <><div ref={mountDocumentTreeHost} style={{ display: "contents" }} />{createPortal(<WorkspaceFileBrowser agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} hostGeneration={documentHostGeneration} selectedPath={activeWorkspacePath(documentPane)} onFileSelect={openWorkspaceMarkdown} />, documentTreeHost)}</> : undefined}
 					assetsSlot={persistentChat ? <AttachmentsEntry count={attachmentRows.length} open={attachmentsView !== null} onClick={toggleAttachments} /> : undefined}
 				/>
 			}

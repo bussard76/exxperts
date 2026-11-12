@@ -571,3 +571,7 @@ The inactive dependent-close path now applies to a typed replacement only when i
 ## Checkpoint: chat pane versus child document case
 
 The detached smoke now specifies opening the real chat Attachments pane while an active RAW document remains visible in the child. Scripts typecheck passed; the attributed run still stops at disabled Detach, so the new case did not execute. This is needed because the existing `rightPane` value currently also chooses the document shown by the child.
+
+## Checkpoint: separate detached document selection
+
+The inactive transfer path now retains the selected document in the owner session separately from the chat right pane; document callbacks and snapshots use that selection, and a verified child is focused on file selection. Returning an active document restores it to chat without changing an unrelated pane when the session is empty. UI and scripts typechecks, UI asset build, and the attributed `attachments-panel-ui`, `two-window-room-ui` and `workspace-file-tabs-ui` smokes passed 3/3. The real child/Attachments case remains unexecuted at disabled Detach, and native focus/bounds and full host behavior remain unverified.
