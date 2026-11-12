@@ -737,6 +737,7 @@ export function App() {
 	}, []);
 
 	function captureDocumentAdmission(requestId: string, intent: DocumentLocalAction | null = null): DocumentAdmission | null {
+		if (unmountedRef.current || personHasChanged()) return null;
 		const ownerGeneration = documentOwnerGenerationRef.current;
 		const current = checkpointContextRef.current;
 		const hostGeneration = documentHostGenerationRef.current;

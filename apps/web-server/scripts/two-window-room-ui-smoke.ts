@@ -930,6 +930,22 @@ try {
 			assert((await e.evaluate(() => window.location.hash)) === originalHash, "a late save cannot execute Home after the page identity changes");
 		} finally { releaseInvalidatedSave(); }
 		{
+			const staleSelection = await ctx.newPage();
+			await staleSelection.addInitScript({ content: `window.addEventListener("beforeunload", (event) => { event.preventDefault(); event.returnValue = ""; });` });
+			staleSelection.on("dialog", (dialog) => { void dialog.dismiss(); });
+			await staleSelection.goto(`${baseUrl}/#/room/${agentId}`);
+			const staleTarget = await staleSelection.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "identity.md" }).elementHandle();
+			assert(staleTarget, "the real file-selection target is present before identity invalidation");
+			assert(await staleSelection.locator(".right-pane-toggle").count() === 0, "the invalidation test starts without an open file pane");
+			await staleSelection.route("**/api/persistent-agents", (route) => route.fulfill({ status: 409, json: { code: "person_changed", error: "Invented identity change" } }));
+			await staleSelection.evaluate(() => window.dispatchEvent(new Event("focus")));
+			await staleSelection.getByText("Someone else is now signed in on this server.", { exact: true }).waitFor();
+			await staleTarget.evaluate((node) => (node as HTMLElement).click());
+			await staleSelection.waitForTimeout(300);
+			assert(await staleSelection.locator(".right-pane-toggle").count() === 0, "a clean file callback cannot select a document after page identity changes");
+			await staleSelection.close();
+		}
+		{
 			const pending = await ctx.newPage();
 			await pending.goto(`${baseUrl}/#/room/${agentId}`);
 			await pending.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "identity.md" }).click();
