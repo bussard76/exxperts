@@ -693,3 +693,7 @@ The detached smoke now specifies a real browser Back action while an actual regi
 ## C7 option B decision (2026-11-12)
 
 Controller reports Sascha accepted option B: only a frame navigated before first readiness by the trusted app parent's own script is outside the guarantee, because that parent already has the snapshot. Untrusted preview content and external pages remain covered, as do all other C7 requirements. The accepted ADR-0009 amendment and bounded reconciliation review are being prepared; until their exact source is provided, both real pre-readiness counterexample scenarios remain unchanged, Excalidraw remains red and HTML remains unexecuted. Earlier references to the human decision being pending describe the historical state before this decision. Detach remains disabled while the connected safeguards and real native evidence are incomplete.
+
+## Checkpoint: moved-room Reload with a dependent child
+
+The detached smoke now specifies two real room owners and a fake model: after the second owner replaces the conversation, the first owner's actual Reload must close its registered child before reading the replacement thread. Scripts typecheck passed. This case is unexecuted because Detach remains disabled; the current Reload admission is not yet wired to dependent-child shutdown and R4 remains open.

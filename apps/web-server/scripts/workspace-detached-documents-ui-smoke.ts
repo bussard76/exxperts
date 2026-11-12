@@ -547,6 +547,48 @@ try {
 				await historyClosed;
 				await historyPage.getByRole("heading", { name: "Your rooms." }).waitFor();
 			} finally { await historyPage.close().catch(() => {}); }
+			const reloadRoom = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Invented Reload Ordering", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
+			assert(reloadRoom.status === 201, "the reload-order room is created");
+			const reloadRoomId = String(reloadRoom.body?.agent?.id ?? "");
+			assert((await api(`/api/persistent-agents/${encodeURIComponent(reloadRoomId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: workspace, workspaceAccessMode: "localFiles" }) })).status === 200, "the reload-order room uses the invented workspace");
+			const reloadPage = await context.newPage();
+			const moverPage = await context.newPage();
+			try {
+				await reloadPage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+				await reloadPage.waitForLoadState("networkidle");
+				const dismissReload = reloadPage.locator(".whats-new-close");
+				if (await dismissReload.count()) await dismissReload.click();
+				await reloadPage.locator(".persistent-agent-card").filter({ hasText: "Invented Reload Ordering" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+				const composer = reloadPage.locator("textarea").first();
+				await composer.fill("Invented original question.");
+				await composer.press("Enter");
+				await reloadPage.getByText("Invented fake answer.", { exact: true }).waitFor();
+				const oldStatus = await api(`/api/persistent-agents/${encodeURIComponent(reloadRoomId)}/status`);
+				const oldThread = String(oldStatus.body?.runtime?.activeThreadId ?? "");
+				assert(oldThread, "the reload-order room has a current conversation");
+				const reloadOpened = reloadPage.waitForEvent("popup");
+				await reloadPage.getByRole("button", { name: "Detach", exact: true }).click();
+				const reloadChild = await reloadOpened;
+				await reloadChild.locator(".workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
+				await reloadChild.evaluate(`window.__t20OriginalClose = window.close; window.__t20CloseCalls = 0; window.close = () => { window.__t20CloseCalls++; }`);
+				await moverPage.goto(`${baseUrl}/#/room/${encodeURIComponent(reloadRoomId)}`);
+				await moverPage.getByText("Invented original question.", { exact: true }).waitFor();
+				await moverPage.getByRole("button", { name: "Forget", exact: true }).first().click();
+				await moverPage.getByRole("alertdialog", { name: "Forget this conversation and start fresh?" }).getByRole("button", { name: "Forget", exact: true }).click();
+				await waitUntil(async () => { const current = await api(`/api/persistent-agents/${encodeURIComponent(reloadRoomId)}/status`); const next = String(current.body?.runtime?.activeThreadId ?? ""); return Boolean(next && next !== oldThread); }, "the other owner moves the room to an invented replacement conversation");
+				await composer.fill("Invented stale question.");
+				await composer.press("Enter");
+				await reloadPage.getByText("This room went on in another window. Reload to continue there.", { exact: true }).waitFor();
+				let replacementReads = 0;
+				reloadPage.on("request", (request) => { if (request.method() === "GET" && request.url().includes("/threads/")) replacementReads++; });
+				await reloadPage.getByRole("button", { name: "Reload", exact: true }).click();
+				await waitUntil(() => reloadChild.evaluate(`window.__t20CloseCalls > 0`), "moved-room Reload requests the registered child close");
+				assert(!reloadChild.isClosed() && replacementReads === 0, "moved-room Reload withholds the replacement thread while the actual child is open");
+				const reloadClosed = reloadChild.waitForEvent("close");
+				await reloadChild.evaluate(`window.close = window.__t20OriginalClose; window.close()`);
+				await reloadClosed;
+				await waitUntil(() => replacementReads > 0, "moved-room Reload reads the replacement only after child closure");
+			} finally { await reloadPage.close().catch(() => {}); await moverPage.close().catch(() => {}); }
 			const mementoRoom = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Invented Memento Ordering", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
 			assert(mementoRoom.status === 201, "the Memento-order room is created");
 			const mementoRoomId = String(mementoRoom.body?.agent?.id ?? "");
