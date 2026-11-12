@@ -732,3 +732,7 @@ The detached smoke now counts the real selected-file read and verifies one selec
 ## Checkpoint: post-adoption failure recovery draft
 
 The detached smoke now injects an append failure after the real host has been adopted into the child and requires the fenced unavailable state and same-attempt Return without a write. The inactive move path now treats any failure after adoption as unknown instead of releasing the arbiter after an ordinary rollback. UI and scripts typechecks and UI asset build passed; the attributed detached smoke still stopped at disabled Detach, so the new fault and recovery assertions did not execute and C3 remains open.
+
+## Checkpoint: native owner endpoint red
+
+Added `workspace-documents-owner-ui` as a supplemental real-browser check of the actual owner endpoint's non-enumerable installation, hello binding, replay and malformed-input refusal. The attributed run failed 0/1 because the owner endpoint does not yet exist. This is test-first evidence for the owner seam only; it is not the real shell exchange, native lifecycle, permit registration or platform evidence, all of which remain open and sandbox-blocked.
