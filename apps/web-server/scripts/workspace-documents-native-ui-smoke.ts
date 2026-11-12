@@ -16,7 +16,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "exxperts-documents-native-"));
 const port = await freePort();
 const stuck = process.env.T20_NATIVE_STUCK === "1";
-const dirty = process.env.T20_NATIVE_DIRTY === "1";
+const save = process.env.T20_NATIVE_SAVE === "1";
+const dirty = process.env.T20_NATIVE_DIRTY === "1" || save;
 const active = process.env.T20_NATIVE_ACTIVE === "1" || dirty;
 const prepare = process.env.T20_NATIVE_PREPARE === "1" || active;
 const feed = http.createServer((_request, response) => {
@@ -113,13 +114,39 @@ try {
 		if (dirty) {
 			assert(page, "the owner page is available for the native prompt");
 			const prompt = page.getByRole("dialog", { name: "Unsaved Markdown changes" });
-			await prompt.getByRole("button", { name: "Cancel", exact: true }).click();
-			await new Promise((resolve) => setTimeout(resolve, 1_000));
-			assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20AbortAck === 1, owner), "the native shell aborts a cancelled dirty action and receives its matching acknowledgement");
-			assert((await page.locator(".markdown-editor-tiptap .ProseMirror").textContent())?.includes("retained native edit"), "native Cancel retains the actual edited draft");
-			await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.close(), owner);
-			await prompt.waitFor({ state: "visible", timeout: 5_000 });
-			await prompt.getByRole("button", { name: "Cancel", exact: true }).click();
+			if (save) {
+				let beginWrite!: () => void, releaseWrite!: () => void, finishWrite!: () => void, writes = 0;
+				const started = new Promise<void>((resolve) => { beginWrite = resolve; });
+				const released = new Promise<void>((resolve) => { releaseWrite = resolve; });
+				const finished = new Promise<void>((resolve) => { finishWrite = resolve; });
+				await page.route("**/workspace-markdown?*", async (route) => {
+					if (route.request().method() !== "PUT") return route.continue();
+					writes++;
+					const response = await route.fetch();
+					beginWrite();
+					await released;
+					await route.fulfill({ response }).catch(() => {});
+					finishWrite();
+				});
+				try {
+					await prompt.getByRole("button", { name: "Save and continue" }).click();
+					await started;
+					await new Promise((resolve) => setTimeout(resolve, 300));
+					assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Completed === 0, owner), "native completion waits for the sent Save response");
+					releaseWrite();
+					await finished;
+					await waitUntil(() => application!.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Completed === 1, owner), "native Save reaches one matching completion");
+					assert(writes === 1, "native Save issues exactly one workspace write");
+				} finally { releaseWrite(); if (writes) await finished; await page.unroute("**/workspace-markdown?*"); }
+			} else {
+				await prompt.getByRole("button", { name: "Cancel", exact: true }).click();
+				await new Promise((resolve) => setTimeout(resolve, 1_000));
+				assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20AbortAck === 1, owner), "the native shell aborts a cancelled dirty action and receives its matching acknowledgement");
+				assert((await page.locator(".markdown-editor-tiptap .ProseMirror").textContent())?.includes("retained native edit"), "native Cancel retains the actual edited draft");
+				await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.close(), owner);
+				await prompt.waitFor({ state: "visible", timeout: 5_000 });
+				await prompt.getByRole("button", { name: "Cancel", exact: true }).click();
+			}
 		} else await new Promise((resolve) => setTimeout(resolve, 1_000));
 		if (!dirty) assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Prepares === 1, owner), "the actual native close sends exactly one owner prepare");
 		if (active && !dirty) {
