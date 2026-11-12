@@ -631,3 +631,7 @@ The real `workspace-markdown-images-ui` smoke now verifies that the opened Markd
 ## Checkpoint: attached room regressions after host rework
 
 The attributed filtered run of `attachments-panel-ui` and `two-window-room-ui` passed 2/2 after the one-container and drawer changes. These are existing attached-room interactions in Chromium; they do not exercise an enabled detached child or establish native behavior.
+
+## Checkpoint: topbar and sidebar alignment
+
+The existing `room-topbar-ui` smoke initially failed because the new disabled empty-room Detach button was the last topbar action, leaving no edge glyph for the workspace alignment contract. Moving the document controls before the existing Forget/settings icons restored the layout without weakening the smoke; the attributed `room-topbar-ui` and `sidebar-files-lineup-ui` run then passed 2/2. This verifies attached browser layout and Mac-look CSS only, not native window behavior.

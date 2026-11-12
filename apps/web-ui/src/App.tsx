@@ -9645,12 +9645,6 @@ export function App() {
 				persistentChat
 					? (
 						<>
-							{/* Gated on being IN a room, not on the polled status list:
-							    a stale or empty list is exactly the stuck-room case
-							    Forget exists to rescue, and the button vanishing then
-							    would be the worst possible moment to lose it. */}
-							<button className="icon-btn icon-btn-square icon-btn-danger" aria-label="Forget" title="Forget this conversation and start fresh. Nothing is saved to memory" onClick={() => void mementoPersistentThread()}><TrashIcon /></button>
-							{currentPersistentStatus?.exists && <button className="icon-btn icon-btn-square" aria-label="Room settings" title={`Room settings — ${roomSettingsChordHint()}`} onClick={() => openRoomSettings()}><GearIcon /></button>}
 							{documentHostStatus === "attached" && workspaceTabs?.paths.length === 0 && <button type="button" className="workspace-tabs-window" disabled onClick={detachDocuments}>Detach</button>}
 							{documentHostError && documentHostStatus === "attached" && <span className="docs-window-error" role="status">{documentHostError}</span>}
 							{documentHostStatus !== "attached" && <span className="docs-window-actions">
@@ -9658,6 +9652,12 @@ export function App() {
 								<button type="button" disabled={!documentChildRef.current || (!!markdownEditorPendingActionRef.current && !(documentHostStatus === "recovering" && documentRecoveryRef.current?.admission === markdownEditorPendingActionRef.current.admission))} onClick={focusDocumentChild}>Show documents</button>
 								<button type="button" disabled={!documentChildRef.current || (!!markdownEditorPendingActionRef.current && !(documentHostStatus === "recovering" && documentRecoveryRef.current?.admission === markdownEditorPendingActionRef.current.admission))} onClick={() => { if (documentHostStatus === "recovering") recoverDocuments(); else returnDocuments(); }}>Return</button>
 							</span>}
+							{/* Gated on being IN a room, not on the polled status list:
+							    a stale or empty list is exactly the stuck-room case
+							    Forget exists to rescue, and the button vanishing then
+							    would be the worst possible moment to lose it. */}
+							<button className="icon-btn icon-btn-square icon-btn-danger" aria-label="Forget" title="Forget this conversation and start fresh. Nothing is saved to memory" onClick={() => void mementoPersistentThread()}><TrashIcon /></button>
+							{currentPersistentStatus?.exists && <button className="icon-btn icon-btn-square" aria-label="Room settings" title={`Room settings — ${roomSettingsChordHint()}`} onClick={() => openRoomSettings()}><GearIcon /></button>}
 							{rightPaneVisible && !artifactPaneMaximized && <button className="icon-btn icon-btn-square right-pane-toggle" aria-label={rightCollapsed ? "Show right pane" : "Hide right pane"} aria-expanded={!rightCollapsed} title={rightCollapsed ? "Show right pane" : "Hide right pane"} onClick={() => setRightPaneCollapsed((collapsed) => !collapsed)}><PanelIcon side="right" /></button>}
 						</>
 					)
