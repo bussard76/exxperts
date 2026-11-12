@@ -752,3 +752,7 @@ The owner endpoint now returns `no-session` only for an exactly bound native pre
 ## Checkpoint: native owner response correlation
 
 The supplemental owner browser smoke now also checks the exact binding, request ID and disposition echoed in empty-session and active-room refusal responses. The attributed run passed 1/1. This still does not exercise the native shell or a native lifecycle continuation.
+
+## Checkpoint: owner invalidation after identity change
+
+The supplemental owner smoke now injects an invented `person_changed` response at the existing workspace read and verifies the old endpoint refuses another poll. Its first run timed out because the normal identity-change reload replaced the page before the assertion; the fixture now uses the existing browser beforeunload refusal pattern to retain the invalidated page, and the attributed rerun passed 1/1. This checks the real UI owner in a browser and does not establish native shell behavior.

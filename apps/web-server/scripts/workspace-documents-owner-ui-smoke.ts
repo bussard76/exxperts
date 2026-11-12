@@ -10,6 +10,8 @@ try {
 	const room = await openRoom("Invented Native Owner");
 	browser = await chromium.launch();
 	const page = await browser.newPage();
+	await page.addInitScript({ content: `window.addEventListener("beforeunload", (event) => { event.preventDefault(); event.returnValue = ""; });` });
+	page.on("dialog", (dialog) => { void dialog.dismiss(); });
 	await page.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
 	await page.waitForLoadState("networkidle");
 	const result = await page.evaluate(() => {
@@ -49,6 +51,11 @@ try {
 	}, { binding: first.status.binding });
 	const refusal = active?.items?.[0];
 	assert(active?.sequence === 3 && refusal?.kind === "guard-result" && refusal.result?.kind === "refused" && refusal.result.reason === "invalidated" && refusal.result.correlation?.stamp?.roomId === room.roomId && refusal.result.correlation.stamp.conversationId === room.conversationId && refusal.result.correlation.requestId === "33333333-3333-4333-8333-333333333333" && refusal.result.correlation.action?.kind === "chat-close" && refusal.result.correlation.action.disposition === "hide" && JSON.stringify(refusal.binding) === JSON.stringify(first.status.binding), "a null observed stamp cannot report no-session for a current room");
+	await page.route("**/workspace-files?*", (route) => route.fulfill({ status: 409, json: { code: "person_changed", error: "Invented identity change" } }));
+	await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+	await page.getByText("Someone else is now signed in on this server.", { exact: true }).waitFor();
+	const invalidated = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 4, ack: 3, items: [] }), { binding: first.status.binding });
+	assert(invalidated == null, "a changed person cannot receive another owner status");
 	console.log("owner endpoint browser supplement: hello, replay and invalid inputs passed");
 } catch (caught) { error = caught; }
 finally { await browser?.close(); await stopRoomStateServer(error); }
