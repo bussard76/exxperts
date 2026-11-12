@@ -6,6 +6,7 @@
 // Closing the window hides it (server and scheduled work keep running); only
 // Quit stops the server.
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, shell, Tray } from "electron";
@@ -240,6 +241,58 @@ function wireNavigation(win: BrowserWindow): void {
     wireNavigation(child);
     wireContextMenu(child);
   });
+}
+
+
+const documentsPollInFlight = new WeakSet<BrowserWindow>();
+
+// The first C5 transport checkpoint accepts only hello and empty polls. It
+// cannot authorize native actions or register a child until the remaining
+// protocol and lifecycle entrypoints are connected.
+function startDocumentsPoll(win: BrowserWindow): () => void {
+  const session = randomUUID();
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  let active = true;
+  let pending = false;
+  let sequence = 1;
+  let ownerId: string | null = null;
+  let ownerGeneration = 0;
+  const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+  const keys = (value: Record<string, unknown>, expected: string) => Object.keys(value).sort().join(",") === expected;
+  const positive = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+  const accept = (value: unknown): boolean => {
+    if (!record(value) || !keys(value, "ack,items,nativeSessionId,sequence,status,version") || value.version !== 1 || value.nativeSessionId !== session || value.sequence !== sequence || value.ack !== sequence || !Array.isArray(value.items) || !record(value.status) || !keys(value.status, "binding,child,stamp") || !record(value.status.binding) || !keys(value.status.binding, "nativeSessionId,ownerGeneration,ownerId") || value.status.binding.nativeSessionId !== session || typeof value.status.binding.ownerId !== "string" || !uuid.test(value.status.binding.ownerId) || !positive(value.status.binding.ownerGeneration) || value.status.child !== null) return false;
+    const binding = value.status.binding;
+    if (ownerId === null) {
+      const hello = value.items[0];
+      if (sequence !== 1 || value.items.length !== 1 || !record(hello) || !keys(hello, "kind,ownerGeneration,ownerId") || hello.kind !== "hello" || hello.ownerId !== binding.ownerId || hello.ownerGeneration !== binding.ownerGeneration) return false;
+    } else if (binding.ownerId !== ownerId || binding.ownerGeneration !== ownerGeneration || value.items.length !== 0) return false;
+    if (value.status.stamp !== null) {
+      const stamp = value.status.stamp;
+      if (!record(stamp) || !keys(stamp, "conversationId,draftGeneration,hostGeneration,ownerGeneration,ownerId,roomGeneration,roomId") || stamp.ownerId !== binding.ownerId || stamp.ownerGeneration !== binding.ownerGeneration || typeof stamp.roomId !== "string" || !stamp.roomId || typeof stamp.conversationId !== "string" || !stamp.conversationId || !positive(stamp.roomGeneration) || !positive(stamp.hostGeneration) || !positive(stamp.draftGeneration)) return false;
+    }
+    ownerId = binding.ownerId as string;
+    ownerGeneration = binding.ownerGeneration as number;
+    return true;
+  };
+  const poll = () => {
+    if (!active || pending || documentsPollInFlight.has(win) || win.isDestroyed() || win.webContents.isDestroyed() || !isAppOrigin(win.webContents.getURL()) || !Number.isSafeInteger(sequence)) return;
+    const input = { version: 1, nativeSessionId: session, sequence, ack: sequence - 1, items: sequence === 1 ? [{ kind: "hello" }] : [] };
+    const expression = `(() => { const endpoint = window.__exxpertsDocuments; return endpoint && typeof endpoint.step === "function" ? endpoint.step(${JSON.stringify(input)}) : null; })()`;
+    pending = true;
+    documentsPollInFlight.add(win);
+    let expired = false;
+    const deadline = setTimeout(() => { expired = true; }, 2_000);
+    let evaluation: Promise<unknown>;
+    try { evaluation = win.webContents.executeJavaScript(expression); }
+    catch { clearTimeout(deadline); pending = false; documentsPollInFlight.delete(win); return; }
+    void evaluation.then((output: unknown) => {
+      if (active && !expired && accept(output)) sequence++;
+    }).catch(() => {}).finally(() => { clearTimeout(deadline); pending = false; documentsPollInFlight.delete(win); });
+  };
+  const timer = setInterval(poll, 100);
+  poll();
+  return () => { active = false; clearInterval(timer); };
 }
 
 function createMainWindow(): BrowserWindow {
@@ -868,6 +921,15 @@ async function boot(): Promise<void> {
   // copy, and a check that landed while the app was on another page would
   // otherwise never reach the settings menu.
   mainWindow.webContents.on("did-finish-load", pushUpdateStateToPage);
+  let stopDocumentsPoll = () => {};
+  mainWindow.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) { stopDocumentsPoll(); stopDocumentsPoll = () => {}; }
+  });
+  mainWindow.webContents.on("did-finish-load", () => {
+    stopDocumentsPoll();
+    if (mainWindow && !mainWindow.isDestroyed() && isAppOrigin(mainWindow.webContents.getURL())) stopDocumentsPoll = startDocumentsPoll(mainWindow);
+  });
+  mainWindow.webContents.on("destroyed", () => stopDocumentsPoll());
   server.onUnexpectedExit((code, signal) => { void handleServerCrash(code, signal); });
   await mainWindow.loadURL(`${SERVER_ORIGIN}/auth/session?token=${encodeURIComponent(authToken)}`);
   // Hand off: reveal the loaded app window first, then retire the boot
