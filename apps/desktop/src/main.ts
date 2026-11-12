@@ -245,7 +245,7 @@ function wireNavigation(win: BrowserWindow): void {
 
 
 const documentsPollInFlight = new WeakSet<BrowserWindow>();
-const requestDocumentsAction = new WeakMap<BrowserWindow, (disposition: "hide" | "quit") => void>();
+const requestDocumentsAction = new WeakMap<BrowserWindow, (disposition: "hide" | "quit" | "reload") => void>();
 
 // The first C5 transport checkpoint accepts only hello and empty polls. It
 // cannot authorize native actions or register a child until the remaining
@@ -260,7 +260,7 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
   let ownerId: string | null = null;
   let ownerGeneration = 0;
   let latestStamp: Record<string, unknown> | null | undefined;
-  let hideRequest: { nativeRequestId: string; observedStamp: Record<string, unknown> | null; disposition: "hide" | "quit" } | null = null;
+  let hideRequest: { nativeRequestId: string; observedStamp: Record<string, unknown> | null; disposition: "hide" | "quit" | "reload" } | null = null;
   let hideSent = false;
   let hidePhase: "idle" | "preparing" | "abort" | "commit" | "close-evidence" | "completed" = "idle";
   let hideCorrelation: Record<string, unknown> | null = null;
@@ -791,7 +791,10 @@ function buildAppMenu(): void {
     {
       label: "View",
       submenu: [
-        { role: "reload" },
+        { id: "documents-reload", label: "Reload", accelerator: "CommandOrControl+R", click: (_item, focusedWindow) => {
+          if (focusedWindow === mainWindow && mainWindow && !mainWindow.isDestroyed()) requestDocumentsAction.get(mainWindow)?.("reload");
+          else if (focusedWindow) BrowserWindow.fromId(focusedWindow.id)?.webContents.reload();
+        } },
         { role: "toggleDevTools" },
         { type: "separator" },
         { role: "resetZoom" },

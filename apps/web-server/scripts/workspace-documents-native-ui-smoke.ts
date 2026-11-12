@@ -23,7 +23,9 @@ const dirty = process.env.T20_NATIVE_DIRTY === "1" || save || lateAbort;
 const late = process.env.T20_NATIVE_LATE === "1";
 const active = process.env.T20_NATIVE_ACTIVE === "1" || dirty || late;
 const quit = process.env.T20_NATIVE_QUIT === "1";
-const prepare = process.env.T20_NATIVE_PREPARE === "1" || active || quit;
+const reloadKey = process.env.T20_NATIVE_RELOAD_KEY === "1";
+const reload = process.env.T20_NATIVE_RELOAD === "1" || reloadKey;
+const prepare = process.env.T20_NATIVE_PREPARE === "1" || active || quit || reload;
 const feed = http.createServer((_request, response) => {
 	response.writeHead(200, { "content-type": "application/json" });
 	response.end(JSON.stringify({ tag_name: "v0.0.0", prerelease: false, draft: false }));
@@ -95,6 +97,7 @@ try {
 			(window as any).__t20Polls = 0;
 			(window as any).__t20Prepares = 0;
 			(window as any).__t20QuitPrepares = 0;
+			(window as any).__t20ReloadPrepares = 0;
 			(window as any).__t20NoSession = 0;
 			(window as any).__t20Prepared = 0;
 			(window as any).__t20Completed = 0;
@@ -104,7 +107,7 @@ try {
 			(window.webContents as any).executeJavaScript = (script: string, ...args: unknown[]) => {
 				if (script.includes("__exxpertsDocuments")) {
 					(window as any).__t20Polls++;
-					if (script.includes('"native-prepare"')) { (window as any).__t20Prepares++; (window as any).__t20Trace.push("prepare"); if (script.includes('"disposition":"quit"')) (window as any).__t20QuitPrepares++; }
+					if (script.includes('"native-prepare"')) { (window as any).__t20Prepares++; (window as any).__t20Trace.push("prepare"); if (script.includes('"disposition":"quit"')) (window as any).__t20QuitPrepares++; if (script.includes('"disposition":"reload"')) (window as any).__t20ReloadPrepares++; }
 					if (script.includes('"native-abort"')) (window as any).__t20Trace.push("abort");
 					if (script.includes('"native-commit"')) (window as any).__t20Commits++;
 				}
@@ -125,6 +128,17 @@ try {
 		}, { id: owner, late, lateAbort });
 		await waitUntil(() => application!.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Polls >= 2, owner), "the real owner has been polled");
 		if (quit) await application.evaluate(({ app }) => app.quit()).catch(() => {});
+		else if (reloadKey) await application.evaluate(({ BrowserWindow }, id) => {
+			const contents = BrowserWindow.fromId(id)!.webContents;
+			contents.sendInputEvent({ type: "keyDown", keyCode: "R", modifiers: [process.platform === "darwin" ? "meta" : "control"] });
+			contents.sendInputEvent({ type: "keyUp", keyCode: "R", modifiers: [process.platform === "darwin" ? "meta" : "control"] });
+		}, owner);
+		else if (reload) await application.evaluate(({ Menu, BrowserWindow }, id) => {
+			const view = Menu.getApplicationMenu()?.items.find((item: any) => item.label === "View");
+			const command = view?.submenu?.items.find((item: any) => item.role === "reload" || item.id === "documents-reload");
+			if (!command) throw new Error("the View reload command is missing");
+			command.click(undefined as any, BrowserWindow.fromId(id)!, BrowserWindow.fromId(id)!.webContents);
+		}, owner);
 		else await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.close(), owner);
 		if (late) {
 			await waitUntil(() => application!.evaluate(({ BrowserWindow }, id) => typeof (BrowserWindow.fromId(id) as any)?.__t20Release === "function", owner), "the real prepare reply is held");
@@ -182,6 +196,7 @@ try {
 		} else await new Promise((resolve) => setTimeout(resolve, 1_000));
 		if (!dirty && !late) assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Prepares === 1, owner), "the actual native action sends exactly one owner prepare");
 		if (quit) assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20QuitPrepares === 1, owner), "the actual Quit uses a quit disposition");
+		if (reload) assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20ReloadPrepares === 1, owner), "the actual View reload uses a reload disposition");
 		if (active && !dirty && !late) {
 			assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Prepared === 1, owner), "the actual owner prepares the active clean room exactly once");
 			assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Completed === 1, owner), "the real owner completes only after the shell sends no-child evidence");
