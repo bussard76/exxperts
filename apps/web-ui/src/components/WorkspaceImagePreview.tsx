@@ -9,7 +9,7 @@ const FIT_PADDING = 16;
 
 type View = { scale: number; x: number; y: number };
 
-export function WorkspaceImagePreview({ agentId, conversationId, path, retained }: { agentId: string; conversationId: string; path: string; retained: { imageUrl?: string; disposed?: boolean } }) {
+export function WorkspaceImagePreview({ agentId, conversationId, path, retained, hostGeneration }: { agentId: string; conversationId: string; path: string; retained: { imageUrl?: string; disposed?: boolean }; hostGeneration: number }) {
 	const [src, setSrc] = useState<string | null>(() => retained.imageUrl ?? null);
 	const [error, setError] = useState(false);
 	const [percent, setPercent] = useState<number | null>(null);
@@ -20,7 +20,7 @@ export function WorkspaceImagePreview({ agentId, conversationId, path, retained 
 	const view = useRef<View>({ scale: 1, x: 0, y: 0 });
 	// Where the eased zoom is heading, and the point of the stage that stays put on the way.
 	const target = useRef({ scale: 1, anchorX: 0, anchorY: 0 });
-	const frame = useRef<number | null>(null);
+	const frame = useRef<{ host: Window; id: number } | null>(null);
 	const fitted = useRef(true);
 	const drag = useRef<{ x: number; y: number } | null>(null);
 
@@ -62,20 +62,28 @@ export function WorkspaceImagePreview({ agentId, conversationId, path, retained 
 		const current = view.current, ratio = scale / current.scale;
 		view.current = { scale, x: anchorX - (anchorX - current.x) * ratio, y: anchorY - (anchorY - current.y) * ratio };
 	}
+	function cancelFrame(): void {
+		if (frame.current) frame.current.host.cancelAnimationFrame(frame.current.id);
+		frame.current = null;
+	}
+	function scheduleFrame(): void {
+		const host = stageRef.current?.ownerDocument.defaultView;
+		if (host) frame.current = { host, id: host.requestAnimationFrame(step) };
+	}
 	function step(): void {
 		frame.current = null;
 		const { scale, anchorX, anchorY } = target.current;
 		const remaining = Math.log(scale / view.current.scale);
-		const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+		const reduced = stageRef.current?.ownerDocument.defaultView?.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 		const done = reduced || Math.abs(remaining) < 0.001;
 		zoomViewAt(anchorX, anchorY, done ? scale : view.current.scale * Math.exp(remaining * EASING));
 		paint();
-		if (!done) frame.current = requestAnimationFrame(step);
+		if (!done) scheduleFrame();
 	}
 	function zoomTo(scale: number, anchorX: number, anchorY: number): void {
 		fitted.current = false;
 		target.current = { scale: Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale)), anchorX, anchorY };
-		if (frame.current === null) frame.current = requestAnimationFrame(step);
+		if (frame.current === null) scheduleFrame();
 	}
 	function stageCentre(): [number, number] {
 		const stage = stageRef.current;
@@ -85,7 +93,7 @@ export function WorkspaceImagePreview({ agentId, conversationId, path, retained 
 		const stage = stageRef.current;
 		if (!stage || !size.current.width || !stage.clientWidth || !stage.clientHeight) return;
 		fitted.current = true;
-		if (frame.current !== null) { cancelAnimationFrame(frame.current); frame.current = null; }
+		cancelFrame();
 		// Fit shrinks a large picture; a small one stays at its own size.
 		const scale = Math.min(1, (stage.clientWidth - FIT_PADDING * 2) / size.current.width, (stage.clientHeight - FIT_PADDING * 2) / size.current.height);
 		view.current = { scale, x: 0, y: 0 };
@@ -110,7 +118,9 @@ export function WorkspaceImagePreview({ agentId, conversationId, path, retained 
 		};
 		stage.addEventListener("wheel", onWheel, { passive: false });
 		// A tab that was hidden has no size until it is shown; the pane can also be resized.
-		const observer = new ResizeObserver(() => {
+		const host = stage.ownerDocument.defaultView;
+		if (!host) { stage.removeEventListener("wheel", onWheel); return; }
+		const observer = new host.ResizeObserver(() => {
 			if (fitted.current) handlers.current.fit();
 			else paint();
 		});
@@ -118,10 +128,10 @@ export function WorkspaceImagePreview({ agentId, conversationId, path, retained 
 		return () => {
 			stage.removeEventListener("wheel", onWheel);
 			observer.disconnect();
-			if (frame.current !== null) cancelAnimationFrame(frame.current);
+			cancelFrame();
 		};
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, []);
+	}, [hostGeneration]);
 
 	function onImageLoad(): void {
 		const image = imageRef.current;
@@ -141,7 +151,7 @@ export function WorkspaceImagePreview({ agentId, conversationId, path, retained 
 	function onPointerMove(event: ReactPointerEvent<HTMLDivElement>): void {
 		if (!drag.current) return;
 		// Moving takes over from any zoom still easing.
-		if (frame.current !== null) { cancelAnimationFrame(frame.current); frame.current = null; target.current.scale = view.current.scale; }
+		if (frame.current !== null) { cancelFrame(); target.current.scale = view.current.scale; }
 		view.current.x += event.clientX - drag.current.x;
 		view.current.y += event.clientY - drag.current.y;
 		drag.current = { x: event.clientX, y: event.clientY };

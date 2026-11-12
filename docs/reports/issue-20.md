@@ -479,3 +479,7 @@ The owner tab record now retains validated PDF page data and the validated sprea
 ## Checkpoint: child image animation case
 
 The detached smoke now requires actual child image zoom to schedule animation frames in the child window. Scripts typecheck passed; the attributed run remains red at the first missing Detach control, so this new assertion has not executed and provides no host evidence yet.
+
+## Checkpoint: image host-bound animation
+
+Image zoom now obtains animation scheduling, cancellation, reduced-motion preference and resize observation from the preview element's actual window; host generation changes rebind the observer and cancel the old host's frame. The UI typecheck, UI asset build and attributed `workspace-file-tabs-ui` smoke passed (1/1), covering attached image zoom, wheel and drag. The new child animation assertion did not run because Detach is unavailable; no child-host evidence or full C7 completion is claimed.
