@@ -1,21 +1,18 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-type PreparedChild = { child: Window; document: Document; treeSlot: HTMLElement; paneSlot: HTMLElement; returnButton: HTMLButtonElement };
+type PreparedChild = { child: Window; document: Document; hostSlot: HTMLElement; returnButton: HTMLButtonElement };
 
-// The chat owns both portal elements; their contents stay in the same React tree.
+// The chat owns one portal element; its contents stay in the same React tree.
 export function useDocumentsHost() {
 	const [host] = useState(() => {
 		const element = document.createElement("div");
 		element.className = "docs-host";
 		return element;
 	});
-	const [treeHost] = useState(() => {
-		const element = document.createElement("div");
-		element.style.display = "contents";
-		return element;
-	});
 	const ownerHostSlot = useRef<HTMLDivElement | null>(null);
 	const ownerTreeSlot = useRef<HTMLDivElement | null>(null);
+	const treeResizeRef = useRef<ResizeObserver | null>(null);
+	const updateTreeRef = useRef<() => void>(() => {});
 	const lastBounds = useRef<{ left: number; top: number; width: number; height: number } | null>(null);
 	const opening = useRef(false);
 	const prepared = useRef<PreparedChild | null>(null);
@@ -25,9 +22,30 @@ export function useDocumentsHost() {
 		if (slot && !registered.current) slot.appendChild(host);
 	}, [host]);
 	const mountTree = useCallback((slot: HTMLDivElement | null) => {
+		if (ownerTreeSlot.current) treeResizeRef.current?.unobserve(ownerTreeSlot.current);
 		ownerTreeSlot.current = slot;
-		if (slot && !registered.current) slot.appendChild(treeHost);
-	}, [treeHost]);
+		if (slot) treeResizeRef.current?.observe(slot);
+		updateTreeRef.current();
+	}, []);
+	useEffect(() => {
+		const update = () => {
+			const slot = ownerTreeSlot.current;
+			if (!slot) return;
+			const rect = slot.getBoundingClientRect();
+			for (const [name, value] of Object.entries({ left: rect.left, top: rect.top, width: rect.width, height: rect.height })) host.style.setProperty(`--docs-tree-${name}`, `${value}px`);
+		};
+		updateTreeRef.current = update;
+		const resize = new ResizeObserver(update);
+		treeResizeRef.current = resize;
+		const mutation = new MutationObserver(update);
+		const slot = ownerTreeSlot.current;
+		if (slot) resize.observe(slot);
+		mutation.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
+		window.addEventListener("resize", update);
+		document.addEventListener("scroll", update, true);
+		update();
+		return () => { treeResizeRef.current = null; updateTreeRef.current = () => {}; resize.disconnect(); mutation.disconnect(); window.removeEventListener("resize", update); document.removeEventListener("scroll", update, true); };
+	}, [host]);
 	// Opening is separate from adoption: the owner keeps authority until every
 	// stylesheet has loaded and the caller has revalidated its transfer stamp.
 	const beginChild = useCallback(async (frameName: string, title: string) => {
@@ -82,18 +100,14 @@ export function useDocumentsHost() {
 			returnButton.textContent = "Return";
 			returnButton.disabled = true;
 			bar.append(heading, returnButton);
-			const treeSlot = target.createElement("div");
-			treeSlot.className = "documents-child-tree";
-			const paneSlot = target.createElement("div");
-			paneSlot.className = "documents-child-pane";
-			layout.append(bar, treeSlot, paneSlot);
+			layout.append(bar);
 			target.body.replaceChildren(layout);
 			await Promise.race([
 				Promise.all(pending),
 				new Promise<never>((_, reject) => { timer = window.setTimeout(() => reject(new Error("Stylesheet timeout")), 10_000); }),
 			]);
 			if (child.closed || child.opener !== window || child.location.href !== "about:blank" || child.document !== target || target.defaultView !== child || child.getComputedStyle(layout).display !== "grid" || !layout.getBoundingClientRect().width || !layout.getBoundingClientRect().height) throw new Error("Child not ready");
-			const result = { child, document: target, treeSlot, paneSlot, returnButton };
+			const result = { child, document: target, hostSlot: layout, returnButton };
 			prepared.current = result;
 			return result;
 		} catch {
@@ -112,30 +126,27 @@ export function useDocumentsHost() {
 	// The caller holds the owner arbiter and fences input before either move.
 	const moveToChild = useCallback((candidate: PreparedChild, current: () => boolean): "moved" | "refused" | "unknown" => {
 		const hostSlot = ownerHostSlot.current, treeSlot = ownerTreeSlot.current;
-		if (prepared.current !== candidate || registered.current || !hostSlot || !treeSlot || host.parentNode !== hostSlot || treeHost.parentNode !== treeSlot || !current()) return "refused";
+		if (prepared.current !== candidate || registered.current || !hostSlot || !treeSlot || host.parentNode !== hostSlot || !current()) return "refused";
 		try {
 			if (candidate.child.closed || candidate.child.opener !== window || candidate.child.document !== candidate.document || candidate.document.defaultView !== candidate.child || candidate.child.location.href !== "about:blank" || !current()) return "refused";
-			candidate.treeSlot.appendChild(candidate.document.adoptNode(treeHost));
-			candidate.paneSlot.appendChild(candidate.document.adoptNode(host));
+			candidate.hostSlot.appendChild(candidate.document.adoptNode(host));
 			if (!current()) throw new Error("Transfer invalidated");
 			prepared.current = null;
 			registered.current = candidate;
 			return "moved";
 		} catch {
 			try {
-				treeSlot.appendChild(document.adoptNode(treeHost));
 				hostSlot.appendChild(document.adoptNode(host));
 				return "refused";
 			} catch { return "unknown"; }
 		}
-	}, [host, treeHost]);
+	}, [host]);
 	const moveToOwner = useCallback((candidate: PreparedChild, current: () => boolean): "moved" | "refused" | "unknown" => {
 		const hostSlot = ownerHostSlot.current, treeSlot = ownerTreeSlot.current;
 		if (registered.current !== candidate || !hostSlot || !treeSlot || !current()) return "refused";
 		try {
 			if (!candidate.child.closed && (candidate.child.opener !== window || candidate.child.document !== candidate.document)) return "unknown";
-			if (host.ownerDocument !== candidate.document || treeHost.ownerDocument !== candidate.document || !current()) return "unknown";
-			treeSlot.appendChild(document.adoptNode(treeHost));
+			if (host.ownerDocument !== candidate.document || !current()) return "unknown";
 			hostSlot.appendChild(document.adoptNode(host));
 			try {
 				if (!candidate.child.closed) {
@@ -145,24 +156,23 @@ export function useDocumentsHost() {
 			} catch {}
 			return "moved";
 		} catch { return "unknown"; }
-	}, [host, treeHost]);
+	}, [host]);
 	const recoverToOwner = useCallback((candidate: PreparedChild, current: () => boolean): "moved" | "refused" | "unknown" => {
 		const hostSlot = ownerHostSlot.current, treeSlot = ownerTreeSlot.current;
 		if ((prepared.current !== candidate && registered.current !== candidate) || !hostSlot || !treeSlot || !current()) return "refused";
 		try {
 			if (!candidate.child.closed && (candidate.child.opener !== window || candidate.child.document !== candidate.document)) return "unknown";
-			if ((host.ownerDocument !== document && host.ownerDocument !== candidate.document) || (treeHost.ownerDocument !== document && treeHost.ownerDocument !== candidate.document) || !current()) return "unknown";
-			treeSlot.appendChild(document.adoptNode(treeHost));
+			if ((host.ownerDocument !== document && host.ownerDocument !== candidate.document) || !current()) return "unknown";
 			hostSlot.appendChild(document.adoptNode(host));
 			prepared.current = null;
 			registered.current = candidate;
 			return "moved";
 		} catch { return "unknown"; }
-	}, [host, treeHost]);
+	}, [host]);
 	const childClosed = useCallback((candidate: PreparedChild) => {
-		if (registered.current !== candidate || !candidate.child.closed || host.ownerDocument !== document || treeHost.ownerDocument !== document) return false;
+		if (registered.current !== candidate || !candidate.child.closed || host.ownerDocument !== document) return false;
 		registered.current = null;
 		return true;
-	}, [host, treeHost]);
-	return { host, treeHost, mountHost, mountTree, beginChild, abortChild, moveToChild, moveToOwner, recoverToOwner, childClosed };
+	}, [host]);
+	return { host, mountHost, mountTree, beginChild, abortChild, moveToChild, moveToOwner, recoverToOwner, childClosed };
 }

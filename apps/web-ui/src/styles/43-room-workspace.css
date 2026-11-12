@@ -314,6 +314,11 @@ html.desktop-app-mac .workspace-tab {
 /* The topbar's actions sit on the chat rail's edge, far from the pane in a wide window. The pane toggle moves out to the column's right edge, 8px from the pane. */
 .topbar-actions .right-pane-toggle { transform: translateX(calc(var(--topbar-banner-edge) - 15px)); }
 .docs-slot, .docs-host { display: contents; }
+.docs-tree-slot { flex: 1 1 auto; min-height: 0; }
+.docs-tree-host { position: fixed; left: var(--docs-tree-left); top: var(--docs-tree-top); width: var(--docs-tree-width); height: var(--docs-tree-height); display: flex; flex-direction: column; min-height: 0; }
+.workbench.right-pane-collapsed > .docs-slot { display: contents; }
+body.documents-child .docs-tree-host { position: static; width: auto; height: auto; grid-column: 1; grid-row: 2; overflow: hidden; }
+body.documents-child .docs-host > .workspace-pane { grid-column: 2; grid-row: 2; }
 .workspace-pane { min-width: 0; min-height: 0; height: 100%; display: flex; flex-direction: column; }
 .workbench.right-pane-collapsed .docs-slot .workspace-pane { display: none; }
 .workspace-pane[hidden], .workspace-pane [hidden] { display: none; }

@@ -561,7 +561,7 @@ export function App() {
 	const [rightPane, setRightPane] = useState<RightPaneOccupant | null>(null);
 	const [workspaceTabs, setWorkspaceTabs] = useState<{ agentId: string; conversationId: string; paths: string[] } | null>(null);
 	const documentPreviewSnapshotsRef = useRef(new Map<string, { bytes: ArrayBuffer | null; text?: string; nextFrame?: { generation: number; id: string }; word?: { html: string; notice: boolean }; pdf?: { page: number; mimeType: "image/jpeg"; imageBase64: string; widthPx: number; heightPx: number }[]; spreadsheet?: { workbook: unknown; notices: string[] }; imageUrl?: string; disposed?: boolean }>());
-	const { host: documentHost, treeHost: documentTreeHost, mountHost: mountDocumentHost, mountTree: mountDocumentTreeHost, beginChild: beginDocumentChild, abortChild: abortDocumentChild, moveToChild: moveDocumentToChild, moveToOwner: moveDocumentToOwner, recoverToOwner: recoverDocumentToOwner, childClosed: documentChildClosed } = useDocumentsHost();
+	const { host: documentHost, mountHost: mountDocumentHost, mountTree: mountDocumentTreeHost, beginChild: beginDocumentChild, abortChild: abortDocumentChild, moveToChild: moveDocumentToChild, moveToOwner: moveDocumentToOwner, recoverToOwner: recoverDocumentToOwner, childClosed: documentChildClosed } = useDocumentsHost();
 	type PreparedDocumentChild = NonNullable<Awaited<ReturnType<typeof beginDocumentChild>>>;
 	const documentChildRef = useRef<PreparedDocumentChild | null>(null);
 	const documentChildContextRef = useRef<DocumentContext | null>(null);
@@ -1002,7 +1002,7 @@ export function App() {
 		};
 		if (commit.direction === "detach") {
 			try {
-				if (commit.child.child.closed || commit.child.child.document !== commit.child.document || documentHost.ownerDocument !== commit.child.document || documentTreeHost.ownerDocument !== commit.child.document) { setDocumentHostStatus("recovering"); return; }
+				if (commit.child.child.closed || commit.child.child.document !== commit.child.document || documentHost.ownerDocument !== commit.child.document) { setDocumentHostStatus("recovering"); return; }
 				const beforeUnload = (event: BeforeUnloadEvent) => {
 					if (documentClosingRef.current) return;
 					if (!returnDocuments()) { event.preventDefault(); event.returnValue = ""; }
@@ -9493,7 +9493,7 @@ export function App() {
 			{persistentChat && !personChanged && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId && (
 				<>
 				<div className="docs-slot" ref={mountDocumentHost} />
-				{createPortal(<div className="workspace-pane" hidden={activeWorkspacePath(documentPane) === null}>
+				{createPortal(<><div className="docs-tree-host"><WorkspaceFileBrowser agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} hostGeneration={documentHostGeneration} selectedPath={activeWorkspacePath(documentPane)} onFileSelect={openWorkspaceMarkdown} onPathDragStart={startDocumentPathDrag} onPathDragEnd={endDocumentPathDrag} /></div><div className="workspace-pane" hidden={activeWorkspacePath(documentPane) === null}>
 					<WorkspaceFileTabs onDetach={documentHostStatus === "attached" ? detachDocuments : undefined} detachDisabled tabs={workspaceTabs.paths} active={activeWorkspacePath(documentPane)} onSelect={(path) => openWorkspaceMarkdown({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} onReorder={(paths) => setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths } : tabs)} />
 					{documentPane && (documentPane.kind === "workspaceImage" || documentPane.kind === "workspacePdf" || documentPane.kind === "workspaceWord" || documentPane.kind === "workspaceHtml" || documentPane.kind === "workspaceFramed" || documentPane.kind === "workspaceText" || documentPane.kind === "workspaceSpreadsheet" || (documentPane.kind === "workspaceLegacyDoc" && !/\.doc$/i.test(documentPane.path))) && <WorkspaceOpenAction key={JSON.stringify([persistentChat.agentId, persistentChat.conversationId, documentPane.path])} agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={documentPane.path} />}
 					{documentPane?.kind === "markdownEditor" && <MarkdownEditorPane
@@ -9538,7 +9538,7 @@ export function App() {
 					{workspaceTabs.paths.filter((path) => /\.(png|jpe?g|gif|webp|svg)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={documentPane?.kind !== "workspaceImage" || documentPane.path !== path}>
 						<WorkspaceImagePreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} hostGeneration={documentHostGeneration} />
 					</div>)}
-				</div>, documentHost)}
+				</div></>, documentHost)}
 				</>
 			)}
 			{rightPane?.kind === "taskRun" && taskState.phase !== "none" && taskState.taskId === rightPane.taskId && (
@@ -9625,7 +9625,7 @@ export function App() {
 					appearance={appearance}
 					onSetAppearance={setAppearance}
 					onSettings={openSettings}
-					workspaceSlot={persistentChat ? <><div ref={mountDocumentTreeHost} style={{ display: "contents" }} />{createPortal(<WorkspaceFileBrowser agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} hostGeneration={documentHostGeneration} selectedPath={activeWorkspacePath(documentPane)} onFileSelect={openWorkspaceMarkdown} onPathDragStart={startDocumentPathDrag} onPathDragEnd={endDocumentPathDrag} />, documentTreeHost)}</> : undefined}
+					workspaceSlot={persistentChat ? <div className="docs-tree-slot" ref={mountDocumentTreeHost} /> : undefined}
 					assetsSlot={persistentChat ? <AttachmentsEntry count={attachmentRows.length} open={attachmentsView !== null} onClick={toggleAttachments} /> : undefined}
 				/>
 			}

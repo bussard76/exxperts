@@ -607,3 +607,7 @@ The real `workspace-file-tabs-ui` regression now navigates the opaque framed pre
 ## Checkpoint: single-container regression
 
 The real detached-document smoke now requires the attached tree to belong to the document container, and later checks that the exact container, tree and editor nodes appear in the child. Scripts typecheck passed. The attributed run failed 0/1 at the initial attached-tree assertion, before Detach, demonstrating that the current two-container draft violates C3; the later identity assertions did not execute. The Controller confirmed that correcting this within the accepted one-container contract is authorized; preserving the existing attached layout and disabled Detach remains required.
+
+## Checkpoint: one-container host draft
+
+The workspace tree and document pane now render under one retained portal node; transfers and recovery adopt that one node, while the attached tree is positioned over its existing measured sidebar slot. UI and scripts typechecks and the UI asset build passed; the attributed `sidebar-reopen-ui` and `workspace-markdown-images-ui` smokes passed 2/2. The `workspace-detached-documents-ui` initial same-container assertion now passes and the run stops at intentionally disabled Detach (1 expected failure of 3 cases); real child movement, exact editor identity, partial-recovery behavior, responsive/sidebar stacking and native integration remain unverified. The separate C7 navigation-before-readiness regression remains red and is under Architect review; this checkpoint does not close C3 or claim support.
