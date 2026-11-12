@@ -46,6 +46,7 @@ interface Props {
 	fenced: boolean;
 	saveInFlight: { current: Promise<boolean> | null };
 	keepMineInFlight: { current: Promise<boolean> | null };
+	unknownWrite: { current: UnknownDocumentWrite | null };
 	onClose: () => void;
 	onMutation: (agentId: string, conversationId: string, generation: number) => void;
 	onDirtyChange: (dirty: boolean, agentId: string, conversationId: string, generation: number) => void;
@@ -54,6 +55,7 @@ interface Props {
 
 type EditorPhase = "loading" | "ready" | "saving" | "conflict" | "error";
 type EditorMode = "edit" | "preview" | "raw";
+type UnknownDocumentWrite = { agentId: string; conversationId: string; contextGeneration: number; path: string; content: string; revision: string; terminal: boolean };
 
 // Markdown permits a list item's first block to be a heading, quote, table, or
 // nested list. Relaxing the stock paragraph-first schema keeps those files
@@ -460,7 +462,7 @@ function resolveWorkspaceMarkdownPath(currentPath: string, href: string, allowEx
 	return allowExtensionless ? `${resolved}.md` : null;
 }
 
-export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agentId, conversationId, contextGeneration, path, fenced, saveInFlight, keepMineInFlight: keepMineInFlightRef, onClose, onMutation, onDirtyChange, onOpenMarkdown }: Props, ref: Ref<MarkdownEditorHandle>) {
+export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agentId, conversationId, contextGeneration, path, fenced, saveInFlight, keepMineInFlight: keepMineInFlightRef, unknownWrite: unknownWriteRef, onClose, onMutation, onDirtyChange, onOpenMarkdown }: Props, ref: Ref<MarkdownEditorHandle>) {
 	const noteMutation = useCallback(() => onMutation(agentId, conversationId, contextGeneration), [agentId, contextGeneration, conversationId, onMutation]);
 	const reportDirty = useCallback((dirty: boolean) => onDirtyChange(dirty, agentId, conversationId, contextGeneration), [agentId, contextGeneration, conversationId, onDirtyChange]);
 	const [file, setFile] = useDocumentState<WorkspaceMarkdownFile | null>(null, noteMutation, sameDocumentFile);
@@ -472,8 +474,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 	const [error, setError] = useDocumentState<string | null>(null, noteMutation);
 	const [conflictRevision, setConflictRevision] = useDocumentState<string | null>(null, noteMutation);
 	const [canEdit, setCanEdit] = useDocumentState(false, noteMutation);
-	const unknownWriteRef = useRef<{ content: string; revision: string; terminal: boolean } | null>(null);
-	const setUnknownWrite = useCallback((next: { content: string; revision: string; terminal: boolean } | null) => {
+	const setUnknownWrite = useCallback((next: UnknownDocumentWrite | null) => {
 		if (unknownWriteRef.current !== next) { unknownWriteRef.current = next; noteMutation(); }
 	}, [noteMutation]);
 	const surfaceRef = useRef<SurfaceHandle | null>(null);
@@ -524,7 +525,11 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 
 	useEffect(() => {
 		const controller = new AbortController();
-		setUnknownWrite(null);
+		if (unknownWriteRef.current) {
+			setPhase("error");
+			setError("The save has not finished. Its outcome is unknown.");
+			return () => controller.abort();
+		}
 		fileRef.current = null;
 		setFile(null);
 		draftRef.current = "";
@@ -589,6 +594,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		if (!canEdit) return null;
 		const unknown = unknownWriteRef.current;
 		if (unknown) {
+			if (unknown.agentId !== agentId || unknown.conversationId !== conversationId || unknown.contextGeneration !== contextGeneration || unknown.path !== path) return null;
 			if (!unknown.terminal) return null;
 			try {
 				const latest = await readRevisionWithinDeadline(agentId, conversationId, path);
@@ -627,7 +633,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			const timeout = new Promise<null>((resolve) => { timer = window.setTimeout(() => resolve(null), 30_000); });
 			const next = await Promise.race([write, timeout]).finally(() => window.clearTimeout(timer));
 			if (!next) {
-				const unknown = { content, revision, terminal: false };
+				const unknown = { agentId, conversationId, contextGeneration, path, content, revision, terminal: false };
 				setUnknownWrite(unknown);
 				const terminal = () => {
 					if (!unknown.terminal) { unknown.terminal = true; if (unknownWriteRef.current === unknown) noteMutation(); }
@@ -646,7 +652,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			return next.revision;
 		} catch (cause) {
 			if (!(cause instanceof WorkspaceMarkdownApiError)) {
-				setUnknownWrite({ content, revision, terminal: true });
+				setUnknownWrite({ agentId, conversationId, contextGeneration, path, content, revision, terminal: true });
 				try {
 					const latest = await readRevisionWithinDeadline(agentId, conversationId, path);
 					setCanEdit(!latest.readOnly);
@@ -685,7 +691,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			}
 			return null;
 		}
-	}, [agentId, canEdit, conversationId, path, reconcileServerContent, recordConfirmedWrite, setDirty]);
+	}, [agentId, canEdit, contextGeneration, conversationId, path, reconcileServerContent, recordConfirmedWrite, setDirty]);
 
 	const persistAfterKeepMine = useCallback(async (content: string, revision: string) => {
 		const keepMine = keepMineInFlightRef.current;
@@ -726,6 +732,8 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		await saveInFlight.current;
 		const unknown = unknownWriteRef.current;
 		if (!unknown) return true;
+		if (!surfaceRef.current) return false;
+		if (unknown.agentId !== agentId || unknown.conversationId !== conversationId || unknown.contextGeneration !== contextGeneration || unknown.path !== path) return false;
 		if (!unknown.terminal) return false;
 		try {
 			const latest = await readRevisionWithinDeadline(agentId, conversationId, path);
@@ -753,7 +761,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		} catch {
 			return false;
 		}
-	}, [agentId, conversationId, path, reconcileServerContent, recordConfirmedWrite, saveInFlight, setDirty]);
+	}, [agentId, contextGeneration, conversationId, path, reconcileServerContent, recordConfirmedWrite, saveInFlight, setDirty]);
 	const discard = useCallback(() => {
 		if (unknownWriteRef.current || !surfaceRef.current) return false;
 		surfaceRef.current.discard();

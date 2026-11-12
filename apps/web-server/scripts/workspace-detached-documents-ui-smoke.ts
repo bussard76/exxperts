@@ -173,6 +173,27 @@ try {
 			} finally { releaseKeep(); }
 			await waitUntil(() => fs.readFileSync(path.join(workspace, "invented.md"), "utf8") === conflictDraft, "the retained Keep mine reaches the original workspace");
 			assert(Number(writes) === 3, "returning a pending Keep mine sends no duplicate write");
+			await waitUntil(async () => await page.locator(".markdown-editor-status").textContent() === "Saved", "the retained Keep mine settles");
+			await page.unroute("**/workspace-markdown?*");
+			const unknownOpened = page.waitForEvent("popup");
+			await detach.click();
+			const unknownChild = await unknownOpened;
+			const unknownRaw = unknownChild.getByRole("textbox", { name: "Raw Markdown source" });
+			await unknownRaw.waitFor();
+			const unknownDraft = "# Invented unresolved child draft\n";
+			await page.route("**/workspace-markdown?*", (route) => route.request().method() === "PUT" ? route.abort() : route.continue());
+			await unknownRaw.fill(unknownDraft);
+			await unknownChild.locator(".markdown-editor-save").click();
+			await unknownChild.locator(".markdown-editor-error").waitFor();
+			const closedUnknownChild = unknownChild.waitForEvent("close");
+			await unknownChild.getByRole("button", { name: "Return", exact: true }).click();
+			await closedUnknownChild;
+			assert(await raw.inputValue() === unknownDraft && Number(writes) === 4, "Return retains an unknown write and its source");
+			await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+			const unknownGuard = page.getByRole("dialog", { name: "Unsaved Markdown changes" });
+			await unknownGuard.getByRole("button", { name: "Discard changes" }).click();
+			await unknownGuard.waitFor({ state: "hidden" });
+			assert((await page.evaluate(() => location.hash)).includes("/room/") && await raw.inputValue() === unknownDraft && Number(writes) === 4, "an unresolved returned write refuses Discard without a retry");
 		} finally { await context.close(); }
 	} finally { await browser.close(); }
 	console.log("workspace-detached-documents-ui smoke: ok");

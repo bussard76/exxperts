@@ -556,6 +556,7 @@ export function App() {
 	const documentDraftGenerationRef = useRef(1);
 	const documentSaveInFlightRef = useRef<Promise<boolean> | null>(null);
 	const documentKeepMineInFlightRef = useRef<Promise<boolean> | null>(null);
+	const documentUnknownWriteRef = useRef<{ agentId: string; conversationId: string; contextGeneration: number; path: string; content: string; revision: string; terminal: boolean } | null>(null);
 	const markdownEditorRef = useRef<MarkdownEditorHandle | null>(null);
 	const markdownEditorAdmissionRef = useRef<DocumentAdmission | null>(null);
 	const preparedDocumentAdmissionRef = useRef<PreparedDocumentAdmission | null>(null);
@@ -710,7 +711,7 @@ export function App() {
 	}
 
 	function noDocumentSession(): boolean {
-		return !unmountedRef.current && !personHasChanged() && checkpointContextRef.current.key === null && !markdownEditorRef.current && !documentSaveInFlightRef.current && !documentKeepMineInFlightRef.current && !markdownEditorPendingActionRef.current;
+		return !unmountedRef.current && !personHasChanged() && checkpointContextRef.current.key === null && !markdownEditorRef.current && !documentSaveInFlightRef.current && !documentKeepMineInFlightRef.current && !documentUnknownWriteRef.current && !markdownEditorPendingActionRef.current;
 	}
 
 	function guardMarkdownEditorAction(action: () => void | Promise<unknown>, prompt: "close" | "switch" | "navigate"): boolean {
@@ -719,7 +720,7 @@ export function App() {
 			return true;
 		}
 		if (markdownEditorPendingActionRef.current || !documentOwnerId) return false;
-		if (!markdownEditorRef.current && (documentSaveInFlightRef.current || documentKeepMineInFlightRef.current)) return false;
+		if (!markdownEditorRef.current && (documentSaveInFlightRef.current || documentKeepMineInFlightRef.current || documentUnknownWriteRef.current)) return false;
 		const requestId = allocateDocumentId();
 		const admission = requestId ? captureDocumentAdmission(requestId) : null;
 		if (!admission) return false;
@@ -797,7 +798,7 @@ export function App() {
 
 	function admitCleanMarkdownEditorAction(action: () => Promise<unknown>, admittedId?: string): Promise<unknown> | null {
 		if (markdownEditorDirtyRef.current || markdownEditorPendingActionRef.current || markdownEditorCommitBypassRef.current) return null;
-		if (!markdownEditorRef.current && (documentSaveInFlightRef.current || documentKeepMineInFlightRef.current)) return Promise.resolve(false);
+		if (!markdownEditorRef.current && (documentSaveInFlightRef.current || documentKeepMineInFlightRef.current || documentUnknownWriteRef.current)) return Promise.resolve(false);
 		const requestId = documentOwnerId && (admittedId ?? allocateDocumentId());
 		const admission = requestId ? captureDocumentAdmission(requestId) : null;
 		if (!admission) return Promise.resolve(false);
@@ -9053,6 +9054,7 @@ export function App() {
 						fenced={markdownEditorFenced}
 						saveInFlight={documentSaveInFlightRef}
 						keepMineInFlight={documentKeepMineInFlightRef}
+						unknownWrite={documentUnknownWriteRef}
 						onClose={requestCloseMarkdownEditor}
 						onDirtyChange={onMarkdownEditorDirtyChange}
 						onOpenMarkdown={(path) => openWorkspaceMarkdown({ relativePath: path, extension: ".md" })}
