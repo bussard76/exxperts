@@ -229,6 +229,10 @@ Browser geometry is session-volatile best effort: keep last same-owner `screenX/
 
 ## 8. C7: actual host documents, overlays and preview snapshots
 
+
+**Accepted threat-model amendment, 2026-11-12 — Decided by: Sascha (2026-11-12), C7 review option B:** The [reconciled ADR-0009 amendment](../../docs/adr/0009-detached-document-window.md#reconciled-c7-amendment--2026-11-12) excludes only a frame navigated before its first ready by the trusted app parent's own script; that parent already can read the snapshot. Untrusted preview content and external pages remain fully covered, and every other C7 rule below remains binding. The unqualified after-navigation/no-bytes wording below is read within this explicitly narrowed threat model, not as proof that `src`, a visible fragment or WindowProxy authenticates a document. Preserve the Excalidraw/HTML pre-ready counterexample tests as documented expected behaviour under this model, without deleting them or loosening other controls. Preserve prior red history and every one-use/foreign/stale/after-delivery, opaque-CSP/script/network/permission/snapshot rule. The independent identity review `9aaf284d` is historical level-3, now answered by this accepted human decision; reconciled review and final Tester/conformance inspect the exact boundary.
+
+
 `HostBinding.document/window` comes from `container.ownerDocument/defaultView`, not module globals. `docs-window.ts` publishes a new binding after adoption; every host-bound listener removes the old binding **before** adding the new one. Use the relevant realm's constructors or node/tag checks for Element/HTMLInputElement/HTMLAnchorElement/HTMLLinkElement; owner-realm instanceof must not reject child nodes.
 
 | Consumer | Binding and observations |
