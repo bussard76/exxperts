@@ -201,6 +201,7 @@ addEventListener("message", event => { if (event.data instanceof ArrayBuffer) pa
 parent.postMessage({kind:"frame-ready"}, "*");
 </script></body>`);
 fs.writeFileSync(path.join(folder, "navigation.html"), `<script>parent.postMessage({kind:"invented-navigation-script"}, "*"); location.href = "https://example.invalid/collect?data=invented-file-content"</script>`);
+fs.writeFileSync(path.join(folder, "stalled.html"), "<p>Invented stalled snapshot</p>");
 const observedFiles = ["photo.png", "report.pdf", "report.docx", "sample.xlsx", "large.svg", "notes.md"];
 const digest = (name: string) => createHash("sha256").update(fs.readFileSync(path.join(folder, name))).digest("hex");
 const originalDigests = new Map(observedFiles.map((name) => [name, digest(name)]));
@@ -542,7 +543,7 @@ try {
         const forbiddenRequests: string[] = [];
         context.on("requestfinished", request => { if (/hostile-(fetch|api|xhr|ws|image|form)/.test(request.url())) forbiddenRequests.push(request.url()); });
         await page.evaluate(() => { (window as any).htmlRepeatedBytes = 0; (window as any).htmlReplacementBytes = 0; (window as any).htmlReplacementReady = 0; window.addEventListener("message", (event) => { if (event.data?.kind === "html-repeat-received") (window as any).htmlRepeatedBytes = event.data.length; if (event.data?.kind === "html-replacement-received") (window as any).htmlReplacementBytes = event.data.length; if (event.data?.kind === "html-replacement-ready") (window as any).htmlReplacementReady++; }); });
-        await page.route("**/replacement-html-frame", (route) => route.fulfill({ status: 200, contentType: "text/html", body: `<body>Invented replacement<script>onmessage = event => { if (event.data instanceof ArrayBuffer) parent.postMessage({kind: "html-replacement-received", length: event.data.byteLength}, "*"); }; parent.postMessage({kind:"html-replacement-ready"}, "*"); parent.postMessage({kind:"frame-ready"}, "*");</script></body>` }));
+        await page.route("**/replacement-html-frame", (route) => route.fulfill({ status: 200, contentType: "text/html", body: `<body>Invented replacement<script>onmessage = event => { if (event.data instanceof ArrayBuffer) parent.postMessage({kind: "html-replacement-received", length: event.data.byteLength}, "*"); }; parent.postMessage({kind:"html-replacement-ready"}, "*"); parent.postMessage({kind:"frame-ready"}, "*"); setTimeout(() => parent.postMessage({kind:"frame-failed"}, "*"), 100);</script></body>` }));
         let releaseHtmlShell!: () => void, startHtmlShell!: () => void;
         const htmlShellReleased = new Promise<void>((resolve) => { releaseHtmlShell = resolve; });
         const htmlShellStarted = new Promise<void>((resolve) => { startHtmlShell = resolve; });
@@ -583,6 +584,7 @@ try {
         await waitUntil(() => page.evaluate(() => (window as any).htmlReplacementReady === 2), "the navigated frame sent readiness");
         await page.waitForTimeout(300);
         assert(await page.evaluate(() => (window as any).htmlReplacementBytes) === 0, "a navigated HTML frame cannot receive the retained snapshot again");
+        assert(await htmlFrame.count() === 1, "a navigated frame cannot invalidate a completed HTML render");
         await page.unroute("**/replacement-html-frame");
         let navigation = "";
         const navigationConsole: string[] = [];
@@ -622,6 +624,20 @@ try {
         assert(await direct.evaluate(() => (window as any).controlledDeliveries) === 1, "the controlled parent delivers exactly one snapshot to its real registered frame");
         await direct.close();
         await context.unroute("https://example.invalid/**");
+        await page.evaluate(() => { const original = window.setTimeout; (window as any).restoreHtmlTimeout = () => { window.setTimeout = original; }; window.setTimeout = ((callback: TimerHandler, delay?: number, ...args: unknown[]) => original(callback, delay === 30_000 ? 300 : delay, ...args)) as typeof window.setTimeout; });
+        await page.route("**/workspace-preview?*", (route) => {
+            const url = new URL(route.request().url());
+            if (url.searchParams.get("path") === "stalled.html" && url.searchParams.get("frame") === "1") return route.fulfill({ status: 200, contentType: "text/html", body: "<body>Invented stalled frame</body>" });
+            return route.continue();
+        });
+        try {
+            await treeFile("stalled.html").click();
+            await page.getByText("This preview took too long to load.", { exact: true }).waitFor({ timeout: 5_000 });
+            await tab("stalled.html").locator(".workspace-tab-close").click();
+        } finally {
+            await page.unroute("**/workspace-preview?*");
+            await page.evaluate(() => (window as any).restoreHtmlTimeout());
+        }
         previewRequests = 0;
 		await treeFile("notes.md").click();
 		await page.locator(".markdown-editor-tiptap .ProseMirror").waitFor({ timeout: 20_000 });
