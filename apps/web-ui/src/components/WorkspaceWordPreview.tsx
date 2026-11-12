@@ -3,11 +3,12 @@ import { apiFetch } from "../api";
 
 const WORD_PREVIEW_PREFIX = `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">`;
 
-export function WorkspaceWordPreview({ agentId, conversationId, path }: { agentId: string; conversationId: string; path: string }) {
-	const [html, setHtml] = useState<string | null>(null);
+export function WorkspaceWordPreview({ agentId, conversationId, path, retained }: { agentId: string; conversationId: string; path: string; retained: { word?: { html: string; notice: boolean } } }) {
+	const [html, setHtml] = useState<string | null>(() => retained.word?.html ?? null);
 	const [error, setError] = useState<string | null>(null);
-	const [notice, setNotice] = useState(false);
+	const [notice, setNotice] = useState(() => retained.word?.notice ?? false);
 	useEffect(() => {
+		if (retained.word) return;
 		const controller = new AbortController();
 		const query = new URLSearchParams({ conversationId, path });
 		void apiFetch(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?${query}`, { signal: controller.signal })
@@ -44,10 +45,10 @@ export function WorkspaceWordPreview({ agentId, conversationId, path }: { agentI
 					return;
 				}
 				if (body?.schemaVersion !== 1 || body.agentId !== agentId || body.conversationId !== conversationId || body.path !== path || body.kind !== "word" || typeof body.html !== "string" || body.html.length > 16_777_216 || !body.html.startsWith(WORD_PREVIEW_PREFIX) || !Array.isArray(body.notices) || body.notices.length > 1 || !body.notices.every((item: { code?: string; text?: string }) => item?.code === "external_resources_blocked" && item.text === "External document resources are blocked.")) throw new Error("Invalid preview");
-				if (!controller.signal.aborted) { setNotice(body.notices.length === 1); setHtml(body.html); }
+				if (!controller.signal.aborted) { retained.word = { html: body.html, notice: body.notices.length === 1 }; setNotice(retained.word.notice); setHtml(retained.word.html); }
 			})
 			.catch(() => { if (!controller.signal.aborted) setError("This file could not be previewed."); });
 		return () => controller.abort();
-	}, [agentId, conversationId, path]);
+	}, [agentId, conversationId, path, retained]);
 	return <div className="workspace-preview-word">{html ? <>{notice && <p>External document resources are blocked.</p>}<iframe sandbox="" title={path.split("/").pop() ?? path} srcDoc={html} /></> : <p>{error ?? "Loading preview…"}</p>}</div>;
 }

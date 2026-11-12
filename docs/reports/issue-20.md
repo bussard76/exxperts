@@ -453,3 +453,7 @@ The existing tab record now retains the authorized image object URL and revokes 
 ## Checkpoint: child-first Word case
 
 The real detached-window smoke now also specifies opening a generated Word document in the child, replacing the disk file, returning, and checking the original rendered heading with one content request. Scripts typecheck passed; the attributed detached smoke again failed at its first unavailable Detach assertion, so the new Word case did not execute and provides no transfer evidence yet.
+
+## Checkpoint: owner-held Word snapshot
+
+The owner tab record now retains successfully validated Word HTML and its external-resource notice for reconstruction. UI and scripts typechecks and the UI asset build passed; the attributed `workspace-file-preview` and `workspace-file-tabs-ui` filtered smokes passed 2/2. The child-first Word case is not yet reached because Detach is unavailable, and loading/error retention, remaining preview types, host transfer and native safeguards remain open.

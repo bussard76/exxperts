@@ -558,7 +558,7 @@ export function App() {
 		| { kind: "taskRun"; taskId: string };
 	const [rightPane, setRightPane] = useState<RightPaneOccupant | null>(null);
 	const [workspaceTabs, setWorkspaceTabs] = useState<{ agentId: string; conversationId: string; paths: string[] } | null>(null);
-	const documentPreviewSnapshotsRef = useRef(new Map<string, { bytes: ArrayBuffer | null; text?: string; imageUrl?: string; disposed?: boolean }>());
+	const documentPreviewSnapshotsRef = useRef(new Map<string, { bytes: ArrayBuffer | null; text?: string; word?: { html: string; notice: boolean }; imageUrl?: string; disposed?: boolean }>());
 	const { host: documentHost, treeHost: documentTreeHost, mountHost: mountDocumentHost, mountTree: mountDocumentTreeHost } = useDocumentsHost();
 	// Synchronous mirror for the WS handlers (toast suppression / run-view swap
 	// read the pane at event time, not at closure-capture time).
@@ -9199,7 +9199,7 @@ export function App() {
 					/>}
 					{rightPane?.kind === "workspaceLegacyDoc" && <p className="workspace-preview-error">{/\.doc$/i.test(rightPane.path) ? "Save this old .doc file as .docx to preview it here." : "This file type cannot be previewed here."}</p>}
 					{workspaceTabs.paths.filter((path) => /\.docx$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceWord" || rightPane.path !== path}>
-						<WorkspaceWordPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />
+						<WorkspaceWordPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} />
 					</div>)}
 					{workspaceTabs.paths.filter((path) => /\.html?$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceHtml" || rightPane.path !== path}>
 						<WorkspaceHtmlPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} createFrameId={allocateDocumentId} />
