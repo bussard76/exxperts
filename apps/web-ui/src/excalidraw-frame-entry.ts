@@ -4,8 +4,9 @@ import { mountCanvas } from "./frame-canvas";
 
 type SceneElement = { type?: string; name?: string | null; isDeleted?: boolean };
 
-window.addEventListener("message", (event) => {
-	if (event.source !== window.parent || !(event.data instanceof ArrayBuffer)) return;
+const receive = (event: MessageEvent) => {
+	if (event.source !== window.parent || event.origin !== location.origin || !(event.data instanceof ArrayBuffer)) return;
+	window.removeEventListener("message", receive);
 	const container = document.getElementById("slides");
 	if (!container) return;
 	void (async () => {
@@ -31,5 +32,6 @@ window.addEventListener("message", (event) => {
 	})()
 		.then(() => window.parent.postMessage({ kind: "frame-rendered" }, "*"))
 		.catch(() => window.parent.postMessage({ kind: "frame-failed" }, "*"));
-});
-window.parent.postMessage({ kind: "frame-ready" }, "*");
+};
+window.addEventListener("message", receive);
+window.parent.postMessage({ kind: "frame-ready", frameId: new URLSearchParams(location.hash.slice(1)).get("frameId") }, "*");

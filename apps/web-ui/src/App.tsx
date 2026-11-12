@@ -9182,7 +9182,7 @@ export function App() {
 						<WorkspaceTextPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />
 					</div>)}
 					{workspaceTabs.paths.filter((path) => /\.(?:pptx|excalidraw)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceFramed" || rightPane.path !== path}>
-						<WorkspaceFramedPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} />
+						<WorkspaceFramedPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} createFrameId={allocateDocumentId} />
 					</div>)}
 					{workspaceTabs.paths.filter((path) => /\.xlsx$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceSpreadsheet" || rightPane.path !== path}>
 						<WorkspaceSpreadsheetPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />
