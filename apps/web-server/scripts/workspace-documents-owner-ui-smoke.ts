@@ -152,10 +152,74 @@ try {
 		const afterAbort = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 18, ack: 17, items: [] }), { binding: first.status.binding });
 		assert(afterAbort?.items?.length === 0, "a late Save result does not publish an allow after the abort");
 	} finally { releaseAbortSave(); await page.unroute("**/workspace-markdown?*"); }
+	await editor.click();
+	await page.keyboard.type(" already sent write");
+	let beginExisting!: () => void, releaseExisting!: () => void, finishExisting!: () => void, existingWrites = 0;
+	const existingStarted = new Promise<void>((resolve) => { beginExisting = resolve; });
+	const existingReleased = new Promise<void>((resolve) => { releaseExisting = resolve; });
+	const existingFinished = new Promise<void>((resolve) => { finishExisting = resolve; });
+	await page.route("**/workspace-markdown?*", async (route) => {
+		if (route.request().method() !== "PUT") return route.continue();
+		existingWrites++;
+		const response = await route.fetch();
+		beginExisting();
+		await existingReleased;
+		await route.fulfill({ response }).catch(() => {});
+		finishExisting();
+	});
+	try {
+		await page.locator(".markdown-editor-save").click();
+		await existingStarted;
+		const pendingStatus = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 19, ack: 18, items: [] }), { binding: first.status.binding });
+		const pendingPrepare = await page.evaluate(({ binding, stamp }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 20, ack: 19, items: [{ kind: "native-prepare", binding, nativeRequestId: "99999999-9999-4999-8999-999999999999", observedStamp: stamp, disposition: "hide" }] }), { binding: first.status.binding, stamp: pendingStatus.status.stamp });
+		assert(pendingPrepare?.sequence === 20 && pendingPrepare.items?.length === 0, "a native prepare joins an already-sent Save instead of refusing admission");
+		const whilePending = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 21, ack: 20, items: [] }), { binding: first.status.binding });
+		assert(whilePending?.items?.length === 0 && existingWrites === 1, "the joined write cannot allow or issue a duplicate PUT while its response is held");
+		releaseExisting();
+		await page.locator(".markdown-editor-status").getByText("Saved", { exact: true }).waitFor();
+		await page.waitForTimeout(100);
+		const afterExisting = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 22, ack: 21, items: [] }), { binding: first.status.binding });
+		const joined = afterExisting?.items?.[0];
+		assert(joined?.kind === "guard-result" && joined.result?.kind === "prepared" && joined.result.correlation.requestId === "99999999-9999-4999-8999-999999999999" && existingWrites === 1, "the joined Save yields one current prepared result");
+		const joinedAbort = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 23, ack: 22, items: [{ kind: "native-abort", binding, correlation }] }), { binding: first.status.binding, correlation: joined.result.correlation });
+		assert(joinedAbort?.items?.[0]?.kind === "abort-ack", "the joined action remains reserved until its matching abort");
+	} finally { releaseExisting(); if (existingWrites > 0) await existingFinished; await page.unroute("**/workspace-markdown?*"); }
+	await editor.click();
+	await page.keyboard.type(" abort joined write");
+	let beginJoinedAbort!: () => void, releaseJoinedAbort!: () => void, finishJoinedAbort!: () => void;
+	const joinedAbortStarted = new Promise<void>((resolve) => { beginJoinedAbort = resolve; });
+	const joinedAbortReleased = new Promise<void>((resolve) => { releaseJoinedAbort = resolve; });
+	const joinedAbortFinished = new Promise<void>((resolve) => { finishJoinedAbort = resolve; });
+	await page.route("**/workspace-markdown?*", async (route) => {
+		if (route.request().method() !== "PUT") return route.continue();
+		const response = await route.fetch();
+		beginJoinedAbort();
+		await joinedAbortReleased;
+		await route.fulfill({ response }).catch(() => {});
+		finishJoinedAbort();
+	});
+	try {
+		await page.locator(".markdown-editor-save").click();
+		await joinedAbortStarted;
+		const status = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 24, ack: 23, items: [] }), { binding: first.status.binding });
+		const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+		const prepared = await page.evaluate(({ binding, stamp, id }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 25, ack: 24, items: [{ kind: "native-prepare", binding, nativeRequestId: id, observedStamp: stamp, disposition: "hide" }] }), { binding: first.status.binding, stamp: status.status.stamp, id });
+		assert(prepared?.items?.length === 0, "joining an existing write reserves the action");
+		const correlation = { requestId: id, stamp: status.status.stamp, action: { kind: "chat-close", disposition: "hide" } };
+		const abort = () => page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 26, ack: 25, items: [{ kind: "native-abort", binding, correlation }] }), { binding: first.status.binding, correlation });
+		assert(await abort() == null, "abort cannot acknowledge while the joined write is unsettled");
+		releaseJoinedAbort();
+		await joinedAbortFinished;
+		await page.locator(".markdown-editor-status").getByText("Saved", { exact: true }).waitFor();
+		await page.waitForTimeout(100);
+		assert((await abort())?.items?.[0]?.kind === "abort-ack", "the same abort releases only after the joined write settles");
+		const after = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 27, ack: 26, items: [] }), { binding: first.status.binding });
+		assert(after?.items?.length === 0, "the aborted joined write cannot publish a late allow");
+	} finally { releaseJoinedAbort(); await joinedAbortFinished; await page.unroute("**/workspace-markdown?*"); }
 	await page.route("**/workspace-files?*", (route) => route.fulfill({ status: 409, json: { code: "person_changed", error: "Invented identity change" } }));
 	await page.evaluate(() => window.dispatchEvent(new Event("focus")));
 	await page.getByText("Someone else is now signed in on this server.", { exact: true }).waitFor();
-	const invalidated = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 19, ack: 18, items: [] }), { binding: first.status.binding });
+	const invalidated = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 28, ack: 27, items: [] }), { binding: first.status.binding });
 	assert(invalidated == null, "a changed person cannot receive another owner status");
 	console.log("owner endpoint browser supplement: hello, replay and invalid inputs passed");
 } catch (caught) { error = caught; }

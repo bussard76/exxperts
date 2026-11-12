@@ -1124,7 +1124,9 @@ export function App() {
 							} else if (markdownEditorPendingActionRef.current) {
 								items = [{ kind: "guard-result", binding: currentBinding, nativeRequestId: request.nativeRequestId, result: { kind: "refused", correlation, reason: "busy" } }];
 							} else {
-								if (markdownEditorRef.current?.pendingWrite() || documentSaveInFlightRef.current || documentKeepMineInFlightRef.current || documentWriteRef.current) return null;
+								const editor = markdownEditorRef.current;
+								const pendingWrite = editor?.pendingWrite() || documentSaveInFlightRef.current || documentKeepMineInFlightRef.current || documentWriteRef.current;
+								if (pendingWrite && !editor) return null;
 								const admission = captureDocumentAdmission(request.nativeRequestId, { kind: "chat-close", disposition });
 								if (!admission) return null;
 								markdownEditorPendingActionRef.current = { admission, continuation: () => {}, result: null };
@@ -1154,7 +1156,7 @@ export function App() {
 										outbound.push({ kind: "guard-result", binding: currentBinding, nativeRequestId: request.nativeRequestId, result: { kind: "prepared", correlation: nativePrepared.correlation, decision: "allow" } });
 									},
 								};
-								if (markdownEditorDirtyRef.current) {
+								const startDeadline = () => {
 									const timer = window.setTimeout(() => {
 										if (markdownEditorPromptTimerRef.current !== timer || nativeGuardRef.current?.admission !== admission) return;
 										markdownEditorPromptTimerRef.current = null;
@@ -1164,8 +1166,34 @@ export function App() {
 										setMarkdownEditorPromptBusy(false);
 									}, 120_000);
 									markdownEditorPromptTimerRef.current = timer;
+								};
+								const prompt = () => {
+									if (markdownEditorPromptTimerRef.current === null) startDeadline();
 									setMarkdownEditorPrompt("navigate");
 									setMarkdownEditorPromptBusy(false);
+								};
+								if (pendingWrite && editor) {
+									startDeadline();
+									markdownEditorPromptBusyRef.current = true;
+									void (async () => {
+										let settled = false;
+										try { settled = await editor.settle(); } catch { /* Fail closed on an unsettled write. */ }
+										markdownEditorPromptBusyRef.current = false;
+										if (nativePrepared?.admission === admission && nativePrepared.phase === "aborting") markdownEditorCanceledSaveRef.current = false;
+										if (!nativePrepared || nativePrepared.admission !== admission || nativePrepared.phase !== "preparing") return;
+										if (!settled) nativeGuardRef.current?.fail("unknown-write");
+										else if (!documentAdmissionIsCurrent(admission)) nativeGuardRef.current?.fail("invalidated");
+										else if (markdownEditorDirtyRef.current) prompt();
+										else if (prepareDocumentAdmission(admission)) {
+											if (markdownEditorPromptTimerRef.current !== null) window.clearTimeout(markdownEditorPromptTimerRef.current);
+											markdownEditorPromptTimerRef.current = null;
+											nativeGuardRef.current?.prepared();
+										}
+										else nativeGuardRef.current?.fail("invalidated");
+									})();
+									items = [];
+								} else if (markdownEditorDirtyRef.current) {
+									prompt();
 									items = [];
 								} else {
 									if (!prepareDocumentAdmission(admission)) { nativeGuardRef.current = null; nativePrepared = null; markdownEditorPendingActionRef.current = null; markdownEditorRef.current?.setFence(false); setMarkdownEditorFenced(false); return null; }
