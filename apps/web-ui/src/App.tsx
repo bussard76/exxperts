@@ -1181,9 +1181,13 @@ export function App() {
 								if (pendingWrite && editor) {
 									startDeadline();
 									markdownEditorPromptBusyRef.current = true;
+									const joinDeadline = window.setTimeout(() => {
+										if (nativeGuardRef.current?.admission === admission) nativeGuardRef.current.deadline();
+									}, 30_000);
 									void (async () => {
 										let settled = false;
 										try { settled = await editor.settle(); } catch { /* Fail closed on an unsettled write. */ }
+										window.clearTimeout(joinDeadline);
 										markdownEditorPromptBusyRef.current = false;
 										if (nativePrepared?.admission === admission && nativePrepared.phase === "aborting") markdownEditorCanceledSaveRef.current = false;
 										if (!nativePrepared || nativePrepared.admission !== admission || nativePrepared.phase !== "preparing") return;

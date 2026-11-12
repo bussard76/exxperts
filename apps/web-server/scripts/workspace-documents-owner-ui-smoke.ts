@@ -232,10 +232,49 @@ try {
 	assert(closed?.items?.[0]?.kind === "completed", "explicit matching no-child evidence completes the committed action");
 	const receipt = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 33, ack: 32, items: [{ kind: "native-completed", binding, correlation }] }), { binding: first.status.binding, correlation });
 	assert(receipt?.sequence === 33, "matching completion receipt releases the owner reservation");
+	await editor.click();
+	await page.keyboard.type(" timed joined write");
+	let beginTimed!: () => void, releaseTimed!: () => void, finishTimed!: () => void, timedStarted = false;
+	const timedStart = new Promise<void>((resolve) => { beginTimed = resolve; });
+	const timedRelease = new Promise<void>((resolve) => { releaseTimed = resolve; });
+	const timedFinish = new Promise<void>((resolve) => { finishTimed = resolve; });
+	await page.route("**/workspace-markdown?*", async (route) => {
+		if (route.request().method() !== "PUT") return route.continue();
+		timedStarted = true;
+		const response = await route.fetch();
+		beginTimed();
+		await timedRelease;
+		await route.fulfill({ response }).catch(() => {});
+		finishTimed();
+	});
+	try {
+		await page.locator(".markdown-editor-save").click();
+		await timedStart;
+		const status = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 34, ack: 33, items: [] }), { binding: first.status.binding });
+		const id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+		const result = await page.evaluate(({ binding, stamp, id }) => {
+			const original = window.setTimeout;
+			window.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: any[]) => original(handler, timeout === 30_000 ? 20 : timeout, ...args)) as typeof window.setTimeout;
+			try { return (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 35, ack: 34, items: [{ kind: "native-prepare", binding, nativeRequestId: id, observedStamp: stamp, disposition: "hide" }] }); }
+			finally { window.setTimeout = original; }
+		}, { binding: first.status.binding, stamp: status.status.stamp, id });
+		assert(result?.items?.length === 0, "timed write initially remains pending");
+		await page.waitForTimeout(100);
+		const timed = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 36, ack: 35, items: [] }), { binding: first.status.binding });
+		assert(timed?.items?.[0]?.result?.kind === "unknown", "the 30-second write join deadline reports unknown");
+		const correlation = { requestId: id, stamp: status.status.stamp, action: { kind: "chat-close", disposition: "hide" } };
+		const abort = () => page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 37, ack: 36, items: [{ kind: "native-abort", binding, correlation }] }), { binding: first.status.binding, correlation });
+		assert(await abort() == null, "a timed-out sent write retains its reservation until settled");
+		releaseTimed();
+		await timedFinish;
+		await page.locator(".markdown-editor-status").getByText("Saved", { exact: true }).waitFor();
+		await page.waitForTimeout(100);
+		assert((await abort())?.items?.[0]?.kind === "abort-ack", "the timed-out attempt releases only on matching abort after settlement");
+	} finally { releaseTimed(); if (timedStarted) await timedFinish; await page.unroute("**/workspace-markdown?*"); }
 	await page.route("**/workspace-files?*", (route) => route.fulfill({ status: 409, json: { code: "person_changed", error: "Invented identity change" } }));
 	await page.evaluate(() => window.dispatchEvent(new Event("focus")));
 	await page.getByText("Someone else is now signed in on this server.", { exact: true }).waitFor();
-	const invalidated = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 34, ack: 33, items: [] }), { binding: first.status.binding });
+	const invalidated = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 38, ack: 37, items: [] }), { binding: first.status.binding });
 	assert(invalidated == null, "a changed person cannot receive another owner status");
 	console.log("owner endpoint browser supplement: hello, replay and invalid inputs passed");
 } catch (caught) { error = caught; }

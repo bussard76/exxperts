@@ -788,3 +788,7 @@ The owner now admits a matching native request while an existing Markdown write 
 ## Checkpoint: no-child commit handshake draft
 
 The supplemental owner test first failed because native commit was unsupported. The owner now validates a current prepared correlation, reports committed while retaining the fence, rejects stale no-child evidence, and reports completed only after the matching explicit `child-closed` input; a matching final receipt releases the reservation. The attributed `workspace-documents-owner-ui` run passed 1/1 after the fix, and UI/scripts typechecks and UI build passed. This is a controlled browser sender for the no-child case: the actual shell does not yet generate or consume these messages, and registered-child teardown and native continuation remain unimplemented.
+
+## Checkpoint: bounded native write join
+
+The owner browser test accelerated only the specified 30-second join timer while holding the real invented Markdown PUT, and first failed because no unknown result was emitted. The owner now emits unknown at that bound and retains the arbiter until the write settles and the matching abort is acknowledged. The attributed `workspace-documents-owner-ui` run passed 1/1; UI/scripts typechecks and UI build passed. This is controlled browser endpoint evidence, not a native shell round trip.
