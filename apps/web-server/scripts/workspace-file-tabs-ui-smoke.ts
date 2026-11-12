@@ -401,7 +401,7 @@ try {
 		try {
 			await framedShellStarted;
 			const frame = page.locator('.workspace-preview-html iframe[title="premature.excalidraw"]');
-			await frame.evaluate((node) => { const iframe = node as HTMLIFrameElement; iframe.src = `/replacement-frame${new URL(iframe.src).hash}`; });
+			await frame.evaluate((node) => { const iframe = node as HTMLIFrameElement; iframe.contentWindow!.location.href = `/replacement-frame${new URL(iframe.src).hash}`; });
 			await page.frameLocator('.workspace-preview-html iframe[title="premature.excalidraw"]').getByText("Invented framed replacement").waitFor();
 			await waitUntil(() => page.evaluate(() => (window as any).replacementReady), "the prematurely navigated framed preview sent readiness");
 			await page.waitForTimeout(300);
@@ -618,7 +618,7 @@ try {
         await direct.waitForTimeout(300);
         assert(await page.evaluate(() => (window as any).htmlRepeatedBytes) === 0, "repeated HTML frame readiness cannot receive a second snapshot");
         assert(forbiddenRequests.length === 0 && !/hostile-(fetch|api|xhr|ws|image|form)/.test(serverOutput.join("")), "HTML cannot send API, connect, image or form requests");
-        await htmlFrame.evaluate((frame) => { const iframe = frame as HTMLIFrameElement; iframe.src = `/replacement-html-frame${new URL(iframe.src).hash}`; });
+        await htmlFrame.evaluate((frame) => { const iframe = frame as HTMLIFrameElement; iframe.contentWindow!.location.href = `/replacement-html-frame${new URL(iframe.src).hash}`; });
         await page.frameLocator(".workspace-preview-html iframe").getByText("Invented replacement").waitFor();
         await waitUntil(() => page.evaluate(() => (window as any).htmlReplacementReady === 2), "the navigated frame sent readiness");
         await page.waitForTimeout(300);
@@ -639,7 +639,7 @@ try {
         try {
             await prematureShellStarted;
             const prematureFrame = page.locator('.workspace-preview-html iframe[title="premature.html"]');
-            await prematureFrame.evaluate((frame) => { const iframe = frame as HTMLIFrameElement; iframe.src = `/replacement-html-frame${new URL(iframe.src).hash}`; });
+            await prematureFrame.evaluate((frame) => { const iframe = frame as HTMLIFrameElement; iframe.contentWindow!.location.href = `/replacement-html-frame${new URL(iframe.src).hash}`; });
             await page.frameLocator('.workspace-preview-html iframe[title="premature.html"]').getByText("Invented replacement").waitFor();
             await waitUntil(() => page.evaluate(() => (window as any).htmlReplacementReady === 3), "the prematurely navigated frame sent readiness");
             await page.waitForTimeout(300);
