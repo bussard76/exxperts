@@ -270,7 +270,7 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
   const keys = (value: Record<string, unknown>, expected: string) => Object.keys(value).sort().join(",") === expected;
   const positive = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
   const accept = (value: unknown, sentPrepare: boolean): boolean => {
-    let receivedNoSession = false;
+    let receivedPreparation = false;
     if (!record(value) || !keys(value, "ack,items,nativeSessionId,sequence,status,version") || value.version !== 1 || value.nativeSessionId !== session || value.sequence !== sequence || value.ack !== sequence || !Array.isArray(value.items) || !record(value.status) || !keys(value.status, "binding,child,stamp") || !record(value.status.binding) || !keys(value.status.binding, "nativeSessionId,ownerGeneration,ownerId") || value.status.binding.nativeSessionId !== session || typeof value.status.binding.ownerId !== "string" || !uuid.test(value.status.binding.ownerId) || !positive(value.status.binding.ownerGeneration) || value.status.child !== null) return false;
     const binding = value.status.binding;
     if (ownerId === null) {
@@ -279,14 +279,22 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
     } else if (binding.ownerId !== ownerId || binding.ownerGeneration !== ownerGeneration) return false;
     else if (sentPrepare && hideRequest && !hideSent) {
       const reply = value.items[0];
-      if (hideRequest.observedStamp !== null || value.status.stamp !== null || value.items.length !== 1 || !record(reply) || !keys(reply, "binding,disposition,kind,nativeRequestId") || reply.kind !== "no-session" || reply.nativeRequestId !== hideRequest.nativeRequestId || reply.disposition !== "hide" || !record(reply.binding) || !keys(reply.binding, "nativeSessionId,ownerGeneration,ownerId") || reply.binding.nativeSessionId !== session || reply.binding.ownerId !== ownerId || reply.binding.ownerGeneration !== ownerGeneration) return false;
-      receivedNoSession = true;
+      if (value.items.length !== 1 || !record(reply) || !record(reply.binding) || !keys(reply.binding, "nativeSessionId,ownerGeneration,ownerId") || reply.binding.nativeSessionId !== session || reply.binding.ownerId !== ownerId || reply.binding.ownerGeneration !== ownerGeneration || reply.nativeRequestId !== hideRequest.nativeRequestId) return false;
+      if (reply.kind === "no-session") {
+        if (!keys(reply, "binding,disposition,kind,nativeRequestId") || hideRequest.observedStamp !== null || value.status.stamp !== null || reply.disposition !== "hide") return false;
+      } else if (reply.kind === "guard-result") {
+        const result = reply.result;
+        if (!keys(reply, "binding,kind,nativeRequestId,result") || !hideRequest.observedStamp || !record(result) || !keys(result, "correlation,decision,kind") || result.kind !== "prepared" || result.decision !== "allow" || !record(result.correlation) || !keys(result.correlation, "action,requestId,stamp") || result.correlation.requestId !== hideRequest.nativeRequestId || !record(result.correlation.action) || !keys(result.correlation.action, "disposition,kind") || result.correlation.action.kind !== "chat-close" || result.correlation.action.disposition !== "hide" || !record(result.correlation.stamp) || !record(value.status.stamp)) return false;
+        const stamp = result.correlation.stamp;
+        if (!keys(stamp, "conversationId,draftGeneration,hostGeneration,ownerGeneration,ownerId,roomGeneration,roomId") || !Object.entries(stamp).every(([key, entry]) => value.status && record(value.status) && record(value.status.stamp) && value.status.stamp[key] === entry) || !Object.entries(hideRequest.observedStamp).every(([key, entry]) => key === "draftGeneration" ? positive(stamp[key]) && positive(entry) && (stamp[key] as number) >= entry : stamp[key] === entry)) return false;
+      } else return false;
+      receivedPreparation = true;
     } else if (value.items.length !== 0) return false;
     if (value.status.stamp !== null) {
       const stamp = value.status.stamp;
       if (!record(stamp) || !keys(stamp, "conversationId,draftGeneration,hostGeneration,ownerGeneration,ownerId,roomGeneration,roomId") || stamp.ownerId !== binding.ownerId || stamp.ownerGeneration !== binding.ownerGeneration || typeof stamp.roomId !== "string" || !stamp.roomId || typeof stamp.conversationId !== "string" || !stamp.conversationId || !positive(stamp.roomGeneration) || !positive(stamp.hostGeneration) || !positive(stamp.draftGeneration)) return false;
     }
-    if (receivedNoSession) hideSent = true;
+    if (receivedPreparation) hideSent = true;
     latestStamp = value.status.stamp as Record<string, unknown> | null;
     ownerId = binding.ownerId as string;
     ownerGeneration = binding.ownerGeneration as number;

@@ -16,7 +16,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "exxperts-documents-native-"));
 const port = await freePort();
 const stuck = process.env.T20_NATIVE_STUCK === "1";
-const prepare = process.env.T20_NATIVE_PREPARE === "1";
+const active = process.env.T20_NATIVE_ACTIVE === "1";
+const prepare = process.env.T20_NATIVE_PREPARE === "1" || active;
 const feed = http.createServer((_request, response) => {
 	response.writeHead(200, { "content-type": "application/json" });
 	response.end(JSON.stringify({ tag_name: "v0.0.0", prerelease: false, draft: false }));
@@ -24,6 +25,16 @@ const feed = http.createServer((_request, response) => {
 await new Promise<void>((resolve) => feed.listen(0, "127.0.0.1", resolve));
 const address = feed.address();
 assert(address && typeof address !== "string", "the fake update feed listens locally");
+if (active) {
+	const agent = path.join(scratch, ".exxperts", "agent");
+	const app = path.join(scratch, ".exxperts", "app");
+	fs.mkdirSync(agent, { recursive: true });
+	fs.mkdirSync(app, { recursive: true });
+	fs.writeFileSync(path.join(agent, "models.json"), JSON.stringify({ providers: { "openai-compatible": { name: "Synthetic Gateway", baseUrl: `http://127.0.0.1:${address.port}/v1`, api: "openai-completions", models: [{ id: "room-model", name: "Room Model", contextWindow: 128000, maxTokens: 16384 }] } } }));
+	fs.writeFileSync(path.join(agent, "auth.json"), JSON.stringify({ "openai-compatible": { type: "api_key", key: "synthetic-native-key" } }));
+	fs.writeFileSync(path.join(app, "openai-compatible-ai-profile.json"), JSON.stringify({ profileId: "openai-compatible", providerId: "openai-compatible", label: "Synthetic Gateway", roomModels: [{ modelId: "room-model", label: "Room Model" }], maintenanceModel: "room-model" }));
+	fs.writeFileSync(path.join(app, "persistent-agent-ai-profile.json"), JSON.stringify({ profileId: "openai-compatible" }));
+}
 let application: ElectronApplication | undefined;
 try {
 	application = await electron.launch({
@@ -42,12 +53,27 @@ try {
 		return window.id;
 	}, port);
 	if (prepare) {
+		if (active) {
+			const page = application.windows().find((candidate) => candidate.url().startsWith(`http://localhost:${port}/`));
+			assert(page, "the real owner page is available");
+			const created = await page.evaluate(async () => {
+				const response = await fetch("/api/persistent-agents", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ displayName: "Invented Native Room", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
+				return response.status;
+			});
+			assert(created === 201, "the isolated native test creates an invented room");
+			await page.reload();
+			const dismiss = page.locator(".whats-new-close");
+			if (await dismiss.count()) await dismiss.click();
+			await page.locator(".persistent-agent-card").filter({ hasText: "Invented Native Room" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+			await page.locator(".sidebar-workspace-files").waitFor();
+		}
 		await application.evaluate(({ BrowserWindow }, id) => {
 			const window = BrowserWindow.fromId(id)!;
 			const original = window.webContents.executeJavaScript.bind(window.webContents);
 			(window as any).__t20Polls = 0;
 			(window as any).__t20Prepares = 0;
 			(window as any).__t20NoSession = 0;
+			(window as any).__t20Prepared = 0;
 			(window.webContents as any).executeJavaScript = (script: string, ...args: unknown[]) => {
 				if (script.includes("__exxpertsDocuments")) {
 					(window as any).__t20Polls++;
@@ -56,6 +82,7 @@ try {
 				const result = (original as any)(script, ...args);
 				if (script.includes('"native-prepare"')) return Promise.resolve(result).then((output: any) => {
 					if (output?.items?.[0]?.kind === "no-session") (window as any).__t20NoSession++;
+					if (output?.items?.[0]?.kind === "guard-result" && output.items[0].result?.kind === "prepared") (window as any).__t20Prepared++;
 					return output;
 				});
 				return result;
@@ -65,7 +92,8 @@ try {
 		await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.close(), owner);
 		await new Promise((resolve) => setTimeout(resolve, 1_000));
 		assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Prepares === 1, owner), "the actual native close sends exactly one owner prepare");
-		assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20NoSession === 1, owner), "the actual owner returns the matching empty-session response");
+		if (active) assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Prepared === 1, owner), "the actual owner prepares the active clean room exactly once");
+		else assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20NoSession === 1, owner), "the actual owner returns the matching empty-session response");
 		assert(await application.evaluate(({ BrowserWindow }, id) => Boolean(BrowserWindow.fromId(id)?.isVisible()), owner), "the staged no-session response cannot yet continue the native close");
 	} else {
 	// Fault the shell's actual outbound exchange, retaining its ordinary close entrypoint.
