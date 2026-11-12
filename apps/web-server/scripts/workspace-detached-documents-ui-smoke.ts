@@ -133,6 +133,24 @@ try {
 			const detachCount = await detach.count();
 			assert(detachCount === 1, `a selected room shows one Detach control before opening a tab (found ${detachCount})`);
 			assert(await detach.isEnabled(), "Detach is available for an empty selected room when safeguards are ready");
+			await page.evaluate(`window.__t20RecoveryOpen = window.open; window.__t20RecoveryAdopt = document.adoptNode; document.adoptNode = function () { throw new Error("invented rollback fault"); }; window.open = function (...args) { const child = window.__t20RecoveryOpen.apply(this, args); if (child) { child.__t20RecoveryAdopt = child.document.adoptNode; child.document.adoptNode = function (node) { if (node.className === "docs-host") throw new Error("invented adoption fault"); return child.__t20RecoveryAdopt.call(this, node); }; } return child; };`);
+			let recoveryChild: import("playwright").Page | undefined;
+			try {
+				const recoveryOpened = page.waitForEvent("popup");
+				await detach.click();
+				recoveryChild = await recoveryOpened;
+				await page.getByText("Cedar Studio · Documents unavailable", { exact: true }).waitFor();
+				await page.evaluate(`window.open = window.__t20RecoveryOpen; document.adoptNode = window.__t20RecoveryAdopt;`);
+				await recoveryChild.evaluate(`document.adoptNode = window.__t20RecoveryAdopt;`);
+				const recoveredClosed = recoveryChild.waitForEvent("close");
+				await page.getByRole("button", { name: "Return", exact: true }).click();
+				await recoveredClosed;
+				await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
+				assert(await page.locator(".workspace-tab").count() === 0 && writes === 0, "recovering a partial move retains one empty owner session without a write");
+			} finally {
+				await page.evaluate(`window.open = window.__t20RecoveryOpen; document.adoptNode = window.__t20RecoveryAdopt; delete window.__t20RecoveryOpen; delete window.__t20RecoveryAdopt`).catch(() => {});
+				if (recoveryChild && !recoveryChild.isClosed()) await recoveryChild.evaluate(`document.adoptNode = window.__t20RecoveryAdopt; delete window.__t20RecoveryAdopt`).catch(() => {});
+			}
 			let releaseLoad!: () => void, beginLoad!: () => void;
 			const loadReleased = new Promise<void>((resolve) => { releaseLoad = resolve; });
 			const loadStarted = new Promise<void>((resolve) => { beginLoad = resolve; });
