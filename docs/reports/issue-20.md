@@ -503,3 +503,5 @@ The detached smoke now specifies holding the actual HTML metadata request across
 ## Checkpoint: controlled frame generation draft
 
 The owner now publishes host generation to the document components. HTML, PPTX and Excalidraw keep their component, in-flight fetch and error state while a changed host generation creates a fresh concrete iframe identity; the prior listener also rejects messages after its element changes owner window. UI and scripts typechecks, UI asset build, and the attributed `workspace-file-tabs-ui` smoke passed (1/1), including attached real-frame source and navigation checks. No transfer currently advances the generation, and the child/in-flight cases remain unexecuted; preflight identity allocation and actual controlled-move security still require completion and proof.
+
+The pending child fixture was corrected to avoid duplicate invented-file writes and to release the held HTML response if child opening or its loading assertion fails. Scripts typecheck passed; the child test remains blocked before these lines by unavailable Detach.

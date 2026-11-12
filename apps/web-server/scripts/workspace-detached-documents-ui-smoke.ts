@@ -151,10 +151,11 @@ try {
 			});
 			await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "loading.html" }).click();
 			await previewStarted;
-			const loadingOpened = page.waitForEvent("popup");
-			await detach.click();
-			const loadingChild = await loadingOpened;
+			let loadingChild!: import("playwright").Page;
 			try {
+				const loadingOpened = page.waitForEvent("popup");
+				await detach.click();
+				loadingChild = await loadingOpened;
 				await loadingChild.locator(".workspace-preview-html").getByText("Loading preview…", { exact: true }).waitFor();
 			} finally { releasePreview(); }
 			await loadingChild.frameLocator('.workspace-preview-html iframe[title="loading.html"]').getByText("Invented loading snapshot").waitFor();
@@ -174,9 +175,7 @@ try {
 			await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "snapshot.html" }).click();
 			await page.frameLocator('.workspace-preview-html iframe[title="snapshot.html"]').getByText("Invented original snapshot").waitFor();
 			assert(await page.frameLocator('.workspace-preview-html iframe[title="snapshot.html"]').locator("body").getAttribute("data-executed") === "yes", "the authorized original HTML snapshot executes in its opaque frame");
-			fs.writeFileSync(path.join(workspace, "retained.txt"), "Invented original text snapshot");
-fs.writeFileSync(path.join(workspace, "retained.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==", "base64"));
-fs.writeFileSync(path.join(workspace, "snapshot.html"), '<body><p>Invented later disk content</p></body>');
+			fs.writeFileSync(path.join(workspace, "snapshot.html"), '<body><p>Invented later disk content</p></body>');
 			const previewOpened = page.waitForEvent("popup");
 			await detach.click();
 			const previewChild = await previewOpened;
