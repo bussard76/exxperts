@@ -39,7 +39,8 @@ export function WorkspaceFramedPreview({ agentId, conversationId, path }: { agen
 			if (!frame || event.source !== frame) return;
 			if (event.data?.kind === "frame-ready" && bytes && !delivered.current) {
 				delivered.current = true;
-				frame.postMessage(bytes, "*", [bytes]);
+				const copy = bytes.slice(0);
+				frame.postMessage(copy, "*", [copy]);
 			}
 			else if (event.data?.kind === "frame-rendered") setRendered(true);
 			else if (event.data?.kind === "frame-failed") setError("This file is damaged or cannot be read.");

@@ -350,7 +350,16 @@ try {
 				if (url.searchParams.get("path") === "single.excalidraw" && url.searchParams.get("frame") !== "1") singleFileFetches += 1;
 			}
 		});
-		await page.evaluate(() => { (window as any).replacementBytes = 0; (window as any).replacementReady = false; (window as any).repeatBytes = 0; window.addEventListener("message", (event) => { if (event.data?.kind === "replacement-ready") (window as any).replacementReady = true; if (event.data?.kind === "repeat-received") (window as any).repeatBytes = event.data.length; if (event.data?.kind === "replacement-received") (window as any).replacementBytes = event.data.length; }); });
+		await page.evaluate(() => {
+			const original = Response.prototype.arrayBuffer;
+			(window as any).restorePreviewBuffer = () => { Response.prototype.arrayBuffer = original; };
+			Response.prototype.arrayBuffer = async function () {
+				const buffer = await original.call(this);
+				if (this.url.includes("path=single.excalidraw")) (window as any).originalPreviewBuffer = buffer;
+				return buffer;
+			};
+			(window as any).replacementBytes = 0; (window as any).replacementReady = false; (window as any).repeatBytes = 0; window.addEventListener("message", (event) => { if (event.data?.kind === "replacement-ready") (window as any).replacementReady = true; if (event.data?.kind === "repeat-received") (window as any).repeatBytes = event.data.length; if (event.data?.kind === "replacement-received") (window as any).replacementBytes = event.data.length; });
+		});
 		const fakeFrame = `<script>let received = false; onmessage = e => { if (e.data instanceof ArrayBuffer) { if (received) parent.postMessage({kind: "repeat-received", length: e.data.byteLength}, "*"); else { received = true; parent.postMessage({kind: "frame-rendered"}, "*"); parent.postMessage({kind: "frame-ready"}, "*"); setTimeout(() => location.href = "/replacement-frame", 100); } } }; parent.postMessage({kind: "frame-ready"}, "*");</script>`;
 		const replacement = `<script>onmessage = e => { if (e.data instanceof ArrayBuffer) parent.postMessage({kind: "replacement-received", length: e.data.byteLength}, "*"); }; parent.postMessage({kind: "replacement-ready"}, "*"); parent.postMessage({kind: "frame-ready"}, "*");</script>`;
 		await page.route("**/replacement-frame", (route) => route.fulfill({ status: 200, contentType: "text/html", body: replacement }));
@@ -363,9 +372,11 @@ try {
 		await page.locator(".workspace-preview-pptx-loading").waitFor({ state: "hidden", timeout: 30_000 });
 		await waitUntil(() => page.evaluate(() => (window as any).replacementReady), "replacement frame loaded");
 		await page.waitForTimeout(1000);
+		assert(await page.evaluate(() => (window as any).originalPreviewBuffer?.byteLength) === 500, "the actual preview response retains its original bytes after frame delivery");
 		assert(await page.evaluate(() => (window as any).repeatBytes) === 0, "repeated ready cannot receive the file again");
 		assert(await page.evaluate(() => (window as any).replacementBytes) === 0 && singleFileFetches === 1, "a replacement frame cannot receive or refetch the 500-byte file");
 		await tab("single.excalidraw").getByRole("button", { name: /close/i }).click();
+		await page.evaluate(() => (window as any).restorePreviewBuffer());
 		await page.unroute("**/workspace-preview?*");
 		await page.unroute("**/replacement-frame");
 		await treeFile("single.excalidraw").click();
