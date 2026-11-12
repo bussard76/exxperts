@@ -318,6 +318,11 @@ try {
 			await child.locator(".workspace-tab[data-active='true']", { hasText: "invented.md" }).waitFor();
 			assert(await child.getByRole("textbox", { name: "Raw Markdown source" }).inputValue() === rawDisplay, "the child presents the source and active tab");
 			assert(await child.evaluate(`document.querySelector(".docs-host") === opener.__t20OriginalHost && document.querySelector(".sidebar-workspace-files") === opener.__t20OriginalTree && document.querySelector('[aria-label="Raw Markdown source"]') === opener.__t20OriginalEditor`), "the actual child holds the same container, tree, and editor nodes");
+			await child.locator(".workspace-file-browser-file", { hasText: "invented.md" }).hover();
+			await child.getByRole("tooltip").getByText("invented.md", { exact: true }).waitFor();
+			assert(await page.getByRole("tooltip").count() === 0, "the tree tooltip belongs to the actual child host");
+			await child.mouse.move(700, 500);
+			await child.getByRole("tooltip").waitFor({ state: "hidden" });
 			assert(await page.locator("textarea").first().isVisible(), "chat remains usable in the owner window");
 			await page.getByRole("button", { name: "Attachments", exact: true }).click();
 			await page.getByRole("region", { name: "Attachments" }).waitFor();

@@ -676,3 +676,7 @@ The actual-shell `workspace-documents-native-ui` smoke now has an independent `T
 ## Checkpoint: scrolled tree tooltip
 
 The attributed `sidebar-reopen-ui` smoke passed 1/1 with an invented long tree, including a real hover on its last scrolled entry and an intersection check that the tooltip remains visible. This checks the attached host's clipping behavior; it is not evidence for child-window overlays.
+
+## Checkpoint: child tooltip case
+
+The detached smoke now exercises a real hover in the child tree and requires the tooltip to appear in that child rather than the owner, then clear on pointer exit. Scripts typecheck passed; this case has not executed because Detach remains disabled, so R10 is still open.
