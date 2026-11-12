@@ -1962,6 +1962,59 @@ try {
 			await unknownPrompt.getByRole("button", { name: "Discard changes" }).click();
 			assert(await roomPage.locator(".markdown-editor-tiptap .ProseMirror").count() === 1 && (await roomPage.locator(".markdown-editor-tiptap .ProseMirror").textContent())?.includes("unresolved draft") && unknownWrites === 1, "an unknown write prevents discard and retry while retaining the draft");
 		} finally { await roomContext.close(); }
+		for (const operation of ["archive", "purge"] as const) {
+			const displayName = operation === "archive" ? "Draft Willow" : "Draft Cypress";
+			const created = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName, userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
+			assert(created.status === 201, `the invented ${operation} draft room is created`);
+			const roomId = String(created.body?.agent?.id ?? "");
+			assert((await api(`/api/persistent-agents/${encodeURIComponent(roomId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: folder, workspaceAccessMode: "localFiles" }) })).status === 200, `the invented ${operation} room uses the temporary workspace`);
+			const dirtyContext = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+			try {
+				await dirtyContext.addInitScript({ content: `(() => { const json = Response.prototype.json; Response.prototype.json = async function () { const body = await json.call(this); if (new URL(this.url).pathname === "/api/persistent-agents" && Array.isArray(body)) window.__t20DangerStatuses = body; return body; }; const interval = window.setInterval; window.setInterval = (callback, delay, ...args) => interval(callback, delay === 5000 ? 30000 : delay, ...args); const oldTimeout = window.setTimeout; window.setTimeout = (callback, delay, ...args) => oldTimeout(callback, delay === 1000 ? 30000 : delay, ...args); })();` });
+				const dirtyPage = await dirtyContext.newPage();
+				await dirtyPage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+				await dirtyPage.waitForLoadState("networkidle");
+				const close = dirtyPage.locator(".whats-new-close");
+				if (await close.count()) await close.click();
+				await dirtyPage.locator(".persistent-agent-card").filter({ hasText: displayName }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+				await dirtyPage.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "notes.md" }).click();
+				await dirtyPage.locator(".markdown-editor-tiptap .ProseMirror").waitFor();
+				await dirtyPage.getByRole("button", { name: "RAW", exact: true }).click();
+				const dirtyRaw = dirtyPage.getByRole("textbox", { name: "Raw Markdown source" });
+				await dirtyRaw.fill(`# Invented ${operation} draft\n`);
+				await dirtyPage.getByRole("button", { name: "Room settings" }).click();
+				await dirtyPage.locator(".settings-dialog-nav-item").filter({ hasText: /^Archive or delete$/ }).first().click();
+				let requests = 0;
+				dirtyPage.on("request", (request) => { if (request.method() === "POST" && request.url().endsWith(`/${operation}`)) requests++; });
+				const requestOperation = async (stale = false) => {
+					const button = dirtyPage.locator(".room-danger-zone").getByRole("button", { name: operation === "archive" ? "Archive" : "Delete room", exact: true });
+					if (stale) {
+						const element = await button.elementHandle();
+						assert(element, `the actual ${operation} button is present`);
+						assert(await dirtyPage.evaluate(({ id, element }) => { const status = (window as any).__t20DangerStatuses?.find((item: { id: string }) => item.id === id); if (!status) return false; (window as any).__t20DangerStatus = status; status.id = "invented-foreign-room"; (element as HTMLButtonElement).click(); return true; }, { id: roomId, element }), `the actual ${operation} status supplies the current room`);
+					} else await button.click();
+					if (operation === "purge") {
+						await dirtyPage.getByRole("alertdialog", { name: `Delete ${displayName}?` }).getByRole("button", { name: "Delete room", exact: true }).click();
+					}
+				};
+				await requestOperation(true);
+				await dirtyPage.waitForTimeout(300);
+				assert(requests === 0 && await dirtyPage.getByRole("dialog", { name: "Unsaved Markdown changes" }).count() === 0 && await dirtyRaw.inputValue() === `# Invented ${operation} draft\n`, `a stale ${operation} target is refused before prompting or sending`);
+				await dirtyPage.evaluate((id) => { (window as any).__t20DangerStatus.id = id; }, roomId);
+				await dirtyPage.evaluate(() => window.dispatchEvent(new Event("focus")));
+				await dirtyPage.locator(".settings-dialog-nav-item").filter({ hasText: /^Archive or delete$/ }).first().click({ timeout: 10_000 });
+				await dirtyPage.locator(".room-danger-zone").getByRole("button", { name: operation === "archive" ? "Archive" : "Delete room", exact: true }).waitFor({ timeout: 10_000 });
+				await requestOperation();
+				const guard = dirtyPage.getByRole("dialog", { name: "Unsaved Markdown changes" });
+				await guard.getByRole("button", { name: "Cancel", exact: true }).click();
+				assert(requests === 0 && await dirtyRaw.inputValue() === `# Invented ${operation} draft\n` && (await dirtyPage.title()).includes(displayName), `Cancel keeps the invented ${operation} room and draft before any request`);
+				await requestOperation();
+				const completed = dirtyPage.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith(`/${operation}`) && response.ok());
+				await guard.getByRole("button", { name: "Discard changes" }).click();
+				assert(await completed, `the admitted invented ${operation} callback reaches its real endpoint`);
+				assert(requests >= 1, `the admitted ${operation} sends its endpoint request`);
+			} finally { await dirtyContext.close(); }
+		}
 		const archiveRoom = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Willow", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
 		assert(archiveRoom.status === 201, "the invented archive-test room is created");
 		const archiveRoomId = String(archiveRoom.body?.agent?.id ?? "");

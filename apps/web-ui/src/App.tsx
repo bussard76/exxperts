@@ -175,7 +175,7 @@ type DocumentContext = Readonly<{
 	roomGeneration: number;
 }>;
 
-type DocumentLocalAction = Readonly<{ kind: "select-file" | "close-tab"; path: string } | { kind: "room-operation"; operation: "memento"; roomId: string; conversationId: string }>;
+type DocumentLocalAction = Readonly<{ kind: "select-file" | "close-tab"; path: string } | { kind: "room-operation"; operation: "memento" | "archive" | "purge"; roomId: string; conversationId: string }>;
 
 function sameDocumentLocalAction(a: DocumentLocalAction | null, b: DocumentLocalAction | null): boolean {
 	if (!a || !b) return a === b;
@@ -745,7 +745,7 @@ export function App() {
 		} : null;
 		if (current.key !== null && !context) return null;
 		if (intent?.kind === "room-operation") {
-			if (intent.operation !== "memento" || typeof intent.roomId !== "string" || !intent.roomId || typeof intent.conversationId !== "string" || !intent.conversationId || !context || context.roomId !== intent.roomId || context.conversationId !== intent.conversationId) return null;
+			if ((intent.operation !== "memento" && intent.operation !== "archive" && intent.operation !== "purge") || typeof intent.roomId !== "string" || !intent.roomId || typeof intent.conversationId !== "string" || !intent.conversationId || !context || context.roomId !== intent.roomId || context.conversationId !== intent.conversationId) return null;
 		} else if (intent && ((intent.kind !== "select-file" && intent.kind !== "close-tab") || typeof intent.path !== "string" || !intent.path)) return null;
 		return { requestId, ownerId: documentOwnerId, ownerGeneration, roomGeneration: current.generation, initialHostGeneration: hostGeneration, initialDraftGeneration: draftGeneration, context, intent: intent && { ...intent } };
 	}
@@ -1966,11 +1966,12 @@ export function App() {
 	async function archivePersistentAgentRoom(agentId: PersistentAgentId, confirmation: string): Promise<PersistentAgentArchiveResponse | null> {
 		const roomName = shownRoomName(persistentAgentStatuses.find((status) => status.id === agentId)?.displayName) || agentId;
 		const leavingBoundRoom = persistentChat?.agentId === agentId;
+		const intent: DocumentLocalAction | null = leavingBoundRoom && persistentChat ? { kind: "room-operation", operation: "archive", roomId: agentId, conversationId: persistentChat.conversationId } : null;
 		if (leavingBoundRoom) {
-			const cleanAction = admitCleanMarkdownEditorAction(() => archivePersistentAgentRoom(agentId, confirmation));
+			const cleanAction = admitCleanMarkdownEditorAction(() => archivePersistentAgentRoom(agentId, confirmation), undefined, intent);
 			if (cleanAction) return await cleanAction as PersistentAgentArchiveResponse | null;
 		}
-		if (leavingBoundRoom && !guardMarkdownEditorAction(() => archivePersistentAgentRoom(agentId, confirmation), "navigate")) return null;
+		if (leavingBoundRoom && !guardMarkdownEditorAction(() => archivePersistentAgentRoom(agentId, confirmation), "navigate", intent)) return null;
 		if (leavingBoundRoom && persistentRoomInFlight) {
 			// Leaving now would detach the turn into background cooking, and the
 			// archive would then refuse on that — say it while the pane can show it.
@@ -2042,11 +2043,12 @@ export function App() {
 	async function purgePersistentAgentRoom(agentId: PersistentAgentId, confirmation: string): Promise<PersistentAgentPurgeResponse | null> {
 		const roomName = shownRoomName(persistentAgentStatuses.find((status) => status.id === agentId)?.displayName) || agentId;
 		const leavingBoundRoom = persistentChat?.agentId === agentId;
+		const intent: DocumentLocalAction | null = leavingBoundRoom && persistentChat ? { kind: "room-operation", operation: "purge", roomId: agentId, conversationId: persistentChat.conversationId } : null;
 		if (leavingBoundRoom) {
-			const cleanAction = admitCleanMarkdownEditorAction(() => purgePersistentAgentRoom(agentId, confirmation));
+			const cleanAction = admitCleanMarkdownEditorAction(() => purgePersistentAgentRoom(agentId, confirmation), undefined, intent);
 			if (cleanAction) return await cleanAction as PersistentAgentPurgeResponse | null;
 		}
-		if (leavingBoundRoom && !guardMarkdownEditorAction(() => purgePersistentAgentRoom(agentId, confirmation), "navigate")) return null;
+		if (leavingBoundRoom && !guardMarkdownEditorAction(() => purgePersistentAgentRoom(agentId, confirmation), "navigate", intent)) return null;
 		if (leavingBoundRoom && persistentRoomInFlight) {
 			// Leaving now would detach the turn into background cooking, and the
 			// purge would then refuse on that — say it while the pane can show it.
@@ -8290,6 +8292,7 @@ export function App() {
 	const currentPersistentStatus = persistentChat
 		? persistentAgentStatuses.find((status) => status.id === persistentChat.agentId) ?? (persistentAgentStatus?.id === persistentChat.agentId ? persistentAgentStatus : null)
 		: null;
+	const roomSettingsGeneration = checkpointContextRef.current.generation;
 	roomMemoryEmptyRef.current = !!currentPersistentStatus && nothingToMaintain(currentPersistentStatus.memoryStatus);
 	const currentActiveThreadStatus = persistentChat && currentPersistentStatus?.activeThread?.threadId === persistentChat.conversationId
 		? currentPersistentStatus.activeThread
@@ -9548,8 +9551,8 @@ export function App() {
 							</section>
 						</div>
 					)}
-					{roomSettingsOpen && currentPersistentStatus && (
-						<RoomSettingsModal status={currentPersistentStatus} answering={persistentRoomInFlight} initialPane={roomSettingsPane} onClose={() => setRoomSettingsOpen(false)} onArchive={archivePersistentAgentRoom} onPurge={purgePersistentAgentRoom} onRefresh={refreshPersistentAgentStatus} onMementoApplied={() => leaveRoomAfterMemento(true)} onBeforeMemento={(continueAction, target) => {
+					{roomSettingsOpen && currentPersistentStatus && persistentChat && (
+						<RoomSettingsModal status={currentPersistentStatus} answering={persistentRoomInFlight} initialPane={roomSettingsPane} onClose={() => setRoomSettingsOpen(false)} onArchive={(agentId, confirmation) => agentId === persistentChat.agentId && checkpointOriginCurrent(persistentChat, roomSettingsGeneration) ? archivePersistentAgentRoom(agentId, confirmation) : Promise.resolve(null)} onPurge={(agentId, confirmation) => agentId === persistentChat.agentId && checkpointOriginCurrent(persistentChat, roomSettingsGeneration) ? purgePersistentAgentRoom(agentId, confirmation) : Promise.resolve(null)} onRefresh={refreshPersistentAgentStatus} onMementoApplied={() => leaveRoomAfterMemento(true)} onBeforeMemento={(continueAction, target) => {
 							const intent: DocumentLocalAction = { kind: "room-operation", operation: "memento", roomId: target.agentId, conversationId: target.conversationId };
 							const cleanAction = admitCleanMarkdownEditorAction(async () => { await continueAction(); }, undefined, intent);
 							if (cleanAction) return false;
