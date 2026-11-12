@@ -579,3 +579,7 @@ The inactive transfer path now retains the selected document in the owner sessio
 ## Checkpoint: chat recovery controls case
 
 The detached smoke now specifies the room-labelled strip, Show documents focusing the existing real child, and chat-side Return waiting for child closure and restoring the retained HTML preview. Scripts typecheck passed; the attributed run still stops at disabled Detach, so these controls and child behavior have not run.
+
+## Checkpoint: room-labelled recovery strip draft
+
+The inactive child path now records its owner/room incarnation and renders the bounded room-labelled opening, detached, returning or unavailable strip, with Show documents and chat Return bound to the registered current child. Failed bootstrap uses an inline error; unknown moves keep the action reserved and fenced. UI and scripts typechecks, UI asset build, and the attributed `two-window-room-ui` and `workspace-file-tabs-ui` smokes passed 2/2. The detached smoke still stops at disabled Detach, so the strip, focus and Return cases did not run; same-attempt partial-move recovery and native bounds/registration are incomplete.

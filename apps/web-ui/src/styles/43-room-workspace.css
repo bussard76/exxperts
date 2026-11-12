@@ -380,3 +380,8 @@ body.documents-child { margin: 0; }
 
 .workspace-tabs-window { margin-left: auto; flex: none; align-self: center; padding: 3px 10px; border: 1px solid var(--exx-border); border-radius: 6px; background: transparent; color: inherit; font-size: 12px; cursor: pointer; }
 .workspace-tabs-window:hover:not(:disabled) { background: var(--exx-surface-hover); }
+
+.docs-window-actions { display: inline-flex; gap: 6px; align-items: center; }
+.docs-window-actions button { padding: 3px 10px; border: 1px solid var(--exx-border); border-radius: 6px; background: transparent; color: inherit; font-size: 12px; cursor: pointer; }
+.docs-window-actions button:hover:not(:disabled) { background: var(--exx-surface-hover); }
+.docs-window-error { color: var(--exx-text-muted, inherit); font-size: 12px; }

@@ -564,6 +564,9 @@ export function App() {
 	const { host: documentHost, treeHost: documentTreeHost, mountHost: mountDocumentHost, mountTree: mountDocumentTreeHost, beginChild: beginDocumentChild, abortChild: abortDocumentChild, moveToChild: moveDocumentToChild, moveToOwner: moveDocumentToOwner, childClosed: documentChildClosed } = useDocumentsHost();
 	type PreparedDocumentChild = NonNullable<Awaited<ReturnType<typeof beginDocumentChild>>>;
 	const documentChildRef = useRef<PreparedDocumentChild | null>(null);
+	const documentChildContextRef = useRef<DocumentContext | null>(null);
+	const [documentHostStatus, setDocumentHostStatus] = useState<"attached" | "opening" | "detached" | "returning" | "recovering">("attached");
+	const [documentHostError, setDocumentHostError] = useState<string | null>(null);
 	const documentHostCommitRef = useRef<{ admission: DocumentAdmission; child: PreparedDocumentChild; generation: number; direction: "detach" | "return" | "exit"; resolve?: (closed: boolean) => void } | null>(null);
 	const documentClosingRef = useRef(false);
 	// Synchronous mirror for the WS handlers (toast suppression / run-view swap
@@ -771,20 +774,24 @@ export function App() {
 		if (!admission?.context) return;
 		markdownEditorPendingActionRef.current = { admission, continuation: () => {}, result: null };
 		preparedDocumentAdmissionRef.current = null;
+		setDocumentHostStatus("opening");
+		setDocumentHostError(null);
 		markdownEditorRef.current?.setFence(true);
 		setMarkdownEditorFenced(true);
-		const release = () => {
+		const release = (failed = false) => {
 			if (markdownEditorPendingActionRef.current?.admission !== admission) return;
+			const current = documentAdmissionContextIsCurrent(admission);
 			markdownEditorPendingActionRef.current = null;
 			preparedDocumentAdmissionRef.current = null;
 			markdownEditorRef.current?.setFence(false);
 			setMarkdownEditorFenced(false);
+			if (current) { setDocumentHostStatus("attached"); if (failed) setDocumentHostError("Documents could not be opened in another window."); }
 		};
 		const name = `exxperts-documents-${admission.ownerId}-${admission.roomGeneration}-${admission.requestId}`;
 		let adopted = false;
 		let candidate: PreparedDocumentChild | null = null;
 		void beginDocumentChild(name, `${persistentChat.displayName} · Documents`).then((child) => {
-			if (!child) { release(); return; }
+			if (!child) { release(true); return; }
 			candidate = child;
 			const pane = documentPaneRef.current;
 			const snapshot = documentFileSnapshotRef.current;
@@ -797,17 +804,18 @@ export function App() {
 			if (!prepareDocumentAdmission(admission) || !prepareDocumentFrameSeeds(nextGeneration)) { abortDocumentChild(child); release(); return; }
 			const moved = moveDocumentToChild(child, () => preparedDocumentAdmissionIsCurrent(admission));
 			if (moved === "refused") { abortDocumentChild(child); release(); return; }
-			if (moved !== "moved") return;
+			if (moved !== "moved") { setDocumentHostStatus("recovering"); return; }
 			adopted = true;
 			const detachedPane = activeWorkspacePath(documentPaneRef.current) ? documentPaneRef.current : null;
 			documentPaneRef.current = detachedPane;
 			setDetachedDocumentPane(detachedPane);
 			documentChildRef.current = child;
+			documentChildContextRef.current = admission.context;
 			if (activeWorkspacePath(rightPaneRef.current)) setRightPane(null);
 			documentHostCommitRef.current = { admission, child, generation: nextGeneration, direction: "detach" };
 			documentHostGenerationRef.current = nextGeneration;
 			setDocumentHostGeneration(nextGeneration);
-		}).catch(() => { if (!adopted) { if (candidate) abortDocumentChild(candidate); release(); } });
+		}).catch(() => { if (!adopted) { if (candidate) abortDocumentChild(candidate); release(true); } else setDocumentHostStatus("recovering"); });
 	}
 
 	function prepareDocumentFrameSeeds(generation: number): boolean {
@@ -822,14 +830,21 @@ export function App() {
 		return true;
 	}
 
+	function documentChildContextIsCurrent(): boolean {
+		const context = documentChildContextRef.current;
+		const current = checkpointContextRef.current;
+		return Boolean(context && !unmountedRef.current && !personHasChanged() && context.ownerId === documentOwnerId && context.ownerGeneration === documentOwnerGenerationRef.current && context.roomGeneration === current.generation && current.key === `${context.roomId}\u0000${context.conversationId}` && context.roomId === current.roomId && context.conversationId === current.conversationId);
+	}
+
 	function returnDocuments(): boolean {
 		const child = documentChildRef.current;
-		if (!child || markdownEditorPendingActionRef.current) return false;
+		if (!child || !documentChildContextIsCurrent() || markdownEditorPendingActionRef.current) return false;
 		const requestId = allocateDocumentId();
 		const admission = requestId ? captureDocumentAdmission(requestId, { kind: "transfer", direction: "return" }) : null;
 		if (!admission?.context) return false;
 		markdownEditorPendingActionRef.current = { admission, continuation: () => {}, result: null };
 		preparedDocumentAdmissionRef.current = null;
+		setDocumentHostStatus("returning");
 		markdownEditorRef.current?.setFence(true);
 		setMarkdownEditorFenced(true);
 		const release = () => {
@@ -838,6 +853,7 @@ export function App() {
 			preparedDocumentAdmissionRef.current = null;
 			markdownEditorRef.current?.setFence(false);
 			setMarkdownEditorFenced(false);
+			setDocumentHostStatus("detached");
 		};
 		const pane = documentPaneRef.current;
 		const snapshot = documentFileSnapshotRef.current;
@@ -846,7 +862,7 @@ export function App() {
 		if (!Number.isSafeInteger(nextGeneration) || !documentAdmissionIsCurrent(admission) || (pane?.kind === "markdownEditor" && !(documentFileSnapshotValidRef.current && snapshot?.file.path === pane.path && snapshot.draftGeneration === documentDraftGenerationRef.current) && !(load?.path === pane.path)) || !prepareDocumentAdmission(admission) || !prepareDocumentFrameSeeds(nextGeneration)) { release(); return false; }
 		const moved = moveDocumentToOwner(child, () => preparedDocumentAdmissionIsCurrent(admission));
 		if (moved === "refused") { release(); return false; }
-		if (moved !== "moved") return false;
+		if (moved !== "moved") { setDocumentHostStatus("recovering"); return false; }
 		if (activeWorkspacePath(documentPaneRef.current)) setRightPane(documentPaneRef.current);
 		documentClosingRef.current = true;
 		documentHostCommitRef.current = { admission, child, generation: nextGeneration, direction: "return" };
@@ -889,12 +905,14 @@ export function App() {
 	function closeDocumentChildForExit(pending: PendingDocumentAction): Promise<boolean> {
 		const child = documentChildRef.current;
 		if (!child) return Promise.resolve(true);
+		if (!documentChildContextIsCurrent()) return Promise.resolve(false);
 		if (!preparedDocumentAdmissionIsCurrent(pending.admission) || documentWriteRef.current || documentSaveInFlightRef.current || documentKeepMineInFlightRef.current) return Promise.resolve(false);
 		const nextGeneration = documentHostGenerationRef.current + 1;
 		if (!Number.isSafeInteger(nextGeneration) || !prepareDocumentFrameSeeds(nextGeneration)) return Promise.resolve(false);
 		const moved = moveDocumentToOwner(child, () => preparedDocumentAdmissionIsCurrent(pending.admission));
 		if (moved === "refused") return Promise.resolve(false);
-		if (moved !== "moved") return new Promise(() => {});
+		if (moved !== "moved") { setDocumentHostStatus("recovering"); return new Promise(() => {}); }
+		setDocumentHostStatus("returning");
 		if (activeWorkspacePath(documentPaneRef.current)) setRightPane(documentPaneRef.current);
 		documentClosingRef.current = true;
 		return new Promise<boolean>((resolve) => {
@@ -920,7 +938,7 @@ export function App() {
 		};
 		if (commit.direction === "detach") {
 			try {
-				if (commit.child.child.closed || commit.child.child.document !== commit.child.document || documentHost.ownerDocument !== commit.child.document || documentTreeHost.ownerDocument !== commit.child.document) return;
+				if (commit.child.child.closed || commit.child.child.document !== commit.child.document || documentHost.ownerDocument !== commit.child.document || documentTreeHost.ownerDocument !== commit.child.document) { setDocumentHostStatus("recovering"); return; }
 				const beforeUnload = (event: BeforeUnloadEvent) => {
 					if (documentClosingRef.current) return;
 					if (!returnDocuments()) { event.preventDefault(); event.returnValue = ""; }
@@ -929,15 +947,18 @@ export function App() {
 				commit.child.child.addEventListener("beforeunload", beforeUnload);
 				commit.child.returnButton.addEventListener("click", onReturn);
 				commit.child.returnButton.disabled = false;
+				setDocumentHostStatus("detached");
 				const poll = window.setInterval(() => { try { if (commit.child.child.closed) returnDocuments(); } catch {} }, 100);
 				release();
 				try { commit.child.child.focus(); } catch {}
 				return () => { window.clearInterval(poll); try { commit.child.child.removeEventListener("beforeunload", beforeUnload); } catch {} commit.child.returnButton.removeEventListener("click", onReturn); };
-			} catch { return; }
+			} catch { setDocumentHostStatus("recovering"); return; }
 		}
 		const settle = () => {
 			if (!documentChildClosed(commit.child)) return;
 			documentChildRef.current = null;
+			documentChildContextRef.current = null;
+			setDocumentHostStatus("attached");
 			setDetachedDocumentPane(null);
 			documentClosingRef.current = false;
 			window.clearInterval(poll);
@@ -1160,7 +1181,7 @@ export function App() {
 
 	function focusDocumentChild(): void {
 		const child = documentChildRef.current;
-		if (!child || unmountedRef.current || personHasChanged()) return;
+		if (!child || !documentChildContextIsCurrent()) return;
 		try { if (!child.child.closed && child.child.opener === window && child.child.document === child.document) child.child.focus(); } catch {}
 	}
 
@@ -1325,6 +1346,7 @@ export function App() {
 				checkpointContextRef.current = { key, generation, roomId: next?.agentId ?? null, conversationId: next?.conversationId ?? null };
 				documentHostGenerationRef.current = 1;
 				setDocumentHostGeneration(1);
+				if (!documentChildRef.current) { setDocumentHostStatus("attached"); setDocumentHostError(null); }
 				documentDraftGenerationRef.current = 1;
 			}
 		}
@@ -9402,7 +9424,7 @@ export function App() {
 				<>
 				<div className="docs-slot" ref={mountDocumentHost} />
 				{createPortal(<div className="workspace-pane" hidden={activeWorkspacePath(documentPane) === null}>
-					<WorkspaceFileTabs onDetach={detachDocuments} detachDisabled tabs={workspaceTabs.paths} active={activeWorkspacePath(documentPane)} onSelect={(path) => openWorkspaceMarkdown({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} onReorder={(paths) => setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths } : tabs)} />
+					<WorkspaceFileTabs onDetach={documentHostStatus === "attached" ? detachDocuments : undefined} detachDisabled tabs={workspaceTabs.paths} active={activeWorkspacePath(documentPane)} onSelect={(path) => openWorkspaceMarkdown({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} onReorder={(paths) => setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths } : tabs)} />
 					{documentPane && (documentPane.kind === "workspaceImage" || documentPane.kind === "workspacePdf" || documentPane.kind === "workspaceWord" || documentPane.kind === "workspaceHtml" || documentPane.kind === "workspaceFramed" || documentPane.kind === "workspaceText" || documentPane.kind === "workspaceSpreadsheet" || (documentPane.kind === "workspaceLegacyDoc" && !/\.doc$/i.test(documentPane.path))) && <WorkspaceOpenAction key={JSON.stringify([persistentChat.agentId, persistentChat.conversationId, documentPane.path])} agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={documentPane.path} />}
 					{documentPane?.kind === "markdownEditor" && <MarkdownEditorPane
 						key={checkpointContextRef.current.generation}
@@ -9558,7 +9580,13 @@ export function App() {
 							    would be the worst possible moment to lose it. */}
 							<button className="icon-btn icon-btn-square icon-btn-danger" aria-label="Forget" title="Forget this conversation and start fresh. Nothing is saved to memory" onClick={() => void mementoPersistentThread()}><TrashIcon /></button>
 							{currentPersistentStatus?.exists && <button className="icon-btn icon-btn-square" aria-label="Room settings" title={`Room settings — ${roomSettingsChordHint()}`} onClick={() => openRoomSettings()}><GearIcon /></button>}
-							{workspaceTabs?.paths.length === 0 && <button type="button" className="workspace-tabs-window" disabled onClick={detachDocuments}>Detach</button>}
+							{documentHostStatus === "attached" && workspaceTabs?.paths.length === 0 && <button type="button" className="workspace-tabs-window" disabled onClick={detachDocuments}>Detach</button>}
+							{documentHostError && documentHostStatus === "attached" && <span className="docs-window-error" role="status">{documentHostError}</span>}
+							{documentHostStatus !== "attached" && <span className="docs-window-actions">
+								<span>{persistentChat.displayName} · {documentHostStatus === "opening" ? "Opening documents…" : documentHostStatus === "returning" ? "Returning documents…" : documentHostStatus === "recovering" ? "Documents unavailable" : "Documents in another window"}</span>
+								<button type="button" disabled={!documentChildRef.current || !!markdownEditorPendingActionRef.current} onClick={focusDocumentChild}>Show documents</button>
+								<button type="button" disabled={!documentChildRef.current || !!markdownEditorPendingActionRef.current} onClick={() => { returnDocuments(); }}>Return</button>
+							</span>}
 							{rightPaneVisible && !artifactPaneMaximized && <button className="icon-btn icon-btn-square right-pane-toggle" aria-label={rightCollapsed ? "Show right pane" : "Hide right pane"} aria-expanded={!rightCollapsed} title={rightCollapsed ? "Show right pane" : "Hide right pane"} onClick={() => setRightPaneCollapsed((collapsed) => !collapsed)}><PanelIcon side="right" /></button>}
 						</>
 					)
