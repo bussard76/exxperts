@@ -748,3 +748,7 @@ The desktop shell now starts the approved private pull mechanism after an exact-
 ## Checkpoint: explicit empty-session response
 
 The owner endpoint now returns `no-session` only for an exactly bound native preparation when its current context, retained document state, child and pending work are all absent. A null observed stamp with a current room instead returns an invalidated refusal carrying the actual current stamp; unsupported valid-session actions remain fail-closed. The supplemental `workspace-documents-owner-ui` test first failed on the missing empty response and then on the missing active-room refusal; the attributed final run passed 1/1, including replay, wrong binding, malformed stamp and sequence checks. UI and scripts typechecks and UI asset build passed. This is owner-endpoint browser evidence only: the shell does not yet issue native preparations or validate these results, and native actions and child registration remain unimplemented and untested.
+
+## Checkpoint: native owner response correlation
+
+The supplemental owner browser smoke now also checks the exact binding, request ID and disposition echoed in empty-session and active-room refusal responses. The attributed run passed 1/1. This still does not exercise the native shell or a native lifecycle continuation.

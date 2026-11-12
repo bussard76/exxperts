@@ -37,7 +37,7 @@ try {
 	assert(JSON.stringify(result.replay) === JSON.stringify(first), "a repeated sequence returns the cached response");
 	assert(result.changedReplay == null && result.wrongVersion == null && result.gap == null && result.wrongBinding == null && result.malformedStamp == null, "changed replays, invalid versions, sequence gaps, foreign bindings and malformed stamps produce no authorization");
 	const noSession = result.noSession;
-	assert(noSession?.sequence === 2 && noSession.ack === 2 && noSession.items?.length === 1 && noSession.items[0].kind === "no-session" && noSession.items[0].nativeRequestId === "22222222-2222-4222-8222-222222222222" && noSession.items[0].disposition === "hide", "a live empty owner explicitly confirms only the matching no-session request");
+	assert(noSession?.sequence === 2 && noSession.ack === 2 && noSession.items?.length === 1 && noSession.items[0].kind === "no-session" && noSession.items[0].nativeRequestId === "22222222-2222-4222-8222-222222222222" && noSession.items[0].disposition === "hide" && JSON.stringify(noSession.items[0].binding) === JSON.stringify(first.status.binding), "a live empty owner explicitly confirms only the matching no-session request");
 	assert(JSON.stringify(result.noSessionReplay) === JSON.stringify(noSession), "replayed no-session preparation does not repeat an effect");
 	const dismiss = page.locator(".whats-new-close");
 	if (await dismiss.count()) await dismiss.click();
@@ -48,7 +48,7 @@ try {
 		return endpoint.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 3, ack: 2, items: [{ kind: "native-prepare", binding, nativeRequestId: "33333333-3333-4333-8333-333333333333", observedStamp: null, disposition: "hide" }] });
 	}, { binding: first.status.binding });
 	const refusal = active?.items?.[0];
-	assert(active?.sequence === 3 && refusal?.kind === "guard-result" && refusal.result?.kind === "refused" && refusal.result.reason === "invalidated" && refusal.result.correlation?.stamp?.roomId === room.roomId && refusal.result.correlation.stamp.conversationId === room.conversationId, "a null observed stamp cannot report no-session for a current room");
+	assert(active?.sequence === 3 && refusal?.kind === "guard-result" && refusal.result?.kind === "refused" && refusal.result.reason === "invalidated" && refusal.result.correlation?.stamp?.roomId === room.roomId && refusal.result.correlation.stamp.conversationId === room.conversationId && refusal.result.correlation.requestId === "33333333-3333-4333-8333-333333333333" && refusal.result.correlation.action?.kind === "chat-close" && refusal.result.correlation.action.disposition === "hide" && JSON.stringify(refusal.binding) === JSON.stringify(first.status.binding), "a null observed stamp cannot report no-session for a current room");
 	console.log("owner endpoint browser supplement: hello, replay and invalid inputs passed");
 } catch (caught) { error = caught; }
 finally { await browser?.close(); await stopRoomStateServer(error); }
