@@ -1,5 +1,5 @@
 // Exercise the actual desktop shell and owner with isolated state and a fake feed.
-// Invoke with --stuck for the independent outstanding-exchange case.
+// Set T20_NATIVE_STUCK=1 for the independent outstanding-exchange case.
 import { _electron as electron, type ElectronApplication } from "playwright";
 import fs from "node:fs";
 import http from "node:http";
@@ -15,7 +15,7 @@ function assert(condition: unknown, message: string): asserts condition {
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "exxperts-documents-native-"));
 const port = await freePort();
-const stuck = process.argv.includes("--stuck");
+const stuck = process.env.T20_NATIVE_STUCK === "1";
 const feed = http.createServer((_request, response) => {
 	response.writeHead(200, { "content-type": "application/json" });
 	response.end(JSON.stringify({ tag_name: "v0.0.0", prerelease: false, draft: false }));
