@@ -46,7 +46,8 @@ interface Props {
 	fenced: boolean;
 	saveInFlight: { current: Promise<boolean> | null };
 	keepMineInFlight: { current: Promise<boolean> | null };
-	unknownWrite: { current: UnknownDocumentWrite | null };
+	documentWrite: { current: DocumentWrite | null };
+	beginWrite: (agentId: string, conversationId: string, generation: number, path: string, content: string, revision: string) => DocumentWrite | null;
 	onClose: () => void;
 	onMutation: (agentId: string, conversationId: string, generation: number) => void;
 	onDirtyChange: (dirty: boolean, agentId: string, conversationId: string, generation: number) => void;
@@ -55,7 +56,7 @@ interface Props {
 
 type EditorPhase = "loading" | "ready" | "saving" | "conflict" | "error";
 type EditorMode = "edit" | "preview" | "raw";
-type UnknownDocumentWrite = { agentId: string; conversationId: string; contextGeneration: number; path: string; content: string; revision: string; terminal: boolean };
+type DocumentWrite = { kind: "pending" | "unknown"; writeId: string; submittedDraftGeneration: number; agentId: string; conversationId: string; contextGeneration: number; path: string; content: string; revision: string; terminal: boolean };
 
 // Markdown permits a list item's first block to be a heading, quote, table, or
 // nested list. Relaxing the stock paragraph-first schema keeps those files
@@ -462,7 +463,7 @@ function resolveWorkspaceMarkdownPath(currentPath: string, href: string, allowEx
 	return allowExtensionless ? `${resolved}.md` : null;
 }
 
-export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agentId, conversationId, contextGeneration, path, fenced, saveInFlight, keepMineInFlight: keepMineInFlightRef, unknownWrite: unknownWriteRef, onClose, onMutation, onDirtyChange, onOpenMarkdown }: Props, ref: Ref<MarkdownEditorHandle>) {
+export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agentId, conversationId, contextGeneration, path, fenced, saveInFlight, keepMineInFlight: keepMineInFlightRef, documentWrite: documentWriteRef, beginWrite, onClose, onMutation, onDirtyChange, onOpenMarkdown }: Props, ref: Ref<MarkdownEditorHandle>) {
 	const noteMutation = useCallback(() => onMutation(agentId, conversationId, contextGeneration), [agentId, contextGeneration, conversationId, onMutation]);
 	const reportDirty = useCallback((dirty: boolean) => onDirtyChange(dirty, agentId, conversationId, contextGeneration), [agentId, contextGeneration, conversationId, onDirtyChange]);
 	const [file, setFile] = useDocumentState<WorkspaceMarkdownFile | null>(null, noteMutation, sameDocumentFile);
@@ -474,8 +475,8 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 	const [error, setError] = useDocumentState<string | null>(null, noteMutation);
 	const [conflictRevision, setConflictRevision] = useDocumentState<string | null>(null, noteMutation);
 	const [canEdit, setCanEdit] = useDocumentState(false, noteMutation);
-	const setUnknownWrite = useCallback((next: UnknownDocumentWrite | null) => {
-		if (unknownWriteRef.current !== next) { unknownWriteRef.current = next; noteMutation(); }
+	const setDocumentWrite = useCallback((next: DocumentWrite | null) => {
+		if (documentWriteRef.current !== next) { documentWriteRef.current = next; noteMutation(); }
 	}, [noteMutation]);
 	const surfaceRef = useRef<SurfaceHandle | null>(null);
 	const rawAreaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -525,7 +526,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 
 	useEffect(() => {
 		const controller = new AbortController();
-		if (unknownWriteRef.current) {
+		if (documentWriteRef.current) {
 			setPhase("error");
 			setError("The save has not finished. Its outcome is unknown.");
 			return () => controller.abort();
@@ -556,7 +557,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		let active = true;
 		let checking = false;
 		const checkForExternalChange = async () => {
-			if (!active || checking || unknownWriteRef.current) return;
+			if (!active || checking || documentWriteRef.current) return;
 			checking = true;
 			try {
 				const latest = await getWorkspaceMarkdownFile(agentId, conversationId, path);
@@ -592,15 +593,16 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 
 	const persist = useCallback(async (content: string, revision: string): Promise<string | null> => {
 		if (!canEdit) return null;
-		const unknown = unknownWriteRef.current;
+		const unknown = documentWriteRef.current;
 		if (unknown) {
+			if (unknown.kind !== "unknown") return null;
 			if (unknown.agentId !== agentId || unknown.conversationId !== conversationId || unknown.contextGeneration !== contextGeneration || unknown.path !== path) return null;
 			if (!unknown.terminal) return null;
 			try {
 				const latest = await readRevisionWithinDeadline(agentId, conversationId, path);
 				setCanEdit(!latest.readOnly);
 				if (latest.revision === unknown.revision) return null;
-				setUnknownWrite(null);
+				setDocumentWrite(null);
 				if (latest.content !== unknown.content) {
 					reconcileServerContent(latest.content);
 					fileRef.current = latest;
@@ -627,16 +629,24 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		}
 		setPhase("saving");
 		setError(null);
+		const writeState = beginWrite(agentId, conversationId, contextGeneration, path, content, revision);
+		if (!writeState) {
+			setPhase("error");
+			setError("This save could not start.");
+			return null;
+		}
+		noteMutation();
 		try {
 			const write = putWorkspaceMarkdownFile(agentId, conversationId, path, content, revision);
 			let timer = 0;
 			const timeout = new Promise<null>((resolve) => { timer = window.setTimeout(() => resolve(null), 30_000); });
 			const next = await Promise.race([write, timeout]).finally(() => window.clearTimeout(timer));
 			if (!next) {
-				const unknown = { agentId, conversationId, contextGeneration, path, content, revision, terminal: false };
-				setUnknownWrite(unknown);
+				const unknown = writeState;
+				unknown.kind = "unknown";
+				noteMutation();
 				const terminal = () => {
-					if (!unknown.terminal) { unknown.terminal = true; if (unknownWriteRef.current === unknown) noteMutation(); }
+					if (!unknown.terminal) { unknown.terminal = true; if (documentWriteRef.current === unknown) noteMutation(); }
 				};
 				void write.then(terminal, terminal);
 				setPhase("error");
@@ -652,12 +662,14 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			return next.revision;
 		} catch (cause) {
 			if (!(cause instanceof WorkspaceMarkdownApiError)) {
-				setUnknownWrite({ agentId, conversationId, contextGeneration, path, content, revision, terminal: true });
+				writeState.kind = "unknown";
+				writeState.terminal = true;
+				noteMutation();
 				try {
 					const latest = await readRevisionWithinDeadline(agentId, conversationId, path);
 					setCanEdit(!latest.readOnly);
 					if (latest.revision !== revision && latest.content === content) {
-						setUnknownWrite(null);
+						setDocumentWrite(null);
 						recordConfirmedWrite(latest);
 						if (latest.readOnly) {
 							setPhase("error");
@@ -667,7 +679,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 						return latest.revision;
 					}
 					if (latest.revision !== revision) {
-						setUnknownWrite(null);
+						setDocumentWrite(null);
 						setDirty(true);
 						reconcileServerContent(latest.content);
 						fileRef.current = latest;
@@ -690,8 +702,10 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 				setError(errorMessage(cause));
 			}
 			return null;
+		} finally {
+			if (documentWriteRef.current === writeState && writeState.kind === "pending") setDocumentWrite(null);
 		}
-	}, [agentId, canEdit, contextGeneration, conversationId, path, reconcileServerContent, recordConfirmedWrite, setDirty]);
+	}, [agentId, beginWrite, canEdit, contextGeneration, conversationId, noteMutation, path, reconcileServerContent, recordConfirmedWrite, setDirty]);
 
 	const persistAfterKeepMine = useCallback(async (content: string, revision: string) => {
 		const keepMine = keepMineInFlightRef.current;
@@ -730,8 +744,9 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 	const settle = useCallback(async () => {
 		await keepMineInFlightRef.current;
 		await saveInFlight.current;
-		const unknown = unknownWriteRef.current;
+		const unknown = documentWriteRef.current;
 		if (!unknown) return true;
+		if (unknown.kind !== "unknown") return false;
 		if (!surfaceRef.current) return false;
 		if (unknown.agentId !== agentId || unknown.conversationId !== conversationId || unknown.contextGeneration !== contextGeneration || unknown.path !== path) return false;
 		if (!unknown.terminal) return false;
@@ -739,7 +754,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			const latest = await readRevisionWithinDeadline(agentId, conversationId, path);
 			setCanEdit(!latest.readOnly);
 			if (latest.revision === unknown.revision) return false;
-			setUnknownWrite(null);
+			setDocumentWrite(null);
 			fileRef.current = latest;
 			setFile(latest);
 			if (latest.content !== unknown.content) {
@@ -763,12 +778,12 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		}
 	}, [agentId, contextGeneration, conversationId, path, reconcileServerContent, recordConfirmedWrite, saveInFlight, setDirty]);
 	const discard = useCallback(() => {
-		if (unknownWriteRef.current || !surfaceRef.current) return false;
+		if (documentWriteRef.current || !surfaceRef.current) return false;
 		surfaceRef.current.discard();
 		return true;
 	}, []);
 	const focus = useCallback(() => surfaceRef.current?.focus(), []);
-	const pendingWrite = useCallback(() => unknownWriteRef.current ? "unknown" as const : keepMineInFlightRef.current || saveInFlight.current ? "pending" as const : null, [saveInFlight]);
+	const pendingWrite = useCallback(() => documentWriteRef.current?.kind === "unknown" ? "unknown" as const : documentWriteRef.current || keepMineInFlightRef.current || saveInFlight.current ? "pending" as const : null, [saveInFlight]);
 	const handlePreviewLink = useCallback((href: string, isWikiLink = false): boolean => {
 		const workspacePath = resolveWorkspaceMarkdownPath(path, href, isWikiLink);
 		if (workspacePath && onOpenMarkdown) {

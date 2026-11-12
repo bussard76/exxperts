@@ -191,6 +191,8 @@ type PreparedDocumentAdmission = Readonly<{
 	draftGeneration: number;
 }>;
 
+type OwnerDocumentWrite = { kind: "pending" | "unknown"; writeId: string; submittedDraftGeneration: number; agentId: string; conversationId: string; contextGeneration: number; path: string; content: string; revision: string; terminal: boolean };
+
 function allocateDocumentId(): string | null {
 	try {
 		const crypto = window.crypto;
@@ -556,7 +558,8 @@ export function App() {
 	const documentDraftGenerationRef = useRef(1);
 	const documentSaveInFlightRef = useRef<Promise<boolean> | null>(null);
 	const documentKeepMineInFlightRef = useRef<Promise<boolean> | null>(null);
-	const documentUnknownWriteRef = useRef<{ agentId: string; conversationId: string; contextGeneration: number; path: string; content: string; revision: string; terminal: boolean } | null>(null);
+	const documentWriteRef = useRef<OwnerDocumentWrite | null>(null);
+	const documentWriteSequenceRef = useRef(0);
 	const markdownEditorRef = useRef<MarkdownEditorHandle | null>(null);
 	const markdownEditorAdmissionRef = useRef<DocumentAdmission | null>(null);
 	const preparedDocumentAdmissionRef = useRef<PreparedDocumentAdmission | null>(null);
@@ -658,6 +661,17 @@ export function App() {
 		const old = documentDraftGenerationRef.current;
 		documentDraftGenerationRef.current = Number.isSafeInteger(old) && old < Number.MAX_SAFE_INTEGER ? old + 1 : Number.NaN;
 	}, []);
+	const beginDocumentWrite = useCallback((agentId: string, conversationId: string, generation: number, path: string, content: string, revision: string): OwnerDocumentWrite | null => {
+		const current = checkpointContextRef.current;
+		const ownerGeneration = documentOwnerGenerationRef.current;
+		const draftGeneration = documentDraftGenerationRef.current;
+		const sequence = documentWriteSequenceRef.current;
+		if (!documentOwnerId || !Number.isSafeInteger(ownerGeneration) || ownerGeneration < 1 || documentWriteRef.current || unmountedRef.current || personHasChanged() || current.roomId !== agentId || current.conversationId !== conversationId || current.generation !== generation || !Number.isSafeInteger(draftGeneration) || draftGeneration < 1 || !Number.isSafeInteger(sequence) || sequence < 0 || sequence >= Number.MAX_SAFE_INTEGER) return null;
+		const write: OwnerDocumentWrite = { kind: "pending", writeId: String(sequence + 1), submittedDraftGeneration: draftGeneration, agentId, conversationId, contextGeneration: generation, path, content, revision, terminal: false };
+		documentWriteSequenceRef.current = sequence + 1;
+		documentWriteRef.current = write;
+		return write;
+	}, [documentOwnerId]);
 	const onMarkdownEditorDirtyChange = useCallback((dirty: boolean, agentId: string, conversationId: string, generation: number) => {
 		const context = checkpointContextRef.current;
 		if (context.roomId !== agentId || context.conversationId !== conversationId || context.generation !== generation) return;
@@ -711,7 +725,7 @@ export function App() {
 	}
 
 	function noDocumentSession(): boolean {
-		return !unmountedRef.current && !personHasChanged() && checkpointContextRef.current.key === null && !markdownEditorRef.current && !documentSaveInFlightRef.current && !documentKeepMineInFlightRef.current && !documentUnknownWriteRef.current && !markdownEditorPendingActionRef.current;
+		return !unmountedRef.current && !personHasChanged() && checkpointContextRef.current.key === null && !markdownEditorRef.current && !documentSaveInFlightRef.current && !documentKeepMineInFlightRef.current && !documentWriteRef.current && !markdownEditorPendingActionRef.current;
 	}
 
 	function guardMarkdownEditorAction(action: () => void | Promise<unknown>, prompt: "close" | "switch" | "navigate"): boolean {
@@ -720,7 +734,7 @@ export function App() {
 			return true;
 		}
 		if (markdownEditorPendingActionRef.current || !documentOwnerId) return false;
-		if (!markdownEditorRef.current && (documentSaveInFlightRef.current || documentKeepMineInFlightRef.current || documentUnknownWriteRef.current)) return false;
+		if (!markdownEditorRef.current && (documentSaveInFlightRef.current || documentKeepMineInFlightRef.current || documentWriteRef.current)) return false;
 		const requestId = allocateDocumentId();
 		const admission = requestId ? captureDocumentAdmission(requestId) : null;
 		if (!admission) return false;
@@ -798,7 +812,7 @@ export function App() {
 
 	function admitCleanMarkdownEditorAction(action: () => Promise<unknown>, admittedId?: string): Promise<unknown> | null {
 		if (markdownEditorDirtyRef.current || markdownEditorPendingActionRef.current || markdownEditorCommitBypassRef.current) return null;
-		if (!markdownEditorRef.current && (documentSaveInFlightRef.current || documentKeepMineInFlightRef.current || documentUnknownWriteRef.current)) return Promise.resolve(false);
+		if (!markdownEditorRef.current && (documentSaveInFlightRef.current || documentKeepMineInFlightRef.current || documentWriteRef.current)) return Promise.resolve(false);
 		const requestId = documentOwnerId && (admittedId ?? allocateDocumentId());
 		const admission = requestId ? captureDocumentAdmission(requestId) : null;
 		if (!admission) return Promise.resolve(false);
@@ -9054,7 +9068,8 @@ export function App() {
 						fenced={markdownEditorFenced}
 						saveInFlight={documentSaveInFlightRef}
 						keepMineInFlight={documentKeepMineInFlightRef}
-						unknownWrite={documentUnknownWriteRef}
+						documentWrite={documentWriteRef}
+						beginWrite={beginDocumentWrite}
 						onClose={requestCloseMarkdownEditor}
 						onDirtyChange={onMarkdownEditorDirtyChange}
 						onOpenMarkdown={(path) => openWorkspaceMarkdown({ relativePath: path, extension: ".md" })}
