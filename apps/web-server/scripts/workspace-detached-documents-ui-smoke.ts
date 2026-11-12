@@ -142,6 +142,37 @@ try {
 			} finally { releaseWrite(); }
 			await waitUntil(() => fs.readFileSync(path.join(workspace, "invented.md"), "utf8") === edited, "the retained Save reaches the original workspace");
 			assert(Number(writes) === 1 && (await page.evaluate(() => location.hash)).includes("/room/"), "moving the pending Save sends no second write and the canceled leave stays canceled");
+			await waitUntil(async () => await page.locator(".markdown-editor-status").textContent() === "Saved", "the retained Save settles");
+			await page.unroute("**/workspace-markdown?*");
+			const conflictOpened = page.waitForEvent("popup");
+			await detach.click();
+			const conflictChild = await conflictOpened;
+			const conflictRaw = conflictChild.getByRole("textbox", { name: "Raw Markdown source" });
+			await conflictRaw.waitFor();
+			const conflictDraft = "# Invented child conflict draft\n";
+			await conflictRaw.fill(conflictDraft);
+			fs.writeFileSync(path.join(workspace, "invented.md"), "# Invented external revision\n");
+			await conflictChild.locator(".markdown-editor-save").click();
+			await conflictChild.locator(".markdown-editor-conflict").waitFor();
+			let releaseKeep!: () => void, beginKeep!: () => void;
+			const keepReleased = new Promise<void>((resolve) => { releaseKeep = resolve; });
+			const keepStarted = new Promise<void>((resolve) => { beginKeep = resolve; });
+			await page.route("**/workspace-markdown?*", async (route) => {
+				if (route.request().method() !== "PUT") return route.continue();
+				beginKeep();
+				await keepReleased;
+				await route.continue();
+			});
+			try {
+				await conflictChild.getByRole("button", { name: "Keep mine", exact: true }).click();
+				await keepStarted;
+				const closedConflictChild = conflictChild.waitForEvent("close");
+				await conflictChild.getByRole("button", { name: "Return", exact: true }).click();
+				await closedConflictChild;
+				assert(await raw.inputValue() === conflictDraft && Number(writes) === 3, "Return retains the pending conflict resolution and exact draft");
+			} finally { releaseKeep(); }
+			await waitUntil(() => fs.readFileSync(path.join(workspace, "invented.md"), "utf8") === conflictDraft, "the retained Keep mine reaches the original workspace");
+			assert(Number(writes) === 3, "returning a pending Keep mine sends no duplicate write");
 		} finally { await context.close(); }
 	} finally { await browser.close(); }
 	console.log("workspace-detached-documents-ui smoke: ok");

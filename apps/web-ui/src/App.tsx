@@ -555,6 +555,7 @@ export function App() {
 	const documentHostGenerationRef = useRef(1);
 	const documentDraftGenerationRef = useRef(1);
 	const documentSaveInFlightRef = useRef<Promise<boolean> | null>(null);
+	const documentKeepMineInFlightRef = useRef<Promise<boolean> | null>(null);
 	const markdownEditorRef = useRef<MarkdownEditorHandle | null>(null);
 	const markdownEditorAdmissionRef = useRef<DocumentAdmission | null>(null);
 	const preparedDocumentAdmissionRef = useRef<PreparedDocumentAdmission | null>(null);
@@ -709,7 +710,7 @@ export function App() {
 	}
 
 	function noDocumentSession(): boolean {
-		return !unmountedRef.current && !personHasChanged() && checkpointContextRef.current.key === null && !markdownEditorRef.current && !documentSaveInFlightRef.current && !markdownEditorPendingActionRef.current;
+		return !unmountedRef.current && !personHasChanged() && checkpointContextRef.current.key === null && !markdownEditorRef.current && !documentSaveInFlightRef.current && !documentKeepMineInFlightRef.current && !markdownEditorPendingActionRef.current;
 	}
 
 	function guardMarkdownEditorAction(action: () => void | Promise<unknown>, prompt: "close" | "switch" | "navigate"): boolean {
@@ -718,7 +719,7 @@ export function App() {
 			return true;
 		}
 		if (markdownEditorPendingActionRef.current || !documentOwnerId) return false;
-		if (!markdownEditorRef.current && documentSaveInFlightRef.current) return false;
+		if (!markdownEditorRef.current && (documentSaveInFlightRef.current || documentKeepMineInFlightRef.current)) return false;
 		const requestId = allocateDocumentId();
 		const admission = requestId ? captureDocumentAdmission(requestId) : null;
 		if (!admission) return false;
@@ -796,7 +797,7 @@ export function App() {
 
 	function admitCleanMarkdownEditorAction(action: () => Promise<unknown>, admittedId?: string): Promise<unknown> | null {
 		if (markdownEditorDirtyRef.current || markdownEditorPendingActionRef.current || markdownEditorCommitBypassRef.current) return null;
-		if (!markdownEditorRef.current && documentSaveInFlightRef.current) return Promise.resolve(false);
+		if (!markdownEditorRef.current && (documentSaveInFlightRef.current || documentKeepMineInFlightRef.current)) return Promise.resolve(false);
 		const requestId = documentOwnerId && (admittedId ?? allocateDocumentId());
 		const admission = requestId ? captureDocumentAdmission(requestId) : null;
 		if (!admission) return Promise.resolve(false);
@@ -9051,6 +9052,7 @@ export function App() {
 						path={rightPane.path}
 						fenced={markdownEditorFenced}
 						saveInFlight={documentSaveInFlightRef}
+						keepMineInFlight={documentKeepMineInFlightRef}
 						onClose={requestCloseMarkdownEditor}
 						onDirtyChange={onMarkdownEditorDirtyChange}
 						onOpenMarkdown={(path) => openWorkspaceMarkdown({ relativePath: path, extension: ".md" })}

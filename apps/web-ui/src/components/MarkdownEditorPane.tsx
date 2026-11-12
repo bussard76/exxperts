@@ -45,6 +45,7 @@ interface Props {
 	path: string;
 	fenced: boolean;
 	saveInFlight: { current: Promise<boolean> | null };
+	keepMineInFlight: { current: Promise<boolean> | null };
 	onClose: () => void;
 	onMutation: (agentId: string, conversationId: string, generation: number) => void;
 	onDirtyChange: (dirty: boolean, agentId: string, conversationId: string, generation: number) => void;
@@ -459,7 +460,7 @@ function resolveWorkspaceMarkdownPath(currentPath: string, href: string, allowEx
 	return allowExtensionless ? `${resolved}.md` : null;
 }
 
-export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agentId, conversationId, contextGeneration, path, fenced, saveInFlight, onClose, onMutation, onDirtyChange, onOpenMarkdown }: Props, ref: Ref<MarkdownEditorHandle>) {
+export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agentId, conversationId, contextGeneration, path, fenced, saveInFlight, keepMineInFlight: keepMineInFlightRef, onClose, onMutation, onDirtyChange, onOpenMarkdown }: Props, ref: Ref<MarkdownEditorHandle>) {
 	const noteMutation = useCallback(() => onMutation(agentId, conversationId, contextGeneration), [agentId, contextGeneration, conversationId, onMutation]);
 	const reportDirty = useCallback((dirty: boolean) => onDirtyChange(dirty, agentId, conversationId, contextGeneration), [agentId, contextGeneration, conversationId, onDirtyChange]);
 	const [file, setFile] = useDocumentState<WorkspaceMarkdownFile | null>(null, noteMutation, sameDocumentFile);
@@ -475,7 +476,6 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 	const setUnknownWrite = useCallback((next: { content: string; revision: string; terminal: boolean } | null) => {
 		if (unknownWriteRef.current !== next) { unknownWriteRef.current = next; noteMutation(); }
 	}, [noteMutation]);
-	const keepMineInFlightRef = useRef<Promise<boolean> | null>(null);
 	const surfaceRef = useRef<SurfaceHandle | null>(null);
 	const rawAreaRef = useRef<HTMLTextAreaElement | null>(null);
 	const immediateFenceRef = useRef(fenced);
