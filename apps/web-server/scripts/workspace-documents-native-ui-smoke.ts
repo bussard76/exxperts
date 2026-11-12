@@ -23,7 +23,8 @@ const dirty = process.env.T20_NATIVE_DIRTY === "1" || save || lateAbort;
 const lateEmpty = process.env.T20_NATIVE_EMPTY_LATE === "1";
 const late = process.env.T20_NATIVE_LATE === "1" || lateEmpty;
 const foreignOpener = process.env.T20_NATIVE_FOREIGN === "1";
-const bounds = process.env.T20_NATIVE_BOUNDS === "1";
+const fallbackBounds = process.env.T20_NATIVE_BOUNDS_FALLBACK === "1";
+const bounds = process.env.T20_NATIVE_BOUNDS === "1" || fallbackBounds;
 const popup = process.env.T20_NATIVE_POPUP === "1" || bounds;
 const armOnly = process.env.T20_NATIVE_ARM === "1" || popup || foreignOpener;
 const active = process.env.T20_NATIVE_ACTIVE === "1" || dirty || (late && !lateEmpty) || armOnly;
@@ -182,17 +183,23 @@ try {
 				let finalNativeChildBounds: { x: number; y: number; width: number; height: number } | null = null;
 				if (bounds) {
 					const geometry = await application.evaluate(({ app, BrowserWindow, screen }, id) => {
-						const display = screen.getPrimaryDisplay();
-						return { userData: app.getPath("userData"), mainBounds: BrowserWindow.fromId(id)!.getBounds(), display: { id: display.id, bounds: display.bounds, workArea: display.workArea, scaleFactor: display.scaleFactor, rotation: display.rotation, internal: display.internal } };
+						const main = BrowserWindow.fromId(id)!;
+						const bounds = main.getBounds();
+						const display = screen.getDisplayNearestPoint({ x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 });
+						return { userData: app.getPath("userData"), mainBounds: bounds, display: { id: display.id, bounds: display.bounds, workArea: display.workArea, scaleFactor: display.scaleFactor, rotation: display.rotation, internal: display.internal } };
 					}, owner);
 					boundsStatePath = path.join(geometry.userData, "window-state.json");
 					originalMainBounds = geometry.mainBounds;
 					const area = geometry.display.workArea;
-					expectedChildBounds = { x: area.x, y: area.y, width: area.width, height: area.height };
+					expectedChildBounds = fallbackBounds
+						? { x: Math.round(area.x + (area.width - Math.min(900, area.width)) / 2), y: Math.round(area.y + (area.height - Math.min(700, area.height)) / 2), width: Math.min(900, area.width), height: Math.min(700, area.height) }
+						: { x: area.x, y: area.y, width: area.width, height: area.height };
 					fs.writeFileSync(boundsStatePath, JSON.stringify({
 						bounds: geometry.mainBounds,
 						maximized: false,
-						documents: { schemaVersion: 1, bounds: { x: area.x - 1000, y: area.y - 1000, width: area.width + 2000, height: area.height + 2000 }, maximized: false, source: "electron-normal-bounds" },
+						documents: fallbackBounds
+							? { schemaVersion: 1, bounds: { x: area.x, y: area.y, width: area.width, height: area.height }, maximized: false, source: "corrupt-test-record" }
+							: { schemaVersion: 1, bounds: { x: area.x - 1000, y: area.y - 1000, width: area.width + 2000, height: area.height + 2000 }, maximized: false, source: "electron-normal-bounds" },
 					}));
 				}
 				const foreign = await page.evaluate(() => window.open("about:blank", "exxperts-doc-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "popup") !== null);
