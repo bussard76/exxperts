@@ -23,7 +23,8 @@ const dirty = process.env.T20_NATIVE_DIRTY === "1" || save || lateAbort;
 const lateEmpty = process.env.T20_NATIVE_EMPTY_LATE === "1";
 const late = process.env.T20_NATIVE_LATE === "1" || lateEmpty;
 const foreignOpener = process.env.T20_NATIVE_FOREIGN === "1";
-const popup = process.env.T20_NATIVE_POPUP === "1";
+const bounds = process.env.T20_NATIVE_BOUNDS === "1";
+const popup = process.env.T20_NATIVE_POPUP === "1" || bounds;
 const armOnly = process.env.T20_NATIVE_ARM === "1" || popup || foreignOpener;
 const active = process.env.T20_NATIVE_ACTIVE === "1" || dirty || (late && !lateEmpty) || armOnly;
 const quit = process.env.T20_NATIVE_QUIT === "1";
@@ -175,6 +176,24 @@ try {
 			} else if (popup) {
 				assert(page, "the owner page is available for the popup");
 				const selector = await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any).__t20PermitName as string, owner);
+				let boundsStatePath = "";
+				let expectedChildBounds: { x: number; y: number; width: number; height: number } | null = null;
+				let originalMainBounds: { x: number; y: number; width: number; height: number } | null = null;
+				if (bounds) {
+					const geometry = await application.evaluate(({ app, BrowserWindow, screen }, id) => {
+						const display = screen.getPrimaryDisplay();
+						return { userData: app.getPath("userData"), mainBounds: BrowserWindow.fromId(id)!.getBounds(), display: { id: display.id, bounds: display.bounds, workArea: display.workArea, scaleFactor: display.scaleFactor, rotation: display.rotation, internal: display.internal } };
+					}, owner);
+					boundsStatePath = path.join(geometry.userData, "window-state.json");
+					originalMainBounds = geometry.mainBounds;
+					const area = geometry.display.workArea;
+					expectedChildBounds = { x: area.x, y: area.y, width: area.width, height: area.height };
+					fs.writeFileSync(boundsStatePath, JSON.stringify({
+						bounds: geometry.mainBounds,
+						maximized: false,
+						documents: { schemaVersion: 1, bounds: { x: area.x - 1000, y: area.y - 1000, width: area.width + 2000, height: area.height + 2000 }, maximized: false, source: "electron-normal-bounds" },
+					}));
+				}
 				const foreign = await page.evaluate(() => window.open("about:blank", "exxperts-doc-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "popup") !== null);
 				assert(!foreign, "an unsolicited native document popup is denied");
 				const opened = await page.evaluate((name) => window.open("about:blank", name, "popup,width=900,height=700") !== null, selector);
@@ -186,6 +205,10 @@ try {
 					return child?.id ?? null;
 				}, owner);
 				assert(childId !== null, "registration binds the actual top-frame opener and child");
+				if (bounds) {
+					const restored = await application.evaluate(({ BrowserWindow }, id) => ({ visible: BrowserWindow.fromId(id)!.isVisible(), bounds: BrowserWindow.fromId(id)!.getBounds() }), childId);
+					assert(restored.visible && JSON.stringify(restored.bounds) === JSON.stringify(expectedChildBounds), `the registered child restores validated current-workarea bounds before use (actual=${JSON.stringify(restored)})`);
+				}
 				assert(await application.evaluate(({ BrowserWindow }, id) => { const prefs = BrowserWindow.fromId(id)!.webContents.getLastWebPreferences(); return prefs.sandbox === true && prefs.nodeIntegration === false && prefs.contextIsolation === true; }, childId), "the actual registered child keeps sandbox and context isolation");
 				await application.evaluate(({ BrowserWindow, shell }, ids) => {
 					const parent = BrowserWindow.fromId(ids.owner)!;
@@ -198,11 +221,23 @@ try {
 				await application.evaluate(({ BrowserWindow }, fixture) => { void BrowserWindow.fromId(fixture.child)!.webContents.executeJavaScript(`location.href = "http://localhost:${fixture.port}/"`); }, { child: childId, port });
 				await new Promise((resolve) => setTimeout(resolve, 300));
 				assert(await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.webContents.getURL() === "about:blank", childId), "registered child cannot navigate even to another app page");
+				if (bounds && expectedChildBounds && originalMainBounds) {
+					const finalBounds = { x: expectedChildBounds.x + 12, y: expectedChildBounds.y + 18, width: Math.min(900, expectedChildBounds.width), height: Math.min(700, expectedChildBounds.height) };
+					await application.evaluate(({ BrowserWindow }, fixture) => BrowserWindow.fromId(fixture.id)!.setBounds(fixture.bounds), { id: childId, bounds: finalBounds });
+					await new Promise((resolve) => setTimeout(resolve, 700));
+					const saved = JSON.parse(fs.readFileSync(boundsStatePath, "utf8")) as { bounds?: unknown; documents?: { schemaVersion?: number; bounds?: unknown; maximized?: boolean; source?: string } };
+					assert(JSON.stringify(saved.bounds) === JSON.stringify(originalMainBounds) && saved.documents?.schemaVersion === 1 && JSON.stringify(saved.documents.bounds) === JSON.stringify(finalBounds) && saved.documents.maximized === false && saved.documents.source === "electron-normal-bounds", `child movement updates only the existing documents state record (record=${JSON.stringify(saved)})`);
+				}
 				await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.close(), owner);
 				await page.waitForTimeout(500);
 				assert(await application.evaluate(({ BrowserWindow }, ids) => Boolean(BrowserWindow.fromId(ids.child)) && (BrowserWindow.fromId(ids.owner) as any)?.__t20Completed === 0, { owner, child: childId }), "a registered child cannot be mistaken for no-child evidence");
 				await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.close(), childId);
 				await waitUntil(() => application!.evaluate(({ BrowserWindow }, id) => !BrowserWindow.fromId(id), childId), "the concrete popup is actually closed");
+				if (bounds && expectedChildBounds) {
+					const saved = JSON.parse(fs.readFileSync(boundsStatePath, "utf8")) as { documents?: { bounds?: { x?: number; y?: number; width?: number; height?: number } } };
+					const expectedFinal = { x: expectedChildBounds.x + 12, y: expectedChildBounds.y + 18, width: Math.min(900, expectedChildBounds.width), height: Math.min(700, expectedChildBounds.height) };
+					assert(JSON.stringify(saved.documents?.bounds) === JSON.stringify(expectedFinal), "closing the registered child flushes its final normal bounds");
+				}
 				await page.waitForTimeout(300);
 				assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Completed === 0, owner), "child destruction without a matching registered closure message cannot authorize no-child completion");
 				const windowsBeforeReuse = await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
