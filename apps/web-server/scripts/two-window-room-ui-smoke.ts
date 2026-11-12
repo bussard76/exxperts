@@ -656,6 +656,38 @@ try {
 			await e.waitForTimeout(500);
 			assert((await e.evaluate(() => window.location.hash)) === originalHash, "a late save cannot execute Home after the page identity changes");
 		} finally { releaseInvalidatedSave(); }
+		{
+			const pending = await ctx.newPage();
+			await pending.goto(`${baseUrl}/#/room/${agentId}`);
+			await pending.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "identity.md" }).click();
+			await pending.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented identity source").waitFor();
+			await pending.getByRole("button", { name: "RAW", exact: true }).click();
+			const raw = pending.getByRole("textbox", { name: "Raw Markdown source" });
+			let releaseWrite!: () => void, beginWrite!: () => void, unloads = 0;
+			const writeReleased = new Promise<void>((resolve) => { releaseWrite = resolve; });
+			const writeStarted = new Promise<void>((resolve) => { beginWrite = resolve; });
+			await pending.route("**/workspace-markdown?*", async (route) => {
+				if (route.request().method() !== "PUT") return route.continue();
+				beginWrite();
+				await writeReleased;
+				await route.abort();
+			});
+			pending.on("dialog", (dialog) => { if (dialog.type() === "beforeunload") unloads++; void dialog.dismiss(); });
+			await raw.fill("# Invented pending identity write\n");
+			await pending.locator(".markdown-editor-save").click();
+			try {
+				await writeStarted;
+				await raw.fill("# Invented identity source\n");
+				await pending.route("**/workspace-files?*", (route) => route.fulfill({ status: 409, json: { code: "person_changed", error: "Invented identity change" } }));
+				await pending.evaluate(() => window.dispatchEvent(new Event("focus")));
+				await pending.getByText("Someone else is now signed in on this server.", { exact: true }).waitFor();
+				await waitUntil(async () => await pending.locator(".markdown-editor-pane").count() === 0, "the old editor surface is gone");
+				const previousUnloads = unloads;
+				await pending.reload({ waitUntil: "domcontentloaded", timeout: 5000 }).catch(() => {});
+				assert(unloads > previousUnloads, "browser reload asks before abandoning an owner-held pending write with no surface");
+			} finally { releaseWrite(); }
+			await pending.close();
+		}
 		const f = await ctx.newPage();
 		await f.goto(`${baseUrl}/#/room/${agentId}`);
 		const cleanHome = await f.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).elementHandle();

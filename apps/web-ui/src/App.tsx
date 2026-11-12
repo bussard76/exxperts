@@ -715,7 +715,7 @@ export function App() {
 	useEffect(() => {
 		if (navigator.userAgent.includes("ExxpertsDesktop")) return;
 		const beforeUnload = (event: BeforeUnloadEvent) => {
-			if (!markdownEditorDirtyRef.current && !markdownEditorRef.current?.pendingWrite()) return;
+			if (!markdownEditorDirtyRef.current && !markdownEditorRef.current?.pendingWrite() && !documentSaveInFlightRef.current && !documentKeepMineInFlightRef.current && !documentWriteRef.current && !documentFileSnapshotRef.current?.file.dirty) return;
 			event.preventDefault();
 			event.returnValue = "";
 		};
