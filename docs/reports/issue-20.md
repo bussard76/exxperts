@@ -708,3 +708,7 @@ The first affected run exposed an independent one-container regression: folding 
 ## Checkpoint: child-close settlement deadline draft
 
 The inactive host-commit path now starts a five-second settlement timer: if the same child has not closed, it shows the existing unavailable state and retains the original fenced action; a later actual closure is still handled by the original commit. UI and scripts typechecks and UI asset build passed; the attributed `two-window-room-ui` passed, while `workspace-detached-documents-ui` still stopped at disabled Detach (1/2 cases passed). The previously written real-child timeout, competing Home and late-closure assertions did not execute, so the draft is not evidence of a working deadline or abort/ack protocol; R6 remains open.
+
+## Checkpoint: moved-room Reload draft
+
+The real Reload callback now checks the resolved room status: if its actual destination replaces the current conversation and a child exists, it waits for that registered child to close before opening the replacement. Same-conversation resume no longer clears and recreates the context key. UI and scripts typechecks, UI asset build and the attributed `two-window-room-ui` smoke passed 1/1 for existing attached paths. The new real-child moved-room test remains unexecuted at disabled Detach; same-context child behavior and Reload failure paths still require targeted verification, so this is not R4 completion.

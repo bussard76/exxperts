@@ -7951,6 +7951,12 @@ export function App() {
 			if (!status) throw new Error("This room is no longer available. Refresh Home and try again.");
 			const pending = markdownEditorPendingActionRef.current;
 			if (!pending || !preparedDocumentAdmissionIsCurrent(pending.admission)) return;
+			const prepared = !!(status.activeThread?.preparedByBoundary ?? status.activeThread?.preparedByCheckpoint);
+			const shownElsewhere = status.activeLock?.surface === "web";
+			const waiting = (!prepared || shownElsewhere) && (status.runtime.state === "standby" || status.runtime.state === "active") && !!status.runtime.activeThreadId;
+			const replacesContext = !waiting || status.runtime.activeThreadId !== chat.conversationId;
+			if (replacesContext && documentChildRef.current && !(await closeDocumentChildForExit(pending))) return;
+			if (!preparedDocumentAdmissionIsCurrent(pending.admission)) return;
 			markdownEditorCommitBypassRef.current = { pending };
 			let opening: Promise<void>;
 			try { opening = openRoomFromAddress(status); } finally { markdownEditorCommitBypassRef.current = null; }
@@ -7995,7 +8001,7 @@ export function App() {
 			const savedDraft = roomDraftsRef.current.get(status.id);
 			if (savedDraft) setComposerPrefill(savedDraft);
 			setPersistentThread(null);
-			setPersistentChat(null);
+			if (checkpointContextRef.current.key !== `${liveThread.agentId}\u0000${liveThread.conversationId}`) setPersistentChat(null);
 			setConversationId(liveThread.conversationId);
 			setItems(liveThread.items);
 			setPersistentThread(liveThread);
