@@ -13,7 +13,7 @@ import { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, shell, Tray
 import { payloadVersion, PORT, probePort, SERVER_ORIGIN, ServerHandle, serverRoot, stateHome, stateProfilesModule, takeOverPort } from "./server";
 import { bootWindowOpen, bootWindowWasShown, closeBootWindow, setBootStatus, showBootWindow } from "./boot-window";
 import { showHealthCheck, showTextWindow } from "./health";
-import { loadWindowState, trackWindowState } from "./window-state";
+import { loadDocumentsWindowState, loadWindowState, trackDocumentsWindowState, trackWindowState } from "./window-state";
 import { checkForUpdate, getAvailableUpdate, getUpdateSnapshot, isNewerVersion, onUpdateStateChanged, openUpdatePage } from "./update-check";
 import { checkViaUpdater, downloadUpdate, installPlan, quitAndInstallNow, smokeSetFeed, updaterAvailability } from "./updater";
 import { openUpdatePanel } from "./update-panel";
@@ -215,7 +215,7 @@ function isAppOrigin(url: string): boolean {
   }
 }
 
-type NativeDocumentPopup = { request: Record<string, unknown>; permit: { frameName: string; permitId: string }; expiresAt: number; pending: boolean; revoked: boolean; opening: boolean; registrationPending: boolean; child: BrowserWindow | null };
+type NativeDocumentPopup = { request: Record<string, unknown>; permit: { frameName: string; permitId: string }; expiresAt: number; pending: boolean; revoked: boolean; opening: boolean; registrationPending: boolean; registered: boolean; maximized: boolean; placement: ReturnType<typeof loadDocumentsWindowState>; child: BrowserWindow | null };
 const documentPopupPermits = new WeakMap<BrowserWindow, NativeDocumentPopup>();
 
 function wireNavigation(win: BrowserWindow): void {
@@ -251,8 +251,12 @@ function wireNavigation(win: BrowserWindow): void {
     if (popup?.opening && details.frameName === popup.permit.frameName) {
       popup.opening = false;
       if (win.isDestroyed() || child.webContents.opener !== win.webContents.mainFrame || Date.now() >= popup.expiresAt) { child.destroy(); return; }
+      const placement = loadDocumentsWindowState(win);
+      if (!placement) { popup.revoked = true; child.destroy(); return; }
       popup.child = child;
       popup.registrationPending = true;
+      popup.maximized = placement.maximized;
+      popup.placement = placement;
       child.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
       child.webContents.on("will-navigate", (event) => event.preventDefault());
       wireContextMenu(child);
@@ -381,13 +385,46 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
     }
     if (releasedAttempt) { hideRequest = null; hideSent = false; hideCorrelation = null; hidePhase = "idle"; }
     if (sentKind === "popup-permit" && popup) popup.pending = false;
-    if (sentKind === "child-registered" && popup) popup.registrationPending = false;
+    if (sentKind === "child-registered" && popup && !popup.registered) {
+      popup.registrationPending = false;
+      popup.registered = true;
+      const child = popup.child;
+      if (child && !child.isDestroyed() && popup.placement) {
+        child.setBounds(popup.placement.bounds);
+        trackDocumentsWindowState(child);
+        if (popup.maximized) child.once("show", () => { if (!child.isDestroyed()) child.maximize(); });
+        child.show();
+        const revalidatePlacement = () => {
+          if (child.isDestroyed()) return;
+          const placement = loadDocumentsWindowState(win, { bounds: child.getBounds(), maximized: child.isMaximized() });
+          if (!placement) return;
+          child.setBounds(placement.bounds);
+          if (placement.maximized && !child.isMaximized()) child.maximize();
+          else if (!placement.maximized && child.isMaximized()) child.unmaximize();
+        };
+        child.on("focus", revalidatePlacement);
+        const onDisplayChange = () => revalidatePlacement();
+        const displayEvents = screen as unknown as { on: (event: string, listener: () => void) => void; removeListener: (event: string, listener: () => void) => void };
+        try {
+          displayEvents.on("display-removed", onDisplayChange);
+          displayEvents.on("display-metrics-changed", onDisplayChange);
+        } catch { /* keep the registered child usable if display notifications are unavailable */ }
+        child.once("closed", () => {
+          child.removeListener("focus", revalidatePlacement);
+          try {
+            displayEvents.removeListener("display-removed", onDisplayChange);
+            displayEvents.removeListener("display-metrics-changed", onDisplayChange);
+          } catch {}
+          if (popup?.child === child) popup.child = null;
+        });
+      }
+    }
     if (disarmPermit && popup?.permit.permitId === disarmPermit) {
       popup.revoked = true;
       if (!popup.child) { popup = null; documentPopupPermits.delete(win); }
     }
     if (armRequest) {
-      popup = { request: armRequest, permit: { frameName: `exxperts-doc-${randomUUID()}`, permitId: randomUUID() }, expiresAt: Date.now() + 10_000, pending: true, revoked: false, opening: false, registrationPending: false, child: null };
+      popup = { request: armRequest, permit: { frameName: `exxperts-doc-${randomUUID()}`, permitId: randomUUID() }, expiresAt: Date.now() + 10_000, pending: true, revoked: false, opening: false, registrationPending: false, registered: false, maximized: false, placement: null, child: null };
       documentPopupPermits.set(win, popup);
     }
     if (receivedPreparation) hideSent = true;

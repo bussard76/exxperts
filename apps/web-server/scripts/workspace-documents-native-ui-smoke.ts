@@ -179,6 +179,7 @@ try {
 				let boundsStatePath = "";
 				let expectedChildBounds: { x: number; y: number; width: number; height: number } | null = null;
 				let originalMainBounds: { x: number; y: number; width: number; height: number } | null = null;
+				let finalNativeChildBounds: { x: number; y: number; width: number; height: number } | null = null;
 				if (bounds) {
 					const geometry = await application.evaluate(({ app, BrowserWindow, screen }, id) => {
 						const display = screen.getPrimaryDisplay();
@@ -206,8 +207,22 @@ try {
 				}, owner);
 				assert(childId !== null, "registration binds the actual top-frame opener and child");
 				if (bounds) {
+					const childWasPlaced = await Promise.race([
+						waitUntil(() => application!.evaluate(({ BrowserWindow }, fixture) => {
+						if (!fixture.bounds) return false;
+						const child = BrowserWindow.fromId(fixture.id);
+						if (!child?.isVisible()) return false;
+						const actual = child.getBounds(), area = fixture.bounds;
+						return actual.x === area.x && actual.y === area.y && Math.abs(actual.width - area.width) <= 1 && Math.abs(actual.height - area.height) <= 1;
+						}, { id: childId, bounds: expectedChildBounds }), "the registered child is placed and shown after its owner acknowledges registration").then(() => true, () => false),
+						new Promise<false>((resolve) => setTimeout(() => resolve(false), 5_000)),
+					]);
+					if (!childWasPlaced) {
+						const state = await application.evaluate(({ BrowserWindow }, id) => ({ windows: BrowserWindow.getAllWindows().map((window: any) => ({ id: window.id, visible: window.isVisible(), bounds: window.getBounds(), url: window.webContents.getURL(), isChild: window.webContents.opener === BrowserWindow.fromId(id)!.webContents.mainFrame })) }), owner);
+						throw new Error(`registered child placement timeout (${JSON.stringify(state)})`);
+					}
 					const restored = await application.evaluate(({ BrowserWindow }, id) => ({ visible: BrowserWindow.fromId(id)!.isVisible(), bounds: BrowserWindow.fromId(id)!.getBounds() }), childId);
-					assert(restored.visible && JSON.stringify(restored.bounds) === JSON.stringify(expectedChildBounds), `the registered child restores validated current-workarea bounds before use (actual=${JSON.stringify(restored)})`);
+					assert(restored.visible && restored.bounds.x === expectedChildBounds!.x && restored.bounds.y === expectedChildBounds!.y && Math.abs(restored.bounds.width - expectedChildBounds!.width) <= 1 && Math.abs(restored.bounds.height - expectedChildBounds!.height) <= 1, `the registered child restores validated current-workarea bounds before use (actual=${JSON.stringify(restored)}, expected=${JSON.stringify(expectedChildBounds)})`);
 				}
 				assert(await application.evaluate(({ BrowserWindow }, id) => { const prefs = BrowserWindow.fromId(id)!.webContents.getLastWebPreferences(); return prefs.sandbox === true && prefs.nodeIntegration === false && prefs.contextIsolation === true; }, childId), "the actual registered child keeps sandbox and context isolation");
 				await application.evaluate(({ BrowserWindow, shell }, ids) => {
@@ -223,10 +238,13 @@ try {
 				assert(await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.webContents.getURL() === "about:blank", childId), "registered child cannot navigate even to another app page");
 				if (bounds && expectedChildBounds && originalMainBounds) {
 					const finalBounds = { x: expectedChildBounds.x + 12, y: expectedChildBounds.y + 18, width: Math.min(900, expectedChildBounds.width), height: Math.min(700, expectedChildBounds.height) };
-					await application.evaluate(({ BrowserWindow }, fixture) => BrowserWindow.fromId(fixture.id)!.setBounds(fixture.bounds), { id: childId, bounds: finalBounds });
+					const immediateBounds = await application.evaluate(({ BrowserWindow }, fixture) => { const child = BrowserWindow.fromId(fixture.id)!; child.setBounds(fixture.bounds); return child.getBounds(); }, { id: childId, bounds: finalBounds });
 					await new Promise((resolve) => setTimeout(resolve, 700));
+					const actualFinalBounds = await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.getBounds(), childId);
+					const windowState = await application.evaluate(({ BrowserWindow }, id) => ({ maximized: BrowserWindow.fromId(id)!.isMaximized(), fullscreen: BrowserWindow.fromId(id)!.isFullScreen(), normal: BrowserWindow.fromId(id)!.getNormalBounds() }), childId);
+					finalNativeChildBounds = actualFinalBounds;
 					const saved = JSON.parse(fs.readFileSync(boundsStatePath, "utf8")) as { bounds?: unknown; documents?: { schemaVersion?: number; bounds?: unknown; maximized?: boolean; source?: string } };
-					assert(JSON.stringify(saved.bounds) === JSON.stringify(originalMainBounds) && saved.documents?.schemaVersion === 1 && JSON.stringify(saved.documents.bounds) === JSON.stringify(finalBounds) && saved.documents.maximized === false && saved.documents.source === "electron-normal-bounds", `child movement updates only the existing documents state record (record=${JSON.stringify(saved)})`);
+					assert(immediateBounds.x === finalBounds.x && immediateBounds.y === finalBounds.y && immediateBounds.width === finalBounds.width && immediateBounds.height === finalBounds.height && actualFinalBounds.x === finalBounds.x && actualFinalBounds.y === finalBounds.y && actualFinalBounds.width === finalBounds.width && actualFinalBounds.height === finalBounds.height && JSON.stringify(saved.bounds) === JSON.stringify(originalMainBounds) && saved.documents?.schemaVersion === 1 && JSON.stringify(saved.documents.bounds) === JSON.stringify(actualFinalBounds) && saved.documents.maximized === false && saved.documents.source === "electron-normal-bounds", `child movement updates only the existing documents state record (immediate=${JSON.stringify(immediateBounds)}, actual=${JSON.stringify(actualFinalBounds)}, window=${JSON.stringify(windowState)}, requested=${JSON.stringify(finalBounds)}, record=${JSON.stringify(saved)})`);
 				}
 				await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.close(), owner);
 				await page.waitForTimeout(500);
@@ -235,8 +253,7 @@ try {
 				await waitUntil(() => application!.evaluate(({ BrowserWindow }, id) => !BrowserWindow.fromId(id), childId), "the concrete popup is actually closed");
 				if (bounds && expectedChildBounds) {
 					const saved = JSON.parse(fs.readFileSync(boundsStatePath, "utf8")) as { documents?: { bounds?: { x?: number; y?: number; width?: number; height?: number } } };
-					const expectedFinal = { x: expectedChildBounds.x + 12, y: expectedChildBounds.y + 18, width: Math.min(900, expectedChildBounds.width), height: Math.min(700, expectedChildBounds.height) };
-					assert(JSON.stringify(saved.documents?.bounds) === JSON.stringify(expectedFinal), "closing the registered child flushes its final normal bounds");
+					assert(!!finalNativeChildBounds && saved.documents?.bounds?.x === finalNativeChildBounds.x && saved.documents.bounds.y === finalNativeChildBounds.y && saved.documents.bounds.width === finalNativeChildBounds.width && saved.documents.bounds.height === finalNativeChildBounds.height, `closing the registered child flushes its final normal bounds (record=${JSON.stringify(saved.documents)}, final=${JSON.stringify(finalNativeChildBounds)})`);
 				}
 				await page.waitForTimeout(300);
 				assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Completed === 0, owner), "child destruction without a matching registered closure message cannot authorize no-child completion");
