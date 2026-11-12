@@ -74,13 +74,39 @@ try {
 			const dismiss = page.locator(".whats-new-close");
 			if (await dismiss.count()) await dismiss.click();
 			await page.locator(".persistent-agent-card").filter({ hasText: "Cedar Studio" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+			const detach = page.getByRole("button", { name: "Detach", exact: true });
+			assert(await detach.count() === 1 && await detach.isEnabled(), "a selected room offers Detach even before opening a tab");
+			let releaseLoad!: () => void, beginLoad!: () => void;
+			const loadReleased = new Promise<void>((resolve) => { releaseLoad = resolve; });
+			const loadStarted = new Promise<void>((resolve) => { beginLoad = resolve; });
+			await page.route("**/workspace-markdown?*", async (route) => {
+				if (route.request().method() !== "GET") return route.continue();
+				beginLoad();
+				await loadReleased;
+				await route.fulfill({ status: 403, json: { code: "workspace_read_forbidden", error: "Invented read refusal" } });
+			});
+			const emptyOpened = page.waitForEvent("popup");
+			await detach.click();
+			const emptyChild = await emptyOpened;
+			assert(await emptyChild.locator(".workspace-tab").count() === 0, "an empty document session has no invented tab");
+			try {
+				await emptyChild.locator(".workspace-file-browser-file", { hasText: "invented.md" }).click();
+				await loadStarted;
+				await emptyChild.getByText("Loading file…", { exact: true }).waitFor();
+			} finally { releaseLoad(); }
+			await emptyChild.getByText("Invented read refusal", { exact: true }).waitFor();
+			const closedEmptyChild = emptyChild.waitForEvent("close");
+			await emptyChild.getByRole("button", { name: "Return", exact: true }).click();
+			await closedEmptyChild;
+			assert(await page.getByText("Invented read refusal", { exact: true }).isVisible() && Number(writes) === 0, "Return retains a load error without inventing a draft or writing");
+			await page.unroute("**/workspace-markdown?*");
+			await page.locator(".workspace-tab", { hasText: "invented.md" }).locator(".workspace-tab-close").click();
 			await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "invented.md" }).click();
 			await page.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented source").waitFor();
 			await page.getByRole("button", { name: "RAW", exact: true }).click();
 			const raw = page.getByRole("textbox", { name: "Raw Markdown source" });
 			await raw.waitFor();
 			assert(await raw.inputValue() === rawDisplay, "the original RAW source is presented");
-			const detach = page.getByRole("button", { name: "Detach", exact: true });
 			assert(await detach.count() === 1 && await detach.isEnabled(), "the document session offers Detach when all safeguards are ready");
 			await page.evaluate(`window.__t20OriginalOpen = window.open; window.open = () => null`);
 			try {
@@ -194,6 +220,13 @@ try {
 			await unknownGuard.getByRole("button", { name: "Discard changes" }).click();
 			await unknownGuard.waitFor({ state: "hidden" });
 			assert((await page.evaluate(() => location.hash)).includes("/room/") && await raw.inputValue() === unknownDraft && Number(writes) === 4, "an unresolved returned write refuses Discard without a retry");
+			const lossOpened = page.waitForEvent("popup");
+			await detach.click();
+			const lostChild = await lossOpened;
+			await lostChild.getByRole("textbox", { name: "Raw Markdown source" }).waitFor();
+			await lostChild.close();
+			await waitUntil(async () => await raw.isVisible(), "the owner recovers after the real browser child closes");
+			assert(await raw.inputValue() === unknownDraft && Number(writes) === 4, "unexpected browser-child closure retains the unresolved source without a retry");
 		} finally { await context.close(); }
 	} finally { await browser.close(); }
 	console.log("workspace-detached-documents-ui smoke: ok");

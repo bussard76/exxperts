@@ -563,6 +563,7 @@ export function App() {
 	const documentPaneBindingRef = useRef<{ agentId: string; conversationId: string; contextGeneration: number; path: string; token: object } | null>(null);
 	const documentFileSnapshotRef = useRef<{ agentId: string; conversationId: string; contextGeneration: number; draftGeneration: number; file: DocumentFileSnapshot } | null>(null);
 	const documentFileSnapshotValidRef = useRef(false);
+	const documentLoadViewRef = useRef<{ agentId: string; conversationId: string; contextGeneration: number; path: string; phase: "loading" | "error"; error: string | null } | null>(null);
 	const markdownEditorRef = useRef<MarkdownEditorHandle | null>(null);
 	const markdownEditorAdmissionRef = useRef<DocumentAdmission | null>(null);
 	const preparedDocumentAdmissionRef = useRef<PreparedDocumentAdmission | null>(null);
@@ -676,15 +677,20 @@ export function App() {
 		documentPaneBindingRef.current = { agentId, conversationId, contextGeneration: generation, path, token };
 		documentFileSnapshotValidRef.current = false;
 	}, []);
-	const onDocumentSnapshot = useCallback((agentId: string, conversationId: string, generation: number, path: string, token: object, file: DocumentFileSnapshot | null) => {
+	const onDocumentSnapshot = useCallback((agentId: string, conversationId: string, generation: number, path: string, token: object, file: DocumentFileSnapshot | null, loadView: { phase: "loading" | "error"; error: string | null } | null) => {
 		const current = checkpointContextRef.current;
 		const pane = rightPaneRef.current;
 		const bound = documentPaneBindingRef.current;
 		const draftGeneration = documentDraftGenerationRef.current;
 		if (unmountedRef.current || personHasChanged() || current.roomId !== agentId || current.conversationId !== conversationId || current.generation !== generation || pane?.kind !== "markdownEditor" || pane.path !== path || !bound || bound.token !== token || bound.agentId !== agentId || bound.conversationId !== conversationId || bound.contextGeneration !== generation || bound.path !== path) return;
-		if (!file || file.path !== path || !Number.isSafeInteger(draftGeneration) || draftGeneration < 1) { documentFileSnapshotValidRef.current = false; return; }
+		if (!file || file.path !== path || !Number.isSafeInteger(draftGeneration) || draftGeneration < 1) {
+			documentFileSnapshotValidRef.current = false;
+			documentLoadViewRef.current = loadView ? { agentId, conversationId, contextGeneration: generation, path, ...loadView } : null;
+			return;
+		}
 		documentFileSnapshotRef.current = { agentId, conversationId, contextGeneration: generation, draftGeneration, file };
 		documentFileSnapshotValidRef.current = true;
+		documentLoadViewRef.current = null;
 	}, []);
 	const beginDocumentWrite = useCallback((agentId: string, conversationId: string, generation: number, path: string, content: string, revision: string): OwnerDocumentWrite | null => {
 		const current = checkpointContextRef.current;
@@ -949,7 +955,7 @@ export function App() {
 			if (!requestId || !captureDocumentAdmission(requestId)) return;
 		}
 		const remaining = paths.filter((item) => item !== path);
-		if (active === path && documentFileSnapshotRef.current?.file.path === path) { documentFileSnapshotRef.current = null; documentFileSnapshotValidRef.current = false; }
+		if (active === path) { documentFileSnapshotRef.current = null; documentFileSnapshotValidRef.current = false; documentLoadViewRef.current = null; }
 		setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths: remaining } : tabs);
 		if (active === path) {
 			const next = remaining[index] ?? remaining[index - 1];
@@ -971,6 +977,7 @@ export function App() {
 		if (!guardMarkdownEditorAction(() => openWorkspaceMarkdown(entry), "switch")) return;
 		documentFileSnapshotRef.current = null;
 		documentFileSnapshotValidRef.current = false;
+		documentLoadViewRef.current = null;
 		setArtifactMaximized(false);
 		setWorkspaceTabs((tabs) => {
 			const same = tabs?.agentId === persistentChat.agentId && tabs.conversationId === persistentChat.conversationId;
@@ -1082,6 +1089,7 @@ export function App() {
 				documentPaneBindingRef.current = null;
 				documentFileSnapshotRef.current = null;
 				documentFileSnapshotValidRef.current = false;
+				documentLoadViewRef.current = null;
 				const old = checkpointContextRef.current.generation;
 				const generation = Number.isSafeInteger(old) && old < Number.MAX_SAFE_INTEGER ? old + 1 : Number.NaN;
 				checkpointContextRef.current = { key, generation, roomId: next?.agentId ?? null, conversationId: next?.conversationId ?? null };

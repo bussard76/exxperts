@@ -57,7 +57,7 @@ interface Props {
 	documentWrite: { current: DocumentWrite | null };
 	beginWrite: (agentId: string, conversationId: string, generation: number, path: string, content: string, revision: string) => DocumentWrite | null;
 	onBind: (agentId: string, conversationId: string, generation: number, path: string, token: object, active: boolean) => void;
-	onSnapshot: (agentId: string, conversationId: string, generation: number, path: string, token: object, snapshot: DocumentFileSnapshot | null) => void;
+	onSnapshot: (agentId: string, conversationId: string, generation: number, path: string, token: object, snapshot: DocumentFileSnapshot | null, loadView: { phase: "loading" | "error"; error: string | null } | null) => void;
 	onClose: () => void;
 	onMutation: (agentId: string, conversationId: string, generation: number) => void;
 	onDirtyChange: (dirty: boolean, agentId: string, conversationId: string, generation: number) => void;
@@ -494,6 +494,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 	const reportDirty = useCallback((dirty: boolean) => { onDirtyChange(dirty, agentId, conversationId, contextGeneration); publishRef.current(); }, [agentId, contextGeneration, conversationId, onDirtyChange]);
 	const [file, setFile, fileStateRef] = useDocumentState<WorkspaceMarkdownFile | null>(null, noteMutation, sameDocumentFile);
 	const fileRef = useRef<WorkspaceMarkdownFile | null>(null);
+	const loadPathRef = useRef<string | null>(null);
 	const [draft, setDraft] = useDocumentState("", noteMutation);
 	const draftRef = useRef("");
 	const [phase, setPhase, phaseRef] = useDocumentState<EditorPhase>("loading", noteMutation);
@@ -532,19 +533,21 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		const currentPhase = phaseRef.current;
 		const surface = surfaceRef.current;
 		if (!currentFile || currentFile.path !== path || currentPhase === "loading" || !surface || surface.identity !== surfaceIdentity) {
-			onSnapshot(agentId, conversationId, contextGeneration, path, paneToken, null);
+			const loadError = loadPathRef.current === path && currentPhase === "error";
+			const loadView = !currentFile || currentFile.path !== path || currentPhase === "loading" ? { phase: loadError ? "error" as const : "loading" as const, error: loadError ? errorRef.current : null } : null;
+			onSnapshot(agentId, conversationId, contextGeneration, path, paneToken, null, loadView);
 			return;
 		}
 		try {
 			const retained = surface.getRetained();
 			const { settled, fileContent, ...syncState } = sync.getRetained();
 			if (!settled || fileContent !== currentFile.content || (currentPhase !== "conflict" && retained.expectedRevision !== currentFile.revision)) {
-				onSnapshot(agentId, conversationId, contextGeneration, path, paneToken, null);
+				onSnapshot(agentId, conversationId, contextGeneration, path, paneToken, null, null);
 				return;
 			}
-			onSnapshot(agentId, conversationId, contextGeneration, path, paneToken, { path, ...retained, ...syncState, canEdit: canEditRef.current, phase: currentPhase, error: errorRef.current, conflictRevision: conflictRevisionRef.current, mode: modeRef.current });
+			onSnapshot(agentId, conversationId, contextGeneration, path, paneToken, { path, ...retained, ...syncState, canEdit: canEditRef.current, phase: currentPhase, error: errorRef.current, conflictRevision: conflictRevisionRef.current, mode: modeRef.current }, null);
 		} catch {
-			onSnapshot(agentId, conversationId, contextGeneration, path, paneToken, null);
+			onSnapshot(agentId, conversationId, contextGeneration, path, paneToken, null, null);
 		}
 	};
 	useLayoutEffect(() => {
@@ -579,6 +582,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 
 	useEffect(() => {
 		const controller = new AbortController();
+		loadPathRef.current = path;
 		if (documentWriteRef.current) {
 			setPhase("error");
 			setError("The save has not finished. Its outcome is unknown.");
