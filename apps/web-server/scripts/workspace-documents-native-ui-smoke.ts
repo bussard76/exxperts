@@ -74,14 +74,16 @@ try {
 			(window as any).__t20Prepares = 0;
 			(window as any).__t20NoSession = 0;
 			(window as any).__t20Prepared = 0;
+			(window as any).__t20Completed = 0;
 			(window.webContents as any).executeJavaScript = (script: string, ...args: unknown[]) => {
 				if (script.includes("__exxpertsDocuments")) {
 					(window as any).__t20Polls++;
 					if (script.includes('"native-prepare"')) (window as any).__t20Prepares++;
 				}
 				const result = (original as any)(script, ...args);
-				if (script.includes('"native-prepare"')) return Promise.resolve(result).then((output: any) => {
+				if (script.includes("__exxpertsDocuments")) return Promise.resolve(result).then((output: any) => {
 					if (output?.items?.[0]?.kind === "no-session") (window as any).__t20NoSession++;
+					if (output?.items?.[0]?.kind === "completed") (window as any).__t20Completed++;
 					if (output?.items?.[0]?.kind === "guard-result" && output.items[0].result?.kind === "prepared") (window as any).__t20Prepared++;
 					return output;
 				});
@@ -92,7 +94,10 @@ try {
 		await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.close(), owner);
 		await new Promise((resolve) => setTimeout(resolve, 1_000));
 		assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Prepares === 1, owner), "the actual native close sends exactly one owner prepare");
-		if (active) assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Prepared === 1, owner), "the actual owner prepares the active clean room exactly once");
+		if (active) {
+			assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Prepared === 1, owner), "the actual owner prepares the active clean room exactly once");
+			assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Completed === 1, owner), "the real owner completes only after the shell sends no-child evidence");
+		}
 		else assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20NoSession === 1, owner), "the actual owner returns the matching empty-session response");
 		assert(await application.evaluate(({ BrowserWindow }, id) => Boolean(BrowserWindow.fromId(id)?.isVisible()), owner), "the staged no-session response cannot yet continue the native close");
 	} else {
