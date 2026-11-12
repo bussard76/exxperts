@@ -1,16 +1,24 @@
 // Supplemental owner-endpoint checks in a real browser. Native shell integration is separate.
 import { chromium } from "playwright";
-import { assert, baseUrl, openRoom, startRoomStateServer, stopRoomStateServer } from "./room-state-setup.js";
+import fs from "node:fs";
+import path from "node:path";
+import { assert, baseUrl, openRoom, requestJson, startRoomStateServer, stopRoomStateServer, tempHome } from "./room-state-setup.js";
 import { SMOKE_AUTH_TOKEN } from "./smoke-server-process.js";
 
 let error: unknown;
 let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
 try {
 	await startRoomStateServer();
-	const room = await openRoom("Invented Native Owner");
+	const workspace = path.join(tempHome, "invented-native-workspace");
+	fs.mkdirSync(workspace);
+	fs.writeFileSync(path.join(workspace, "invented.md"), "# Invented owner draft\n");
+	const room = await openRoom("Invented Native Owner", async (roomId) => {
+		const saved = await requestJson(`/api/persistent-agents/${roomId}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: workspace, workspaceAccessMode: "localFiles" }) });
+		assert(saved.status === 200, "the invented native-owner workspace is configured");
+	});
 	browser = await chromium.launch();
 	const page = await browser.newPage();
-	await page.addInitScript({ content: `window.addEventListener("beforeunload", (event) => { event.preventDefault(); event.returnValue = ""; });` });
+	await page.addInitScript({ content: `window.addEventListener("beforeunload", (event) => { event.preventDefault(); event.returnValue = ""; }); const realTimeout = window.setTimeout; window.setTimeout = (callback, delay, ...args) => realTimeout(callback, delay === 1000 ? 30000 : delay, ...args);` });
 	page.on("dialog", (dialog) => { void dialog.dismiss(); });
 	await page.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
 	await page.waitForLoadState("networkidle");
@@ -66,10 +74,27 @@ try {
 	await page.getByRole("heading", { name: "Your rooms." }).waitFor();
 	await page.locator(".persistent-agent-card").filter({ hasText: "Invented Native Owner" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
 	await page.locator(".sidebar-workspace-files").waitFor();
+	await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "invented.md" }).click();
+	const editor = page.locator(".markdown-editor-tiptap .ProseMirror");
+	await editor.getByText("Invented owner draft").waitFor();
+	await editor.click();
+	await page.keyboard.type(" retained local edit");
+	const current = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 6, ack: 5, items: [] }), { binding: first.status.binding });
+	const dirtyPrepare = await page.evaluate(({ binding, stamp }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 7, ack: 6, items: [{ kind: "native-prepare", binding, nativeRequestId: "66666666-6666-4666-8666-666666666666", observedStamp: stamp, disposition: "hide" }] }), { binding: first.status.binding, stamp: current.status.stamp });
+	assert(dirtyPrepare?.sequence === 7 && dirtyPrepare.items?.length === 0, "a dirty native preparation awaits the real guard decision");
+	const prompt = page.getByRole("dialog", { name: "Unsaved Markdown changes" });
+	await prompt.getByRole("button", { name: "Cancel", exact: true }).click();
+	const refused = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 8, ack: 7, items: [] }), { binding: first.status.binding });
+	const cancel = refused?.items?.[0];
+	assert(cancel?.kind === "guard-result" && cancel.result?.kind === "refused" && cancel.result.reason === "cancel" && cancel.result.correlation.requestId === "66666666-6666-4666-8666-666666666666", "Cancel returns the matching native refusal");
+	await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+	assert((await editor.textContent())?.includes("retained local edit"), "a refused native attempt reserves the dirty draft until abort acknowledgement");
+	const dirtyAbort = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 9, ack: 8, items: [{ kind: "native-abort", binding, correlation }] }), { binding: first.status.binding, correlation: cancel.result.correlation });
+	assert(dirtyAbort?.items?.[0]?.kind === "abort-ack", "the matching abort releases the refused dirty attempt");
 	await page.route("**/workspace-files?*", (route) => route.fulfill({ status: 409, json: { code: "person_changed", error: "Invented identity change" } }));
 	await page.evaluate(() => window.dispatchEvent(new Event("focus")));
 	await page.getByText("Someone else is now signed in on this server.", { exact: true }).waitFor();
-	const invalidated = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 6, ack: 5, items: [] }), { binding: first.status.binding });
+	const invalidated = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 10, ack: 9, items: [] }), { binding: first.status.binding });
 	assert(invalidated == null, "a changed person cannot receive another owner status");
 	console.log("owner endpoint browser supplement: hello, replay and invalid inputs passed");
 } catch (caught) { error = caught; }

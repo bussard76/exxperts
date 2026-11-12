@@ -597,6 +597,7 @@ export function App() {
 	const preparedDocumentAdmissionRef = useRef<PreparedDocumentAdmission | null>(null);
 	const markdownEditorDirtyRef = useRef(false);
 	const markdownEditorPendingActionRef = useRef<PendingDocumentAction | null>(null);
+	const nativeGuardRef = useRef<{ admission: DocumentAdmission; cancel: () => void; prepared: () => void; fail: (reason: "save-error" | "unknown-write" | "invalidated") => void; deadline: () => void } | null>(null);
 	const markdownEditorCommitBypassRef = useRef<{ pending: PendingDocumentAction } | null>(null);
 	const markdownEditorCommittingRef = useRef(false);
 	const markdownEditorPromptTimerRef = useRef<number | null>(null);
@@ -1060,15 +1061,16 @@ export function App() {
 
 
 	// Private shell-to-owner endpoint. Until the remaining C5 items are wired,
-	// only hello, empty polls, empty-session and clean prepare/abort are accepted;
-	// every other request fails closed.
+	// Only the staged hello, preparation and abort paths are accepted here;
+	// unsupported native requests fail closed.
 	useEffect(() => {
 		if (!documentOwnerId || Object.getOwnPropertyDescriptor(window, "__exxpertsDocuments")) return;
 		let nativeSessionId: string | null = null;
 		let lastInput = "";
 		let lastSequence = 0;
 		let lastOutput: unknown = null;
-		let nativePrepared: { admission: DocumentAdmission; correlation: { requestId: string; stamp: DocumentContext & { hostGeneration: number; draftGeneration: number }; action: { kind: "chat-close"; disposition: "hide" | "quit" | "update" | "reload" } } } | null = null;
+		let nativePrepared: { admission: DocumentAdmission; correlation: { requestId: string; stamp: DocumentContext & { hostGeneration: number; draftGeneration: number }; action: { kind: "chat-close"; disposition: "hide" | "quit" | "update" | "reload" } }; phase: "preparing" | "prepared" | "refused" } | null = null;
+		let outbound: unknown[] = [];
 		const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 		const matchesStamp = (value: unknown, expected: DocumentContext & { hostGeneration: number; draftGeneration: number }): boolean => {
 			if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -1097,7 +1099,7 @@ export function App() {
 				items = [{ kind: "hello", ownerId: documentOwnerId, ownerGeneration: documentOwnerGenerationRef.current }];
 			} else {
 				if (envelope.nativeSessionId !== nativeSessionId || envelope.sequence !== lastSequence + 1 || envelope.ack !== lastSequence) return null;
-				if (envelope.items.length === 0) items = [];
+				if (envelope.items.length === 0) { items = outbound; outbound = []; }
 				else {
 					const item = envelope.items[0];
 					if (envelope.items.length !== 1 || !item || typeof item !== "object" || Array.isArray(item)) return null;
@@ -1121,16 +1123,54 @@ export function App() {
 							} else if (markdownEditorPendingActionRef.current) {
 								items = [{ kind: "guard-result", binding: currentBinding, nativeRequestId: request.nativeRequestId, result: { kind: "refused", correlation, reason: "busy" } }];
 							} else {
-								if (markdownEditorDirtyRef.current || markdownEditorRef.current?.pendingWrite() || documentSaveInFlightRef.current || documentKeepMineInFlightRef.current || documentWriteRef.current) return null;
+								if (markdownEditorRef.current?.pendingWrite() || documentSaveInFlightRef.current || documentKeepMineInFlightRef.current || documentWriteRef.current) return null;
 								const admission = captureDocumentAdmission(request.nativeRequestId, { kind: "chat-close", disposition });
 								if (!admission) return null;
 								markdownEditorPendingActionRef.current = { admission, continuation: () => {}, result: null };
 								preparedDocumentAdmissionRef.current = null;
-								if (!prepareDocumentAdmission(admission)) { markdownEditorPendingActionRef.current = null; return null; }
 								markdownEditorRef.current?.setFence(true);
 								setMarkdownEditorFenced(true);
-								nativePrepared = { admission, correlation };
-								items = [{ kind: "guard-result", binding: currentBinding, nativeRequestId: request.nativeRequestId, result: { kind: "prepared", correlation, decision: "allow" } }];
+								nativePrepared = { admission, correlation, phase: "preparing" };
+								const queueRefusal = (reason: "cancel" | "save-error" | "unknown-write" | "invalidated") => {
+									if (!nativePrepared || nativePrepared.admission !== admission || nativePrepared.phase !== "preparing") return;
+									nativePrepared.phase = "refused";
+									outbound.push({ kind: "guard-result", binding: currentBinding, nativeRequestId: request.nativeRequestId, result: { kind: "refused", correlation: nativePrepared.correlation, reason } });
+								};
+								nativeGuardRef.current = {
+									admission,
+									cancel: () => queueRefusal("cancel"),
+									fail: queueRefusal,
+									deadline: () => {
+										if (!nativePrepared || nativePrepared.admission !== admission || nativePrepared.phase !== "preparing") return;
+										nativePrepared.phase = "refused";
+										outbound.push({ kind: "guard-result", binding: currentBinding, nativeRequestId: request.nativeRequestId, result: { kind: "unknown", correlation: nativePrepared.correlation } });
+									},
+									prepared: () => {
+										const prepared = preparedDocumentAdmissionRef.current;
+										if (!nativePrepared || nativePrepared.admission !== admission || nativePrepared.phase !== "preparing" || !prepared || prepared.admission !== admission || !admission.context) return;
+										nativePrepared.correlation = { ...correlation, stamp: { ...admission.context, hostGeneration: prepared.hostGeneration, draftGeneration: prepared.draftGeneration } };
+										nativePrepared.phase = "prepared";
+										outbound.push({ kind: "guard-result", binding: currentBinding, nativeRequestId: request.nativeRequestId, result: { kind: "prepared", correlation: nativePrepared.correlation, decision: "allow" } });
+									},
+								};
+								if (markdownEditorDirtyRef.current) {
+									const timer = window.setTimeout(() => {
+										if (markdownEditorPromptTimerRef.current !== timer || nativeGuardRef.current?.admission !== admission) return;
+										markdownEditorPromptTimerRef.current = null;
+										if (markdownEditorPromptBusyRef.current) markdownEditorCanceledSaveRef.current = true;
+										nativeGuardRef.current.deadline();
+										setMarkdownEditorPrompt(null);
+										setMarkdownEditorPromptBusy(false);
+									}, 120_000);
+									markdownEditorPromptTimerRef.current = timer;
+									setMarkdownEditorPrompt("navigate");
+									setMarkdownEditorPromptBusy(false);
+									items = [];
+								} else {
+									if (!prepareDocumentAdmission(admission)) { nativeGuardRef.current = null; nativePrepared = null; markdownEditorPendingActionRef.current = null; markdownEditorRef.current?.setFence(false); setMarkdownEditorFenced(false); return null; }
+									nativePrepared.phase = "prepared";
+									items = [{ kind: "guard-result", binding: currentBinding, nativeRequestId: request.nativeRequestId, result: { kind: "prepared", correlation, decision: "allow" } }];
+								}
 							}
 						}
 					} else if (request.kind === "native-abort") {
@@ -1138,7 +1178,14 @@ export function App() {
 						const correlation = request.correlation as Record<string, unknown>;
 						const action = correlation.action;
 						if (Object.keys(correlation).sort().join(",") !== "action,requestId,stamp" || correlation.requestId !== nativePrepared.correlation.requestId || !matchesStamp(correlation.stamp, nativePrepared.correlation.stamp) || !action || typeof action !== "object" || Array.isArray(action) || Object.keys(action).sort().join(",") !== "disposition,kind" || (action as Record<string, unknown>).kind !== "chat-close" || (action as Record<string, unknown>).disposition !== nativePrepared.correlation.action.disposition || markdownEditorPendingActionRef.current?.admission !== nativePrepared.admission) return null;
+						if (markdownEditorPromptBusyRef.current || documentSaveInFlightRef.current || documentKeepMineInFlightRef.current || documentWriteRef.current) return null;
 						const aborted = nativePrepared.correlation;
+						if (markdownEditorPromptTimerRef.current !== null) window.clearTimeout(markdownEditorPromptTimerRef.current);
+						markdownEditorPromptTimerRef.current = null;
+						setMarkdownEditorPrompt(null);
+						setMarkdownEditorPromptBusy(false);
+						outbound = [];
+						nativeGuardRef.current = null;
 						nativePrepared = null;
 						markdownEditorPendingActionRef.current = null;
 						preparedDocumentAdmissionRef.current = null;
@@ -1211,15 +1258,23 @@ export function App() {
 			setMarkdownEditorFenced(false);
 		};
 		const admission = pending.admission;
+		const nativeGuard = nativeGuardRef.current?.admission === admission ? nativeGuardRef.current : null;
 		if (prepareNow && (!admission || !prepareDocumentAdmission(admission))) {
 			setMarkdownEditorPrompt(null);
 			setMarkdownEditorPromptBusy(false);
+			if (nativeGuard) { markdownEditorPromptBusyRef.current = false; markdownEditorCommittingRef.current = false; nativeGuard.fail("invalidated"); return Promise.resolve(false); }
 			release();
 			actionResult?.resolve(false);
 			return Promise.resolve(false);
 		}
 		setMarkdownEditorPrompt(null);
 		setMarkdownEditorPromptBusy(false);
+		if (nativeGuard) {
+			markdownEditorPromptBusyRef.current = false;
+			markdownEditorCommittingRef.current = false;
+			nativeGuard.prepared();
+			return Promise.resolve(true);
+		}
 		markdownEditorDirtyRef.current = false;
 		try {
 			const invoke = () => {
@@ -1282,6 +1337,18 @@ export function App() {
 		const saved = await markdownEditorRef.current?.save();
 		if (!pending || markdownEditorPendingActionRef.current !== pending) return;
 		if (!saved || markdownEditorCanceledSaveRef.current) {
+			const nativeGuard = nativeGuardRef.current?.admission === pending.admission ? nativeGuardRef.current : null;
+			if (nativeGuard) {
+				if (markdownEditorPromptTimerRef.current !== null) window.clearTimeout(markdownEditorPromptTimerRef.current);
+				markdownEditorPromptTimerRef.current = null;
+				if (markdownEditorCanceledSaveRef.current) nativeGuard.cancel();
+				else nativeGuard.fail(markdownEditorRef.current?.pendingWrite() === "unknown" ? "unknown-write" : "save-error");
+				markdownEditorCanceledSaveRef.current = false;
+				markdownEditorPromptBusyRef.current = false;
+				setMarkdownEditorPromptBusy(false);
+				setMarkdownEditorPrompt(null);
+				return;
+			}
 			if (markdownEditorPromptTimerRef.current !== null) window.clearTimeout(markdownEditorPromptTimerRef.current);
 			markdownEditorPromptTimerRef.current = null;
 			markdownEditorCanceledSaveRef.current = false;
@@ -1308,6 +1375,17 @@ export function App() {
 		const settled = await editor?.settle();
 		if (!pending || markdownEditorPendingActionRef.current !== pending) return;
 		if (markdownEditorCanceledSaveRef.current || !settled || !editor?.discard()) {
+			const nativeGuard = nativeGuardRef.current?.admission === pending.admission ? nativeGuardRef.current : null;
+			if (nativeGuard) {
+				if (markdownEditorPromptTimerRef.current !== null) window.clearTimeout(markdownEditorPromptTimerRef.current);
+				markdownEditorPromptTimerRef.current = null;
+				if (markdownEditorCanceledSaveRef.current) nativeGuard.cancel(); else nativeGuard.fail("unknown-write");
+				markdownEditorCanceledSaveRef.current = false;
+				markdownEditorPromptBusyRef.current = false;
+				setMarkdownEditorPrompt(null);
+				setMarkdownEditorPromptBusy(false);
+				return;
+			}
 			if (markdownEditorPromptTimerRef.current !== null) window.clearTimeout(markdownEditorPromptTimerRef.current);
 			markdownEditorPromptTimerRef.current = null;
 			markdownEditorCanceledSaveRef.current = false;
@@ -1328,6 +1406,15 @@ export function App() {
 		if (markdownEditorCommittingRef.current) return;
 		if (markdownEditorPromptTimerRef.current !== null) window.clearTimeout(markdownEditorPromptTimerRef.current);
 		markdownEditorPromptTimerRef.current = null;
+		const pending = markdownEditorPendingActionRef.current;
+		const nativeGuard = nativeGuardRef.current?.admission === pending?.admission ? nativeGuardRef.current : null;
+		if (nativeGuard) {
+			if (markdownEditorPromptBusyRef.current) markdownEditorCanceledSaveRef.current = true;
+			nativeGuard.cancel();
+			setMarkdownEditorPrompt(null);
+			setMarkdownEditorPromptBusy(false);
+			return;
+		}
 		if (markdownEditorPromptBusyRef.current) markdownEditorCanceledSaveRef.current = true;
 		else {
 			const pending = markdownEditorPendingActionRef.current;
