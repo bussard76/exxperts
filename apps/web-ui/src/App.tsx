@@ -1069,13 +1069,19 @@ export function App() {
 		let lastInput = "";
 		let lastSequence = 0;
 		let lastOutput: unknown = null;
-		let nativePrepared: { admission: DocumentAdmission; correlation: { requestId: string; stamp: DocumentContext & { hostGeneration: number; draftGeneration: number }; action: { kind: "chat-close"; disposition: "hide" | "quit" | "update" | "reload" } }; phase: "preparing" | "prepared" | "refused" | "aborting" } | null = null;
+		let nativePrepared: { admission: DocumentAdmission; correlation: { requestId: string; stamp: DocumentContext & { hostGeneration: number; draftGeneration: number }; action: { kind: "chat-close"; disposition: "hide" | "quit" | "update" | "reload" } }; phase: "preparing" | "prepared" | "refused" | "aborting" | "committed" | "completed" } | null = null;
 		let outbound: unknown[] = [];
 		const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 		const matchesStamp = (value: unknown, expected: DocumentContext & { hostGeneration: number; draftGeneration: number }): boolean => {
 			if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 			const candidate = value as Record<string, unknown>;
 			return Object.keys(candidate).sort().join(",") === "conversationId,draftGeneration,hostGeneration,ownerGeneration,ownerId,roomGeneration,roomId" && Object.entries(expected).every(([key, value]) => candidate[key] === value);
+		};
+		const matchesCorrelation = (value: unknown): boolean => {
+			if (!nativePrepared || !value || typeof value !== "object" || Array.isArray(value)) return false;
+			const candidate = value as Record<string, unknown>;
+			const action = candidate.action;
+			return Object.keys(candidate).sort().join(",") === "action,requestId,stamp" && candidate.requestId === nativePrepared.correlation.requestId && matchesStamp(candidate.stamp, nativePrepared.correlation.stamp) && !!action && typeof action === "object" && !Array.isArray(action) && Object.keys(action).sort().join(",") === "disposition,kind" && (action as Record<string, unknown>).kind === "chat-close" && (action as Record<string, unknown>).disposition === nativePrepared.correlation.action.disposition;
 		};
 		const step = (input: unknown): unknown => {
 			if (!input || typeof input !== "object" || Array.isArray(input) || unmountedRef.current || personHasChanged()) return null;
@@ -1202,6 +1208,26 @@ export function App() {
 								}
 							}
 						}
+					} else if (request.kind === "native-commit") {
+						if (Object.keys(request).sort().join(",") !== "binding,correlation,kind" || !nativePrepared || nativePrepared.phase !== "prepared" || !matchesCorrelation(request.correlation) || markdownEditorPendingActionRef.current?.admission !== nativePrepared.admission || !preparedDocumentAdmissionIsCurrent(nativePrepared.admission)) return null;
+						nativePrepared.phase = "committed";
+						items = [{ kind: "committed", binding: currentBinding, correlation: nativePrepared.correlation }];
+					} else if (request.kind === "child-closed") {
+						if (Object.keys(request).sort().join(",") !== "binding,child,context,correlation,hostGeneration,kind,transfer" || !nativePrepared || nativePrepared.phase !== "committed" || !matchesCorrelation(request.correlation) || request.transfer !== null || request.child !== null || request.hostGeneration !== nativePrepared.correlation.stamp.hostGeneration || !request.context || typeof request.context !== "object" || Array.isArray(request.context)) return null;
+						const context = request.context as Record<string, unknown>;
+						const expected = nativePrepared.correlation.stamp;
+						if (Object.keys(context).sort().join(",") !== "conversationId,ownerGeneration,ownerId,roomGeneration,roomId" || !["ownerId", "ownerGeneration", "roomId", "conversationId", "roomGeneration"].every((key) => context[key] === expected[key as keyof typeof expected]) || !preparedDocumentAdmissionIsCurrent(nativePrepared.admission)) return null;
+						nativePrepared.phase = "completed";
+						items = [{ kind: "completed", binding: currentBinding, correlation: nativePrepared.correlation }];
+					} else if (request.kind === "native-completed") {
+						if (Object.keys(request).sort().join(",") !== "binding,correlation,kind" || !nativePrepared || nativePrepared.phase !== "completed" || !matchesCorrelation(request.correlation) || markdownEditorPendingActionRef.current?.admission !== nativePrepared.admission) return null;
+						nativeGuardRef.current = null;
+						nativePrepared = null;
+						markdownEditorPendingActionRef.current = null;
+						preparedDocumentAdmissionRef.current = null;
+						markdownEditorRef.current?.setFence(false);
+						setMarkdownEditorFenced(false);
+						items = [];
 					} else if (request.kind === "native-abort") {
 						if (Object.keys(request).sort().join(",") !== "binding,correlation,kind" || !nativePrepared || !request.correlation || typeof request.correlation !== "object" || Array.isArray(request.correlation)) return null;
 						const correlation = request.correlation as Record<string, unknown>;

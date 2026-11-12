@@ -216,10 +216,26 @@ try {
 		const after = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 27, ack: 26, items: [] }), { binding: first.status.binding });
 		assert(after?.items?.length === 0, "the aborted joined write cannot publish a late allow");
 	} finally { releaseJoinedAbort(); await joinedAbortFinished; await page.unroute("**/workspace-markdown?*"); }
+	const commitStatus = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 28, ack: 27, items: [] }), { binding: first.status.binding });
+	const prepareCommit = await page.evaluate(({ binding, stamp }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 29, ack: 28, items: [{ kind: "native-prepare", binding, nativeRequestId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", observedStamp: stamp, disposition: "hide" }] }), { binding: first.status.binding, stamp: commitStatus.status.stamp });
+	const correlation = prepareCommit?.items?.[0]?.result?.correlation;
+	assert(prepareCommit?.items?.[0]?.result?.kind === "prepared", "clean native action is prepared for commit");
+	const committed = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 30, ack: 29, items: [{ kind: "native-commit", binding, correlation }] }), { binding: first.status.binding, correlation });
+	assert(committed?.items?.[0]?.kind === "committed", "matching current native commit is acknowledged");
+	const waiting = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 31, ack: 30, items: [] }), { binding: first.status.binding });
+	assert(waiting?.items?.length === 0, "commit cannot complete before actual no-child evidence");
+	const stamp = correlation.stamp;
+	const context = { ownerId: stamp.ownerId, ownerGeneration: stamp.ownerGeneration, roomId: stamp.roomId, conversationId: stamp.conversationId, roomGeneration: stamp.roomGeneration };
+	const staleClosed = await page.evaluate(({ binding, correlation, context, hostGeneration }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 32, ack: 31, items: [{ kind: "child-closed", binding, correlation, transfer: null, child: null, context, hostGeneration: hostGeneration + 1 }] }), { binding: first.status.binding, correlation, context, hostGeneration: stamp.hostGeneration });
+	assert(staleClosed == null, "stale no-child evidence cannot complete the action");
+	const closed = await page.evaluate(({ binding, correlation, context, hostGeneration }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 32, ack: 31, items: [{ kind: "child-closed", binding, correlation, transfer: null, child: null, context, hostGeneration }] }), { binding: first.status.binding, correlation, context, hostGeneration: stamp.hostGeneration });
+	assert(closed?.items?.[0]?.kind === "completed", "explicit matching no-child evidence completes the committed action");
+	const receipt = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 33, ack: 32, items: [{ kind: "native-completed", binding, correlation }] }), { binding: first.status.binding, correlation });
+	assert(receipt?.sequence === 33, "matching completion receipt releases the owner reservation");
 	await page.route("**/workspace-files?*", (route) => route.fulfill({ status: 409, json: { code: "person_changed", error: "Invented identity change" } }));
 	await page.evaluate(() => window.dispatchEvent(new Event("focus")));
 	await page.getByText("Someone else is now signed in on this server.", { exact: true }).waitFor();
-	const invalidated = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 28, ack: 27, items: [] }), { binding: first.status.binding });
+	const invalidated = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 34, ack: 33, items: [] }), { binding: first.status.binding });
 	assert(invalidated == null, "a changed person cannot receive another owner status");
 	console.log("owner endpoint browser supplement: hello, replay and invalid inputs passed");
 } catch (caught) { error = caught; }
