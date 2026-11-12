@@ -436,6 +436,31 @@ try {
 			await lostChild.close();
 			await waitUntil(async () => await raw.isVisible(), "the owner recovers after the real browser child closes");
 			assert(await raw.inputValue() === unknownDraft && Number(writes) === 3, "unexpected browser-child closure retains the unresolved source without a retry");
+			const closeRoom = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Invented Close Ordering", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
+			assert(closeRoom.status === 201, "the close-order room is created");
+			const closeRoomId = String(closeRoom.body?.agent?.id ?? "");
+			assert((await api(`/api/persistent-agents/${encodeURIComponent(closeRoomId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: workspace, workspaceAccessMode: "localFiles" }) })).status === 200, "the close-order room uses the invented workspace");
+			const closePage = await context.newPage();
+			try {
+				await closePage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+				await closePage.waitForLoadState("networkidle");
+				const closeDismiss = closePage.locator(".whats-new-close");
+				if (await closeDismiss.count()) await closeDismiss.click();
+				await closePage.locator(".persistent-agent-card").filter({ hasText: "Invented Close Ordering" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+				await closePage.locator(".sidebar-workspace-files").waitFor();
+				const closeOpened = closePage.waitForEvent("popup");
+				await closePage.getByRole("button", { name: "Detach", exact: true }).click();
+				const heldChild = await closeOpened;
+				await heldChild.locator(".workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
+				await heldChild.evaluate(`window.__t20OriginalClose = window.close; window.__t20CloseCalls = 0; window.close = () => { window.__t20CloseCalls++; }`);
+				await closePage.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+				await waitUntil(() => heldChild.evaluate(`window.__t20CloseCalls > 0`), "the real Home flow requests the registered child close");
+				assert(!heldChild.isClosed() && (await closePage.evaluate(() => location.hash)).includes("/room/"), "Home waits when the actual child is not closed");
+				const childClosed = heldChild.waitForEvent("close");
+				await heldChild.evaluate(`window.close = window.__t20OriginalClose; window.close()`);
+				await childClosed;
+				await waitUntil(async () => !(await closePage.evaluate(() => location.hash)).includes("/room/"), "Home continues after actual child closure");
+			} finally { await closePage.close().catch(() => {}); }
 		} finally { await context.close(); }
 	} finally { await browser.close(); }
 	console.log("workspace-detached-documents-ui smoke: ok");

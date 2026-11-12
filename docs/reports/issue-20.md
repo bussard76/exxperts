@@ -521,3 +521,7 @@ A selected room now shows one disabled Detach control even with no tabs; an atta
 ## Checkpoint: disabled Return draft
 
 The private child bootstrap now creates a disabled Return control, and the inactive owner path admits Return through the same pending-action record, fences the editor, preallocates fresh frame IDs, moves the held surfaces to chat, and waits for the registered browser window's `closed` state before releasing that attempt. A child `beforeunload` draft invokes the synchronous move; unknown moves retain the fence. UI and scripts typechecks and the UI asset build passed. The first detached rerun checked the control before room entry completed; after waiting for the real workspace tree, the targeted rerun passed the one-control assertion and stopped at the expected disabled Detach assertion. No child, Return, close-evidence or recovery case ran; context-exit close ordering and native C5 remain incomplete, so the control stays disabled.
+
+## Checkpoint: held child-close case
+
+The detached smoke now specifies a real clean Home action with the registered child window's actual `close` method held: Home must stay in the room until that same child really closes, then continue. Scripts typecheck passed; the attributed run still stops at disabled Detach, so the new ordering case was not reached and provides no close evidence yet.
