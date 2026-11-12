@@ -29,7 +29,7 @@ const original = "# Invented source\r\n\r\n";
 // HTML textarea values expose CRLF as LF; the file bytes are checked separately.
 const rawDisplay = original.replaceAll("\r\n", "\n");
 fs.writeFileSync(path.join(workspace, "invented.md"), original);
-fs.writeFileSync(path.join(workspace, "interaction.md"), "- [ ] Invented child task\n\n[Open invented](invented.md)\n");
+fs.writeFileSync(path.join(workspace, "interaction.md"), "- [ ] Invented child task\n\n[Open invented](invented.md)\n\n[External invented](https://example.invalid/invented)\n");
 fs.writeFileSync(path.join(workspace, "snapshot.html"), '<body><p>Invented original snapshot</p><script>document.body.dataset.executed = "yes"</script></body>');
 fs.writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({ providers: {
 	"fake-claude": { name: "Fake Claude", baseUrl: "http://127.0.0.1:9", api: "anthropic-messages", models: [{ id: "claude-fake", name: "Claude Fake", input: ["text"], contextWindow: 200000, maxTokens: 32000 }] },
@@ -176,6 +176,18 @@ try {
 				await child.locator(".workspace-tab[data-active='true']", { hasText: "invented.md" }).waitFor();
 				await child.locator(".workspace-file-browser-file", { hasText: "interaction.md" }).click();
 				await child.getByRole("button", { name: "Preview", exact: true }).click();
+				let externalLinkRequests = 0;
+				await context.route("https://example.invalid/**", (route) => { externalLinkRequests++; return route.abort(); });
+				await page.evaluate(`window.__t20OriginalOpen = window.open; window.__t20ExternalOpens = 0; window.open = () => { window.__t20ExternalOpens++; return null; }`);
+				await child.evaluate(`window.__t20OriginalOpen = window.open; window.__t20ExternalOpens = 0; window.open = () => { window.__t20ExternalOpens++; return null; }`);
+				try {
+					await child.getByRole("link", { name: "External invented" }).click();
+					assert(await child.evaluate(`window.__t20ExternalOpens`) === 1 && await page.evaluate(`window.__t20ExternalOpens`) === 0 && externalLinkRequests === 0, "an explicit external link uses only the child fake opener without a network request");
+				} finally {
+					await child.evaluate(`window.open = window.__t20OriginalOpen; delete window.__t20OriginalOpen; delete window.__t20ExternalOpens`);
+					await page.evaluate(`window.open = window.__t20OriginalOpen; delete window.__t20OriginalOpen; delete window.__t20ExternalOpens`);
+					await context.unroute("https://example.invalid/**");
+				}
 				await child.getByRole("link", { name: "Open invented" }).click();
 				await child.locator(".workspace-tab[data-active='true']", { hasText: "invented.md" }).waitFor();
 				assert(!child.isClosed() && Number(writes) === 0, "child checkbox and internal preview link use the current document host without a write");

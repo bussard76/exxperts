@@ -160,6 +160,7 @@ fs.writeFileSync(path.join(folder, "many.xlsx"), "invented placeholder");
 }
 fs.writeFileSync(path.join(folder, "large.svg"), '<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="2000"><rect width="2000" height="2000" fill="red"/></svg>');
 fs.writeFileSync(path.join(folder, "notes.md"), "# Notes\n\nSome text\n");
+fs.writeFileSync(path.join(folder, "host-link.md"), "[External invented](https://example.invalid/invented)\n");
 fs.writeFileSync(path.join(folder, "draft.md"), "# Invented draft\n");
 fs.writeFileSync(path.join(folder, "save-race.md"), "# Invented save race\n");
 fs.writeFileSync(path.join(folder, "lost-response.md"), "# Invented response loss\n");
@@ -709,6 +710,17 @@ try {
         await page.frameLocator('.workspace-preview-html iframe[title="reopen.html"]').getByText("Invented second HTML incarnation").waitFor();
         assert(reopenedHtmlReads === 2, "closing the HTML tab ends its retained snapshot before a new incarnation opens");
         await tab("reopen.html").locator(".workspace-tab-close").click();
+		await treeFile("host-link.md").click();
+		await page.locator(".markdown-editor-tiptap .ProseMirror").waitFor();
+		await page.getByRole("button", { name: "Preview", exact: true }).click();
+		let externalLinkRequests = 0;
+		await context.route("https://example.invalid/**", (route) => { externalLinkRequests++; return route.abort(); });
+		await page.evaluate(`window.__t20OriginalOpen = window.open; window.__t20ExternalOpens = 0; window.open = () => { window.__t20ExternalOpens++; return null; }`);
+		try {
+			await page.getByRole("link", { name: "External invented" }).click();
+			assert(await page.evaluate(`window.__t20ExternalOpens`) === 1 && externalLinkRequests === 0, "an explicit attached preview link uses its fake window opener once without a network request");
+		} finally { await page.evaluate(`window.open = window.__t20OriginalOpen; delete window.__t20OriginalOpen; delete window.__t20ExternalOpens`); await context.unroute("https://example.invalid/**"); }
+		await tab("host-link.md").locator(".workspace-tab-close").click();
         previewRequests = 0;
 		await treeFile("notes.md").click();
 		await page.locator(".markdown-editor-tiptap .ProseMirror").waitFor({ timeout: 20_000 });

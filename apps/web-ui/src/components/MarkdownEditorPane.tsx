@@ -494,6 +494,7 @@ function resolveWorkspaceMarkdownPath(currentPath: string, href: string, allowEx
 }
 
 export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agentId, conversationId, contextGeneration, hostGeneration, path, fenced, saveInFlight, keepMineInFlight: keepMineInFlightRef, documentWrite: documentWriteRef, beginWrite, onBind, onSnapshot, onClose, onMutation, onDirtyChange, onOpenMarkdown }: Props, ref: Ref<MarkdownEditorHandle>) {
+	const paneRootRef = useRef<HTMLElement | null>(null);
 	const [paneToken] = useState<object>(() => ({}));
 	const publishRef = useRef<() => void>(() => {});
 	const noteMutation = useCallback(() => { onMutation(agentId, conversationId, contextGeneration); publishRef.current(); }, [agentId, contextGeneration, conversationId, onMutation]);
@@ -858,7 +859,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			return true;
 		}
 		if (/^(?:https?:|mailto:|tel:)/i.test(href)) {
-			window.open(href, "_blank", "noopener,noreferrer");
+			paneRootRef.current?.ownerDocument.defaultView?.open(href, "_blank", "noopener,noreferrer");
 			return true;
 		}
 		return false;
@@ -936,7 +937,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 	const status = phase === "loading" ? "Loading…" : phase === "saving" ? "Saving…" : conflict ? "Conflict" : phase === "error" ? "Error" : isDirty ? "Unsaved" : canEdit ? "Saved" : "Read-only";
 
 	return (
-		<aside className="markdown-editor-pane" aria-label={`Markdown editor: ${filename}`} onClickCapture={(event) => { if (immediateFenceRef.current) { event.preventDefault(); event.stopPropagation(); } }}>
+		<aside ref={paneRootRef} className="markdown-editor-pane" aria-label={`Markdown editor: ${filename}`} onClickCapture={(event) => { if (immediateFenceRef.current) { event.preventDefault(); event.stopPropagation(); } }}>
 			<header className="markdown-editor-header" tabIndex={-1}>
 				<h2 className="sr-only">{filename}</h2>
 				<div className="markdown-editor-actions">
