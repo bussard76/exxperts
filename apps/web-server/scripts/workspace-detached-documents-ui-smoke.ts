@@ -495,6 +495,43 @@ try {
 				await mementoClosed;
 				assert((await mementoResponse).ok(), "confirmed Memento reaches its real route after the child closes");
 			} finally { await mementoPage.close().catch(() => {}); }
+			const settingsRoom = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Invented Settings Memento", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
+			assert(settingsRoom.status === 201, "the settings Memento room is created");
+			const settingsRoomId = String(settingsRoom.body?.agent?.id ?? "");
+			assert((await api(`/api/persistent-agents/${encodeURIComponent(settingsRoomId)}/workspace-default`, { method: "PUT", body: JSON.stringify({ root: workspace, workspaceAccessMode: "localFiles" }) })).status === 200, "the settings Memento room uses the invented workspace");
+			const settingsPage = await context.newPage();
+			try {
+				await settingsPage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+				await settingsPage.waitForLoadState("networkidle");
+				const dismissSettings = settingsPage.locator(".whats-new-close");
+				if (await dismissSettings.count()) await dismissSettings.click();
+				await settingsPage.locator(".persistent-agent-card").filter({ hasText: "Invented Settings Memento" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+				await settingsPage.locator(".sidebar-workspace-files").waitFor();
+				const settingsOpened = settingsPage.waitForEvent("popup");
+				await settingsPage.getByRole("button", { name: "Detach", exact: true }).click();
+				const settingsChild = await settingsOpened;
+				await settingsChild.locator(".workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
+				await settingsChild.evaluate(`window.__t20OriginalClose = window.close; window.__t20CloseCalls = 0; window.close = () => { window.__t20CloseCalls++; }`);
+				let settingsRequests = 0;
+				settingsPage.on("request", (request) => { if (request.method() === "POST" && request.url().endsWith("/memento")) settingsRequests++; });
+				await settingsPage.getByRole("button", { name: "Room settings" }).click();
+				await settingsPage.locator(".settings-dialog-nav-item").filter({ hasText: /^Conversation$/ }).first().click();
+				const settingsForget = settingsPage.locator(".room-session-section").getByRole("button", { name: "Forget…" });
+				const settingsConfirm = settingsPage.getByRole("alertdialog", { name: "Forget this conversation and start fresh?" });
+				await settingsForget.click();
+				await settingsConfirm.getByRole("button", { name: "Cancel", exact: true }).click();
+				await settingsConfirm.waitFor({ state: "detached" });
+				assert(!settingsChild.isClosed() && await settingsChild.evaluate(`window.__t20CloseCalls`) === 0 && settingsRequests === 0, "canceling room-settings Memento keeps the child and sends no request");
+				await settingsForget.click();
+				await settingsConfirm.getByRole("button", { name: "Forget", exact: true }).click();
+				await waitUntil(() => settingsChild.evaluate(`window.__t20CloseCalls > 0`), "confirmed settings Memento requests child closure");
+				assert(!settingsChild.isClosed() && settingsRequests === 0, "room-settings Memento waits for actual child closure before its request");
+				const settingsClosed = settingsChild.waitForEvent("close");
+				const settingsResponse = settingsPage.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/memento"));
+				await settingsChild.evaluate(`window.close = window.__t20OriginalClose; window.close()`);
+				await settingsClosed;
+				assert((await settingsResponse).ok(), "room-settings Memento reaches its real route after child closure");
+			} finally { await settingsPage.close().catch(() => {}); }
 		} finally { await context.close(); }
 	} finally { await browser.close(); }
 	console.log("workspace-detached-documents-ui smoke: ok");
