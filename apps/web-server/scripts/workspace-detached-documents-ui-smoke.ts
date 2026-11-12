@@ -26,12 +26,37 @@ const agentDir = path.join(tempHome, ".exxperts", "agent");
 const appDir = path.join(tempHome, ".exxperts", "app");
 const workspace = path.join(tempRoot, "workspace");
 for (const dir of [agentsRoot, agentDir, workspace]) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+function ninePagePdf(): Buffer {
+	const objects: string[] = [];
+	const kids = Array.from({ length: 9 }, (_, index) => `${3 + index * 2} 0 R`).join(" ");
+	objects.push("<< /Type /Catalog /Pages 2 0 R >>", `<< /Type /Pages /Kids [${kids}] /Count 9 >>`);
+	for (let index = 0; index < 9; index++) {
+		const stream = index === 0 ? "1 0 0 rg 10 10 180 80 re f q 40 0 0 40 20 20 cm /I1 Do Q 0 0 0 rg BT /F1 14 Tf 70 45 Td (Invented) Tj ET" : "1 0 0 rg 10 10 180 80 re f";
+		objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents ${4 + index * 2} 0 R /Resources << /Font << /F1 21 0 R >> /XObject << /I1 22 0 R >> >> >>`, `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
+	}
+	objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>", "<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length 7 >>\nstream\n00FF00>\nendstream");
+	let body = "%PDF-1.4\n";
+	const offsets: number[] = [];
+	objects.forEach((object, index) => { offsets.push(body.length); body += `${index + 1} 0 obj\n${object}\nendobj\n`; });
+	const xref = body.length;
+	body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+	for (const offset of offsets) body += `${String(offset).padStart(10, "0")} 00000 n \n`;
+	return Buffer.from(body + `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`, "latin1");
+}
+
 const original = "# Invented source\r\n\r\n";
 // HTML textarea values expose CRLF as LF; the file bytes are checked separately.
 const rawDisplay = original.replaceAll("\r\n", "\n");
 fs.writeFileSync(path.join(workspace, "invented.md"), original);
 fs.writeFileSync(path.join(workspace, "interaction.md"), "- [ ] Invented child task\n\n[Open invented](invented.md)\n\n[External invented](https://example.invalid/invented)\n");
 fs.writeFileSync(path.join(workspace, "retained.docx"), await smallDocx());
+fs.writeFileSync(path.join(workspace, "retained.pdf"), ninePagePdf());
+{
+	const { default: ExcelJS } = await import("exceljs");
+	const workbook = new ExcelJS.Workbook();
+	workbook.addWorksheet("Invented sheet").getCell("A1").value = "Invented original cell";
+	fs.writeFileSync(path.join(workspace, "retained.xlsx"), Buffer.from(await workbook.xlsx.writeBuffer()));
+}
 fs.writeFileSync(path.join(workspace, "retained.txt"), "Invented original text snapshot");
 fs.writeFileSync(path.join(workspace, "retained.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==", "base64"));
 fs.writeFileSync(path.join(workspace, "snapshot.html"), '<body><p>Invented original snapshot</p><script>document.body.dataset.executed = "yes"</script></body>');
@@ -133,22 +158,31 @@ fs.writeFileSync(path.join(workspace, "snapshot.html"), '<body><p>Invented later
 			await previewClosed;
 			await page.frameLocator('.workspace-preview-html iframe[title="snapshot.html"]').getByText("Invented original snapshot").waitFor();
 			assert(htmlReads === 1, "Return keeps the original HTML snapshot without another content read");
-			let textReads = 0, imageReads = 0, wordReads = 0;
+			let textReads = 0, imageReads = 0, wordReads = 0, pdfReads = 0, sheetReads = 0;
 			context.on("request", (request) => {
 				const url = new URL(request.url());
 				if (url.searchParams.get("path") === "retained.txt" && url.pathname.endsWith("/workspace-preview")) textReads++;
 				if (url.searchParams.get("path") === "retained.docx" && url.pathname.endsWith("/workspace-preview")) wordReads++;
+				if (url.searchParams.get("path") === "retained.pdf" && url.pathname.endsWith("/workspace-preview")) pdfReads++;
+				if (url.searchParams.get("path") === "retained.xlsx" && url.pathname.endsWith("/workspace-preview")) sheetReads++;
 				if (url.searchParams.get("path") === "retained.png" && url.pathname.endsWith("/workspace-image")) imageReads++;
 			});
 			const snapshotsOpened = page.waitForEvent("popup");
 			await detach.click();
 			const snapshotsChild = await snapshotsOpened;
+			await snapshotsChild.locator(".workspace-file-browser-file", { hasText: "retained.pdf" }).click();
+			await snapshotsChild.locator('.workspace-preview-pdf img[alt="Page 1"]').waitFor();
+			const originalPdf = await snapshotsChild.locator('.workspace-preview-pdf img[alt="Page 1"]').getAttribute("src");
+			await snapshotsChild.locator(".workspace-file-browser-file", { hasText: "retained.xlsx" }).click();
+			await snapshotsChild.locator(".workspace-spreadsheet").getByText("Invented original cell", { exact: true }).waitFor();
 			await snapshotsChild.locator(".workspace-file-browser-file", { hasText: "retained.docx" }).click();
 			await snapshotsChild.frameLocator('.workspace-preview-word iframe[title="retained.docx"]').getByText("Invented heading").waitFor();
 			await snapshotsChild.locator(".workspace-file-browser-file", { hasText: "retained.txt" }).click();
 			await snapshotsChild.locator(".workspace-preview-text pre").getByText("Invented original text snapshot", { exact: true }).waitFor();
 			await snapshotsChild.locator(".workspace-file-browser-file", { hasText: "retained.png" }).click();
 			await snapshotsChild.locator('.workspace-preview-image img[alt="retained.png"]').waitFor();
+			fs.writeFileSync(path.join(workspace, "retained.pdf"), "Invented damaged later PDF");
+			fs.writeFileSync(path.join(workspace, "retained.xlsx"), "Invented damaged later workbook");
 			fs.writeFileSync(path.join(workspace, "retained.docx"), "Invented damaged later document");
 			fs.writeFileSync(path.join(workspace, "retained.txt"), "Invented later text snapshot");
 			fs.writeFileSync(path.join(workspace, "retained.png"), "Invented invalid later image");
@@ -161,7 +195,14 @@ fs.writeFileSync(path.join(workspace, "snapshot.html"), '<body><p>Invented later
 			await page.locator(".workspace-preview-text pre").getByText("Invented original text snapshot", { exact: true }).waitFor();
 			await page.locator(".workspace-tab", { hasText: "retained.docx" }).click();
 			await page.frameLocator('.workspace-preview-word iframe[title="retained.docx"]').getByText("Invented heading").waitFor();
-			assert(textReads === 1 && imageReads === 1 && wordReads === 1, "Return does not refetch text, image or Word snapshots opened first in the child");
+			await page.locator(".workspace-tab", { hasText: "retained.xlsx" }).click();
+			await page.locator(".workspace-spreadsheet").getByText("Invented original cell", { exact: true }).waitFor();
+			await page.locator(".workspace-tab", { hasText: "retained.pdf" }).click();
+			await page.locator('.workspace-preview-pdf img[alt="Page 1"]').waitFor();
+			assert(await page.locator('.workspace-preview-pdf img[alt="Page 1"]').getAttribute("src") === originalPdf, "Return retains the PDF page opened first in the child");
+			assert(textReads === 1 && imageReads === 1 && wordReads === 1 && pdfReads === 1 && sheetReads === 1, "Return does not refetch snapshots opened first in the child");
+			await page.locator(".workspace-tab", { hasText: "retained.pdf" }).locator(".workspace-tab-close").click();
+			await page.locator(".workspace-tab", { hasText: "retained.xlsx" }).locator(".workspace-tab-close").click();
 			await page.locator(".workspace-tab", { hasText: "retained.docx" }).locator(".workspace-tab-close").click();
 			await page.locator(".workspace-tab", { hasText: "retained.txt" }).locator(".workspace-tab-close").click();
 			await page.locator(".workspace-tab", { hasText: "retained.png" }).locator(".workspace-tab-close").click();
