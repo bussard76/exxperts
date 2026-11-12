@@ -175,6 +175,8 @@ type DocumentContext = Readonly<{
 	roomGeneration: number;
 }>;
 
+type DocumentTabAction = Readonly<{ kind: "select-file" | "close-tab"; path: string }>;
+
 type DocumentAdmission = Readonly<{
 	requestId: string;
 	ownerId: string;
@@ -183,6 +185,7 @@ type DocumentAdmission = Readonly<{
 	initialHostGeneration: number;
 	initialDraftGeneration: number;
 	context: DocumentContext | null;
+	tabAction: DocumentTabAction | null;
 }>;
 
 type PreparedDocumentAdmission = Readonly<{
@@ -720,7 +723,7 @@ export function App() {
 		return () => window.removeEventListener("beforeunload", beforeUnload);
 	}, []);
 
-	function captureDocumentAdmission(requestId: string): DocumentAdmission | null {
+	function captureDocumentAdmission(requestId: string, tabAction: DocumentTabAction | null = null): DocumentAdmission | null {
 		const ownerGeneration = documentOwnerGenerationRef.current;
 		const current = checkpointContextRef.current;
 		const hostGeneration = documentHostGenerationRef.current;
@@ -729,8 +732,8 @@ export function App() {
 		const context = current.key === null ? null : current.roomId && current.conversationId && current.generation > 0 ? {
 			ownerId: documentOwnerId, ownerGeneration, roomId: current.roomId, conversationId: current.conversationId, roomGeneration: current.generation,
 		} : null;
-		if (current.key !== null && !context) return null;
-		return { requestId, ownerId: documentOwnerId, ownerGeneration, roomGeneration: current.generation, initialHostGeneration: hostGeneration, initialDraftGeneration: draftGeneration, context };
+		if ((current.key !== null && !context) || (tabAction && ((tabAction.kind !== "select-file" && tabAction.kind !== "close-tab") || typeof tabAction.path !== "string" || !tabAction.path))) return null;
+		return { requestId, ownerId: documentOwnerId, ownerGeneration, roomGeneration: current.generation, initialHostGeneration: hostGeneration, initialDraftGeneration: draftGeneration, context, tabAction: tabAction && { ...tabAction } };
 	}
 
 	function documentAdmissionIsCurrent(admission: DocumentAdmission): boolean {
@@ -759,7 +762,7 @@ export function App() {
 		return !unmountedRef.current && !personHasChanged() && checkpointContextRef.current.key === null && !markdownEditorRef.current && !documentSaveInFlightRef.current && !documentKeepMineInFlightRef.current && !documentWriteRef.current && !markdownEditorPendingActionRef.current;
 	}
 
-	function guardMarkdownEditorAction(action: () => void | Promise<unknown>, prompt: "close" | "switch" | "navigate"): boolean {
+	function guardMarkdownEditorAction(action: () => void | Promise<unknown>, prompt: "close" | "switch" | "navigate", tabAction: DocumentTabAction | null = null): boolean {
 		if (markdownEditorCommitBypassRef.current) {
 			markdownEditorCommitBypassRef.current = false;
 			return true;
@@ -767,11 +770,11 @@ export function App() {
 		if (markdownEditorPendingActionRef.current || !documentOwnerId) return false;
 		if (!markdownEditorRef.current && (documentSaveInFlightRef.current || documentKeepMineInFlightRef.current || documentWriteRef.current)) return false;
 		const requestId = allocateDocumentId();
-		const admission = requestId ? captureDocumentAdmission(requestId) : null;
+		const admission = requestId ? captureDocumentAdmission(requestId, tabAction) : null;
 		if (!admission) return false;
 		if (!markdownEditorDirtyRef.current) {
 			if (!markdownEditorRef.current?.pendingWrite()) return true;
-			void admitCleanMarkdownEditorAction(async () => action(), admission.requestId);
+			void admitCleanMarkdownEditorAction(async () => action(), admission.requestId, tabAction);
 			return false;
 		}
 		markdownEditorAdmissionRef.current = admission;
@@ -841,11 +844,11 @@ export function App() {
 		}
 	}
 
-	function admitCleanMarkdownEditorAction(action: () => Promise<unknown>, admittedId?: string): Promise<unknown> | null {
+	function admitCleanMarkdownEditorAction(action: () => Promise<unknown>, admittedId?: string, tabAction: DocumentTabAction | null = null): Promise<unknown> | null {
 		if (markdownEditorDirtyRef.current || markdownEditorPendingActionRef.current || markdownEditorCommitBypassRef.current) return null;
 		if (!markdownEditorRef.current && (documentSaveInFlightRef.current || documentKeepMineInFlightRef.current || documentWriteRef.current)) return Promise.resolve(false);
 		const requestId = documentOwnerId && (admittedId ?? allocateDocumentId());
-		const admission = requestId ? captureDocumentAdmission(requestId) : null;
+		const admission = requestId ? captureDocumentAdmission(requestId, tabAction) : null;
 		if (!admission) return Promise.resolve(false);
 		markdownEditorAdmissionRef.current = admission;
 		preparedDocumentAdmissionRef.current = null;
@@ -949,10 +952,10 @@ export function App() {
 		const index = paths.indexOf(path);
 		if (index < 0) return;
 		if (active === path && rightPaneRef.current?.kind === "markdownEditor") {
-			if (!guardMarkdownEditorAction(() => requestCloseWorkspaceTab(path), "close")) return;
+			if (!guardMarkdownEditorAction(() => requestCloseWorkspaceTab(path), "close", { kind: "close-tab", path })) return;
 		} else {
 			const requestId = documentOwnerId && allocateDocumentId();
-			if (!requestId || !captureDocumentAdmission(requestId)) return;
+			if (!requestId || !captureDocumentAdmission(requestId, { kind: "close-tab", path })) return;
 		}
 		const remaining = paths.filter((item) => item !== path);
 		if (active === path) { documentFileSnapshotRef.current = null; documentFileSnapshotValidRef.current = false; documentLoadViewRef.current = null; }
@@ -974,7 +977,7 @@ export function App() {
 		const path = entry.relativePath;
 		if (!/\.(md|doc|docx|pptx|excalidraw|drawio|dio|txt|json|pdf|html?|xls|xlsx|xlsm|png|jpe?g|gif|webp|svg)$/i.test(path) || !persistentChat) return;
 		if (activeWorkspacePath(rightPaneRef.current) === path && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId) return;
-		if (!guardMarkdownEditorAction(() => openWorkspaceMarkdown(entry), "switch")) return;
+		if (!guardMarkdownEditorAction(() => openWorkspaceMarkdown(entry), "switch", { kind: "select-file", path })) return;
 		documentFileSnapshotRef.current = null;
 		documentFileSnapshotValidRef.current = false;
 		documentLoadViewRef.current = null;

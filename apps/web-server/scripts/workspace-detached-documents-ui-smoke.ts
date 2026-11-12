@@ -122,6 +122,12 @@ try {
 			await child.locator(".workspace-tab[data-active='true']", { hasText: "invented.md" }).waitFor();
 			assert(await child.getByRole("textbox", { name: "Raw Markdown source" }).inputValue() === rawDisplay, "the child presents the source and active tab");
 			assert(await page.locator("textarea").first().isVisible(), "chat remains usable in the owner window");
+			await child.locator(".workspace-tab", { hasText: "invented.md" }).locator(".workspace-tab-close").click();
+			assert(!child.isClosed() && await child.locator(".workspace-tab").count() === 0, "closing a tab leaves the document child open");
+			await child.locator(".workspace-file-browser-file", { hasText: "invented.md" }).click();
+			assert(!child.isClosed(), "selecting a file does not close the document child");
+			await child.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented source").waitFor();
+			await child.getByRole("button", { name: "RAW", exact: true }).click();
 			const childRaw = child.getByRole("textbox", { name: "Raw Markdown source" });
 			const edited = "# Invented child draft\n\n";
 			// Hold the ordinary one-second autosave deadline while testing the movement itself.
