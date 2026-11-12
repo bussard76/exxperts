@@ -549,3 +549,5 @@ The room-settings Memento callback now revalidates its admitted target after its
 ## Checkpoint: stale settings Memento response regression
 
 A real attached-browser regression holds the settings Memento response after the invented server action, triggers `person_changed` through the existing workspace route, then releases the response and checks that the invalidated chat's hash and title remain unchanged. The attributed `workspace-file-tabs-ui` smoke failed specifically at that new assertion (0/1); this is a real red for the late settings callback, not a child/native result. The failure must be fixed before this step is complete.
+
+The settings Memento completion now checks the captured room/conversation generation and page identity before clearing chat. The same real held-response regression passed after the fix, and the attributed filtered `workspace-file-tabs-ui` smoke passed 1/1; UI and scripts typechecks and the UI asset build also passed. This proves the attached stale-response case only, not child close or native behavior.
