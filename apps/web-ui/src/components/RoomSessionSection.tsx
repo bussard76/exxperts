@@ -48,15 +48,16 @@ export function RoomSessionSection({ status, answering, onRefresh, onMementoAppl
 	const modelLabel = sessionModelLabel(status);
 	const busy = Boolean(activeThread?.inFlight || activeThread?.working || status.activeLock);
 
-	async function forgetConversation(): Promise<void> {
-		if (!activeThread) return;
-		if (onBeforeMemento && !onBeforeMemento(() => forgetConversation())) return;
+	async function forgetConversation(captured?: { agentId: string; conversationId: string }): Promise<void> {
+		const target = captured ?? (activeThread ? { agentId: status.id, conversationId: activeThread.threadId } : null);
+		if (!target) return;
+		if (onBeforeMemento && !onBeforeMemento(() => forgetConversation(target))) return;
 		setError(null);
 		setMessage(null);
 		if (!(await confirmForgetConversation(answering))) return;
 		setSubmitting(true);
 		try {
-			await applyMemento(status.id, activeThread.threadId);
+			await applyMemento(target.agentId, target.conversationId);
 			// A memento is a forget flow wherever it is applied from: any parked
 			// draft for this room dies with the conversation.
 			onMementoForget?.();

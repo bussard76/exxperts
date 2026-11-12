@@ -306,6 +306,37 @@ try {
 		await waitUntil(() => policyRaw.isEditable(), "a later successful policy read re-enables the real editor", 5000);
 		await policy.close();
 		{
+			const memento = await ctx.newPage();
+			await memento.addInitScript({ content: `(() => {
+				const json = Response.prototype.json;
+				Response.prototype.json = async function () { const body = await json.call(this); if (new URL(this.url).pathname === "/api/persistent-agents" && Array.isArray(body)) window.__t20Statuses = body; return body; };
+				const interval = window.setInterval; window.setInterval = (callback, delay, ...args) => interval(callback, delay === 5000 ? 30000 : delay, ...args);
+				const timeout = window.setTimeout; window.setTimeout = (callback, delay, ...args) => timeout(callback, delay === 1000 ? 30000 : delay, ...args);
+			})();` });
+			await memento.goto(`${baseUrl}/#/room/${agentId}`);
+			await memento.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "identity.md" }).click();
+			await memento.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented identity source").waitFor();
+			await memento.getByRole("button", { name: "RAW", exact: true }).click();
+			await memento.getByRole("textbox", { name: "Raw Markdown source" }).fill("# Invented memento draft\n");
+			await memento.getByRole("button", { name: "Room settings" }).click();
+			await memento.locator(".settings-dialog-nav-item").filter({ hasText: /^Conversation$/ }).first().click();
+			await memento.locator(".room-session-section").getByRole("button", { name: "Forget…" }).waitFor();
+			const originalThread = await memento.evaluate(`(() => { window.__t20MementoTarget = window.__t20Statuses.find((status) => status.id === ${JSON.stringify(agentId)}).activeThread; return window.__t20MementoTarget.threadId; })()`);
+			assert(typeof originalThread === "string" && originalThread, "the real room status supplies the current conversation");
+			await memento.locator(".room-session-section").getByRole("button", { name: "Forget…" }).click();
+			const guard = memento.getByRole("dialog", { name: "Unsaved Markdown changes" });
+			await guard.waitFor();
+			await memento.evaluate(`window.__t20MementoTarget.threadId = "invented-foreign-thread"`);
+			await guard.getByRole("button", { name: "Discard changes" }).click();
+			const request = memento.waitForRequest((candidate) => candidate.method() === "POST" && candidate.url().includes("/memento"));
+			const response = memento.waitForResponse((candidate) => candidate.request().method() === "POST" && candidate.url().includes("/memento"));
+			await memento.getByRole("alertdialog", { name: "Forget this conversation and start fresh?" }).getByRole("button", { name: "Forget", exact: true }).click();
+			assert((await request).postDataJSON().conversationId === originalThread, "room-settings Forget retains its admitted conversation when its source status changes");
+			assert((await response).ok(), "the real Memento endpoint accepts the admitted invented conversation");
+			await memento.locator(".persistent-agent-card").filter({ hasText: "Two Window Room" }).waitFor();
+			await memento.close();
+		}
+		{
 			const policyAgent = agents.createPersistentAgentFromScaffoldInput({ displayName: "Invented Policy Room", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }).agent.agentId;
 			roomModels.writeRoomModels(policyAgent, { conversation: CLAUDE });
 			const policyUrl = `${baseUrl}/api/persistent-agents/${encodeURIComponent(policyAgent)}/workspace-default`;
