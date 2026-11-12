@@ -2151,10 +2151,16 @@ export function App() {
 			if (cleanAction) return await cleanAction as PersistentAgentArchiveResponse | null;
 		}
 		if (leavingBoundRoom && !guardMarkdownEditorAction(() => archivePersistentAgentRoom(agentId, confirmation), "navigate", intent)) return null;
-		if (leavingBoundRoom && persistentRoomInFlight) {
+		if (leavingBoundRoom && roomInFlightRef.current) {
 			// Leaving now would detach the turn into background cooking, and the
 			// archive would then refuse on that — say it while the pane can show it.
 			throw new Error("The assistant is still responding in this room. Stop it or let it finish before deleting.");
+		}
+		if (leavingBoundRoom && documentChildRef.current) {
+			const pending = markdownEditorPendingActionRef.current;
+			if (!pending || !sameDocumentLocalAction(pending.admission.intent, intent) || !preparedDocumentAdmissionIsCurrent(pending.admission)) return null;
+			if (!(await closeDocumentChildForExit(pending)) || !preparedDocumentAdmissionIsCurrent(pending.admission)) return null;
+			if (roomInFlightRef.current) throw new Error("The assistant is still responding in this room. Stop it or let it finish before deleting.");
 		}
 		if (leavingBoundRoom) {
 			if (persistTimerRef.current) {
@@ -2228,10 +2234,16 @@ export function App() {
 			if (cleanAction) return await cleanAction as PersistentAgentPurgeResponse | null;
 		}
 		if (leavingBoundRoom && !guardMarkdownEditorAction(() => purgePersistentAgentRoom(agentId, confirmation), "navigate", intent)) return null;
-		if (leavingBoundRoom && persistentRoomInFlight) {
+		if (leavingBoundRoom && roomInFlightRef.current) {
 			// Leaving now would detach the turn into background cooking, and the
 			// purge would then refuse on that — say it while the pane can show it.
 			throw new Error("The assistant is still responding in this room. Stop it or let it finish before deleting.");
+		}
+		if (leavingBoundRoom && documentChildRef.current) {
+			const pending = markdownEditorPendingActionRef.current;
+			if (!pending || !sameDocumentLocalAction(pending.admission.intent, intent) || !preparedDocumentAdmissionIsCurrent(pending.admission)) return null;
+			if (!(await closeDocumentChildForExit(pending)) || !preparedDocumentAdmissionIsCurrent(pending.admission)) return null;
+			if (roomInFlightRef.current) throw new Error("The assistant is still responding in this room. Stop it or let it finish before deleting.");
 		}
 		if (leavingBoundRoom) {
 			if (persistTimerRef.current) {

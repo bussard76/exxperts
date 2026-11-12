@@ -555,3 +555,7 @@ The settings Memento completion now checks the captured room/conversation genera
 ## Checkpoint: archive and purge child-close cases
 
 The detached smoke now separately specifies the real archive and purge callbacks, a canceled purge confirmation, and held actual child closure before either operation route. Scripts typecheck passed; the attributed smoke still stops at disabled Detach, so these new cases have not executed and do not establish callback ordering.
+
+## Checkpoint: archive and purge child-close draft
+
+The inactive in-room archive and purge paths now check the live busy state before closing a registered child, retain the admitted target while waiting for actual closure, and recheck before changing room state or sending the existing route. UI and scripts typechecks, UI asset build, and the attributed `workspace-file-tabs-ui` smoke passed 1/1, including attached archive/purge and the stale settings Memento regression. The detached archive/purge cases remain unexecuted at disabled Detach; operation ordering and native behavior are not established.
