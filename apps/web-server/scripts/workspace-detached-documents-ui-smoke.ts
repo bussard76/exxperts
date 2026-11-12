@@ -598,6 +598,24 @@ try {
 				assert(await reloadPage.getByRole("navigation", { name: "Room navigation" }).isVisible() && !reloadChild.isClosed() && await reloadChild.evaluate(`window.__t20CloseCalls`) === 0, "a failed same-context resume retains the current room and child");
 				await reloadPage.unroute("**/api/persistent-agents");
 				await reloadPage.unroute("**/threads/**");
+				const oldThreadRecord = await api(`/api/persistent-agents/${encodeURIComponent(reloadRoomId)}/threads/${encodeURIComponent(oldThread)}`);
+				assert(oldThreadRecord.status === 200 && oldThreadRecord.body?.thread, "the invented earlier thread is readable");
+				let sameReads = 0, sameWrites = 0;
+				await reloadPage.route("**/api/persistent-agents", (route) => route.fulfill({ status: 200, json: sameContextStatuses }));
+				await reloadPage.route("**/threads/**", (route) => {
+					if (!route.request().url().endsWith(`/threads/${encodeURIComponent(oldThread)}`)) return route.continue();
+					if (route.request().method() === "GET") { sameReads++; return route.fulfill({ status: 200, json: oldThreadRecord.body }); }
+					if (route.request().method() === "PUT") { sameWrites++; return route.fulfill({ status: 200, json: { thread: oldThreadRecord.body.thread, runtime: sameContextStatuses.find((status: any) => status.id === reloadRoomId).runtime } }); }
+					return route.continue();
+				});
+				await reloadPage.getByRole("button", { name: "Reload", exact: true }).click();
+				await waitUntil(() => sameWrites === 1, "same-context Reload completes its existing thread read and save");
+				assert(sameReads === 1 && !reloadChild.isClosed() && await reloadChild.evaluate(`window.__t20CloseCalls`) === 0 && await reloadChild.locator(".workspace-file-browser-file", { hasText: "invented.md" }).isVisible(), "same-context Reload executes once without closing or replacing the document child");
+				await reloadPage.unroute("**/api/persistent-agents");
+				await reloadPage.unroute("**/threads/**");
+				await composer.fill("Invented stale question again.");
+				await composer.press("Enter");
+				await reloadPage.getByText("This room went on in another window. Reload to continue there.", { exact: true }).waitFor();
 				let replacementReads = 0;
 				reloadPage.on("request", (request) => { if (request.method() === "GET" && request.url().includes("/threads/")) replacementReads++; });
 				await reloadPage.getByRole("button", { name: "Reload", exact: true }).click();
