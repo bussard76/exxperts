@@ -491,3 +491,7 @@ The existing private host hook can now open an empty about:blank child, verify i
 ## Checkpoint: empty owner session
 
 A selected room now initializes its owner tab session with an empty path list, so the hidden document host exists before the first file is selected. UI and scripts typechecks, the UI asset build, and the attributed `two-window-room-ui` and `workspace-file-tabs-ui` smokes passed 2/2. The real empty-child acceptance remains unexecuted because Detach is unavailable; bootstrap, adoption, C4 and native safeguards are not complete.
+
+## Checkpoint: private adoption draft
+
+The private host hook now tracks owner slots and at most one opening, prepared or registered child. Its draft move/return operations check the exact candidate and owner-provided current predicate, retain the registration until the exact window reports closed, and report unknown if a partial move cannot be restored. UI and scripts typechecks and the UI asset build passed; the attributed detached smoke still failed at the first unavailable Detach control, so none of these operations has been exercised through the public entry. They are not connected to the arbiter, editor fence, controlled frame reconstruction, native acknowledgement or UI, and do not establish C3/C4 completion.

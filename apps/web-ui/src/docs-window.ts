@@ -1,4 +1,6 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+
+type PreparedChild = { child: Window; document: Document; treeSlot: HTMLElement; paneSlot: HTMLElement };
 
 // The chat owns both portal elements; their contents stay in the same React tree.
 export function useDocumentsHost() {
@@ -12,17 +14,28 @@ export function useDocumentsHost() {
 		element.style.display = "contents";
 		return element;
 	});
+	const ownerHostSlot = useRef<HTMLDivElement | null>(null);
+	const ownerTreeSlot = useRef<HTMLDivElement | null>(null);
+	const opening = useRef(false);
+	const prepared = useRef<PreparedChild | null>(null);
+	const registered = useRef<PreparedChild | null>(null);
 	const mountHost = useCallback((slot: HTMLDivElement | null) => {
-		if (slot) slot.appendChild(host);
+		ownerHostSlot.current = slot;
+		if (slot && !registered.current) slot.appendChild(host);
 	}, [host]);
 	const mountTree = useCallback((slot: HTMLDivElement | null) => {
-		if (slot) slot.appendChild(treeHost);
+		ownerTreeSlot.current = slot;
+		if (slot && !registered.current) slot.appendChild(treeHost);
 	}, [treeHost]);
 	// Opening is separate from adoption: the owner keeps authority until every
 	// stylesheet has loaded and the caller has revalidated its transfer stamp.
 	const beginChild = useCallback(async (frameName: string, title: string) => {
-		const child = window.open("about:blank", frameName, "popup,width=900,height=700");
-		if (!child) return null;
+		if (opening.current || prepared.current || registered.current) return null;
+		opening.current = true;
+		let child: Window | null;
+		try { child = window.open("about:blank", frameName, "popup,width=900,height=700"); }
+		catch { opening.current = false; return null; }
+		if (!child) { opening.current = false; return null; }
 		let timer: number | null = null;
 		let verified = false;
 		try {
@@ -58,13 +71,57 @@ export function useDocumentsHost() {
 				new Promise<never>((_, reject) => { timer = window.setTimeout(() => reject(new Error("Stylesheet timeout")), 10_000); }),
 			]);
 			if (child.closed || child.opener !== window || child.location.href !== "about:blank" || child.document !== target || target.defaultView !== child || child.getComputedStyle(layout).display !== "grid" || !layout.getBoundingClientRect().width || !layout.getBoundingClientRect().height) throw new Error("Child not ready");
-			return { child, treeSlot, paneSlot };
+			const result = { child, document: target, treeSlot, paneSlot };
+			prepared.current = result;
+			return result;
 		} catch {
 			if (verified) { try { child.close(); } catch {} }
 			return null;
 		} finally {
 			if (timer !== null) window.clearTimeout(timer);
+			opening.current = false;
 		}
 	}, []);
-	return { host, treeHost, mountHost, mountTree, beginChild };
+	const abortChild = useCallback((candidate: PreparedChild) => {
+		if (prepared.current !== candidate) return;
+		prepared.current = null;
+		try { candidate.child.close(); } catch {}
+	}, []);
+	// The caller holds the owner arbiter and fences input before either move.
+	const moveToChild = useCallback((candidate: PreparedChild, current: () => boolean): "moved" | "refused" | "unknown" => {
+		const hostSlot = ownerHostSlot.current, treeSlot = ownerTreeSlot.current;
+		if (prepared.current !== candidate || registered.current || !hostSlot || !treeSlot || host.parentNode !== hostSlot || treeHost.parentNode !== treeSlot || !current()) return "refused";
+		try {
+			if (candidate.child.closed || candidate.child.opener !== window || candidate.child.document !== candidate.document || candidate.document.defaultView !== candidate.child || candidate.child.location.href !== "about:blank" || !current()) return "refused";
+			candidate.treeSlot.appendChild(candidate.document.adoptNode(treeHost));
+			candidate.paneSlot.appendChild(candidate.document.adoptNode(host));
+			if (!current()) throw new Error("Transfer invalidated");
+			prepared.current = null;
+			registered.current = candidate;
+			return "moved";
+		} catch {
+			try {
+				treeSlot.appendChild(document.adoptNode(treeHost));
+				hostSlot.appendChild(document.adoptNode(host));
+				return "refused";
+			} catch { return "unknown"; }
+		}
+	}, [host, treeHost]);
+	const moveToOwner = useCallback((candidate: PreparedChild, current: () => boolean): "moved" | "refused" | "unknown" => {
+		const hostSlot = ownerHostSlot.current, treeSlot = ownerTreeSlot.current;
+		if (registered.current !== candidate || !hostSlot || !treeSlot || !current()) return "refused";
+		try {
+			if (!candidate.child.closed && (candidate.child.opener !== window || candidate.child.document !== candidate.document)) return "unknown";
+			if (host.ownerDocument !== candidate.document || treeHost.ownerDocument !== candidate.document || !current()) return "unknown";
+			treeSlot.appendChild(document.adoptNode(treeHost));
+			hostSlot.appendChild(document.adoptNode(host));
+			return "moved";
+		} catch { return "unknown"; }
+	}, [host, treeHost]);
+	const childClosed = useCallback((candidate: PreparedChild) => {
+		if (registered.current !== candidate || !candidate.child.closed || host.ownerDocument !== document || treeHost.ownerDocument !== document) return false;
+		registered.current = null;
+		return true;
+	}, [host, treeHost]);
+	return { host, treeHost, mountHost, mountTree, beginChild, abortChild, moveToChild, moveToOwner, childClosed };
 }
