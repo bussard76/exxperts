@@ -566,6 +566,7 @@ export function App() {
 	type PreparedDocumentChild = NonNullable<Awaited<ReturnType<typeof beginDocumentChild>>>;
 	const documentChildRef = useRef<PreparedDocumentChild | null>(null);
 	const documentChildContextRef = useRef<DocumentContext | null>(null);
+	const nativePopupRef = useRef<{ request: { requestId: string; stamp: DocumentContext & { hostGeneration: number; draftGeneration: number }; direction: "detach" }; permit: { frameName: string; permitId: string } | null; expiresAt: number } | null>(null);
 	const [documentHostStatus, setDocumentHostStatus] = useState<"attached" | "opening" | "detached" | "returning" | "recovering">("attached");
 	const [documentHostError, setDocumentHostError] = useState<string | null>(null);
 	const documentHostCommitRef = useRef<{ admission: DocumentAdmission; child: PreparedDocumentChild; generation: number; direction: "detach" | "return" | "exit" | "recovery"; resolve?: (closed: boolean) => void } | null>(null);
@@ -1106,8 +1107,24 @@ export function App() {
 			} else {
 				if (envelope.nativeSessionId !== nativeSessionId || envelope.sequence !== lastSequence + 1 || envelope.ack !== lastSequence) return null;
 				if (nativePrepared?.phase === "aborting" && (envelope.items.length !== 1 || !envelope.items[0] || typeof envelope.items[0] !== "object" || (envelope.items[0] as Record<string, unknown>).kind !== "native-abort")) return null;
-				if (envelope.items.length === 0) { items = outbound; outbound = []; }
-				else {
+				if (envelope.items.length === 0) {
+					items = outbound; outbound = [];
+					const armed = nativePopupRef.current;
+					const bound = armed?.request.stamp;
+					const stillCurrent = !!stamp && !!bound && ["ownerId", "ownerGeneration", "roomId", "conversationId", "roomGeneration", "hostGeneration"].every((key) => stamp[key as keyof typeof stamp] === bound[key as keyof typeof bound]);
+					if (armed && items.length === 0 && (!stillCurrent || performance.now() >= armed.expiresAt || !!markdownEditorPendingActionRef.current)) {
+						if (armed.permit) items.push({ kind: "disarm-popup", binding: { nativeSessionId, ownerId: documentOwnerId, ownerGeneration: documentOwnerGenerationRef.current }, permitId: armed.permit.permitId });
+						nativePopupRef.current = null;
+					}
+					if (items.length === 0 && !nativePopupRef.current && stamp && !nativePrepared && !markdownEditorPendingActionRef.current) {
+						const requestId = allocateDocumentId();
+						if (requestId) {
+							const request = { requestId, stamp, direction: "detach" as const };
+							nativePopupRef.current = { request, permit: null, expiresAt: performance.now() + 9_000 };
+							items.push({ kind: "arm-popup", binding: { nativeSessionId, ownerId: documentOwnerId, ownerGeneration: documentOwnerGenerationRef.current }, request });
+						}
+					}
+				} else {
 					const item = envelope.items[0];
 					if (envelope.items.length !== 1 || !item || typeof item !== "object" || Array.isArray(item)) return null;
 					const request = item as Record<string, unknown>;
@@ -1116,7 +1133,15 @@ export function App() {
 					const bound = binding as Record<string, unknown>;
 					if (bound.nativeSessionId !== nativeSessionId || bound.ownerId !== documentOwnerId || bound.ownerGeneration !== documentOwnerGenerationRef.current) return null;
 					const currentBinding = { nativeSessionId, ownerId: documentOwnerId, ownerGeneration: documentOwnerGenerationRef.current };
-					if (request.kind === "native-prepare") {
+					if (request.kind === "popup-permit") {
+						const armed = nativePopupRef.current;
+						const permit = request.permit;
+						if (Object.keys(request).sort().join(",") !== "binding,kind,permit,request" || !armed || armed.permit || performance.now() >= armed.expiresAt || JSON.stringify(request.request) !== JSON.stringify(armed.request) || !permit || typeof permit !== "object" || Array.isArray(permit)) return null;
+						const candidate = permit as Record<string, unknown>;
+						if (Object.keys(candidate).sort().join(",") !== "frameName,permitId" || typeof candidate.frameName !== "string" || !/^exxperts-doc-[0-9a-f-]{36}$/.test(candidate.frameName) || typeof candidate.permitId !== "string" || !uuid.test(candidate.permitId) || !uuid.test(candidate.frameName.slice("exxperts-doc-".length)) || !stamp || !["ownerId", "ownerGeneration", "roomId", "conversationId", "roomGeneration", "hostGeneration"].every((key) => stamp[key as keyof typeof stamp] === armed.request.stamp[key as keyof typeof stamp])) return null;
+						armed.permit = { frameName: candidate.frameName, permitId: candidate.permitId };
+						items = [];
+					} else if (request.kind === "native-prepare") {
 						if (Object.keys(request).sort().join(",") !== "binding,disposition,kind,nativeRequestId,observedStamp" || typeof request.nativeRequestId !== "string" || !uuid.test(request.nativeRequestId) || typeof request.disposition !== "string" || !["hide", "quit", "update", "reload"].includes(request.disposition)) return null;
 						const disposition = request.disposition as "hide" | "quit" | "update" | "reload";
 						if (stamp === null) {
@@ -1270,7 +1295,7 @@ export function App() {
 		};
 		const endpoint = Object.freeze({ step });
 		Object.defineProperty(window, "__exxpertsDocuments", { value: endpoint, enumerable: false, configurable: true, writable: false });
-		return () => { if (Object.getOwnPropertyDescriptor(window, "__exxpertsDocuments")?.value === endpoint) delete (window as unknown as Record<string, unknown>).__exxpertsDocuments; };
+		return () => { nativePopupRef.current = null; if (Object.getOwnPropertyDescriptor(window, "__exxpertsDocuments")?.value === endpoint) delete (window as unknown as Record<string, unknown>).__exxpertsDocuments; };
 	}, [documentOwnerId]);
 
 	function guardMarkdownEditorAction(action: () => void | Promise<unknown>, prompt: "close" | "switch" | "navigate", intent: DocumentLocalAction | null = null): boolean {

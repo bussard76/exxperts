@@ -21,7 +21,8 @@ const save = process.env.T20_NATIVE_SAVE === "1";
 const lateAbort = process.env.T20_NATIVE_LATE_ABORT === "1";
 const dirty = process.env.T20_NATIVE_DIRTY === "1" || save || lateAbort;
 const late = process.env.T20_NATIVE_LATE === "1";
-const active = process.env.T20_NATIVE_ACTIVE === "1" || dirty || late;
+const armOnly = process.env.T20_NATIVE_ARM === "1";
+const active = process.env.T20_NATIVE_ACTIVE === "1" || dirty || late || armOnly;
 const quit = process.env.T20_NATIVE_QUIT === "1";
 const reloadKey = process.env.T20_NATIVE_RELOAD_KEY === "1";
 const reload = process.env.T20_NATIVE_RELOAD === "1" || reloadKey;
@@ -62,6 +63,55 @@ try {
 	}, port);
 	if (prepare) {
 		const page = application.windows().find((candidate) => candidate.url().startsWith(`http://localhost:${port}/`));
+		await application.evaluate(({ BrowserWindow }, fixture) => {
+			const window = BrowserWindow.fromId(fixture.id)!;
+			const original = window.webContents.executeJavaScript.bind(window.webContents);
+			(window as any).__t20Polls = 0;
+			(window as any).__t20Prepares = 0;
+			(window as any).__t20QuitPrepares = 0;
+			(window as any).__t20ReloadPrepares = 0;
+			(window as any).__t20Arms = 0;
+			(window as any).__t20ActivePolls = 0;
+			(window as any).__t20Permits = 0;
+			(window as any).__t20OpaquePermit = false;
+			(window as any).__t20NoSession = 0;
+			(window as any).__t20Prepared = 0;
+			(window as any).__t20Completed = 0;
+			(window as any).__t20AbortAck = 0;
+			(window as any).__t20Commits = 0;
+			(window as any).__t20Trace = [];
+			(window.webContents as any).executeJavaScript = (script: string, ...args: unknown[]) => {
+				if (script.includes("__exxpertsDocuments")) {
+					(window as any).__t20Polls++;
+					if (script.includes('"native-prepare"')) { (window as any).__t20Prepares++; (window as any).__t20Trace.push("prepare"); if (script.includes('"disposition":"quit"')) (window as any).__t20QuitPrepares++; if (script.includes('"disposition":"reload"')) (window as any).__t20ReloadPrepares++; }
+					if (script.includes('"native-abort"')) (window as any).__t20Trace.push("abort");
+					if (script.includes('"native-commit"')) (window as any).__t20Commits++;
+					if (script.includes('"popup-permit"')) {
+						(window as any).__t20Permits++;
+						const match = script.match(/endpoint\.step\((.*)\) : null/);
+						if (match) {
+							const item = JSON.parse(match[1]).items[0];
+							(window as any).__t20OpaquePermit = /^exxperts-doc-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(item.permit?.frameName) && item.permit.frameName !== item.permit.permitId;
+						}
+					}
+				}
+				const result = (original as any)(script, ...args);
+				const tracked = Promise.resolve(result).then((output: any) => {
+					if (output?.status?.stamp?.roomId) (window as any).__t20ActivePolls++;
+					if (output?.items?.[0]?.kind === "no-session") (window as any).__t20NoSession++;
+					if (output?.items?.[0]?.kind === "arm-popup") (window as any).__t20Arms++;
+					if (output?.items?.[0]?.kind === "completed") (window as any).__t20Completed++;
+					if (output?.items?.[0]?.kind === "abort-ack") { (window as any).__t20AbortAck++; (window as any).__t20Trace.push("abort-ack"); }
+					if (output?.items?.[0]?.kind === "guard-result" && output.items[0].result?.kind === "prepared") (window as any).__t20Prepared++;
+					return output;
+				});
+				if (((fixture.late && script.includes('"native-prepare"')) || (fixture.lateAbort && script.includes('"native-abort"'))) && !(window as any).__t20Held) {
+					(window as any).__t20Held = true;
+					return new Promise((resolve, reject) => { (window as any).__t20Release = () => tracked.then(resolve, reject); });
+				}
+				return script.includes("__exxpertsDocuments") ? tracked : result;
+			};
+		}, { id: owner, late, lateAbort });
 		if (active) {
 			assert(page, "the real owner page is available");
 			const workspace = path.join(scratch, "invented-workspace");
@@ -89,44 +139,19 @@ try {
 				await editor.getByText("Invented native draft").waitFor();
 				await editor.click();
 				await page.keyboard.type(" retained native edit");
+				const polls = await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any).__t20ActivePolls as number, owner);
+				await waitUntil(() => application!.evaluate(({ BrowserWindow }, fixture) => (BrowserWindow.fromId(fixture.id) as any)?.__t20ActivePolls > fixture.polls, { id: owner, polls }), "the shell sees the edited draft generation");
 			}
 		}
-		await application.evaluate(({ BrowserWindow }, fixture) => {
-			const window = BrowserWindow.fromId(fixture.id)!;
-			const original = window.webContents.executeJavaScript.bind(window.webContents);
-			(window as any).__t20Polls = 0;
-			(window as any).__t20Prepares = 0;
-			(window as any).__t20QuitPrepares = 0;
-			(window as any).__t20ReloadPrepares = 0;
-			(window as any).__t20NoSession = 0;
-			(window as any).__t20Prepared = 0;
-			(window as any).__t20Completed = 0;
-			(window as any).__t20AbortAck = 0;
-			(window as any).__t20Commits = 0;
-			(window as any).__t20Trace = [];
-			(window.webContents as any).executeJavaScript = (script: string, ...args: unknown[]) => {
-				if (script.includes("__exxpertsDocuments")) {
-					(window as any).__t20Polls++;
-					if (script.includes('"native-prepare"')) { (window as any).__t20Prepares++; (window as any).__t20Trace.push("prepare"); if (script.includes('"disposition":"quit"')) (window as any).__t20QuitPrepares++; if (script.includes('"disposition":"reload"')) (window as any).__t20ReloadPrepares++; }
-					if (script.includes('"native-abort"')) (window as any).__t20Trace.push("abort");
-					if (script.includes('"native-commit"')) (window as any).__t20Commits++;
-				}
-				const result = (original as any)(script, ...args);
-				const tracked = Promise.resolve(result).then((output: any) => {
-					if (output?.items?.[0]?.kind === "no-session") (window as any).__t20NoSession++;
-					if (output?.items?.[0]?.kind === "completed") (window as any).__t20Completed++;
-					if (output?.items?.[0]?.kind === "abort-ack") { (window as any).__t20AbortAck++; (window as any).__t20Trace.push("abort-ack"); }
-					if (output?.items?.[0]?.kind === "guard-result" && output.items[0].result?.kind === "prepared") (window as any).__t20Prepared++;
-					return output;
-				});
-				if (((fixture.late && script.includes('"native-prepare"')) || (fixture.lateAbort && script.includes('"native-abort"'))) && !(window as any).__t20Held) {
-					(window as any).__t20Held = true;
-					return new Promise((resolve, reject) => { (window as any).__t20Release = () => tracked.then(resolve, reject); });
-				}
-				return script.includes("__exxpertsDocuments") ? tracked : result;
-			};
-		}, { id: owner, late, lateAbort });
+
 		await waitUntil(() => application!.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Polls >= 2, owner), "the real owner has been polled");
+		if (active) await waitUntil(() => application!.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20ActivePolls >= 2, owner), "the current room owner has been polled");
+		if (armOnly) {
+			await new Promise((resolve) => setTimeout(resolve, 1_000));
+			assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Arms === 1, owner), "the real current owner arms one native popup");
+			assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Permits === 1, owner), "the shell returns one native popup permit");
+			assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20OpaquePermit === true, owner), "the popup selector contains only a fresh opaque UUID");
+		} else {
 		if (quit) await application.evaluate(({ app }) => app.quit()).catch(() => {});
 		else if (reloadKey) await application.evaluate(({ BrowserWindow }, id) => {
 			const contents = BrowserWindow.fromId(id)!.webContents;
@@ -203,6 +228,7 @@ try {
 		}
 		else if (!dirty && !late) assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20NoSession === 1, owner), "the actual owner returns the matching empty-session response");
 		assert(await application.evaluate(({ BrowserWindow }, id) => Boolean(BrowserWindow.fromId(id)?.isVisible()), owner), "the staged no-session response cannot yet continue the native action");
+		}
 	} else {
 	// Fault the shell's actual outbound exchange, retaining its ordinary close entrypoint.
 	await application.evaluate(({ BrowserWindow }, fault) => {

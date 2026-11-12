@@ -264,10 +264,12 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
   let hideSent = false;
   let hidePhase: "idle" | "preparing" | "abort" | "commit" | "close-evidence" | "completed" = "idle";
   let hideCorrelation: Record<string, unknown> | null = null;
+  let popup: { request: Record<string, unknown>; permit: { frameName: string; permitId: string }; expiresAt: number; pending: boolean; revoked: boolean } | null = null;
   let retryInput: { version: number; nativeSessionId: string; sequence: number; ack: number; items: Record<string, unknown>[] } | null = null;
   requestDocumentsAction.set(win, (disposition) => {
     if (!active || hideRequest || ownerId === null || latestStamp === undefined) return;
     hideRequest = { nativeRequestId: randomUUID(), observedStamp: latestStamp, disposition };
+    if (popup) popup.revoked = true;
   });
   const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
   const keys = (value: Record<string, unknown>, expected: string) => Object.keys(value).sort().join(",") === expected;
@@ -277,12 +279,19 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
     let releasedAttempt = false;
     let nextPhase: typeof hidePhase | null = null;
     let preparedCorrelation: Record<string, unknown> | null = null;
+    let armRequest: Record<string, unknown> | null = null;
+    let disarmPermit: string | null = null;
     if (!record(value) || !keys(value, "ack,items,nativeSessionId,sequence,status,version") || value.version !== 1 || value.nativeSessionId !== session || value.sequence !== sequence || value.ack !== sequence || !Array.isArray(value.items) || !record(value.status) || !keys(value.status, "binding,child,stamp") || !record(value.status.binding) || !keys(value.status.binding, "nativeSessionId,ownerGeneration,ownerId") || value.status.binding.nativeSessionId !== session || typeof value.status.binding.ownerId !== "string" || !uuid.test(value.status.binding.ownerId) || !positive(value.status.binding.ownerGeneration) || value.status.child !== null) return false;
     const binding = value.status.binding;
     if (ownerId === null) {
       const hello = value.items[0];
       if (sequence !== 1 || value.items.length !== 1 || !record(hello) || !keys(hello, "kind,ownerGeneration,ownerId") || hello.kind !== "hello" || hello.ownerId !== binding.ownerId || hello.ownerGeneration !== binding.ownerGeneration) return false;
     } else if (binding.ownerId !== ownerId || binding.ownerGeneration !== ownerGeneration) return false;
+    else if (sentKind === undefined && value.items.length === 1 && record(value.items[0]) && value.items[0].kind === "disarm-popup") {
+      const item = value.items[0];
+      if (!keys(item, "binding,kind,permitId") || !record(item.binding) || !keys(item.binding, "nativeSessionId,ownerGeneration,ownerId") || item.binding.nativeSessionId !== session || item.binding.ownerId !== ownerId || item.binding.ownerGeneration !== ownerGeneration || typeof item.permitId !== "string" || !popup || item.permitId !== popup.permit.permitId) return false;
+      disarmPermit = item.permitId;
+    }
     else if (hideRequest && ((sentKind === "native-prepare" && !hideSent) || (sentKind === undefined && hidePhase === "preparing"))) {
       const reply = value.items[0];
       if (value.items.length === 0) {
@@ -320,6 +329,16 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
       const reply = value.items[0];
       if (value.items.length !== 1 || !record(reply) || !keys(reply, "binding,correlation,kind") || reply.kind !== "abort-ack" || !record(reply.binding) || !keys(reply.binding, "nativeSessionId,ownerGeneration,ownerId") || reply.binding.nativeSessionId !== session || reply.binding.ownerId !== ownerId || reply.binding.ownerGeneration !== ownerGeneration || JSON.stringify(reply.correlation) !== JSON.stringify(hideCorrelation)) return false;
       releasedAttempt = true;
+    } else if (sentKind === undefined && value.items.length === 1) {
+      const item = value.items[0];
+      if (!record(item) || !record(item.binding) || !keys(item.binding, "nativeSessionId,ownerGeneration,ownerId") || item.binding.nativeSessionId !== session || item.binding.ownerId !== ownerId || item.binding.ownerGeneration !== ownerGeneration) return false;
+      if (item.kind === "arm-popup") {
+        if (!keys(item, "binding,kind,request") || popup || !record(item.request) || !keys(item.request, "direction,requestId,stamp") || item.request.direction !== "detach" || typeof item.request.requestId !== "string" || !uuid.test(item.request.requestId) || !record(item.request.stamp) || !record(value.status.stamp) || !keys(item.request.stamp, "conversationId,draftGeneration,hostGeneration,ownerGeneration,ownerId,roomGeneration,roomId") || !Object.entries(item.request.stamp).every(([key, entry]) => record(value.status) && record(value.status.stamp) && value.status.stamp[key] === entry)) return false;
+        armRequest = item.request;
+      } else if (item.kind === "disarm-popup") {
+        if (!keys(item, "binding,kind,permitId") || typeof item.permitId !== "string" || !popup || item.permitId !== popup.permit.permitId) return false;
+        disarmPermit = item.permitId;
+      } else return false;
     } else if (value.items.length !== 0) return false;
     if (value.status.stamp !== null) {
       const stamp = value.status.stamp;
@@ -331,6 +350,9 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
       receivedPreparation = true;
     }
     if (releasedAttempt) { hideRequest = null; hideSent = false; hideCorrelation = null; hidePhase = "idle"; }
+    if (sentKind === "popup-permit" && popup) popup.pending = false;
+    if (disarmPermit && popup?.permit.permitId === disarmPermit) popup = null;
+    if (armRequest) popup = { request: armRequest, permit: { frameName: `exxperts-doc-${randomUUID()}`, permitId: randomUUID() }, expiresAt: Date.now() + 10_000, pending: true, revoked: false };
     if (receivedPreparation) hideSent = true;
     if (preparedCorrelation) hideCorrelation = preparedCorrelation;
     if (nextPhase) hidePhase = nextPhase;
@@ -345,6 +367,7 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
       const binding = { nativeSessionId: session, ownerId, ownerGeneration };
       let items: Record<string, unknown>[] = [];
       if (sequence === 1) items = [{ kind: "hello" }];
+      else if (popup?.pending && ownerId !== null) items = [{ kind: "popup-permit", binding, request: popup.request, permit: popup.permit }];
       else if (hideRequest && !hideSent && ownerId !== null) items = [{ kind: "native-prepare", binding, nativeRequestId: hideRequest.nativeRequestId, observedStamp: hideRequest.observedStamp, disposition: hideRequest.disposition }];
       else if (hidePhase === "abort" && hideCorrelation) items = [{ kind: "native-abort", binding, correlation: hideCorrelation }];
       else if (hidePhase === "commit" && hideCorrelation) items = [{ kind: "native-commit", binding, correlation: hideCorrelation }];
