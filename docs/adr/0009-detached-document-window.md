@@ -58,3 +58,31 @@ Normal chat close and room/conversation departure guard and close the dependent 
 2. Freeze the current-main implementation contract in [T20-HARDEN](../specs/T20-HARDEN.md) and the contract register; a fresh different Architect checks acceptance, ownership, transport, stop criteria and R1–R15 before implementation.
 3. After that review and a Controller build dispatch, implement the ordered owner/host, preview/event, lifecycle/native and placement slices test-first. Keep Detach unavailable until required safeguards work. The Developer owns targeted checks, the independent Tester/wave owns host-serial full gates, and a different Architect checks level-3 conformance.
 4. Controller relays the [MAC-TASK draft](../../design/t20-detach-window/front-options.md#mac-task-draft-for-front-via-controller) to Front; record final candidate SHA/OS/app/entrypoint and real native/drag evidence before support claims. Do not infer evidence from this ADR or the approved prototype.
+
+
+## Reconciled C7 amendment — 2026-11-12
+
+Status: accepted
+Date: 2026-11-12
+Decided by: Sascha (2026-11-12), C7 review option B
+Architecture impact: level 3 — narrow the C7 pre-readiness guarantee's threat model; the original architecture option A remains accepted.
+
+### Context and alternatives
+
+The independent [C7 identity review](../reviews/T20-C7-IDENTITY-architecture-spec.md) at `9aaf284df9934522ed75cf8d65c0b4298df3a2a1`, reviewing `2de2cfec8162ebb3d526ece0a6ec8cc4597f69f2`, found that an unchanged iframe `src`, stable WindowProxy and visible fragment do not prove the concrete opaque document before first delivery. The real test holds the genuine shell response, then the trusted app parent's own script navigates that same proxy to an invented replacement and copies the fragment; it receives the retained file's first snapshot. This is a counterexample to the formerly unqualified written guarantee. It is not proof of an external attack: that trusted parent already holds and can read the snapshot. No product-reachable pre-ready navigator controlled by untrusted preview content or an external page was demonstrated.
+
+For this C7 question, review option A was to retain the unqualified guarantee and commission a bounded new authority design; option B was to explicitly narrow the threat model; option C was to change isolation/delivery architecture. These labels belong to this amendment's C7 review, not the historical architecture alternatives above. Sascha selected **C7 option B**. The earlier review remains historically `level-3`; this human decision settles its decision requirement and is not a retroactive pass for that review or any implementation.
+
+### Accepted decision and exact boundary
+
+Front relayed Sascha's decision on 2026-11-12: “a frame navigated before its first ready BY THE TRUSTED APP PARENT's own script is out of scope (that code can already read the snapshot); untrusted preview content and external pages stay fully covered, and every other C7 rule stays.”
+
+Only that privileged trusted-parent pre-first-ready counterexample is excluded. It is an explicit guarantee change, not a new claim that a WindowProxy, visible nonce or `src` authenticates a document. It grants no authority to untrusted preview content, an external page, a foreign frame, an arbitrary same-name popup or stale owner/host/frame messages. It does not authorize an external ready, a second delivery after the first, rearming a navigated frame, a new trust channel or weakening the opaque sandbox, HTTP CSP, permissions, credential checks, byte/parser limits or snapshot/read-count rules. No new route, store, dependency, privilege or different owner is accepted. All other C1–C8, Q1–Q10 and native obligations remain in force.
+
+### Tests, baseline evidence and continuation
+
+Front's exact instruction is: “Keep the pre-ready regression tests for Excalidraw and HTML unchanged, as documented expected behaviour under the narrowed model, not deleted or loosened in other respects.” Retain those real counterexample scenarios and their observation of the original snapshot under explicit trusted-parent navigation; record their expected out-of-scope behaviour and the previous red honestly. Preserve every other assertion, one-use/foreign/stale/after-delivery control and actual producer/consumer requirement. A scoped expectation reconciliation must not become a generic failure waiver, skip or broader relaxation. The reconciled review and later independent Tester/conformance must inspect this boundary and the exact treatment of both tests.
+
+The read-only [baseline comparison](../reports/T20-C7-baseline-comparison.md) pins upstream PR #87 to `5fcffe1036b2d6f867d6583b29822c4985d36fba` and fork main to `1f4b79b01ebd784b6c1116a0b78c42389eae1c24`. The same parent-authority pattern already occurs for PPTX on both baselines, and for Excalidraw on fork main; PR #87 at that SHA does not implement Excalidraw. Baseline HTML directly serves the guarded file under HTTP CSP and has no parent `frame-ready` byte handoff, so this specific handoff counterexample does not apply there. These facts are context, not a waiver of the newly scoped C7 obligations or proof of an external exploit. The five supported type/commit cases were exercised using their unchanged source components in real Chromium with local fixture API/shell responses; this was not full App/auth/parser/native acceptance and changed no `exxeta/*` branch.
+
+Record this amendment in the spec/register, reconcile the accepted boundary, then continue T20 including enabling Detach **as specified** once its connected safeguards are implemented. The decision removes the C7 guarantee-choice blocker; it does not itself prove child movement, recovery, C4/C5 ordering or any native lifecycle. The separately missing sandbox-capable native test environment remains an evidence blocker. No support or full-gate pass follows from this documentation.

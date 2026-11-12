@@ -10,6 +10,10 @@ Status: revised **author draft**, 2026-11-11; awaiting a fresh different Archite
 
 C1 owner/request UUIDv4 allocation uses the actual owner realm's `crypto.randomUUID()` when callable, or that realm's `crypto.getRandomValues` for 16 bytes with the required UUIDv4 masks and canonical formatting only when `randomUUID` is unavailable. Missing or throwing cryptography fails closed; C5 shell-originated producers remain unchanged. The independently reviewed narrow correction is [T20-C1-COMPAT](../reviews/T20-C1-COMPAT-architecture-spec.md); it changes neither ADR-0009 nor the accepted product decisions.
 
+## Accepted C7 threat-model amendment, 2026-11-12
+
+Decided by: Sascha (2026-11-12), option B of [T20-C7-IDENTITY](../reviews/T20-C7-IDENTITY-architecture-spec.md), recorded in the [accepted ADR-0009 amendment](../adr/0009-detached-document-window.md#reconciled-c7-amendment--2026-11-12). Only a pre-first-ready navigation performed by the trusted app parent's own script is outside the C7 guarantee; that parent already has the snapshot. Untrusted preview content and external pages remain fully covered; all other C7 and C1–C8/acceptance rules stay. The Excalidraw/HTML counterexample tests remain, with their observed privileged-parent behaviour documented as expected under the narrower model, and no other test/control is loosened. R11 and navigation wording below are subject only to that exact boundary. [Pinned baseline evidence](../reports/T20-C7-baseline-comparison.md) already reproduces PPTX on PR87/main and Excalidraw on main; baseline HTML uses a different direct-response path. This amendment authorizes continuation, not a product pass; enable Detach only as specified after connected safeguards and real evidence. No new route/store/dependency/protocol or native-sandbox bypass is authorized.
+
 ## Sources and authority
 
 | Source | Exact reference | Authority and use |
