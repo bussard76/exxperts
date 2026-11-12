@@ -643,3 +643,7 @@ The real `sidebar-reopen-ui` smoke was extended to a separate default-browser 39
 ## Checkpoint: attached tree tooltip
 
 The `sidebar-reopen-ui` smoke now also hovers the actual tree file and verifies its tooltip appears and clears after the host clipping change. The attributed Chromium run passed 1/1, including the previously added desktop and phone drawer cases; child-host tooltip behavior remains unexecuted.
+
+## Checkpoint: attached RAW and drag after clipping
+
+The attributed `workspace-markdown-raw-ui` and `workspace-markdown-images-ui` smokes passed 2/2 after the collapsed-tree clipping change. These exercise attached editor/RAW and drag paths, not a child-host transfer.
