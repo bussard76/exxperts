@@ -724,3 +724,7 @@ The detached Reload case now specifies a controlled same-context status response
 ## Checkpoint: same-context Reload case
 
 The real-child Reload scenario now also specifies a controlled same-context status and thread response: the existing Reload read and save must execute once while the same child stays open, before a subsequent genuine replacement requests closure. Scripts typecheck passed. This scenario has not executed behind disabled Detach; its controlled response fixtures and same-context behavior remain to be verified, and R4 is still open.
+
+## Checkpoint: child selection and tab callbacks
+
+The detached smoke now counts the real selected-file read and verifies one selection, no document write and no child closure, while the preceding actual tab-close callback leaves the child open without writing. Scripts typecheck passed. These assertions remain unexecuted behind disabled Detach, so the round-2 C4 callback requirement is not yet proven.

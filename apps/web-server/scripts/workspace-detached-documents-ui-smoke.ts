@@ -328,11 +328,18 @@ try {
 			await page.getByRole("region", { name: "Attachments" }).waitFor();
 			assert(await child.getByRole("textbox", { name: "Raw Markdown source" }).inputValue() === rawDisplay && await child.locator(".workspace-tab[data-active='true']", { hasText: "invented.md" }).isVisible(), "opening the chat Attachments pane keeps the same active child document");
 			await page.getByRole("button", { name: "Attachments", exact: true }).click();
+			const writesBeforeTab = writes;
 			await child.locator(".workspace-tab", { hasText: "invented.md" }).locator(".workspace-tab-close").click();
-			assert(!child.isClosed() && await child.locator(".workspace-tab").count() === 0, "closing a tab leaves the document child open");
-			await child.locator(".workspace-file-browser-file", { hasText: "invented.md" }).click();
-			assert(!child.isClosed(), "selecting a file does not close the document child");
-			await child.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented source").waitFor();
+			assert(!child.isClosed() && await child.locator(".workspace-tab").count() === 0 && writes === writesBeforeTab, "closing a tab once leaves the document child open without writing");
+			let selectedReads = 0;
+			const countSelectedRead = (request: import("playwright").Request) => { const url = new URL(request.url()); if (request.method() === "GET" && url.pathname.endsWith("/workspace-markdown") && url.searchParams.get("path") === "invented.md") selectedReads++; };
+			context.on("request", countSelectedRead);
+			try {
+				await child.locator(".workspace-file-browser-file", { hasText: "invented.md" }).click();
+				await child.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented source").waitFor();
+				await child.waitForTimeout(250);
+				assert(!child.isClosed() && selectedReads === 1 && writes === writesBeforeTab, "the selected file executes once without child closure or a write");
+			} finally { context.off("request", countSelectedRead); }
 			await child.keyboard.press("Control+f");
 			const childSearch = child.getByRole("search");
 			await childSearch.waitFor();
