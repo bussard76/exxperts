@@ -716,3 +716,7 @@ The real Reload callback now checks the resolved room status: if its actual dest
 ## Checkpoint: failed moved-room Reload draft
 
 The real-child Reload case now also faults the room-status response and specifies retaining the current room and child without a close request. The inactive child path reports that failure in the existing chat system-message channel instead of navigating away. UI and scripts typechecks and UI asset build passed; the attributed `two-window-room-ui` passed, while `workspace-detached-documents-ui` stopped at disabled Detach (1/2 cases passed). The new child failure assertion has not run, and same-context nested resume failure still needs verification.
+
+## Checkpoint: failed same-context resume draft
+
+The detached Reload case now specifies a controlled same-context status response followed by a failed real thread read; it requires the current room and child to remain. The inactive resume failure path now reports the error through the existing chat system-message channel when a child exists. UI and scripts typechecks, UI asset build and the attributed `two-window-room-ui` smoke passed 1/1 on attached paths. The new real-child assertion remains unexecuted while Detach is disabled; this is not R4 completion.

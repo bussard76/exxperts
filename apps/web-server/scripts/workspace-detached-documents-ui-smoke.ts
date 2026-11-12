@@ -586,6 +586,18 @@ try {
 				await reloadPage.waitForTimeout(250);
 				assert(await reloadPage.getByRole("navigation", { name: "Room navigation" }).isVisible() && !reloadChild.isClosed() && await reloadChild.evaluate(`window.__t20CloseCalls`) === 0, "a failed Reload status read retains the current room and child");
 				await reloadPage.unroute("**/api/persistent-agents");
+				const liveStatuses = await api("/api/persistent-agents");
+				assert(liveStatuses.status === 200 && Array.isArray(liveStatuses.body), "the invented room statuses are readable");
+				const sameContextStatuses = liveStatuses.body.map((status: any) => status.id === reloadRoomId ? { ...status, runtime: { ...status.runtime, state: "active", activeThreadId: oldThread }, activeLock: { ...status.activeLock, surface: "web" } } : status);
+				await reloadPage.route("**/api/persistent-agents", (route) => route.fulfill({ status: 200, json: sameContextStatuses }));
+				await reloadPage.route("**/threads/**", (route) => route.request().method() === "GET" ? route.fulfill({ status: 503, json: { error: "Invented unavailable thread" } }) : route.continue());
+				const refusedThread = reloadPage.waitForResponse((response) => response.url().includes("/threads/") && response.status() === 503);
+				await reloadPage.getByRole("button", { name: "Reload", exact: true }).click();
+				await refusedThread;
+				await reloadPage.waitForTimeout(250);
+				assert(await reloadPage.getByRole("navigation", { name: "Room navigation" }).isVisible() && !reloadChild.isClosed() && await reloadChild.evaluate(`window.__t20CloseCalls`) === 0, "a failed same-context resume retains the current room and child");
+				await reloadPage.unroute("**/api/persistent-agents");
+				await reloadPage.unroute("**/threads/**");
 				let replacementReads = 0;
 				reloadPage.on("request", (request) => { if (request.method() === "GET" && request.url().includes("/threads/")) replacementReads++; });
 				await reloadPage.getByRole("button", { name: "Reload", exact: true }).click();

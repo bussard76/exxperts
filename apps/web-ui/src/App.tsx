@@ -8021,6 +8021,10 @@ export function App() {
 			clearBackgroundActivityBadge(status.id);
 		} catch (e) {
 			if (!preparedDocumentAdmissionIsCurrent(admission)) return;
+			if (documentChildRef.current) {
+				setItems((items) => [...items, { kind: "system", id: nid(), text: formatDirectResumeError(e), level: "error" }]);
+				return;
+			}
 			setPersistentResumeError(formatDirectResumeError(e));
 			setView("home");
 			await refreshPersistentAgentStatus();
