@@ -533,3 +533,7 @@ For the existing typed Home/Memory leave intents, the inactive child path now re
 ## Checkpoint: Memento confirmation and closure case
 
 The detached smoke now specifies the real Memento confirmation: Cancel leaves the registered child open and sends no operation, while confirmation holds the real Memento request until the actual child closes. Scripts typecheck passed; the attributed smoke still stops at disabled Detach, so this case did not run and is not evidence of ordering.
+
+## Checkpoint: topbar Memento child-close draft
+
+The inactive topbar Memento path now keeps the original guarded action through its own confirmation; Cancel performs no child close, and a confirmed action waits for the registered child before the real Memento request. UI and scripts typechecks, UI asset build, and the attributed `two-window-room-ui` and `workspace-file-tabs-ui` smokes passed 2/2. The new detached Memento case remains unexecuted at disabled Detach, and the separate room-settings callback and other operations still require integration and real child evidence.

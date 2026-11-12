@@ -8095,6 +8095,11 @@ export function App() {
 		// response, closes the thread and opens a fresh one.
 		if (!(await confirmForgetConversation(persistentRoomInFlight))) return;
 		if (!checkpointOriginCurrent(targetChat, generation)) return;
+		if (documentChildRef.current) {
+			const pending = markdownEditorPendingActionRef.current;
+			if (!pending || !sameDocumentLocalAction(pending.admission.intent, intent) || !preparedDocumentAdmissionIsCurrent(pending.admission)) return;
+			if (!(await closeDocumentChildForExit(pending)) || !preparedDocumentAdmissionIsCurrent(pending.admission) || !checkpointOriginCurrent(targetChat, generation)) return;
+		}
 		// The server closes this room's socket as part of Forget, before its
 		// answer arrives: that close is deliberate, not a drop to reconnect
 		// from (or to save an interrupted answer into the forgotten conversation).
