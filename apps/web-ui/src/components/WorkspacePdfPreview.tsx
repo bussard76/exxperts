@@ -30,10 +30,11 @@ const errorText: Record<string, string> = {
 	preview_timeout: "This preview took too long to load.",
 };
 
-export function WorkspacePdfPreview({ agentId, conversationId, path }: { agentId: string; conversationId: string; path: string }) {
-	const [pages, setPages] = useState<Page[] | null>(null);
+export function WorkspacePdfPreview({ agentId, conversationId, path, retained }: { agentId: string; conversationId: string; path: string; retained: { pdf?: Page[] } }) {
+	const [pages, setPages] = useState<Page[] | null>(() => retained.pdf ?? null);
 	const [error, setError] = useState<string | null>(null);
 	useEffect(() => {
+		if (retained.pdf) return;
 		const controller = new AbortController();
 		const query = new URLSearchParams({ conversationId, path });
 		void apiFetch(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?${query}`, { signal: controller.signal })
@@ -44,10 +45,10 @@ export function WorkspacePdfPreview({ agentId, conversationId, path }: { agentId
 					return;
 				}
 				if (body?.schemaVersion !== 1 || body.agentId !== agentId || body.conversationId !== conversationId || body.path !== path || body.kind !== "pdf" || !Number.isInteger(body.totalPages) || body.totalPages < 1 || body.totalPages > 200 || !Array.isArray(body.pages) || body.pages.length !== body.totalPages || !body.pages.every((page: Page, index: number) => page?.page === index + 1 && page.mimeType === "image/jpeg" && typeof page.imageBase64 === "string" && /^[A-Za-z0-9+/]+={0,2}$/.test(page.imageBase64) && Number.isInteger(page.widthPx) && page.widthPx > 0 && Number.isInteger(page.heightPx) && page.heightPx > 0)) throw new Error("Invalid preview");
-				if (!controller.signal.aborted) setPages(body.pages);
+				if (!controller.signal.aborted) { retained.pdf = body.pages; setPages(body.pages); }
 			})
 			.catch(() => { if (!controller.signal.aborted) setError("This file could not be previewed."); });
 		return () => controller.abort();
-	}, [agentId, conversationId, path]);
+	}, [agentId, conversationId, path, retained]);
 	return <div className="workspace-preview-pdf">{pages ? pages.map((page) => <img key={page.page} src={`data:image/jpeg;base64,${page.imageBase64}`} alt={`Page ${page.page}`} width={page.widthPx} height={page.heightPx} />) : <p>{error ?? "Loading preview…"}</p>}</div>;
 }

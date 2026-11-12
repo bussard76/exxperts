@@ -558,7 +558,7 @@ export function App() {
 		| { kind: "taskRun"; taskId: string };
 	const [rightPane, setRightPane] = useState<RightPaneOccupant | null>(null);
 	const [workspaceTabs, setWorkspaceTabs] = useState<{ agentId: string; conversationId: string; paths: string[] } | null>(null);
-	const documentPreviewSnapshotsRef = useRef(new Map<string, { bytes: ArrayBuffer | null; text?: string; word?: { html: string; notice: boolean }; imageUrl?: string; disposed?: boolean }>());
+	const documentPreviewSnapshotsRef = useRef(new Map<string, { bytes: ArrayBuffer | null; text?: string; word?: { html: string; notice: boolean }; pdf?: { page: number; mimeType: "image/jpeg"; imageBase64: string; widthPx: number; heightPx: number }[]; spreadsheet?: { workbook: unknown; notices: string[] }; imageUrl?: string; disposed?: boolean }>());
 	const { host: documentHost, treeHost: documentTreeHost, mountHost: mountDocumentHost, mountTree: mountDocumentTreeHost } = useDocumentsHost();
 	// Synchronous mirror for the WS handlers (toast suppression / run-view swap
 	// read the pane at event time, not at closure-capture time).
@@ -9211,10 +9211,10 @@ export function App() {
 						<WorkspaceFramedPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} createFrameId={allocateDocumentId} />
 					</div>)}
 					{workspaceTabs.paths.filter((path) => /\.xlsx$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceSpreadsheet" || rightPane.path !== path}>
-						<WorkspaceSpreadsheetPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />
+						<WorkspaceSpreadsheetPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} />
 					</div>)}
 					{workspaceTabs.paths.filter((path) => /\.pdf$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspacePdf" || rightPane.path !== path}>
-						<WorkspacePdfPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />
+						<WorkspacePdfPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} />
 					</div>)}
 					{workspaceTabs.paths.filter((path) => /\.(png|jpe?g|gif|webp|svg)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceImage" || rightPane.path !== path}>
 						<WorkspaceImagePreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} />

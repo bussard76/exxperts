@@ -93,12 +93,13 @@ function columnName(index: number): string {
 // Like a sheet in Excel, the grid runs on past the last filled cell.
 const MIN_ROWS = 40, MIN_COLUMNS = 12, ROW_HEADER_PX = 44;
 
-export function WorkspaceSpreadsheetPreview({ agentId, conversationId, path }: { agentId: string; conversationId: string; path: string }) {
-	const [workbook, setWorkbook] = useState<Workbook | null>(null);
+export function WorkspaceSpreadsheetPreview({ agentId, conversationId, path, retained }: { agentId: string; conversationId: string; path: string; retained: { spreadsheet?: { workbook: unknown; notices: string[] } } }) {
+	const [workbook, setWorkbook] = useState<Workbook | null>(() => (retained.spreadsheet?.workbook as Workbook | undefined) ?? null);
 	const [sheetIndex, setSheetIndex] = useState(0);
 	const [error, setError] = useState<string | null>(null);
-	const [notices, setNotices] = useState<string[]>([]);
+	const [notices, setNotices] = useState<string[]>(() => retained.spreadsheet?.notices ?? []);
 	useEffect(() => {
+		if (retained.spreadsheet) return;
 		const controller = new AbortController();
 		const query = new URLSearchParams({ conversationId, path });
 		void apiFetch(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?${query}`, { signal: controller.signal }).then(async (response) => {
@@ -106,10 +107,10 @@ export function WorkspaceSpreadsheetPreview({ agentId, conversationId, path }: {
 			if (!response.ok) { if (!controller.signal.aborted) setError(response.status === 401 ? "Sign in to preview this file." : errorText[body?.code] ?? "This file could not be previewed."); return; }
 			const noticeCopy: Record<string, string> = { excel_charts_omitted: "Charts are not shown in this preview.", excel_unusual_formatting: "Some unusual spreadsheet formatting is not shown." };
 			if (body?.schemaVersion !== 1 || body.agentId !== agentId || body.conversationId !== conversationId || body.path !== path || body.kind !== "spreadsheet" || !Array.isArray(body.notices) || !body.notices.every((notice: unknown) => keys(notice, ["code", "text"]) && typeof notice.code === "string" && noticeCopy[notice.code] === notice.text) || !validWorkbook(body.workbook)) throw new Error("Invalid preview");
-			if (!controller.signal.aborted) { setNotices(body.notices.map((notice: { text: string }) => notice.text)); setWorkbook(body.workbook); }
+			if (!controller.signal.aborted) { retained.spreadsheet = { notices: body.notices.map((notice: { text: string }) => notice.text), workbook: body.workbook }; setNotices(retained.spreadsheet.notices); setWorkbook(body.workbook); }
 		}).catch(() => { if (!controller.signal.aborted) setError("This file could not be previewed."); });
 		return () => controller.abort();
-	}, [agentId, conversationId, path]);
+	}, [agentId, conversationId, path, retained]);
 	if (!workbook) return <p>{error ?? "Loading preview…"}</p>;
 	const sheet = workbook.sheets[sheetIndex];
 	const cells = new Map(sheet.cells.map((cell) => [`${cell.row}:${cell.column}`, cell]));

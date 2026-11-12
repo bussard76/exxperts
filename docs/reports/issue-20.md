@@ -471,3 +471,7 @@ A new targeted `workspace-documents-native-ui-smoke.ts` drafts an actual Electro
 ## Checkpoint: child-first PDF and spreadsheet cases
 
 `workspace-detached-documents-ui-smoke.ts` now specifies a real child-first PDF and generated spreadsheet, changes each invented file on disk, and checks retained page/cell content and a single request after Return. Scripts typecheck passed. The attributed detached smoke again stopped at the first missing Detach assertion, so neither new case ran and this is not transfer evidence; actual browser host and native safeguards remain incomplete.
+
+## Checkpoint: owner-held PDF and spreadsheet snapshots
+
+The owner tab record now retains validated PDF page data and the validated spreadsheet model and notices. UI and scripts typechecks, the UI asset build, and the attributed filtered `workspace-file-tabs-ui` smoke passed (1/1). The child-first PDF and spreadsheet cases remain unexecuted at the unavailable Detach assertion; pending/error snapshots, actual host reconstruction, C3/C4, and native lifecycle work remain open.
