@@ -736,3 +736,7 @@ The detached smoke now injects an append failure after the real host has been ad
 ## Checkpoint: native owner endpoint red
 
 Added `workspace-documents-owner-ui` as a supplemental real-browser check of the actual owner endpoint's non-enumerable installation, hello binding, replay and malformed-input refusal. The attributed run failed 0/1 because the owner endpoint does not yet exist. This is test-first evidence for the owner seam only; it is not the real shell exchange, native lifecycle, permit registration or platform evidence, all of which remain open and sandbox-blocked.
+
+## Checkpoint: native owner handshake draft
+
+The owner now installs the approved non-enumerable synchronous private endpoint, binds a valid initial hello, returns the current owner/context stamp, replays an identical sequence, and refuses malformed or unsupported requests. Only hello and empty polls are implemented; no close, permit, child registration, abort or other native action can be authorized by this draft. The attributed `workspace-documents-owner-ui` browser supplement passed 1/1 after its initial missing-endpoint red, including reordered replay and invalid-input checks; UI asset build and the earlier typechecks passed. This invokes the actual owner endpoint from an isolated browser page, not from the native shell, and is not C5 integration or native evidence.

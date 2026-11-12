@@ -1055,6 +1055,50 @@ export function App() {
 		return !unmountedRef.current && !personHasChanged() && checkpointContextRef.current.key === null && !markdownEditorRef.current && !documentSaveInFlightRef.current && !documentKeepMineInFlightRef.current && !documentWriteRef.current && !documentChildRef.current && !markdownEditorPendingActionRef.current;
 	}
 
+
+	// Private shell-to-owner endpoint. Until the remaining C5 items are wired,
+	// only hello and empty polls are accepted; every other request fails closed.
+	useEffect(() => {
+		if (!documentOwnerId || Object.getOwnPropertyDescriptor(window, "__exxpertsDocuments")) return;
+		let nativeSessionId: string | null = null;
+		let lastInput = "";
+		let lastSequence = 0;
+		let lastOutput: unknown = null;
+		const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+		const step = (input: unknown): unknown => {
+			if (!input || typeof input !== "object" || Array.isArray(input) || unmountedRef.current || personHasChanged()) return null;
+			const envelope = input as Record<string, unknown>;
+			if (Object.keys(envelope).sort().join(",") !== "ack,items,nativeSessionId,sequence,version" || envelope.version !== 1 || typeof envelope.nativeSessionId !== "string" || !uuid.test(envelope.nativeSessionId) || !Number.isSafeInteger(envelope.sequence) || !Number.isSafeInteger(envelope.ack) || !Array.isArray(envelope.items)) return null;
+			let serialized: string;
+			try { serialized = JSON.stringify([envelope.version, envelope.nativeSessionId, envelope.sequence, envelope.ack, envelope.items]); } catch { return null; }
+			if (nativeSessionId && envelope.nativeSessionId === nativeSessionId && envelope.sequence === lastSequence && serialized === lastInput) return lastOutput;
+			if (documentChildRef.current || !Number.isSafeInteger(documentOwnerGenerationRef.current) || documentOwnerGenerationRef.current < 1) return null;
+			const current = checkpointContextRef.current;
+			const hostGeneration = documentHostGenerationRef.current;
+			const draftGeneration = documentDraftGenerationRef.current;
+			if (!Number.isSafeInteger(hostGeneration) || hostGeneration < 1 || !Number.isSafeInteger(draftGeneration) || draftGeneration < 1) return null;
+			const stamp = current.key === null ? null : current.roomId && current.conversationId && Number.isSafeInteger(current.generation) && current.generation > 0 && current.key === `${current.roomId}\u0000${current.conversationId}` ? { ownerId: documentOwnerId, ownerGeneration: documentOwnerGenerationRef.current, roomId: current.roomId, conversationId: current.conversationId, roomGeneration: current.generation, hostGeneration, draftGeneration } : undefined;
+			if (stamp === undefined) return null;
+			let items: unknown[];
+			if (nativeSessionId === null) {
+				const item = envelope.items[0];
+				if (envelope.sequence !== 1 || envelope.ack !== 0 || envelope.items.length !== 1 || !item || typeof item !== "object" || Array.isArray(item) || Object.keys(item).join(",") !== "kind" || (item as Record<string, unknown>).kind !== "hello") return null;
+				nativeSessionId = envelope.nativeSessionId;
+				items = [{ kind: "hello", ownerId: documentOwnerId, ownerGeneration: documentOwnerGenerationRef.current }];
+			} else {
+				if (envelope.nativeSessionId !== nativeSessionId || envelope.sequence !== lastSequence + 1 || envelope.ack !== lastSequence || envelope.items.length !== 0) return null;
+				items = [];
+			}
+			lastSequence = envelope.sequence as number;
+			lastInput = serialized;
+			lastOutput = { version: 1, nativeSessionId, sequence: lastSequence, ack: lastSequence, items, status: { binding: { nativeSessionId, ownerId: documentOwnerId, ownerGeneration: documentOwnerGenerationRef.current }, stamp, child: null } };
+			return lastOutput;
+		};
+		const endpoint = Object.freeze({ step });
+		Object.defineProperty(window, "__exxpertsDocuments", { value: endpoint, enumerable: false, configurable: true, writable: false });
+		return () => { if (Object.getOwnPropertyDescriptor(window, "__exxpertsDocuments")?.value === endpoint) delete (window as unknown as Record<string, unknown>).__exxpertsDocuments; };
+	}, [documentOwnerId]);
+
 	function guardMarkdownEditorAction(action: () => void | Promise<unknown>, prompt: "close" | "switch" | "navigate", intent: DocumentLocalAction | null = null): boolean {
 		const bypass = markdownEditorCommitBypassRef.current;
 		if (bypass) {
