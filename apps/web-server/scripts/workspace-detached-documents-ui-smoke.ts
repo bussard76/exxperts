@@ -477,42 +477,57 @@ try {
 			await conflictChild.close();
 			await page.locator(".markdown-editor-conflict").waitFor();
 			assert(await raw.inputValue() === conflictDraft && Number(writes) === 1, "unexpected browser-child closure retains the polled conflict and exact local source without writing");
-			await page.locator(".docs-window-actions").waitFor({ state: "detached" });
 			assert(await detach.isEnabled(), "Detach remains available after child conflict recovery");
+			const pageCountBeforeConflictReopen = context.pages().length;
 			const conflictReopened = page.waitForEvent("popup");
 			await detach.click();
 			conflictChild = await conflictReopened;
+			assert(context.pages().includes(conflictChild), "the fresh conflict child belongs to the smoke browser context");
+			assert(await conflictChild.opener() === page, "the owner remains the actual opener after conflict recovery");
+			assert(context.pages().length === pageCountBeforeConflictReopen + 1, "conflict recovery opens exactly one fresh child page");
 			await conflictChild.locator(".markdown-editor-conflict").waitFor();
 			let releaseKeep!: () => void, beginKeep!: () => void;
 			const keepReleased = new Promise<void>((resolve) => { releaseKeep = resolve; });
 			const keepStarted = new Promise<void>((resolve) => { beginKeep = resolve; });
-			await page.route("**/workspace-markdown?*", async (route) => {
+			await context.route("**/workspace-markdown?*", async (route) => {
 				if (route.request().method() !== "PUT") return route.continue();
 				beginKeep();
 				await keepReleased;
 				await route.continue();
 			});
 			try {
-				await conflictChild.getByRole("button", { name: "Keep mine", exact: true }).click();
+				const keepMine = conflictChild.getByRole("button", { name: "Keep mine", exact: true });
+				await keepMine.click();
 				await keepStarted;
 				const closedConflictChild = conflictChild.waitForEvent("close");
-				await conflictChild.getByRole("button", { name: "Return", exact: true }).click();
+				const returnFromConflict = conflictChild.getByRole("button", { name: "Return", exact: true });
+				await returnFromConflict.waitFor({ timeout: 30_000 });
+				await returnFromConflict.click({ timeout: 30_000 });
 				await closedConflictChild;
 				assert(await raw.inputValue() === conflictDraft && Number(writes) === 2, "Return retains the pending conflict resolution and exact draft");
 			} finally { releaseKeep(); }
 			await waitUntil(() => fs.readFileSync(path.join(workspace, "invented.md"), "utf8") === conflictDraft, "the retained Keep mine reaches the original workspace");
 			assert(Number(writes) === 2, "returning a pending Keep mine sends no duplicate write");
 			await waitUntil(async () => await page.locator(".markdown-editor-status").textContent() === "Saved", "the retained Keep mine settles");
-			await page.unroute("**/workspace-markdown?*");
+			await context.unroute("**/workspace-markdown?*");
+			let unknownPutIntercepted = 0;
+			await context.route(/\/workspace-markdown(?:\?|$)/, (route) => {
+				if (route.request().method() !== "PUT") return route.continue();
+				unknownPutIntercepted++;
+				return route.abort();
+			});
 			const unknownOpened = page.waitForEvent("popup");
 			await detach.click();
 			const unknownChild = await unknownOpened;
 			const unknownRaw = unknownChild.getByRole("textbox", { name: "Raw Markdown source" });
 			await unknownRaw.waitFor();
 			const unknownDraft = "# Invented unresolved child draft\n";
-			await page.route("**/workspace-markdown?*", (route) => route.request().method() === "PUT" ? route.abort() : route.continue());
 			await unknownRaw.fill(unknownDraft);
+			assert(await unknownRaw.inputValue() === unknownDraft, "the fresh child retains the exact unresolved-write draft after typing");
+			assert(await unknownChild.locator(".markdown-editor-save").isEnabled(), `typing in the reopened child enables Save (status=${await unknownChild.locator(".markdown-editor-status").textContent()})`);
 			await unknownChild.locator(".markdown-editor-save").click();
+			await waitUntil(() => unknownPutIntercepted === 1, "one unknown workspace PUT reaches the browser boundary");
+			assert(unknownPutIntercepted === 1, "Save in the fresh child sends one intercepted unresolved write");
 			await unknownChild.locator(".markdown-editor-error").waitFor();
 			const closedUnknownChild = unknownChild.waitForEvent("close");
 			await unknownChild.getByRole("button", { name: "Return", exact: true }).click();

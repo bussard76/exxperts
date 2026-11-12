@@ -951,6 +951,33 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 	const resolveImageSrc = useCallback((src: string) => workspaceImageUrl(agentId, conversationId, path, src), [agentId, conversationId, path]);
 	const filename = path.split("/").pop() || path;
 	const conflict = phase === "conflict" || hasExternalUpdate;
+	useLayoutEffect(() => {
+		const area = rawAreaRef.current;
+		if (!area) return;
+		const onInput = () => {
+			if (immediateFenceRef.current) { area.value = draftRef.current; return; }
+			surfaceRef.current?.setRaw(area.value);
+			syncRawTaskActive();
+		};
+		area.addEventListener("input", onInput);
+		area.addEventListener("select", syncRawTaskActive);
+		return () => {
+			area.removeEventListener("input", onInput);
+			area.removeEventListener("select", syncRawTaskActive);
+		};
+	}, [hostGeneration, mode, syncRawTaskActive]);
+	useLayoutEffect(() => {
+		const root = paneRootRef.current;
+		if (!root || !conflict) return;
+		const doc = root.ownerDocument;
+		const onClick = (event: MouseEvent) => {
+			const target = event.target as Element | null;
+			if (immediateFenceRef.current || !target || typeof target.closest !== "function" || !target.closest(".markdown-editor-conflict-actions button:last-child")) return;
+			void keepMine();
+		};
+		doc.addEventListener("click", onClick, true);
+		return () => doc.removeEventListener("click", onClick, true);
+	}, [conflict, hostGeneration, keepMine]);
 	const status = phase === "loading" ? "Loading…" : phase === "saving" ? "Saving…" : conflict ? "Conflict" : phase === "error" ? "Error" : isDirty ? "Unsaved" : canEdit ? "Saved" : "Read-only";
 
 	return (
@@ -972,9 +999,9 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 			<div className={mode === "raw" ? "markdown-editor-body markdown-editor-body-raw" : "markdown-editor-body"}>
 				{phase === "loading" && <p className="markdown-editor-placeholder">Loading file…</p>}
 				{phase !== "loading" && file && <div className={mode === "raw" ? "markdown-editor-surface markdown-editor-surface-raw" : "markdown-editor-surface"}><MarkdownEditorSurfaceWithRef key={surfaceIdentity} identity={surfaceIdentity} hostGeneration={hostGeneration} ref={surfaceRef} resolveImageSrc={resolveImageSrc} content={draft} revision={file.revision} saveInFlight={saveInFlight} canEdit={canEdit} fenced={fenced} isDirty={isDirty} hasExternalUpdate={hasExternalUpdate || phase === "conflict"} isSaving={phase === "saving"} saveError={phase === "error"} readOnly={mode === "preview"} raw={mode === "raw" ? { taskActive: rawTaskActive, onTask: toggleRawTask } : undefined} onPreviewLink={handlePreviewLink} setDirty={setDirty} onDraftChange={handleDraftChange} onMutation={noteMutation} onSave={persistAfterKeepMine} discardAndApplyExternal={discardAndApplyExternal} contentSetterRef={contentSetterRef} /></div>}
-				{phase !== "loading" && mode === "raw" && <textarea ref={rawAreaRef} className="markdown-editor-raw markdown-editor-raw-input" aria-label="Raw Markdown source" spellCheck={false} readOnly={!canEdit || fenced} value={draft} onChange={(event) => { if (immediateFenceRef.current) { event.target.value = draftRef.current; return; } surfaceRef.current?.setRaw(event.target.value); syncRawTaskActive(); }} onSelect={syncRawTaskActive} />}
+				{phase !== "loading" && mode === "raw" && <textarea ref={rawAreaRef} className="markdown-editor-raw markdown-editor-raw-input" aria-label="Raw Markdown source" spellCheck={false} readOnly={!canEdit || fenced} value={draft} />}
 			</div>
-			{conflict && <div className="markdown-editor-conflict" role="alert"><strong>This file changed outside the editor.</strong>{conflictRevision ? <span> Reload the latest version or save your draft over it.</span> : <span> Reload the latest version or keep your local draft.</span>}<div className="markdown-editor-conflict-actions"><button type="button" onClick={() => void reloadLatest()}>Reload</button><button type="button" onClick={() => void keepMine()} disabled={!canEdit}>Keep mine</button></div></div>}
+			{conflict && <div className="markdown-editor-conflict" role="alert"><strong>This file changed outside the editor.</strong>{conflictRevision ? <span> Reload the latest version or save your draft over it.</span> : <span> Reload the latest version or keep your local draft.</span>}<div className="markdown-editor-conflict-actions"><button type="button" onClick={() => void reloadLatest()}>Reload</button><button type="button" disabled={!canEdit}>Keep mine</button></div></div>}
 		</aside>
 	);
 });

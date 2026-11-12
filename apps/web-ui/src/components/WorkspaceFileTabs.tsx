@@ -1,4 +1,4 @@
-import { useState, type DragEvent } from "react";
+import { useLayoutEffect, useRef, useState, type DragEvent } from "react";
 import { useHoverTooltip } from "./workspace-hover-tooltip";
 
 // Its own type, so a tab dropped on the composer or the file tree is ignored there.
@@ -9,7 +9,15 @@ type DropTarget = { path: string; side: "before" | "after" };
 export function WorkspaceFileTabs({ tabs, active, onSelect, onClose, onReorder, onDetach, detachDisabled }: { tabs: string[]; active: string | null; onSelect: (path: string) => void; onClose: (path: string) => void; onReorder: (paths: string[]) => void; onDetach?: () => void; detachDisabled?: boolean }) {
 	const [dragged, setDragged] = useState<string | null>(null);
 	const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+	const detachButton = useRef<HTMLButtonElement>(null);
 	const { show: showTooltip, hide: hideTooltip, tooltip } = useHoverTooltip();
+	useLayoutEffect(() => {
+		const button = detachButton.current;
+		if (!button || !onDetach) return;
+		const onClick = () => onDetach();
+		button.addEventListener("click", onClick);
+		return () => button.removeEventListener("click", onClick);
+	}, [onDetach]);
 	const endDrag = () => { setDragged(null); setDropTarget(null); };
 	const overTab = (event: DragEvent<HTMLElement>, path: string) => {
 		if (!dragged) return;
@@ -58,6 +66,6 @@ export function WorkspaceFileTabs({ tabs, active, onSelect, onClose, onReorder, 
 			</div>;
 		})}
 		{tooltip}
-		{onDetach && <button type="button" className="workspace-tabs-window" disabled={detachDisabled} onClick={onDetach} title="Open the documents in their own window">Detach</button>}
+		{onDetach && <button ref={detachButton} type="button" className="workspace-tabs-window" disabled={detachDisabled} title="Open the documents in their own window">Detach</button>}
 	</div>;
 }
