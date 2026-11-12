@@ -457,3 +457,7 @@ The real detached-window smoke now also specifies opening a generated Word docum
 ## Checkpoint: owner-held Word snapshot
 
 The owner tab record now retains successfully validated Word HTML and its external-resource notice for reconstruction. UI and scripts typechecks and the UI asset build passed; the attributed `workspace-file-preview` and `workspace-file-tabs-ui` filtered smokes passed 2/2. The child-first Word case is not yet reached because Detach is unavailable, and loading/error retention, remaining preview types, host transfer and native safeguards remain open.
+
+## Desktop test prerequisite requiring Controller decision
+
+The desktop package has a separate lockfile. `EXXETA_SKIP_BROWSER_INSTALL=1 npm ci` in `apps/desktop` completed with normal lifecycle scripts and `npm run typecheck` passed, without a tracked lockfile change. The locked Electron package is 43.8.6 and has no install lifecycle script; its `index.js` invokes `install.js` to download the Electron executable lazily when first required. The executable is absent after `npm ci`, no `electron` executable is on PATH and no Electron cache is present. Running the native endpoint tests therefore needs an Electron runtime, but invoking that lazy installer would install a dependency outside the dispatch's explicit `npm ci` and normal-lifecycle-only rule; Controller must identify an authorized way to supply it. All previous check results remain partial, and the actual host/C4/native lifecycle and the child tests remain unfinished.
