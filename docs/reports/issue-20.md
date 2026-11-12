@@ -728,3 +728,7 @@ The real-child Reload scenario now also specifies a controlled same-context stat
 ## Checkpoint: child selection and tab callbacks
 
 The detached smoke now counts the real selected-file read and verifies one selection, no document write and no child closure, while the preceding actual tab-close callback leaves the child open without writing. Scripts typecheck passed. These assertions remain unexecuted behind disabled Detach, so the round-2 C4 callback requirement is not yet proven.
+
+## Checkpoint: post-adoption failure recovery draft
+
+The detached smoke now injects an append failure after the real host has been adopted into the child and requires the fenced unavailable state and same-attempt Return without a write. The inactive move path now treats any failure after adoption as unknown instead of releasing the arbiter after an ordinary rollback. UI and scripts typechecks and UI asset build passed; the attributed detached smoke still stopped at disabled Detach, so the new fault and recovery assertions did not execute and C3 remains open.

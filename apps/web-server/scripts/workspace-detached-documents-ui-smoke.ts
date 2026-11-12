@@ -134,6 +134,25 @@ try {
 			const detachCount = await detach.count();
 			assert(detachCount === 1, `a selected room shows one Detach control before opening a tab (found ${detachCount})`);
 			assert(await detach.isEnabled(), "Detach is available for an empty selected room when safeguards are ready");
+			await page.evaluate(`window.__t20AppendOpen = window.open; window.open = function (...args) { const child = window.__t20AppendOpen.apply(this, args); if (child) { child.__t20Append = child.Node.prototype.appendChild; child.Node.prototype.appendChild = function (node) { if (node.className === "docs-host") throw new Error("invented post-adoption fault"); return child.__t20Append.call(this, node); }; } return child; };`);
+			let appendChild: import("playwright").Page | undefined;
+			try {
+				const appendOpened = page.waitForEvent("popup");
+				await detach.click();
+				appendChild = await appendOpened;
+				await page.getByText("Cedar Studio · Documents unavailable", { exact: true }).waitFor();
+				assert(await page.locator(".sidebar-workspace-files").count() === 0 && writes === 0, "a post-adoption failure retains the fenced host rather than reporting an ordinary refusal");
+				await page.evaluate(`window.open = window.__t20AppendOpen;`);
+				await appendChild.evaluate(`Node.prototype.appendChild = window.__t20Append;`);
+				const appendClosed = appendChild.waitForEvent("close");
+				await page.getByRole("button", { name: "Return", exact: true }).click();
+				await appendClosed;
+				await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
+				assert(writes === 0, "recovering the post-adoption failure sends no write");
+			} finally {
+				await page.evaluate(`window.open = window.__t20AppendOpen; delete window.__t20AppendOpen;`);
+				if (appendChild && !appendChild.isClosed()) await appendChild.evaluate(`if (window.__t20Append) Node.prototype.appendChild = window.__t20Append;`).catch(() => {});
+			}
 			await page.evaluate(`window.__t20RecoveryOpen = window.open; window.__t20RecoveryAdopt = document.adoptNode; document.adoptNode = function () { throw new Error("invented rollback fault"); }; window.open = function (...args) { const child = window.__t20RecoveryOpen.apply(this, args); if (child) { child.__t20RecoveryAdopt = child.document.adoptNode; child.document.adoptNode = function (node) { if (node.className === "docs-host") throw new Error("invented adoption fault"); return child.__t20RecoveryAdopt.call(this, node); }; } return child; };`);
 			let recoveryChild: import("playwright").Page | undefined;
 			try {

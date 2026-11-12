@@ -127,14 +127,18 @@ export function useDocumentsHost() {
 	const moveToChild = useCallback((candidate: PreparedChild, current: () => boolean): "moved" | "refused" | "unknown" => {
 		const hostSlot = ownerHostSlot.current, treeSlot = ownerTreeSlot.current;
 		if (prepared.current !== candidate || registered.current || !hostSlot || !treeSlot || host.parentNode !== hostSlot || !current()) return "refused";
+		let adopted = false;
 		try {
 			if (candidate.child.closed || candidate.child.opener !== window || candidate.child.document !== candidate.document || candidate.document.defaultView !== candidate.child || candidate.child.location.href !== "about:blank" || !current()) return "refused";
-			candidate.hostSlot.appendChild(candidate.document.adoptNode(host));
+			const movedHost = candidate.document.adoptNode(host);
+			adopted = true;
+			candidate.hostSlot.appendChild(movedHost);
 			if (!current()) throw new Error("Transfer invalidated");
 			prepared.current = null;
 			registered.current = candidate;
 			return "moved";
 		} catch {
+			if (adopted || host.ownerDocument === candidate.document) return "unknown";
 			try {
 				hostSlot.appendChild(document.adoptNode(host));
 				return "refused";
