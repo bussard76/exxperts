@@ -9,13 +9,16 @@ interface Props {
 	hostGeneration: number;
 	selectedPath?: string | null;
 	onFileSelect?: (entry: WorkspaceFileEntry) => void;
+	onPathDragStart: (path: string, trusted: boolean) => string | null;
+	onPathDragEnd: (token: string) => void;
 }
 
 const ROOT_PATH = "";
 const FILE_TREE_REFRESH_MS = 2000;
 
-export function WorkspaceFileBrowser({ agentId, conversationId, hostGeneration, selectedPath = null, onFileSelect }: Props) {
+export function WorkspaceFileBrowser({ agentId, conversationId, hostGeneration, selectedPath = null, onFileSelect, onPathDragStart, onPathDragEnd }: Props) {
 	const rootRef = useRef<HTMLElement | null>(null);
+	const dragTokenRef = useRef<string | null>(null);
 	const [root, setRoot] = useState<{ displayLabel: string; basename: string } | null>(null);
 	const fileButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 	const previousSelectedPathRef = useRef<string | null>(selectedPath);
@@ -156,10 +159,14 @@ export function WorkspaceFileBrowser({ agentId, conversationId, hostGeneration, 
 							draggable
 							onDragStart={(event) => {
 								hideTooltip();
+								const token = onPathDragStart(entry.relativePath, event.nativeEvent.isTrusted);
+								if (!token) { event.preventDefault(); return; }
+								dragTokenRef.current = token;
 								event.dataTransfer.setData(WORKSPACE_PATH_DRAG_TYPE, entry.relativePath);
 								event.dataTransfer.setData("text/plain", entry.relativePath);
 								event.dataTransfer.effectAllowed = "copy";
 							}}
+							onDragEnd={() => { if (dragTokenRef.current) onPathDragEnd(dragTokenRef.current); dragTokenRef.current = null; }}
 							onClick={() => onFileSelect?.(entry)}
 						>
 							<span className="workspace-file-browser-icon workspace-file-browser-document" aria-hidden="true" />

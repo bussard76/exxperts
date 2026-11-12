@@ -580,6 +580,7 @@ export function App() {
 	documentPaneRef.current = documentPane;
 	const [documentOwnerId] = useState(allocateDocumentId);
 	const documentOwnerGenerationRef = useRef(1);
+	const documentDragRef = useRef<{ token: string; context: DocumentContext; hostGeneration: number; path: string } | null>(null);
 	const documentHostGenerationRef = useRef(1);
 	const [documentHostGeneration, setDocumentHostGeneration] = useState(1);
 	const documentDraftGenerationRef = useRef(1);
@@ -829,6 +830,29 @@ export function App() {
 		}
 		for (const seed of seeds) seed.record.nextFrame = { generation, id: seed.id };
 		return true;
+	}
+
+
+	function startDocumentPathDrag(path: string, trusted: boolean): string | null {
+		if (!trusted || markdownEditorPendingActionRef.current) return null;
+		const token = allocateDocumentId();
+		const admission = token ? captureDocumentAdmission(token, { kind: "select-file", path }) : null;
+		if (!token || !admission?.context) return null;
+		documentDragRef.current = { token, context: admission.context, hostGeneration: admission.initialHostGeneration, path };
+		return token;
+	}
+
+	function endDocumentPathDrag(token: string): void {
+		if (documentDragRef.current?.token === token) documentDragRef.current = null;
+	}
+
+	function acceptDocumentPathDrop(path: string, trusted: boolean): boolean {
+		if (!trusted) return false;
+		const drag = documentDragRef.current;
+		documentDragRef.current = null;
+		if (!drag || drag.path !== path || markdownEditorPendingActionRef.current || unmountedRef.current || personHasChanged()) return false;
+		const current = checkpointContextRef.current;
+		return drag.hostGeneration === documentHostGenerationRef.current && drag.context.ownerId === documentOwnerId && drag.context.ownerGeneration === documentOwnerGenerationRef.current && drag.context.roomGeneration === current.generation && drag.context.roomId === current.roomId && drag.context.conversationId === current.conversationId && current.key === `${drag.context.roomId}\u0000${drag.context.conversationId}`;
 	}
 
 	function documentChildContextIsCurrent(): boolean {
@@ -1380,6 +1404,7 @@ export function App() {
 		if (typeof next !== "function") {
 			const key = next ? `${next.agentId}\u0000${next.conversationId}` : null;
 			if (checkpointContextRef.current.key !== key) {
+				documentDragRef.current = null;
 				for (const preview of documentPreviewSnapshotsRef.current.values()) { preview.disposed = true; if (preview.imageUrl) URL.revokeObjectURL(preview.imageUrl); }
 				documentPreviewSnapshotsRef.current = new Map();
 				documentPaneBindingRef.current = null;
@@ -9590,6 +9615,7 @@ export function App() {
 
 	return (
 		<InRoomChatShellView
+			composerOnWorkspacePathDrop={persistentChat ? acceptDocumentPathDrop : undefined}
 			onHome={goHome}
 			sidebarResizable
 			sidebar={
@@ -9599,7 +9625,7 @@ export function App() {
 					appearance={appearance}
 					onSetAppearance={setAppearance}
 					onSettings={openSettings}
-					workspaceSlot={persistentChat ? <><div ref={mountDocumentTreeHost} style={{ display: "contents" }} />{createPortal(<WorkspaceFileBrowser agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} hostGeneration={documentHostGeneration} selectedPath={activeWorkspacePath(documentPane)} onFileSelect={openWorkspaceMarkdown} />, documentTreeHost)}</> : undefined}
+					workspaceSlot={persistentChat ? <><div ref={mountDocumentTreeHost} style={{ display: "contents" }} />{createPortal(<WorkspaceFileBrowser agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} hostGeneration={documentHostGeneration} selectedPath={activeWorkspacePath(documentPane)} onFileSelect={openWorkspaceMarkdown} onPathDragStart={startDocumentPathDrag} onPathDragEnd={endDocumentPathDrag} />, documentTreeHost)}</> : undefined}
 					assetsSlot={persistentChat ? <AttachmentsEntry count={attachmentRows.length} open={attachmentsView !== null} onClick={toggleAttachments} /> : undefined}
 				/>
 			}

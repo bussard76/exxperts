@@ -595,3 +595,7 @@ The inactive host path now retains the exact child and admission after an unknow
 ## Checkpoint: workspace drag provenance regression
 
 The attached `workspace-markdown-images-ui` smoke first performs the real existing tree-to-composer drag, then attempts an unrelated forged drop with the same MIME and path. The attributed run failed specifically because the forged drop inserted again (0/1), while the real drag succeeded. This is an attached negative regression only; it is not cross-window or native drag evidence and must be fixed.
+
+## Checkpoint: attached drag provenance
+
+The owner now records a trusted tree drag against its room incarnation and host generation, and consumes it once at the real composer drop; context changes, pending actions, foreign or synthetic drops, and stale hosts cannot authorize insertion. The unchanged workspace-path and plain-text MIME values remain available to external consumers. UI and scripts typechecks and the UI asset build passed; the attributed `workspace-markdown-images-ui` smoke passed 1/1, including its real attached drag and previously failing forged-drop assertion. This does not establish cross-window or native drag behavior; those tests remain open.

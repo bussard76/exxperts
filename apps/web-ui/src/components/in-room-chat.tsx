@@ -61,6 +61,7 @@ export interface InRoomChatShellViewProps {
 	composerAllowEmptySend?: boolean;
 	/** Image files pasted into the textarea are handed here to be staged. */
 	composerOnPasteFiles?: (files: File[]) => void;
+	composerOnWorkspacePathDrop?: (path: string, trusted: boolean) => boolean;
 	connected: boolean;
 	/** Room auto-reconnect: "reconnecting" while backoff attempts run, "failed" once capped. */
 	reconnectState?: "idle" | "reconnecting" | "failed";
@@ -780,6 +781,7 @@ interface ComposerInputProps {
 	allowEmptySend?: boolean;
 	/** Files pasted into the textarea (images, documents alike) are handed here to be staged. */
 	onPasteFiles?: (files: File[]) => void;
+	onWorkspacePathDrop?: (path: string, trusted: boolean) => boolean;
 	/** The sole pending yes/no card, answered by Enter and Escape while the composer is empty. */
 	keyboardApproval?: { approve: () => void; decline: () => void } | null;
 	onSendNow?: (text: string) => boolean;
@@ -841,6 +843,7 @@ export function ComposerInput({
 	stagingSlot,
 	allowEmptySend = false,
 	onPasteFiles,
+	onWorkspacePathDrop,
 	keyboardApproval = null,
 	onSendNow,
 	onSendQueuedNow,
@@ -1167,6 +1170,7 @@ export function ComposerInput({
 					const relativePath = event.dataTransfer.getData(WORKSPACE_PATH_DRAG_TYPE);
 					if (!relativePath) return;
 					event.preventDefault();
+					if (!onWorkspacePathDrop?.(relativePath, event.nativeEvent.isTrusted)) return;
 					insertComposerText(relativePath, event.currentTarget.selectionStart, event.currentTarget.selectionEnd);
 				}}
 					onScroll={(e) => { if (mirrorRef.current) mirrorRef.current.scrollTop = e.currentTarget.scrollTop; }}
@@ -1212,6 +1216,7 @@ export function InRoomChatShellView({
 	composerStagingSlot,
 	composerAllowEmptySend,
 	composerOnPasteFiles,
+	composerOnWorkspacePathDrop,
 	connected,
 	reconnectState = "idle",
 	onReconnect,
@@ -1727,6 +1732,7 @@ export function InRoomChatShellView({
 								stagingSlot={composerStagingSlot}
 								allowEmptySend={composerAllowEmptySend}
 								onPasteFiles={composerOnPasteFiles}
+								onWorkspacePathDrop={composerOnWorkspacePathDrop}
 								keyboardApproval={keyboardApproval}
 								onSendNow={onSendNow}
 								onSendQueuedNow={onSendQueuedNow}
