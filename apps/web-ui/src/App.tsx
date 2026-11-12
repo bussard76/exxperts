@@ -1052,12 +1052,13 @@ export function App() {
 	}, [documentHostGeneration]);
 
 	function noDocumentSession(): boolean {
-		return !unmountedRef.current && !personHasChanged() && checkpointContextRef.current.key === null && !markdownEditorRef.current && !documentSaveInFlightRef.current && !documentKeepMineInFlightRef.current && !documentWriteRef.current && !documentChildRef.current && !markdownEditorPendingActionRef.current;
+		return !unmountedRef.current && !personHasChanged() && checkpointContextRef.current.key === null && !markdownEditorRef.current && !documentSaveInFlightRef.current && !documentKeepMineInFlightRef.current && !documentWriteRef.current && !documentChildRef.current && !documentHostCommitRef.current && !documentRecoveryRef.current && documentPreviewSnapshotsRef.current.size === 0 && !documentFileSnapshotRef.current && !markdownEditorPendingActionRef.current;
 	}
 
 
 	// Private shell-to-owner endpoint. Until the remaining C5 items are wired,
-	// only hello and empty polls are accepted; every other request fails closed.
+	// only hello, empty polls and explicit empty-session preparation are accepted;
+	// every other request fails closed.
 	useEffect(() => {
 		if (!documentOwnerId || Object.getOwnPropertyDescriptor(window, "__exxpertsDocuments")) return;
 		let nativeSessionId: string | null = null;
@@ -1086,8 +1087,24 @@ export function App() {
 				nativeSessionId = envelope.nativeSessionId;
 				items = [{ kind: "hello", ownerId: documentOwnerId, ownerGeneration: documentOwnerGenerationRef.current }];
 			} else {
-				if (envelope.nativeSessionId !== nativeSessionId || envelope.sequence !== lastSequence + 1 || envelope.ack !== lastSequence || envelope.items.length !== 0) return null;
-				items = [];
+				if (envelope.nativeSessionId !== nativeSessionId || envelope.sequence !== lastSequence + 1 || envelope.ack !== lastSequence) return null;
+				if (envelope.items.length === 0) items = [];
+				else {
+					const item = envelope.items[0];
+					if (envelope.items.length !== 1 || !item || typeof item !== "object" || Array.isArray(item)) return null;
+					const request = item as Record<string, unknown>;
+					const binding = request.binding;
+					if (Object.keys(request).sort().join(",") !== "binding,disposition,kind,nativeRequestId,observedStamp" || request.kind !== "native-prepare" || !binding || typeof binding !== "object" || Array.isArray(binding) || Object.keys(binding).sort().join(",") !== "nativeSessionId,ownerGeneration,ownerId") return null;
+					const bound = binding as Record<string, unknown>;
+					if (bound.nativeSessionId !== nativeSessionId || bound.ownerId !== documentOwnerId || bound.ownerGeneration !== documentOwnerGenerationRef.current || typeof request.nativeRequestId !== "string" || !uuid.test(request.nativeRequestId) || request.observedStamp !== null || !["hide", "quit", "update", "reload"].includes(request.disposition as string)) return null;
+					const currentBinding = { nativeSessionId, ownerId: documentOwnerId, ownerGeneration: documentOwnerGenerationRef.current };
+					if (stamp === null) {
+						if (!noDocumentSession()) return null;
+						items = [{ kind: "no-session", binding: currentBinding, nativeRequestId: request.nativeRequestId, disposition: request.disposition }];
+					} else {
+						items = [{ kind: "guard-result", binding: currentBinding, nativeRequestId: request.nativeRequestId, result: { kind: "refused", correlation: { requestId: request.nativeRequestId, stamp, action: { kind: "chat-close", disposition: request.disposition } }, reason: "invalidated" } }];
+					}
+				}
 			}
 			lastSequence = envelope.sequence as number;
 			lastInput = serialized;
