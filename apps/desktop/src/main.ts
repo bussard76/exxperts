@@ -255,6 +255,7 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
   let active = true;
   let pending = false;
+  let transportPoisoned = false;
   let sequence = 1;
   let ownerId: string | null = null;
   let ownerGeneration = 0;
@@ -271,7 +272,7 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
   const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
   const keys = (value: Record<string, unknown>, expected: string) => Object.keys(value).sort().join(",") === expected;
   const positive = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
-  const accept = (value: unknown, sentKind: unknown): boolean => {
+  const accept = (value: unknown, sentKind: unknown, expired = false): boolean => {
     let receivedPreparation = false;
     let releasedAttempt = false;
     let nextPhase: typeof hidePhase | null = null;
@@ -324,6 +325,11 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
       const stamp = value.status.stamp;
       if (!record(stamp) || !keys(stamp, "conversationId,draftGeneration,hostGeneration,ownerGeneration,ownerId,roomGeneration,roomId") || stamp.ownerId !== binding.ownerId || stamp.ownerGeneration !== binding.ownerGeneration || typeof stamp.roomId !== "string" || !stamp.roomId || typeof stamp.conversationId !== "string" || !stamp.conversationId || !positive(stamp.roomGeneration) || !positive(stamp.hostGeneration) || !positive(stamp.draftGeneration)) return false;
     }
+    if (expired && sentKind === "native-prepare" && hideRequest?.observedStamp) {
+      preparedCorrelation ??= { requestId: hideRequest.nativeRequestId, stamp: hideRequest.observedStamp, action: { kind: "chat-close", disposition: "hide" } };
+      nextPhase = "abort";
+      receivedPreparation = true;
+    }
     if (releasedAttempt) { hideRequest = null; hideSent = false; hideCorrelation = null; hidePhase = "idle"; }
     if (receivedPreparation) hideSent = true;
     if (preparedCorrelation) hideCorrelation = preparedCorrelation;
@@ -334,7 +340,7 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
     return true;
   };
   const poll = () => {
-    if (!active || pending || documentsPollInFlight.has(win) || win.isDestroyed() || win.webContents.isDestroyed() || !isAppOrigin(win.webContents.getURL()) || !Number.isSafeInteger(sequence)) return;
+    if (!active || transportPoisoned || pending || documentsPollInFlight.has(win) || win.isDestroyed() || win.webContents.isDestroyed() || !isAppOrigin(win.webContents.getURL()) || !Number.isSafeInteger(sequence)) return;
     if (!retryInput) {
       const binding = { nativeSessionId: session, ownerId, ownerGeneration };
       let items: Record<string, unknown>[] = [];
@@ -359,7 +365,11 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
     try { evaluation = win.webContents.executeJavaScript(expression); }
     catch { clearTimeout(deadline); pending = false; documentsPollInFlight.delete(win); return; }
     void evaluation.then((output: unknown) => {
-      if (active && !expired && accept(output, input.items[0]?.kind)) { sequence++; retryInput = null; }
+      if (!active) return;
+      const kind = input.items[0]?.kind;
+      if (expired && kind !== "native-prepare" && kind !== "native-abort") { transportPoisoned = true; return; }
+      if (accept(output, kind, expired)) { sequence++; retryInput = null; }
+      else if (expired) transportPoisoned = true;
     }).catch(() => {}).finally(() => { clearTimeout(deadline); pending = false; documentsPollInFlight.delete(win); });
   };
   const timer = setInterval(poll, 100);
