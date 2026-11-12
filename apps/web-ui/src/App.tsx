@@ -9808,7 +9808,7 @@ export function App() {
 				<>
 				<div className="docs-slot" ref={mountDocumentHost} />
 				{createPortal(<><div className="docs-tree-host"><WorkspaceFileBrowser agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} hostGeneration={documentHostGeneration} selectedPath={activeWorkspacePath(documentPane)} onFileSelect={openWorkspaceMarkdown} onPathDragStart={startDocumentPathDrag} onPathDragEnd={endDocumentPathDrag} /></div><div className="workspace-pane" hidden={activeWorkspacePath(documentPane) === null}>
-					<WorkspaceFileTabs onDetach={documentHostStatus === "attached" ? detachDocuments : undefined} detachDisabled tabs={workspaceTabs.paths} active={activeWorkspacePath(documentPane)} onSelect={(path) => openWorkspaceMarkdown({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} onReorder={(paths) => setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths } : tabs)} />
+					<WorkspaceFileTabs onDetach={documentHostStatus === "attached" ? detachDocuments : undefined} tabs={workspaceTabs.paths} active={activeWorkspacePath(documentPane)} onSelect={(path) => openWorkspaceMarkdown({ relativePath: path, extension: "" })} onClose={requestCloseWorkspaceTab} onReorder={(paths) => setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths } : tabs)} />
 					{documentPane && (documentPane.kind === "workspaceImage" || documentPane.kind === "workspacePdf" || documentPane.kind === "workspaceWord" || documentPane.kind === "workspaceHtml" || documentPane.kind === "workspaceFramed" || documentPane.kind === "workspaceText" || documentPane.kind === "workspaceSpreadsheet" || (documentPane.kind === "workspaceLegacyDoc" && !/\.doc$/i.test(documentPane.path))) && <WorkspaceOpenAction key={JSON.stringify([persistentChat.agentId, persistentChat.conversationId, documentPane.path])} agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={documentPane.path} />}
 					{documentPane?.kind === "markdownEditor" && <MarkdownEditorPane
 						key={checkpointContextRef.current.generation}
@@ -9959,7 +9959,7 @@ export function App() {
 				persistentChat
 					? (
 						<>
-							{documentHostStatus === "attached" && workspaceTabs?.paths.length === 0 && <button type="button" className="workspace-tabs-window" disabled onClick={detachDocuments}>Detach</button>}
+							{documentHostStatus === "attached" && workspaceTabs?.paths.length === 0 && <button type="button" className="workspace-tabs-window" onClick={detachDocuments}>Detach</button>}
 							{documentHostError && documentHostStatus === "attached" && <span className="docs-window-error" role="status">{documentHostError}</span>}
 							{documentHostStatus !== "attached" && <span className="docs-window-actions">
 								<span>{persistentChat.displayName} · {documentHostStatus === "opening" ? "Opening documents…" : documentHostStatus === "returning" ? "Returning documents…" : documentHostStatus === "recovering" ? "Documents unavailable" : "Documents in another window"}</span>

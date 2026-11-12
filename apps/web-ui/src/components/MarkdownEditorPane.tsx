@@ -5,7 +5,7 @@
 // Changes: exxperts keeps the textarea-era workspace API, revision conflicts,
 // room dirty-navigation guard, and adds a read-only TipTap preview.
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type Ref } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
 import { mergeAttributes, Node, type Editor } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { StarterKit } from "@tiptap/starter-kit";
@@ -419,8 +419,10 @@ function MarkdownEditorSurface({
 	}, [canEdit, contentSetterRef, editor, fenced, onDraftChange, onMutation, readOnly, setDirty]);
 
 	useEffect(() => {
-		const hostDocument = rootRef.current?.ownerDocument;
-		if (!hostDocument) return;
+		const root = rootRef.current;
+		const hostDocument = root?.ownerDocument;
+		if (!root || !hostDocument) return;
+		const hostWindow = hostDocument.defaultView;
 		const handler = (event: KeyboardEvent) => {
 			if (fencedRef.current) return;
 			if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
@@ -431,9 +433,35 @@ function MarkdownEditorSurface({
 				setSearchOpen(true);
 			}
 		};
+		const onCheckboxChange = (event: Event) => {
+			const input = event.target as HTMLInputElement | null;
+			if (canEdit && !readOnly && hostWindow && input?.tagName === "INPUT" && input.type === "checkbox") {
+				userEditedRef.current = true;
+				hostWindow.setTimeout(() => {
+					userEditedRef.current = true;
+					setDirty(true);
+					onMutation();
+				}, 0);
+			}
+		};
+		const richScroll = root.querySelector(".markdown-editor-rich-scroll");
+		const onPreviewLinkClick = (event: Event) => {
+			const clicked = event.target as Element | null;
+			if (!readOnly || !onPreviewLink || !clicked || typeof clicked.closest !== "function") return;
+			const target = clicked.closest("a");
+			if (!target) return;
+			const href = target.getAttribute("href");
+			if (href && onPreviewLink(href, target.getAttribute("data-wiki-link") === "true")) event.preventDefault();
+		};
 		hostDocument.addEventListener("keydown", handler);
-		return () => hostDocument.removeEventListener("keydown", handler);
-	}, [hostGeneration]);
+		hostDocument.addEventListener("change", onCheckboxChange, true);
+		richScroll?.addEventListener("click", onPreviewLinkClick);
+		return () => {
+			hostDocument.removeEventListener("keydown", handler);
+			hostDocument.removeEventListener("change", onCheckboxChange, true);
+			richScroll?.removeEventListener("click", onPreviewLinkClick);
+		};
+	}, [canEdit, hostGeneration, onMutation, onPreviewLink, readOnly, setDirty]);
 
 	useEffect(() => {
 		if (!canEdit || fenced || !isDirty || hasExternalUpdate || isSaving) return;
@@ -441,23 +469,12 @@ function MarkdownEditorSurface({
 		return () => window.clearTimeout(timer);
 	}, [canEdit, fenced, hasExternalUpdate, isDirty, isSaving, save]);
 
-	const handlePreviewLinkClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
-		if (!readOnly || !onPreviewLink) return;
-		const hostWindow = event.currentTarget.ownerDocument.defaultView;
-		const target = hostWindow && event.target instanceof hostWindow.Element ? event.target.closest("a") : null;
-		if (!hostWindow || !(target instanceof hostWindow.HTMLAnchorElement)) return;
-		const href = target.getAttribute("href");
-		if (!href) return;
-		const isWikiLink = target.dataset.wikiLink === "true";
-		if (onPreviewLink(href, isWikiLink)) event.preventDefault();
-	}, [onPreviewLink, readOnly]);
-
 	return (
 		<div ref={rootRef} className="markdown-editor-rich-surface">
 			{!readOnly && !raw && <MarkdownSearchBar editor={editor} hostGeneration={hostGeneration} stateRef={searchStateRef} open={searchOpen} onClose={() => setSearchOpen(false)} />}
 			{!readOnly && <MarkdownEditorToolbar editor={editor} canEdit={canEdit && !fenced} onSave={() => { void save(); }} isSaving={isSaving} isDirty={isDirty} saveError={saveError} hasExternalUpdate={hasExternalUpdate} onSearch={() => setSearchOpen((open) => !open)} searchOpen={searchOpen} raw={raw} />}
 			{/* A click on a task checkbox is a user edit even when the editor does not hold the focus; otherwise onUpdate takes it for an outside change and never saves it. */}
-			<div className="markdown-editor-rich-scroll" onClick={handlePreviewLinkClick} onClickCapture={(event) => { const hostWindow = event.currentTarget.ownerDocument.defaultView; if (canEdit && !readOnly && hostWindow && event.target instanceof hostWindow.HTMLInputElement && event.target.type === "checkbox" && !userEditedRef.current) { userEditedRef.current = true; onMutation(); } }}>
+			<div className="markdown-editor-rich-scroll">
 				<EditorContent editor={editor} className="markdown-editor-tiptap" />
 			</div>
 		</div>

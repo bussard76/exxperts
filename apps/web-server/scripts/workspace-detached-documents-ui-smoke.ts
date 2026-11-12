@@ -337,11 +337,13 @@ try {
 			await child.locator(".workspace-tab[data-active='true']", { hasText: "invented.md" }).waitFor();
 			assert(await child.getByRole("textbox", { name: "Raw Markdown source" }).inputValue() === rawDisplay, "the child presents the source and active tab");
 			assert(await child.evaluate(`document.querySelector(".docs-host") === opener.__t20OriginalHost && document.querySelector(".sidebar-workspace-files") === opener.__t20OriginalTree && document.querySelector('[aria-label="Raw Markdown source"]') === opener.__t20OriginalEditor`), "the actual child holds the same container, tree, and editor nodes");
-			await child.locator(".workspace-file-browser-file", { hasText: "invented.md" }).hover();
-			await child.getByRole("tooltip").getByText("invented.md", { exact: true }).waitFor();
+			const childFile = child.locator(".workspace-file-browser-file", { hasText: "invented.md" });
+			const childTree = child.getByRole("region", { name: "Workspace files" });
+			await childFile.hover();
+			await childTree.getByRole("tooltip").getByText("invented.md", { exact: true }).waitFor();
 			assert(await page.getByRole("tooltip").count() === 0, "the tree tooltip belongs to the actual child host");
-			await child.mouse.move(700, 500);
-			await child.getByRole("tooltip").waitFor({ state: "hidden" });
+			await child.locator(".documents-child-bar").hover();
+			await childTree.getByRole("tooltip").waitFor({ state: "hidden" });
 			assert(await page.locator("textarea").first().isVisible(), "chat remains usable in the owner window");
 			await page.getByRole("button", { name: "Attachments", exact: true }).click();
 			await page.getByRole("region", { name: "Attachments" }).waitFor();
@@ -373,7 +375,9 @@ try {
 			await page.evaluate(`window.__t20RealmTimeout = window.setTimeout; window.setTimeout = (callback, delay, ...args) => window.__t20RealmTimeout(callback, delay === 1000 ? 30000 : delay, ...args)`);
 			try {
 				await child.locator(".workspace-file-browser-file", { hasText: "interaction.md" }).click();
-				await child.locator('.markdown-editor-tiptap input[type="checkbox"]').first().click();
+				const childCheckbox = child.locator('.markdown-editor-tiptap input[type="checkbox"]').first();
+				await childCheckbox.click();
+				assert(await childCheckbox.isChecked(), "the actual child editor applies a checkbox click");
 				await child.locator(".markdown-editor-status").getByText("Unsaved", { exact: true }).waitFor();
 				await child.locator(".workspace-file-browser-file", { hasText: "invented.md" }).click();
 				await page.getByRole("dialog", { name: "Unsaved Markdown changes" }).getByRole("button", { name: "Discard changes" }).click();
@@ -386,7 +390,9 @@ try {
 				await child.evaluate(`window.__t20OriginalOpen = window.open; window.__t20ExternalOpens = 0; window.open = () => { window.__t20ExternalOpens++; return null; }`);
 				try {
 					await child.getByRole("link", { name: "External invented" }).click();
-					assert(await child.evaluate(`window.__t20ExternalOpens`) === 1 && await page.evaluate(`window.__t20ExternalOpens`) === 0 && externalLinkRequests === 0, "an explicit external link uses only the child fake opener without a network request");
+					const childOpens = await child.evaluate(`window.__t20ExternalOpens`);
+					const ownerOpens = await page.evaluate(`window.__t20ExternalOpens`);
+					assert(childOpens === 1 && ownerOpens === 0 && externalLinkRequests === 0, `an explicit external link uses only the child fake opener without a network request: child=${childOpens}, owner=${ownerOpens}, requests=${externalLinkRequests}`);
 				} finally {
 					await child.evaluate(`window.open = window.__t20OriginalOpen; delete window.__t20OriginalOpen; delete window.__t20ExternalOpens`);
 					await page.evaluate(`window.open = window.__t20OriginalOpen; delete window.__t20OriginalOpen; delete window.__t20ExternalOpens`);
@@ -471,6 +477,8 @@ try {
 			await conflictChild.close();
 			await page.locator(".markdown-editor-conflict").waitFor();
 			assert(await raw.inputValue() === conflictDraft && Number(writes) === 1, "unexpected browser-child closure retains the polled conflict and exact local source without writing");
+			await page.locator(".docs-window-actions").waitFor({ state: "detached" });
+			assert(await detach.isEnabled(), "Detach remains available after child conflict recovery");
 			const conflictReopened = page.waitForEvent("popup");
 			await detach.click();
 			conflictChild = await conflictReopened;

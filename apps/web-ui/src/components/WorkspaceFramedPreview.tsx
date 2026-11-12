@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { apiFetch } from "../api";
 // Only so the build emits the renderers' bundles; the server puts them into the frame's document.
 import "../pptx-frame-entry.ts?worker&url";
@@ -39,7 +39,7 @@ export function WorkspaceFramedPreview({ agentId, conversationId, path, retained
 			.catch(() => { if (!controller.signal.aborted) setError("This file could not be previewed."); });
 		return () => { controller.abort(); if (fetchController.current === controller) fetchController.current = null; };
 	}, [route, retained, firstFrameId]);
-	useEffect(() => {
+	useLayoutEffect(() => {
 		const parent = frameRef.current?.ownerDocument.defaultView;
 		if (!parent || !bytes) return;
 		const onMessage = (event: MessageEvent) => {

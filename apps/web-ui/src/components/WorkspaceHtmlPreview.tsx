@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { apiFetch } from "../api";
 
 // The frame loads the same route with frame=1. Its sandbox has no allow-same-origin, so a file's scripts
 // run without the app's cookies or API, and the route's own policy blocks every network request.
 export function WorkspaceHtmlPreview({ agentId, conversationId, path, retained, createFrameId, hostGeneration }: { agentId: string; conversationId: string; path: string; retained: { bytes: ArrayBuffer | null; nextFrame?: { generation: number; id: string } }; createFrameId: () => string | null; hostGeneration: number }) {
 	const [firstFrameId] = useState(createFrameId);
-	const activeFrame = useRef({ generation: hostGeneration, id: firstFrameId, delivered: false, terminal: false });
-	if (activeFrame.current.generation !== hostGeneration) activeFrame.current = { generation: hostGeneration, id: retained.nextFrame?.generation === hostGeneration ? retained.nextFrame.id : null, delivered: false, terminal: false };
+	const activeFrame = useRef<{ generation: number; id: string | null; delivered: boolean; terminal: boolean; readySource: MessageEventSource | null }>({ generation: hostGeneration, id: firstFrameId, delivered: false, terminal: false, readySource: null });
+	if (activeFrame.current.generation !== hostGeneration) activeFrame.current = { generation: hostGeneration, id: retained.nextFrame?.generation === hostGeneration ? retained.nextFrame.id : null, delivered: false, terminal: false, readySource: null };
 	const instance = activeFrame.current;
 	const frameId = instance.id;
 	const [snapshot, setSnapshot] = useState<ArrayBuffer | null>(() => retained.bytes);
@@ -36,21 +36,29 @@ export function WorkspaceHtmlPreview({ agentId, conversationId, path, retained, 
 			.catch(() => { if (!controller.signal.aborted) setError("This file could not be previewed."); });
 		return () => { controller.abort(); if (fetchController.current === controller) fetchController.current = null; };
 	}, [route, retained, firstFrameId]);
-	useEffect(() => {
+	useLayoutEffect(() => {
 		const parent = frameRef.current?.ownerDocument.defaultView;
-		if (!parent || !snapshot) return;
+		if (!parent || !frameId) return;
+		const deliver = () => {
+			const element = frameRef.current;
+			const frame = element?.contentWindow;
+			if (!snapshot || activeFrame.current !== instance || !frame || instance.readySource !== frame || instance.delivered || element.ownerDocument.defaultView !== parent || element.getAttribute("src") !== frameSrc) return;
+			instance.delivered = true;
+			const copy = snapshot.slice(0);
+			frame.postMessage(copy, "*", [copy]);
+		};
 		const onMessage = (event: MessageEvent) => {
 			const element = frameRef.current;
 			const frame = element?.contentWindow;
 			if (activeFrame.current !== instance || !frame || element.ownerDocument.defaultView !== parent || event.source !== frame || element.getAttribute("src") !== frameSrc || instance.terminal) return;
 			if (event.data?.kind === "frame-ready" && event.data.frameId === frameId && !instance.delivered) {
-				instance.delivered = true;
-				const copy = snapshot.slice(0);
-				frame.postMessage(copy, "*", [copy]);
+				instance.readySource = event.source;
+				deliver();
 			} else if (instance.delivered && event.data?.kind === "frame-rendered") { instance.terminal = true; setRenderedGeneration(hostGeneration); }
 			else if (instance.delivered && event.data?.kind === "frame-failed") { instance.terminal = true; setError("This file could not be previewed."); }
 		};
 		parent.addEventListener("message", onMessage);
+		deliver();
 		return () => parent.removeEventListener("message", onMessage);
 	}, [snapshot, frameId, frameSrc, hostGeneration, instance]);
 	useEffect(() => {

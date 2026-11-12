@@ -80,6 +80,17 @@ export function useDocumentsHost() {
 			for (const source of document.head.querySelectorAll('link[rel~="stylesheet"], style, meta[http-equiv="Content-Security-Policy" i]')) {
 				const copy = source.cloneNode(true) as HTMLElement;
 				if (copy instanceof HTMLLinkElement) {
+					try {
+						const rules = (source as HTMLLinkElement).sheet?.cssRules;
+						if (rules) {
+							const inline = target.createElement("style");
+						inline.textContent = [...rules].map((rule) => rule.cssText).join("\n");
+						if (copy.media) inline.media = copy.media;
+						if (copy.nonce) inline.nonce = copy.nonce;
+						target.head.appendChild(inline);
+						continue;
+						}
+					} catch { /* Fall back to loading the original stylesheet under the app CSP. */ }
 					copy.href = (source as HTMLLinkElement).href;
 					pending.push(new Promise<void>((resolve, reject) => {
 						copy.addEventListener("load", () => resolve(), { once: true });
