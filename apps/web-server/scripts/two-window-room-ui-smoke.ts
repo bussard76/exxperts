@@ -344,6 +344,82 @@ try {
 			await memento.close();
 		}
 		{
+			const lateAgent = agents.createPersistentAgentFromScaffoldInput({ displayName: "Invented Late Memento", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }).agent.agentId;
+			roomModels.writeRoomModels(lateAgent, { conversation: CLAUDE });
+			assert((await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(lateAgent)}/workspace-default`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ root: workspace, workspaceAccessMode: "localFiles" }) })).ok, "the invented late-Memento room uses the temporary workspace");
+			const late = await ctx.newPage();
+			await late.addInitScript({ content: `window.addEventListener("beforeunload", (event) => { event.preventDefault(); event.returnValue = ""; });` });
+			late.on("dialog", (dialog) => { void dialog.dismiss(); });
+			await late.goto(`${baseUrl}/#/room/${lateAgent}`);
+			await late.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "identity.md" }).click();
+			await late.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented identity source").waitFor();
+			let releaseMemento!: () => void, beginMemento!: () => void, observeLate = false, lateThreadRequests = 0;
+			const mementoReleased = new Promise<void>((resolve) => { releaseMemento = resolve; });
+			const mementoStarted = new Promise<void>((resolve) => { beginMemento = resolve; });
+			await late.route("**/memento", async (route) => {
+				const response = await route.fetch();
+				beginMemento();
+				await mementoReleased;
+				await route.fulfill({ response });
+			});
+			late.on("request", (request) => { if (observeLate && request.url().includes("/threads/") && ["GET", "PUT"].includes(request.method())) lateThreadRequests++; });
+			await late.getByRole("button", { name: "Forget", exact: true }).first().click();
+			await late.getByRole("alertdialog", { name: "Forget this conversation and start fresh?" }).getByRole("button", { name: "Forget", exact: true }).click();
+			try {
+				await mementoStarted;
+				await late.route("**/workspace-files?*", (route) => route.fulfill({ status: 409, json: { code: "person_changed", error: "Invented identity change" } }));
+				await late.evaluate(() => window.dispatchEvent(new Event("focus")));
+				await late.getByText("Someone else is now signed in on this server.", { exact: true }).waitFor();
+				const previousFailures = await late.locator(".failure-line").count();
+				observeLate = true;
+				const response = late.waitForResponse((candidate) => candidate.request().method() === "POST" && candidate.url().includes("/memento"));
+				releaseMemento();
+				assert((await response).ok(), "the real invented Memento completed before its answer was released");
+				await late.waitForTimeout(500);
+				assert(lateThreadRequests === 0, "a late Memento answer cannot fetch or save a thread after page identity changes");
+				assert(await late.locator(".failure-line").count() === previousFailures, "a late Memento answer cannot add a failure to the invalidated chat");
+			} finally { releaseMemento(); }
+			await late.close();
+			const rebind = await ctx.newPage();
+			await rebind.addInitScript({ content: `window.addEventListener("beforeunload", (event) => { event.preventDefault(); event.returnValue = ""; });` });
+			rebind.on("dialog", (dialog) => { void dialog.dismiss(); });
+			await rebind.goto(`${baseUrl}/#/room/${lateAgent}`);
+			await rebind.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "identity.md" }).click();
+			await rebind.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented identity source").waitFor();
+			const composer = rebind.locator("textarea").first();
+			await composer.fill("Invented prior sentence.");
+			await composer.press("Enter");
+			await rebind.getByText("Invented prior sentence.", { exact: true }).waitFor();
+			await rebind.getByText("Answer from claude-fake.").first().waitFor({ timeout: 20000 });
+			await rebind.locator('button[title="Send"]').first().waitFor({ timeout: 20000 });
+			let releaseThread!: () => void, beginThread!: () => void, holdThread = true;
+			const threadReleased = new Promise<void>((resolve) => { releaseThread = resolve; });
+			const threadStarted = new Promise<void>((resolve) => { beginThread = resolve; });
+			await rebind.route("**/threads/**", async (route) => {
+				if (!holdThread || route.request().method() !== "GET") return route.continue();
+				holdThread = false;
+				const response = await route.fetch();
+				beginThread();
+				await threadReleased;
+				await route.fulfill({ response });
+			});
+			await rebind.getByRole("button", { name: "Forget", exact: true }).first().click();
+			await rebind.getByRole("alertdialog", { name: "Forget this conversation and start fresh?" }).getByRole("button", { name: "Forget", exact: true }).click();
+			try {
+				await threadStarted;
+				await rebind.route("**/workspace-files?*", (route) => route.fulfill({ status: 409, json: { code: "person_changed", error: "Invented identity change" } }));
+				await rebind.evaluate(() => window.dispatchEvent(new Event("focus")));
+				await rebind.getByText("Someone else is now signed in on this server.", { exact: true }).waitFor();
+				assert(await rebind.getByText("Invented prior sentence.", { exact: true }).count() === 1, "the invalidated chat still contains its prior sentence before the late reply");
+				const response = rebind.waitForResponse((candidate) => candidate.request().method() === "GET" && candidate.url().includes("/threads/"));
+				releaseThread();
+				assert((await response).ok(), "the fresh invented thread read completed before its answer was released");
+				await rebind.waitForTimeout(500);
+				assert(await rebind.getByText("Invented prior sentence.", { exact: true }).count() === 1, "a late fresh-thread read cannot reset the invalidated chat");
+			} finally { releaseThread(); }
+			await rebind.close();
+		}
+		{
 			const policyAgent = agents.createPersistentAgentFromScaffoldInput({ displayName: "Invented Policy Room", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }).agent.agentId;
 			roomModels.writeRoomModels(policyAgent, { conversation: CLAUDE });
 			const policyUrl = `${baseUrl}/api/persistent-agents/${encodeURIComponent(policyAgent)}/workspace-default`;

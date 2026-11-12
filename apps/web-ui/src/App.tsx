@@ -5702,13 +5702,13 @@ export function App() {
 		return true;
 	}
 
-	async function bindToMementoRuntime(result: PersistentAgentMementoBoundaryResponse, targetChat: NonNullable<PersistentChatConfig>): Promise<void> {
-		// A memento boundary is a forget flow: the parked draft dies with the
-		// conversation it was written for (dropping it up front also covers the
-		// park-on-launcher failure branch below).
+	async function bindToMementoRuntime(result: PersistentAgentMementoBoundaryResponse, targetChat: NonNullable<PersistentChatConfig>, generation: number): Promise<boolean> {
+		if (!checkpointOriginCurrent(targetChat, generation)) return false;
+		// A memento boundary is a forget flow: the parked draft dies with the conversation.
 		roomDraftsRef.current.delete(targetChat.agentId);
 		const freshThreadId = result.postMemento.activeThreadId || result.runtimeBoundary.newThreadId;
 		const record = await fetchPersistentAgentThread(targetChat.agentId, freshThreadId);
+		if (!checkpointOriginCurrent(targetChat, generation)) return false;
 		const thread = threadRecordToLocalThread(record, targetChat.displayName);
 		const liveThread = { ...thread, state: "live" as const };
 		// Deliberate boundary rebind (memento can land mid-stream): this close
@@ -5738,12 +5738,14 @@ export function App() {
 		setItems(liveThread.items);
 		setPersistentThread(liveThread);
 		setPersistentChat({ agentId: liveThread.agentId, displayName: liveThread.displayName, conversationId: liveThread.conversationId, model: liveThread.model });
+		const newGeneration = checkpointContextRef.current.generation;
 		// Consult MR-5 (§2.3): Memento (forget-this-conversation) discards the pending
 		// queue — the fresh thread starts with nothing queued.
 		applyPendingHandoffs([], new Set());
 		try {
 			await savePersistentAgentThread(liveThread, "active", "memento", liveThread.items, []);
 		} catch (e) {
+			if (!checkpointOriginCurrent(liveThread, newGeneration)) return false;
 			// The fresh thread may inherit a model the active AI profile no longer
 			// provides (Memento is how a stuck room gets freed), and activating it
 			// then trips the model gate; transient failures land here too. The
@@ -5755,11 +5757,13 @@ export function App() {
 			setPersistentResumeError(`The conversation was reset, but the room could not be reopened automatically: ${(e as Error).message} Enter it again from its card.`);
 			setView("home");
 			void refreshPersistentAgentStatus();
-			return;
+			return false;
 		}
+		if (!checkpointOriginCurrent(liveThread, newGeneration)) return false;
 		setCurrentModel(liveThread.model);
 		setView("chat");
 		setSessionVersion((v) => v + 1);
+		return true;
 	}
 
 	async function approveCheckpointProposal(approvedFields: CheckpointApprovalEditFields) {
@@ -7862,15 +7866,19 @@ export function App() {
 		void runQuickCheckpoint();
 	}
 
-	async function mementoPersistentThread() {
-		const cleanAction = admitCleanMarkdownEditorAction(() => mementoPersistentThread());
+	async function mementoPersistentThread(captured?: { chat: NonNullable<PersistentChatConfig>; generation: number }) {
+		const targetChat = captured?.chat ?? (persistentChat ? { ...persistentChat, model: { ...persistentChat.model } } : null);
+		const generation = captured?.generation ?? checkpointContextRef.current.generation;
+		if (!targetChat || !checkpointOriginCurrent(targetChat, generation)) return;
+		const intent: DocumentLocalAction = { kind: "room-operation", operation: "memento", roomId: targetChat.agentId, conversationId: targetChat.conversationId };
+		const resume = () => mementoPersistentThread({ chat: targetChat, generation });
+		const cleanAction = admitCleanMarkdownEditorAction(resume, undefined, intent);
 		if (cleanAction) { await cleanAction; return; }
-		if (!guardMarkdownEditorAction(() => mementoPersistentThread(), "navigate")) return;
-		const targetChat = persistentChat;
-		if (!targetChat) return;
+		if (!guardMarkdownEditorAction(resume, "navigate", intent)) return;
 		// Memento always works, even mid-stream: the server stops the current
 		// response, closes the thread and opens a fresh one.
 		if (!(await confirmForgetConversation(persistentRoomInFlight))) return;
+		if (!checkpointOriginCurrent(targetChat, generation)) return;
 		// The server closes this room's socket as part of Forget, before its
 		// answer arrives: that close is deliberate, not a drop to reconnect
 		// from (or to save an interrupted answer into the forgotten conversation).
@@ -7878,12 +7886,11 @@ export function App() {
 		try {
 			setBusy(true);
 			const result = await applyPersistentAgentMemento(targetChat.agentId, targetChat.conversationId);
-			const currentChat = persistentChatRef.current;
-			if (!currentChat || currentChat.agentId !== targetChat.agentId) throw new Error("The room moved on before this could be forgotten. Please reopen the room and try again.");
+			if (!checkpointOriginCurrent(targetChat, generation)) return;
 			if (result.agentId !== targetChat.agentId) throw new Error("The forget response does not match the current room.");
-			await bindToMementoRuntime(result, targetChat);
-			void refreshPersistentAgentStatus();
+			if (await bindToMementoRuntime(result, targetChat, generation)) void refreshPersistentAgentStatus();
 		} catch (e) {
+			if (!checkpointOriginCurrent(targetChat, generation)) return;
 			// A refusal leaves the socket open, and a later drop is a real one; a
 			// failure after the server closed it reconnects the usual way.
 			suppressReconnectRef.current = false;
