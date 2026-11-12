@@ -756,3 +756,7 @@ The supplemental owner browser smoke now also checks the exact binding, request 
 ## Checkpoint: owner invalidation after identity change
 
 The supplemental owner smoke now injects an invented `person_changed` response at the existing workspace read and verifies the old endpoint refuses another poll. Its first run timed out because the normal identity-change reload replaced the page before the assertion; the fixture now uses the existing browser beforeunload refusal pattern to retain the invalidated page, and the attributed rerun passed 1/1. This checks the real UI owner in a browser and does not establish native shell behavior.
+
+## Checkpoint: clean native prepare and matching abort draft
+
+The owner endpoint now accepts a correctly bound clean current-context native prepare, fences and reserves the existing arbiter, and acknowledges only a matching abort before releasing it. The supplemental `workspace-documents-owner-ui` run went red on the missing prepare and then passed 1/1, including real Home attempts while reserved and a foreign abort. UI and scripts typechecks and UI asset build passed. Dirty/save/commit/child-closed paths and actual shell integration remain missing; this browser invocation is not native evidence. Controller was separately asked how the accepted protocol reserves and safely completes an empty-session action if a room is entered before its reply is consumed; native continuations remain disconnected while that ordering is resolved.

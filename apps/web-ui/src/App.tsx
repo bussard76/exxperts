@@ -176,7 +176,7 @@ type DocumentContext = Readonly<{
 	roomGeneration: number;
 }>;
 
-type DocumentLocalAction = Readonly<{ kind: "transfer"; direction: "detach" | "return" } | { kind: "select-file" | "close-tab"; path: string } | { kind: "leave-room"; target: "home" | "memory" } | { kind: "replace-conversation"; roomId: string; conversationId: string } | { kind: "room-operation"; operation: "memento" | "archive" | "purge"; roomId: string; conversationId: string }>;
+type DocumentLocalAction = Readonly<{ kind: "transfer"; direction: "detach" | "return" } | { kind: "select-file" | "close-tab"; path: string } | { kind: "leave-room"; target: "home" | "memory" } | { kind: "replace-conversation"; roomId: string; conversationId: string } | { kind: "room-operation"; operation: "memento" | "archive" | "purge"; roomId: string; conversationId: string } | { kind: "chat-close"; disposition: "hide" | "quit" | "update" | "reload" }>;
 
 function sameDocumentLocalAction(a: DocumentLocalAction | null, b: DocumentLocalAction | null): boolean {
 	if (!a || !b) return a === b;
@@ -184,6 +184,7 @@ function sameDocumentLocalAction(a: DocumentLocalAction | null, b: DocumentLocal
 	if (a.kind === "room-operation") return b.kind === "room-operation" && a.operation === b.operation && a.roomId === b.roomId && a.conversationId === b.conversationId;
 	if (a.kind === "leave-room") return b.kind === "leave-room" && a.target === b.target;
 	if (a.kind === "replace-conversation") return b.kind === "replace-conversation" && a.roomId === b.roomId && a.conversationId === b.conversationId;
+	if (a.kind === "chat-close") return b.kind === "chat-close" && a.disposition === b.disposition;
 	return (b.kind === "select-file" || b.kind === "close-tab") && a.kind === b.kind && a.path === b.path;
 }
 
@@ -765,6 +766,8 @@ export function App() {
 			if (intent.target !== "home" && intent.target !== "memory") return null;
 		} else if (intent?.kind === "replace-conversation") {
 			if (typeof intent.roomId !== "string" || !intent.roomId || typeof intent.conversationId !== "string" || !intent.conversationId || !context || context.roomId !== intent.roomId) return null;
+		} else if (intent?.kind === "chat-close") {
+			if (!context || !["hide", "quit", "update", "reload"].includes(intent.disposition)) return null;
 		} else if (intent && ((intent.kind !== "select-file" && intent.kind !== "close-tab") || typeof intent.path !== "string" || !intent.path)) return null;
 		return { requestId, ownerId: documentOwnerId, ownerGeneration, roomGeneration: current.generation, initialHostGeneration: hostGeneration, initialDraftGeneration: draftGeneration, context, intent: intent && { ...intent } };
 	}
@@ -1057,7 +1060,7 @@ export function App() {
 
 
 	// Private shell-to-owner endpoint. Until the remaining C5 items are wired,
-	// only hello, empty polls and explicit empty-session preparation are accepted;
+	// only hello, empty polls, empty-session and clean prepare/abort are accepted;
 	// every other request fails closed.
 	useEffect(() => {
 		if (!documentOwnerId || Object.getOwnPropertyDescriptor(window, "__exxpertsDocuments")) return;
@@ -1065,7 +1068,13 @@ export function App() {
 		let lastInput = "";
 		let lastSequence = 0;
 		let lastOutput: unknown = null;
+		let nativePrepared: { admission: DocumentAdmission; correlation: { requestId: string; stamp: DocumentContext & { hostGeneration: number; draftGeneration: number }; action: { kind: "chat-close"; disposition: "hide" | "quit" | "update" | "reload" } } } | null = null;
 		const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+		const matchesStamp = (value: unknown, expected: DocumentContext & { hostGeneration: number; draftGeneration: number }): boolean => {
+			if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+			const candidate = value as Record<string, unknown>;
+			return Object.keys(candidate).sort().join(",") === "conversationId,draftGeneration,hostGeneration,ownerGeneration,ownerId,roomGeneration,roomId" && Object.entries(expected).every(([key, value]) => candidate[key] === value);
+		};
 		const step = (input: unknown): unknown => {
 			if (!input || typeof input !== "object" || Array.isArray(input) || unmountedRef.current || personHasChanged()) return null;
 			const envelope = input as Record<string, unknown>;
@@ -1094,16 +1103,49 @@ export function App() {
 					if (envelope.items.length !== 1 || !item || typeof item !== "object" || Array.isArray(item)) return null;
 					const request = item as Record<string, unknown>;
 					const binding = request.binding;
-					if (Object.keys(request).sort().join(",") !== "binding,disposition,kind,nativeRequestId,observedStamp" || request.kind !== "native-prepare" || !binding || typeof binding !== "object" || Array.isArray(binding) || Object.keys(binding).sort().join(",") !== "nativeSessionId,ownerGeneration,ownerId") return null;
+					if (!binding || typeof binding !== "object" || Array.isArray(binding) || Object.keys(binding).sort().join(",") !== "nativeSessionId,ownerGeneration,ownerId") return null;
 					const bound = binding as Record<string, unknown>;
-					if (bound.nativeSessionId !== nativeSessionId || bound.ownerId !== documentOwnerId || bound.ownerGeneration !== documentOwnerGenerationRef.current || typeof request.nativeRequestId !== "string" || !uuid.test(request.nativeRequestId) || request.observedStamp !== null || !["hide", "quit", "update", "reload"].includes(request.disposition as string)) return null;
+					if (bound.nativeSessionId !== nativeSessionId || bound.ownerId !== documentOwnerId || bound.ownerGeneration !== documentOwnerGenerationRef.current) return null;
 					const currentBinding = { nativeSessionId, ownerId: documentOwnerId, ownerGeneration: documentOwnerGenerationRef.current };
-					if (stamp === null) {
-						if (!noDocumentSession()) return null;
-						items = [{ kind: "no-session", binding: currentBinding, nativeRequestId: request.nativeRequestId, disposition: request.disposition }];
-					} else {
-						items = [{ kind: "guard-result", binding: currentBinding, nativeRequestId: request.nativeRequestId, result: { kind: "refused", correlation: { requestId: request.nativeRequestId, stamp, action: { kind: "chat-close", disposition: request.disposition } }, reason: "invalidated" } }];
-					}
+					if (request.kind === "native-prepare") {
+						if (Object.keys(request).sort().join(",") !== "binding,disposition,kind,nativeRequestId,observedStamp" || typeof request.nativeRequestId !== "string" || !uuid.test(request.nativeRequestId) || typeof request.disposition !== "string" || !["hide", "quit", "update", "reload"].includes(request.disposition)) return null;
+						const disposition = request.disposition as "hide" | "quit" | "update" | "reload";
+						if (stamp === null) {
+							if (request.observedStamp !== null || !noDocumentSession()) return null;
+							items = [{ kind: "no-session", binding: currentBinding, nativeRequestId: request.nativeRequestId, disposition }];
+						} else {
+							const correlation = { requestId: request.nativeRequestId, stamp, action: { kind: "chat-close" as const, disposition } };
+							if (request.observedStamp === null || !matchesStamp(request.observedStamp, stamp)) {
+								if (request.observedStamp !== null && (!request.observedStamp || typeof request.observedStamp !== "object" || Array.isArray(request.observedStamp) || Object.keys(request.observedStamp).sort().join(",") !== "conversationId,draftGeneration,hostGeneration,ownerGeneration,ownerId,roomGeneration,roomId")) return null;
+								items = [{ kind: "guard-result", binding: currentBinding, nativeRequestId: request.nativeRequestId, result: { kind: "refused", correlation, reason: "invalidated" } }];
+							} else if (markdownEditorPendingActionRef.current) {
+								items = [{ kind: "guard-result", binding: currentBinding, nativeRequestId: request.nativeRequestId, result: { kind: "refused", correlation, reason: "busy" } }];
+							} else {
+								if (markdownEditorDirtyRef.current || markdownEditorRef.current?.pendingWrite() || documentSaveInFlightRef.current || documentKeepMineInFlightRef.current || documentWriteRef.current) return null;
+								const admission = captureDocumentAdmission(request.nativeRequestId, { kind: "chat-close", disposition });
+								if (!admission) return null;
+								markdownEditorPendingActionRef.current = { admission, continuation: () => {}, result: null };
+								preparedDocumentAdmissionRef.current = null;
+								if (!prepareDocumentAdmission(admission)) { markdownEditorPendingActionRef.current = null; return null; }
+								markdownEditorRef.current?.setFence(true);
+								setMarkdownEditorFenced(true);
+								nativePrepared = { admission, correlation };
+								items = [{ kind: "guard-result", binding: currentBinding, nativeRequestId: request.nativeRequestId, result: { kind: "prepared", correlation, decision: "allow" } }];
+							}
+						}
+					} else if (request.kind === "native-abort") {
+						if (Object.keys(request).sort().join(",") !== "binding,correlation,kind" || !nativePrepared || !request.correlation || typeof request.correlation !== "object" || Array.isArray(request.correlation)) return null;
+						const correlation = request.correlation as Record<string, unknown>;
+						const action = correlation.action;
+						if (Object.keys(correlation).sort().join(",") !== "action,requestId,stamp" || correlation.requestId !== nativePrepared.correlation.requestId || !matchesStamp(correlation.stamp, nativePrepared.correlation.stamp) || !action || typeof action !== "object" || Array.isArray(action) || Object.keys(action).sort().join(",") !== "disposition,kind" || (action as Record<string, unknown>).kind !== "chat-close" || (action as Record<string, unknown>).disposition !== nativePrepared.correlation.action.disposition || markdownEditorPendingActionRef.current?.admission !== nativePrepared.admission) return null;
+						const aborted = nativePrepared.correlation;
+						nativePrepared = null;
+						markdownEditorPendingActionRef.current = null;
+						preparedDocumentAdmissionRef.current = null;
+						markdownEditorRef.current?.setFence(false);
+						setMarkdownEditorFenced(false);
+						items = [{ kind: "abort-ack", binding: currentBinding, correlation: aborted }];
+					} else return null;
 				}
 			}
 			lastSequence = envelope.sequence as number;

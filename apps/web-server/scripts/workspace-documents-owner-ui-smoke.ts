@@ -51,10 +51,25 @@ try {
 	}, { binding: first.status.binding });
 	const refusal = active?.items?.[0];
 	assert(active?.sequence === 3 && refusal?.kind === "guard-result" && refusal.result?.kind === "refused" && refusal.result.reason === "invalidated" && refusal.result.correlation?.stamp?.roomId === room.roomId && refusal.result.correlation.stamp.conversationId === room.conversationId && refusal.result.correlation.requestId === "33333333-3333-4333-8333-333333333333" && refusal.result.correlation.action?.kind === "chat-close" && refusal.result.correlation.action.disposition === "hide" && JSON.stringify(refusal.binding) === JSON.stringify(first.status.binding), "a null observed stamp cannot report no-session for a current room");
+	const clean = await page.evaluate(({ binding, stamp }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 4, ack: 3, items: [{ kind: "native-prepare", binding, nativeRequestId: "44444444-4444-4444-8444-444444444444", observedStamp: stamp, disposition: "hide" }] }), { binding: first.status.binding, stamp: refusal.result.correlation.stamp });
+	const prepared = clean?.items?.[0];
+	assert(clean?.sequence === 4 && prepared?.kind === "guard-result" && prepared.result?.kind === "prepared" && prepared.result.decision === "allow", "a clean current native close prepares without committing");
+	await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+	assert(await page.getByRole("navigation", { name: "Room navigation" }).isVisible(), "the prepared native action reserves the owner against Home");
+	const wrongAbort = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 5, ack: 4, items: [{ kind: "native-abort", binding, correlation: { ...correlation, requestId: "55555555-5555-4555-8555-555555555555" } }] }), { binding: first.status.binding, correlation: prepared.result.correlation });
+	assert(wrongAbort == null, "a foreign abort cannot release the prepared action");
+	await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+	assert(await page.getByRole("navigation", { name: "Room navigation" }).isVisible(), "the owner stays reserved after a foreign abort");
+	const aborted = await page.evaluate(({ binding, correlation }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 5, ack: 4, items: [{ kind: "native-abort", binding, correlation }] }), { binding: first.status.binding, correlation: prepared.result.correlation });
+	assert(aborted?.items?.[0]?.kind === "abort-ack" && aborted.items[0].correlation.requestId === "44444444-4444-4444-8444-444444444444", "matching native abort acknowledges only the prepared attempt");
+	await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+	await page.getByRole("heading", { name: "Your rooms." }).waitFor();
+	await page.locator(".persistent-agent-card").filter({ hasText: "Invented Native Owner" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+	await page.locator(".sidebar-workspace-files").waitFor();
 	await page.route("**/workspace-files?*", (route) => route.fulfill({ status: 409, json: { code: "person_changed", error: "Invented identity change" } }));
 	await page.evaluate(() => window.dispatchEvent(new Event("focus")));
 	await page.getByText("Someone else is now signed in on this server.", { exact: true }).waitFor();
-	const invalidated = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 4, ack: 3, items: [] }), { binding: first.status.binding });
+	const invalidated = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 6, ack: 5, items: [] }), { binding: first.status.binding });
 	assert(invalidated == null, "a changed person cannot receive another owner status");
 	console.log("owner endpoint browser supplement: hello, replay and invalid inputs passed");
 } catch (caught) { error = caught; }
