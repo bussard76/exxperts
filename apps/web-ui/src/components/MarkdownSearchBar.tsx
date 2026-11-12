@@ -8,12 +8,13 @@ import { findMatches, searchDecorationKey, type SearchDecorationState } from "./
 
 interface Props {
 	editor: Editor | null;
+	hostGeneration: number;
 	stateRef: { current: SearchDecorationState | null };
 	open: boolean;
 	onClose: () => void;
 }
 
-export function MarkdownSearchBar({ editor, stateRef, open, onClose }: Props) {
+export function MarkdownSearchBar({ editor, hostGeneration, stateRef, open, onClose }: Props) {
 	const [query, setQuery] = useState("");
 	const [currentIndex, setCurrentIndex] = useState(0);
 	const [version, setVersion] = useState(0);
@@ -38,9 +39,11 @@ export function MarkdownSearchBar({ editor, stateRef, open, onClose }: Props) {
 	}, [currentIndex, editor, matchCount, query, stateRef]);
 	useEffect(() => {
 		if (!editor || !matchCount) return;
-		const timer = requestAnimationFrame(() => editor.view.dom.querySelector(".md-search-match-current")?.scrollIntoView({ block: "center", behavior: "smooth" }));
-		return () => cancelAnimationFrame(timer);
-	}, [currentIndex, editor, matchCount]);
+		const hostWindow = editor.view.dom.ownerDocument.defaultView;
+		if (!hostWindow) return;
+		const timer = hostWindow.requestAnimationFrame(() => editor.view.dom.querySelector(".md-search-match-current")?.scrollIntoView({ block: "center", behavior: "smooth" }));
+		return () => hostWindow.cancelAnimationFrame(timer);
+	}, [currentIndex, editor, hostGeneration, matchCount]);
 	const next = useCallback(() => { if (matchCount) setCurrentIndex((index) => (index + 1) % matchCount); }, [matchCount]);
 	const previous = useCallback(() => { if (matchCount) setCurrentIndex((index) => (index - 1 + matchCount) % matchCount); }, [matchCount]);
 	const close = useCallback(() => { setQuery(""); onClose(); }, [onClose]);

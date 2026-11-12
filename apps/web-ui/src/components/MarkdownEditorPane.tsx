@@ -454,7 +454,7 @@ function MarkdownEditorSurface({
 
 	return (
 		<div ref={rootRef} className="markdown-editor-rich-surface">
-			{!readOnly && !raw && <MarkdownSearchBar editor={editor} stateRef={searchStateRef} open={searchOpen} onClose={() => setSearchOpen(false)} />}
+			{!readOnly && !raw && <MarkdownSearchBar editor={editor} hostGeneration={hostGeneration} stateRef={searchStateRef} open={searchOpen} onClose={() => setSearchOpen(false)} />}
 			{!readOnly && <MarkdownEditorToolbar editor={editor} canEdit={canEdit && !fenced} onSave={() => { void save(); }} isSaving={isSaving} isDirty={isDirty} saveError={saveError} hasExternalUpdate={hasExternalUpdate} onSearch={() => setSearchOpen((open) => !open)} searchOpen={searchOpen} raw={raw} />}
 			{/* A click on a task checkbox is a user edit even when the editor does not hold the focus; otherwise onUpdate takes it for an outside change and never saves it. */}
 			<div className="markdown-editor-rich-scroll" onClick={handlePreviewLinkClick} onClickCapture={(event) => { const hostWindow = event.currentTarget.ownerDocument.defaultView; if (canEdit && !readOnly && hostWindow && event.target instanceof hostWindow.HTMLInputElement && event.target.type === "checkbox" && !userEditedRef.current) { userEditedRef.current = true; onMutation(); } }}>

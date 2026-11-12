@@ -158,8 +158,13 @@ try {
 			await child.keyboard.press("Control+f");
 			const childSearch = child.getByRole("search");
 			await childSearch.waitFor();
-			await childSearch.getByPlaceholder("Find in file…").fill("Invented");
-			await childSearch.getByPlaceholder("Find in file…").press("Escape");
+			await child.evaluate(`window.__t20FindFrames = 0; window.__t20FindFrame = window.requestAnimationFrame; window.requestAnimationFrame = (callback) => { window.__t20FindFrames++; return window.__t20FindFrame(callback); }`);
+			try {
+				await childSearch.getByPlaceholder("Find in file…").fill("Invented");
+				await child.locator(".md-search-match-current").waitFor();
+				await waitUntil(() => child.evaluate(`window.__t20FindFrames > 0`), "the search scroll schedules in the child window");
+				await childSearch.getByPlaceholder("Find in file…").press("Escape");
+			} finally { await child.evaluate(`window.requestAnimationFrame = window.__t20FindFrame; delete window.__t20FindFrame; delete window.__t20FindFrames`); }
 			assert(await childSearch.count() === 0 && await child.locator(".workspace-tab", { hasText: "invented.md" }).count() === 1, "Escape closes Find without closing the actual child document tab");
 			await page.evaluate(`window.__t20RealmTimeout = window.setTimeout; window.setTimeout = (callback, delay, ...args) => window.__t20RealmTimeout(callback, delay === 1000 ? 30000 : delay, ...args)`);
 			try {

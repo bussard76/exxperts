@@ -714,7 +714,8 @@ try {
 		await page.locator(".markdown-editor-tiptap .ProseMirror").waitFor({ timeout: 20_000 });
 		await page.keyboard.press("Control+f");
 		const attachedSearch = page.getByRole("search");
-		await attachedSearch.getByPlaceholder("Find in file…").fill("Invented");
+		await attachedSearch.getByPlaceholder("Find in file…").fill("Notes");
+		await page.locator(".md-search-match-current").waitFor();
 		await attachedSearch.getByPlaceholder("Find in file…").press("Escape");
 		assert(await attachedSearch.count() === 0 && await tab("notes.md").count() === 1, "Escape closes Find without closing the attached document tab");
 		let attachedLinkPrompts = 0;
