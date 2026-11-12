@@ -573,7 +573,7 @@ export function App() {
 	const markdownEditorDirtyRef = useRef(false);
 	const markdownEditorPendingActionRef = useRef<(() => void | Promise<unknown>) | null>(null);
 	const markdownEditorActionResultRef = useRef<{ promise: Promise<unknown>; resolve: (result: unknown) => void } | null>(null);
-	const markdownEditorCommitBypassRef = useRef(false);
+	const markdownEditorCommitBypassRef = useRef<{ tabAction: DocumentTabAction | null } | null>(null);
 	const markdownEditorCommittingRef = useRef(false);
 	const markdownEditorPromptTimerRef = useRef<number | null>(null);
 	const markdownEditorCanceledSaveRef = useRef(false);
@@ -763,8 +763,10 @@ export function App() {
 	}
 
 	function guardMarkdownEditorAction(action: () => void | Promise<unknown>, prompt: "close" | "switch" | "navigate", tabAction: DocumentTabAction | null = null): boolean {
-		if (markdownEditorCommitBypassRef.current) {
-			markdownEditorCommitBypassRef.current = false;
+		const bypass = markdownEditorCommitBypassRef.current;
+		if (bypass) {
+			if (bypass.tabAction?.kind !== tabAction?.kind || bypass.tabAction?.path !== tabAction?.path) return false;
+			markdownEditorCommitBypassRef.current = null;
 			return true;
 		}
 		if (markdownEditorPendingActionRef.current || !documentOwnerId) return false;
@@ -824,9 +826,9 @@ export function App() {
 		setMarkdownEditorPromptBusy(false);
 		markdownEditorDirtyRef.current = false;
 		try {
-			markdownEditorCommitBypassRef.current = true;
+			markdownEditorCommitBypassRef.current = { tabAction: admission?.tabAction ?? null };
 			const result = action?.();
-			markdownEditorCommitBypassRef.current = false;
+			markdownEditorCommitBypassRef.current = null;
 			return Promise.resolve(result).then((value) => {
 				release();
 				actionResult?.resolve(value);
@@ -837,7 +839,7 @@ export function App() {
 				throw error;
 			});
 		} catch (error) {
-			markdownEditorCommitBypassRef.current = false;
+			markdownEditorCommitBypassRef.current = null;
 			release();
 			actionResult?.resolve(false);
 			throw error;
@@ -858,8 +860,8 @@ export function App() {
 			if (pending === "pending" && !(await editor!.save())) return false;
 			if (pending === "unknown" && (!(await editor!.settle()) || !(await editor!.save()))) return false;
 			if (!prepareDocumentAdmission(admission) || !preparedDocumentAdmissionIsCurrent(admission)) return false;
-			markdownEditorCommitBypassRef.current = true;
-			try { return action(); } finally { markdownEditorCommitBypassRef.current = false; }
+			markdownEditorCommitBypassRef.current = { tabAction: admission.tabAction };
+			try { return action(); } finally { markdownEditorCommitBypassRef.current = null; }
 		};
 		markdownEditorPendingActionRef.current = continueAfterWrite;
 		markdownEditorPromptBusyRef.current = true;
@@ -977,7 +979,8 @@ export function App() {
 		const path = entry.relativePath;
 		if (!/\.(md|doc|docx|pptx|excalidraw|drawio|dio|txt|json|pdf|html?|xls|xlsx|xlsm|png|jpe?g|gif|webp|svg)$/i.test(path) || !persistentChat) return;
 		if (activeWorkspacePath(rightPaneRef.current) === path && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId) return;
-		if (!guardMarkdownEditorAction(() => openWorkspaceMarkdown(entry), "switch", { kind: "select-file", path })) return;
+		const target = { relativePath: path, extension: entry.extension };
+		if (!guardMarkdownEditorAction(() => openWorkspaceMarkdown(target), "switch", { kind: "select-file", path })) return;
 		documentFileSnapshotRef.current = null;
 		documentFileSnapshotValidRef.current = false;
 		documentLoadViewRef.current = null;
@@ -7587,9 +7590,9 @@ export function App() {
 			const status = (await fetchPersistentAgentStatuses()).find((candidate) => candidate.id === chat.agentId);
 			if (!checkpointOriginCurrent(chat, generation)) return;
 			if (!status) throw new Error("This room is no longer available. Refresh Home and try again.");
-			markdownEditorCommitBypassRef.current = true;
+			markdownEditorCommitBypassRef.current = { tabAction: null };
 			let opening: Promise<void>;
-			try { opening = openRoomFromAddress(status); } finally { markdownEditorCommitBypassRef.current = false; }
+			try { opening = openRoomFromAddress(status); } finally { markdownEditorCommitBypassRef.current = null; }
 			await opening;
 		} catch (e) {
 			if (!checkpointOriginCurrent(chat, generation)) return;

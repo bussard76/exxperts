@@ -306,6 +306,30 @@ try {
 		await waitUntil(() => policyRaw.isEditable(), "a later successful policy read re-enables the real editor", 5000);
 		await policy.close();
 		{
+			const target = await ctx.newPage();
+			await target.addInitScript({ content: `(() => {
+				const json = Response.prototype.json;
+				Response.prototype.json = async function () { const body = await json.call(this); if (this.url.includes("/workspace-files?")) window.__t20Listing = body; return body; };
+				const interval = window.setInterval; window.setInterval = (callback, delay, ...args) => interval(callback, delay === 2000 ? 30000 : delay, ...args);
+				const timeout = window.setTimeout; window.setTimeout = (callback, delay, ...args) => timeout(callback, delay === 1000 ? 30000 : delay, ...args);
+			})();` });
+			await target.goto(`${baseUrl}/#/room/${agentId}`);
+			await target.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "invented.md" }).click();
+			await target.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented source").waitFor();
+			await target.getByRole("button", { name: "RAW", exact: true }).click();
+			await target.getByRole("textbox", { name: "Raw Markdown source" }).fill("# Invented target draft\n");
+			assert(await target.evaluate(`Boolean(window.__t20Listing?.entries?.find((entry) => entry.relativePath === "owners.md"))`), "the actual tree response includes the target");
+			await target.evaluate(`window.__t20Target = window.__t20Listing.entries.find((entry) => entry.relativePath === "owners.md")`);
+			await target.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "owners.md" }).click();
+			const guard = target.getByRole("dialog", { name: "Unsaved Markdown changes" });
+			await guard.waitFor();
+			await target.evaluate(`window.__t20Target.relativePath = "identity.md"`);
+			await guard.getByRole("button", { name: "Discard changes" }).click();
+			await target.locator(".workspace-tab[data-active='true']", { hasText: "owners.md" }).waitFor({ timeout: 5000 });
+			assert(await target.locator(".workspace-tab[data-active='true']", { hasText: "identity.md" }).count() === 0, "the admitted file selection retains its original target when its source object changes");
+			await target.close();
+		}
+		{
 			const loading = await ctx.newPage();
 			await loading.goto(`${baseUrl}/#/room/${agentId}`);
 			let releaseLoad!: () => void, beginLoad!: () => void, writes = 0;
