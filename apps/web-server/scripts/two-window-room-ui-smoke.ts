@@ -306,6 +306,40 @@ try {
 		await waitUntil(() => policyRaw.isEditable(), "a later successful policy read re-enables the real editor", 5000);
 		await policy.close();
 		{
+			const policyAgent = agents.createPersistentAgentFromScaffoldInput({ displayName: "Invented Policy Room", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }).agent.agentId;
+			roomModels.writeRoomModels(policyAgent, { conversation: CLAUDE });
+			const policyUrl = `${baseUrl}/api/persistent-agents/${encodeURIComponent(policyAgent)}/workspace-default`;
+			const configure = (body: unknown) => authedFetch(policyUrl, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+			assert((await configure({ root: workspace, workspaceAccessMode: "localFiles" })).ok, "the invented policy room uses the temporary workspace");
+			const actualPolicy = await ctx.newPage();
+			await actualPolicy.addInitScript({ content: `const interval = window.setInterval; window.setInterval = (callback, delay, ...args) => interval(callback, delay === 5000 ? 100 : delay, ...args); const timeout = window.setTimeout; window.setTimeout = (callback, delay, ...args) => timeout(callback, delay === 1000 ? 30000 : delay, ...args);` });
+			let writes = 0, deniedReads = 0;
+			actualPolicy.on("request", (request) => { if (request.method() === "PUT" && request.url().includes("/workspace-markdown?")) writes++; });
+			actualPolicy.on("response", (response) => { if (response.request().method() === "GET" && response.url().includes("/workspace-markdown?") && response.status() === 403) deniedReads++; });
+			try {
+				await actualPolicy.goto(`${baseUrl}/#/room/${policyAgent}`);
+				await actualPolicy.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "identity.md" }).click();
+				await actualPolicy.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented identity source").waitFor();
+				await actualPolicy.getByRole("button", { name: "RAW", exact: true }).click();
+				const raw = actualPolicy.getByRole("textbox", { name: "Raw Markdown source" });
+				await raw.fill("# Invented actual policy draft\n");
+				assert((await configure({ toolSelection: { kind: "custom", allowedToolNames: ["ls", "read"] } })).ok, "the real policy removes write permission");
+				await waitUntil(async () => !(await raw.isEditable()), "the real read-only policy reaches the editor", 5000);
+				assert(await raw.inputValue() === "# Invented actual policy draft\n" && writes === 0, "the real read-only policy retains the draft without a write");
+				assert((await configure({ toolSelection: { kind: "standard" } })).ok, "the real policy restores write permission");
+				await waitUntil(() => raw.isEditable(), "the real writable policy reaches the editor", 5000);
+				assert((await configure({ toolSelection: { kind: "custom", allowedToolNames: ["ls"] } })).ok, "the real policy removes read permission");
+				await waitUntil(() => deniedReads > 0, "the real Markdown route returns a denied read", 5000);
+				await waitUntil(async () => !(await raw.isEditable()), "the real denied read reaches the editor", 5000);
+				assert(await raw.inputValue() === "# Invented actual policy draft\n" && writes === 0, "the real denied read retains the draft without a write");
+				assert((await configure({ toolSelection: { kind: "standard" } })).ok, "the real policy restores read permission");
+				await waitUntil(() => raw.isEditable(), "the restored real policy re-enables the editor", 5000);
+			} finally {
+				await configure({ toolSelection: { kind: "standard" } });
+				await actualPolicy.close();
+			}
+		}
+		{
 			const target = await ctx.newPage();
 			await target.addInitScript({ content: `(() => {
 				const json = Response.prototype.json;
