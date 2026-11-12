@@ -449,3 +449,7 @@ A successfully loaded text preview now also stores its formatted content in the 
 ## Checkpoint: owner-held image URL
 
 The existing tab record now retains the authorized image object URL and revokes it on tab close or context replacement; a disposed record cannot create a URL from a late fetch. UI typecheck and UI asset build passed, and the attributed filtered `workspace-file-tabs-ui` and `workspace-markdown-images-ui` smokes passed 2/2, including the existing changed-image/reopen and late-response cases. The child-first image case remains unexecuted at the missing Detach assertion, and this does not establish host-loss, all preview state, C4, or native lifecycle correctness.
+
+## Checkpoint: child-first Word case
+
+The real detached-window smoke now also specifies opening a generated Word document in the child, replacing the disk file, returning, and checking the original rendered heading with one content request. Scripts typecheck passed; the attributed detached smoke again failed at its first unavailable Detach assertion, so the new Word case did not execute and provides no transfer evidence yet.
