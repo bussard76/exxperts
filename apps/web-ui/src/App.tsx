@@ -872,6 +872,11 @@ export function App() {
 		return Boolean(prepared && prepared.admission === admission && documentAdmissionContextIsCurrent(admission) && (prepared.committedHostGeneration ?? prepared.hostGeneration) === documentHostGenerationRef.current && prepared.draftGeneration === documentDraftGenerationRef.current);
 	}
 
+	function documentActionLeavesContext(admission: DocumentAdmission): boolean {
+		const intent = admission.intent;
+		return intent?.kind === "leave-room" || (intent?.kind === "replace-conversation" && !!admission.context && (intent.roomId !== admission.context.roomId || intent.conversationId !== admission.context.conversationId));
+	}
+
 	function closeDocumentChildForExit(pending: PendingDocumentAction): Promise<boolean> {
 		const child = documentChildRef.current;
 		if (!child) return Promise.resolve(true);
@@ -958,7 +963,7 @@ export function App() {
 		const admission = requestId ? captureDocumentAdmission(requestId, intent) : null;
 		if (!admission) return false;
 		if (!markdownEditorDirtyRef.current) {
-			if (!markdownEditorRef.current?.pendingWrite() && !(intent?.kind === "leave-room" && documentChildRef.current)) return true;
+			if (!markdownEditorRef.current?.pendingWrite() && !(documentActionLeavesContext(admission) && documentChildRef.current)) return true;
 			void admitCleanMarkdownEditorAction(async () => action(), admission.requestId, intent);
 			return false;
 		}
@@ -1013,7 +1018,7 @@ export function App() {
 				markdownEditorCommitBypassRef.current = { pending };
 				try { return action?.(); } finally { markdownEditorCommitBypassRef.current = null; }
 			};
-			const result = prepareNow && admission.intent?.kind === "leave-room" && documentChildRef.current
+			const result = prepareNow && documentActionLeavesContext(admission) && documentChildRef.current
 				? closeDocumentChildForExit(pending).then((closed) => closed ? invoke() : false)
 				: invoke();
 			return Promise.resolve(result).then((value) => {
@@ -1048,7 +1053,7 @@ export function App() {
 			if (!prepareDocumentAdmission(admission) || !preparedDocumentAdmissionIsCurrent(admission)) return false;
 			const current = markdownEditorPendingActionRef.current;
 			if (!current || current.admission !== admission) return false;
-			if (intent?.kind === "leave-room" && documentChildRef.current && !(await closeDocumentChildForExit(current))) return false;
+			if (documentActionLeavesContext(admission) && documentChildRef.current && !(await closeDocumentChildForExit(current))) return false;
 			if (!preparedDocumentAdmissionIsCurrent(admission)) return false;
 			markdownEditorCommitBypassRef.current = { pending: current };
 			try { return action(); } finally { markdownEditorCommitBypassRef.current = null; }
@@ -8135,8 +8140,8 @@ export function App() {
 	}
 
 	function continueAfterCheckpoint() {
-		const approval = checkpointApprovalResult;
-		const targetChat = persistentChat;
+		const approval = checkpointApprovalResult ? captureCheckpointApproval(checkpointApprovalResult) : null;
+		const targetChat = persistentChat ? { ...persistentChat, model: { ...persistentChat.model } } : null;
 		// The card's button goes with the card, so focus would fall to the page: it goes back to the message box, after the render that
 		// closes the card (never on a touch screen, where it would pop the keyboard over the room).
 		const keepChatting = () => {
@@ -8145,10 +8150,16 @@ export function App() {
 		};
 		if (approval && targetChat && targetChat.conversationId !== approval.postCheckpoint.activeThreadId) {
 			const generation = checkpointContextRef.current.generation;
-			const cleanAction = admitCleanMarkdownEditorAction(async () => { await continueAfterCheckpoint(); });
-			if (cleanAction) return cleanAction;
-			if (!guardMarkdownEditorAction(() => continueAfterCheckpoint(), "navigate")) return;
-			return bindToApprovedCheckpointRuntime(approval, targetChat, generation).then((bound) => { if (bound) keepChatting(); }).catch((error) => { if (checkpointOriginCurrent(targetChat, generation)) setCheckpointApprovalError(formatRememberError((error as Error).message)); });
+			const intent: DocumentLocalAction = { kind: "replace-conversation", roomId: targetChat.agentId, conversationId: approval.postCheckpoint.activeThreadId || approval.runtimeBoundary.newThreadId };
+			const resume = async (): Promise<void> => {
+				if (!checkpointOriginCurrent(targetChat, generation)) return;
+				const cleanAction = admitCleanMarkdownEditorAction(resume, undefined, intent);
+				if (cleanAction) { await cleanAction; return; }
+				if (!guardMarkdownEditorAction(resume, "navigate", intent)) return;
+				try { if (await bindToApprovedCheckpointRuntime(approval, targetChat, generation)) keepChatting(); }
+				catch (error) { if (checkpointOriginCurrent(targetChat, generation)) setCheckpointApprovalError(formatRememberError((error as Error).message)); }
+			};
+			return resume();
 		}
 		keepChatting();
 	}

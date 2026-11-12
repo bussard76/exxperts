@@ -563,3 +563,7 @@ The inactive in-room archive and purge paths now check the live busy state befor
 ## Checkpoint: checkpoint replacement child-close case
 
 The detached smoke now uses a local scripted fake model and specifies the real checkpoint Save and subsequent replacement-thread read separately: the Save may complete, but the replacement read must wait for the actual registered child to close. Scripts typecheck passed; the attributed run still stops at disabled Detach, so this new case and fake model flow have not executed and provide no checkpoint/child evidence.
+
+## Checkpoint: checkpoint replacement draft
+
+The inactive dependent-close path now applies to a typed replacement only when its captured destination differs from the current conversation. The explicit Keep chatting continuation captures the checkpoint approval and destination before waiting; checkpoint Save itself is not classified as a child close. UI and scripts typechecks, UI asset build, and the attributed `remember-job-dialog` and `workspace-file-tabs-ui` smokes passed 2/2. The new detached checkpoint case remains unexecuted at disabled Detach, and other room-entry/exit paths, abort deadlines, child recovery and native handling remain open.
