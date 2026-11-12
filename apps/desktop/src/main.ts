@@ -330,8 +330,9 @@ function createMainWindow(): BrowserWindow {
   wireContextMenu(win);
   win.on("close", (event) => {
     if (!quitting && !updaterQuitting) {
+      // The C5 continuation is not connected yet. A missing or untrusted
+      // owner result cannot authorize hiding the live window.
       event.preventDefault();
-      win.hide();
     }
   });
   win.on("show", () => setTrayBadge(false));
