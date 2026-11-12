@@ -443,8 +443,9 @@ function MarkdownEditorSurface({
 
 	const handlePreviewLinkClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
 		if (!readOnly || !onPreviewLink) return;
-		const target = event.target instanceof Element ? event.target.closest("a") : null;
-		if (!(target instanceof HTMLAnchorElement)) return;
+		const hostWindow = event.currentTarget.ownerDocument.defaultView;
+		const target = hostWindow && event.target instanceof hostWindow.Element ? event.target.closest("a") : null;
+		if (!hostWindow || !(target instanceof hostWindow.HTMLAnchorElement)) return;
 		const href = target.getAttribute("href");
 		if (!href) return;
 		const isWikiLink = target.dataset.wikiLink === "true";
@@ -456,7 +457,7 @@ function MarkdownEditorSurface({
 			{!readOnly && !raw && <MarkdownSearchBar editor={editor} stateRef={searchStateRef} open={searchOpen} onClose={() => setSearchOpen(false)} />}
 			{!readOnly && <MarkdownEditorToolbar editor={editor} canEdit={canEdit && !fenced} onSave={() => { void save(); }} isSaving={isSaving} isDirty={isDirty} saveError={saveError} hasExternalUpdate={hasExternalUpdate} onSearch={() => setSearchOpen((open) => !open)} searchOpen={searchOpen} raw={raw} />}
 			{/* A click on a task checkbox is a user edit even when the editor does not hold the focus; otherwise onUpdate takes it for an outside change and never saves it. */}
-			<div className="markdown-editor-rich-scroll" onClick={handlePreviewLinkClick} onClickCapture={(event) => { if (canEdit && !readOnly && event.target instanceof HTMLInputElement && event.target.type === "checkbox" && !userEditedRef.current) { userEditedRef.current = true; onMutation(); } }}>
+			<div className="markdown-editor-rich-scroll" onClick={handlePreviewLinkClick} onClickCapture={(event) => { const hostWindow = event.currentTarget.ownerDocument.defaultView; if (canEdit && !readOnly && hostWindow && event.target instanceof hostWindow.HTMLInputElement && event.target.type === "checkbox" && !userEditedRef.current) { userEditedRef.current = true; onMutation(); } }}>
 				<EditorContent editor={editor} className="markdown-editor-tiptap" />
 			</div>
 		</div>

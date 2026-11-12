@@ -29,6 +29,7 @@ const original = "# Invented source\r\n\r\n";
 // HTML textarea values expose CRLF as LF; the file bytes are checked separately.
 const rawDisplay = original.replaceAll("\r\n", "\n");
 fs.writeFileSync(path.join(workspace, "invented.md"), original);
+fs.writeFileSync(path.join(workspace, "interaction.md"), "- [ ] Invented child task\n\n[Open invented](invented.md)\n");
 fs.writeFileSync(path.join(workspace, "snapshot.html"), '<body><p>Invented original snapshot</p><script>document.body.dataset.executed = "yes"</script></body>');
 fs.writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({ providers: {
 	"fake-claude": { name: "Fake Claude", baseUrl: "http://127.0.0.1:9", api: "anthropic-messages", models: [{ id: "claude-fake", name: "Claude Fake", input: ["text"], contextWindow: 200000, maxTokens: 32000 }] },
@@ -160,6 +161,20 @@ try {
 			await childSearch.getByPlaceholder("Find in file…").fill("Invented");
 			await childSearch.getByPlaceholder("Find in file…").press("Escape");
 			assert(await childSearch.count() === 0 && await child.locator(".workspace-tab", { hasText: "invented.md" }).count() === 1, "Escape closes Find without closing the actual child document tab");
+			await page.evaluate(`window.__t20RealmTimeout = window.setTimeout; window.setTimeout = (callback, delay, ...args) => window.__t20RealmTimeout(callback, delay === 1000 ? 30000 : delay, ...args)`);
+			try {
+				await child.locator(".workspace-file-browser-file", { hasText: "interaction.md" }).click();
+				await child.locator('.markdown-editor-tiptap input[type="checkbox"]').first().click();
+				await child.locator(".markdown-editor-status").getByText("Unsaved", { exact: true }).waitFor();
+				await child.locator(".workspace-file-browser-file", { hasText: "invented.md" }).click();
+				await page.getByRole("dialog", { name: "Unsaved Markdown changes" }).getByRole("button", { name: "Discard changes" }).click();
+				await child.locator(".workspace-tab[data-active='true']", { hasText: "invented.md" }).waitFor();
+				await child.locator(".workspace-file-browser-file", { hasText: "interaction.md" }).click();
+				await child.getByRole("button", { name: "Preview", exact: true }).click();
+				await child.getByRole("link", { name: "Open invented" }).click();
+				await child.locator(".workspace-tab[data-active='true']", { hasText: "invented.md" }).waitFor();
+				assert(!child.isClosed() && Number(writes) === 0, "child checkbox and internal preview link use the current document host without a write");
+			} finally { await page.evaluate(`window.setTimeout = window.__t20RealmTimeout; delete window.__t20RealmTimeout`); }
 			await child.getByRole("button", { name: "RAW", exact: true }).click();
 			const childRaw = child.getByRole("textbox", { name: "Raw Markdown source" });
 			const edited = "# Invented child draft\n\n";
