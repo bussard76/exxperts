@@ -6,8 +6,8 @@ import "../excalidraw-frame-entry.ts?worker&url";
 
 // PPTX and Excalidraw: third-party renderers reading an untrusted file, so they stay in a frame with an
 // opaque origin (no allow-same-origin) that may fetch nothing. The parent fetches the file and hands the bytes over.
-export function WorkspaceFramedPreview({ agentId, conversationId, path }: { agentId: string; conversationId: string; path: string }) {
-	const [bytes, setBytes] = useState<ArrayBuffer | null>(null);
+export function WorkspaceFramedPreview({ agentId, conversationId, path, retained }: { agentId: string; conversationId: string; path: string; retained: { bytes: ArrayBuffer | null } }) {
+	const [bytes, setBytes] = useState<ArrayBuffer | null>(() => retained.bytes);
 	const [error, setError] = useState<string | null>(null);
 	const [rendered, setRendered] = useState(false);
 	const frameRef = useRef<HTMLIFrameElement>(null);
@@ -17,6 +17,7 @@ export function WorkspaceFramedPreview({ agentId, conversationId, path }: { agen
 	const [theme] = useState(() => (document.documentElement.dataset.theme === "dark" ? "dark" : "light"));
 	const route = `/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-preview?${new URLSearchParams({ conversationId, path })}`;
 	useEffect(() => {
+		if (retained.bytes) return;
 		const controller = new AbortController();
 		fetchController.current = controller;
 		delivered.current = false;
@@ -28,11 +29,11 @@ export function WorkspaceFramedPreview({ agentId, conversationId, path }: { agen
 					return;
 				}
 				const buffer = await response.arrayBuffer();
-				if (!controller.signal.aborted) setBytes(buffer);
+				if (!controller.signal.aborted) { retained.bytes = buffer; setBytes(buffer); }
 			})
 			.catch(() => { if (!controller.signal.aborted) setError("This file could not be previewed."); });
 		return () => { controller.abort(); if (fetchController.current === controller) fetchController.current = null; };
-	}, [route]);
+	}, [route, retained]);
 	useEffect(() => {
 		const onMessage = (event: MessageEvent) => {
 			const frame = frameRef.current?.contentWindow;

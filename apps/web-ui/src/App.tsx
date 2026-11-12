@@ -549,6 +549,7 @@ export function App() {
 		| { kind: "taskRun"; taskId: string };
 	const [rightPane, setRightPane] = useState<RightPaneOccupant | null>(null);
 	const [workspaceTabs, setWorkspaceTabs] = useState<{ agentId: string; conversationId: string; paths: string[] } | null>(null);
+	const documentPreviewSnapshotsRef = useRef(new Map<string, { bytes: ArrayBuffer | null }>());
 	const [documentHost] = useState(() => {
 		const host = document.createElement("div");
 		host.className = "docs-host";
@@ -969,6 +970,7 @@ export function App() {
 			if (!requestId || !captureDocumentAdmission(requestId, { kind: "close-tab", path })) return;
 		}
 		const remaining = paths.filter((item) => item !== path);
+		documentPreviewSnapshotsRef.current.delete(path);
 		if (active === path) { documentFileSnapshotRef.current = null; documentFileSnapshotValidRef.current = false; documentLoadViewRef.current = null; }
 		setWorkspaceTabs((tabs) => tabs ? { ...tabs, paths: remaining } : tabs);
 		if (active === path) {
@@ -990,6 +992,7 @@ export function App() {
 		if (activeWorkspacePath(rightPaneRef.current) === path && workspaceTabs?.agentId === persistentChat.agentId && workspaceTabs.conversationId === persistentChat.conversationId) return;
 		const target = { relativePath: path, extension: entry.extension };
 		if (!guardMarkdownEditorAction(() => openWorkspaceMarkdown(target), "switch", { kind: "select-file", path })) return;
+		if (!documentPreviewSnapshotsRef.current.has(path)) documentPreviewSnapshotsRef.current.set(path, { bytes: null });
 		documentFileSnapshotRef.current = null;
 		documentFileSnapshotValidRef.current = false;
 		documentLoadViewRef.current = null;
@@ -1101,6 +1104,7 @@ export function App() {
 		if (typeof next !== "function") {
 			const key = next ? `${next.agentId}\u0000${next.conversationId}` : null;
 			if (checkpointContextRef.current.key !== key) {
+				documentPreviewSnapshotsRef.current = new Map();
 				documentPaneBindingRef.current = null;
 				documentFileSnapshotRef.current = null;
 				documentFileSnapshotValidRef.current = false;
@@ -9170,13 +9174,13 @@ export function App() {
 						<WorkspaceWordPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />
 					</div>)}
 					{workspaceTabs.paths.filter((path) => /\.html?$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceHtml" || rightPane.path !== path}>
-						<WorkspaceHtmlPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />
+						<WorkspaceHtmlPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} />
 					</div>)}
 					{workspaceTabs.paths.filter((path) => /\.(?:txt|json)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceText" || rightPane.path !== path}>
 						<WorkspaceTextPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />
 					</div>)}
 					{workspaceTabs.paths.filter((path) => /\.(?:pptx|excalidraw)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceFramed" || rightPane.path !== path}>
-						<WorkspaceFramedPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />
+						<WorkspaceFramedPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} />
 					</div>)}
 					{workspaceTabs.paths.filter((path) => /\.xlsx$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceSpreadsheet" || rightPane.path !== path}>
 						<WorkspaceSpreadsheetPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} />

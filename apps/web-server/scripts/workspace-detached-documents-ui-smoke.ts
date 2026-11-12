@@ -29,6 +29,7 @@ const original = "# Invented source\r\n\r\n";
 // HTML textarea values expose CRLF as LF; the file bytes are checked separately.
 const rawDisplay = original.replaceAll("\r\n", "\n");
 fs.writeFileSync(path.join(workspace, "invented.md"), original);
+fs.writeFileSync(path.join(workspace, "snapshot.html"), '<body><p>Invented original snapshot</p><script>document.body.dataset.executed = "yes"</script></body>');
 fs.writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({ providers: {
 	"fake-claude": { name: "Fake Claude", baseUrl: "http://127.0.0.1:9", api: "anthropic-messages", models: [{ id: "claude-fake", name: "Claude Fake", input: ["text"], contextWindow: 200000, maxTokens: 32000 }] },
 } }), { mode: 0o600 });
@@ -100,6 +101,26 @@ try {
 			await closedEmptyChild;
 			assert(await page.getByText("Invented read refusal", { exact: true }).isVisible() && Number(writes) === 0, "Return retains a load error without inventing a draft or writing");
 			await page.unroute("**/workspace-markdown?*");
+			let htmlReads = 0;
+			context.on("request", (request) => {
+				const url = new URL(request.url());
+				if (url.pathname.endsWith("/workspace-preview") && url.searchParams.get("path") === "snapshot.html" && url.searchParams.get("frame") !== "1") htmlReads++;
+			});
+			await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "snapshot.html" }).click();
+			await page.frameLocator('.workspace-preview-html iframe[title="snapshot.html"]').getByText("Invented original snapshot").waitFor();
+			assert(await page.frameLocator('.workspace-preview-html iframe[title="snapshot.html"]').locator("body").getAttribute("data-executed") === "yes", "the authorized original HTML snapshot executes in its opaque frame");
+			fs.writeFileSync(path.join(workspace, "snapshot.html"), '<body><p>Invented later disk content</p></body>');
+			const previewOpened = page.waitForEvent("popup");
+			await detach.click();
+			const previewChild = await previewOpened;
+			await previewChild.frameLocator('.workspace-preview-html iframe[title="snapshot.html"]').getByText("Invented original snapshot").waitFor();
+			assert(await previewChild.frameLocator('.workspace-preview-html iframe[title="snapshot.html"]').locator("body").getAttribute("data-executed") === "yes" && htmlReads === 1, "the child executes the retained snapshot without rereading changed disk content");
+			const previewClosed = previewChild.waitForEvent("close");
+			await previewChild.getByRole("button", { name: "Return", exact: true }).click();
+			await previewClosed;
+			await page.frameLocator('.workspace-preview-html iframe[title="snapshot.html"]').getByText("Invented original snapshot").waitFor();
+			assert(htmlReads === 1, "Return keeps the original HTML snapshot without another content read");
+			await page.locator(".workspace-tab", { hasText: "snapshot.html" }).locator(".workspace-tab-close").click();
 			await page.locator(".workspace-tab", { hasText: "invented.md" }).locator(".workspace-tab-close").click();
 			await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "invented.md" }).click();
 			await page.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented source").waitFor();
