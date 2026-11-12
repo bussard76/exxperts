@@ -7963,6 +7963,10 @@ export function App() {
 			await opening;
 		} catch (e) {
 			if (!checkpointOriginCurrent(chat, generation)) return;
+			if (documentChildRef.current) {
+				setItems((items) => [...items, { kind: "system", id: nid(), text: (e as Error).message, level: "error" }]);
+				return;
+			}
 			setPersistentResumeError((e as Error).message);
 			setView("home");
 			await refreshPersistentAgentStatus();

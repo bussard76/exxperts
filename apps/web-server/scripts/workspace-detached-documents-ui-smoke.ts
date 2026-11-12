@@ -579,6 +579,13 @@ try {
 				await composer.fill("Invented stale question.");
 				await composer.press("Enter");
 				await reloadPage.getByText("This room went on in another window. Reload to continue there.", { exact: true }).waitFor();
+				await reloadPage.route("**/api/persistent-agents", (route) => route.fulfill({ status: 503, json: { error: "Invented unavailable status" } }));
+				const refusedStatus = reloadPage.waitForResponse((response) => response.url().endsWith("/api/persistent-agents") && response.status() === 503);
+				await reloadPage.getByRole("button", { name: "Reload", exact: true }).click();
+				await refusedStatus;
+				await reloadPage.waitForTimeout(250);
+				assert(await reloadPage.getByRole("navigation", { name: "Room navigation" }).isVisible() && !reloadChild.isClosed() && await reloadChild.evaluate(`window.__t20CloseCalls`) === 0, "a failed Reload status read retains the current room and child");
+				await reloadPage.unroute("**/api/persistent-agents");
 				let replacementReads = 0;
 				reloadPage.on("request", (request) => { if (request.method() === "GET" && request.url().includes("/threads/")) replacementReads++; });
 				await reloadPage.getByRole("button", { name: "Reload", exact: true }).click();

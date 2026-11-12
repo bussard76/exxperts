@@ -712,3 +712,7 @@ The inactive host-commit path now starts a five-second settlement timer: if the 
 ## Checkpoint: moved-room Reload draft
 
 The real Reload callback now checks the resolved room status: if its actual destination replaces the current conversation and a child exists, it waits for that registered child to close before opening the replacement. Same-conversation resume no longer clears and recreates the context key. UI and scripts typechecks, UI asset build and the attributed `two-window-room-ui` smoke passed 1/1 for existing attached paths. The new real-child moved-room test remains unexecuted at disabled Detach; same-context child behavior and Reload failure paths still require targeted verification, so this is not R4 completion.
+
+## Checkpoint: failed moved-room Reload draft
+
+The real-child Reload case now also faults the room-status response and specifies retaining the current room and child without a close request. The inactive child path reports that failure in the existing chat system-message channel instead of navigating away. UI and scripts typechecks and UI asset build passed; the attributed `two-window-room-ui` passed, while `workspace-detached-documents-ui` stopped at disabled Detach (1/2 cases passed). The new child failure assertion has not run, and same-context nested resume failure still needs verification.
