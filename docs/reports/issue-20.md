@@ -627,3 +627,7 @@ The attached single-container draft now gives the narrow-screen drawer backgroun
 ## Checkpoint: attached editor and tree identity
 
 The real `workspace-markdown-images-ui` smoke now verifies that the opened Markdown editor and workspace tree are descendants of the same sole document host before exercising the real drag and forged drop. The attributed smoke passed 1/1. This establishes the attached DOM relationship only; the retained identity across an actual child move is still unexecuted behind disabled Detach.
+
+## Checkpoint: attached room regressions after host rework
+
+The attributed filtered run of `attachments-panel-ui` and `two-window-room-ui` passed 2/2 after the one-container and drawer changes. These are existing attached-room interactions in Chromium; they do not exercise an enabled detached child or establish native behavior.
