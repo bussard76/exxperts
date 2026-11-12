@@ -499,6 +499,11 @@ try {
 		await openDialog();
 		await dialog.getByRole("button", { name: "Generate memory proposal" }).click();
 		await dialog.getByText(nineteenHeadsUp, { exact: true }).waitFor({ timeout: 20000 });
+		await page.evaluate(() => {
+			const json = Response.prototype.json;
+			(window as any).restoreCheckpointJson = () => { Response.prototype.json = json; };
+			Response.prototype.json = async function () { const body = await json.call(this); if (this.url && new URL(this.url).pathname.endsWith("/checkpoint/approve")) (window as any).observedCheckpointApproval = body; return body; };
+		});
 		let releaseCheckpoint!: () => void, startCheckpoint!: () => void;
 		let checkpointApprovals = 0;
 		let freshCheckpointThread = "", releaseCheckpointFetch!: () => void, startCheckpointFetch!: () => void;
@@ -506,6 +511,9 @@ try {
 		const checkpointStarted = new Promise<void>((resolve) => { startCheckpoint = resolve; });
 		const checkpointFetchReleased = new Promise<void>((resolve) => { releaseCheckpointFetch = resolve; });
 		const checkpointFetchStarted = new Promise<void>((resolve) => { startCheckpointFetch = resolve; });
+		let wrongCheckpointFetch!: () => void;
+		const wrongCheckpointStarted = new Promise<void>((resolve) => { wrongCheckpointFetch = resolve; });
+		page.on("request", (request) => { if (request.method() === "GET" && request.url().includes("/threads/invented-wrong-checkpoint")) wrongCheckpointFetch(); });
 		await page.route("**/threads/*", async (route) => {
 			if (route.request().method() !== "GET" || !freshCheckpointThread || !route.request().url().endsWith(`/threads/${encodeURIComponent(freshCheckpointThread)}`)) return route.continue();
 			startCheckpointFetch();
@@ -532,9 +540,12 @@ try {
 			await page.keyboard.type(" invented pending draft");
 		} finally { releaseCheckpoint(); }
 		const checkpointGuard = page.getByRole("dialog", { name: "Unsaved Markdown changes" });
+		await checkpointGuard.waitFor();
+		assert(await page.evaluate(() => { const approval = (window as any).observedCheckpointApproval; if (!approval?.postCheckpoint?.activeThreadId) return false; approval.postCheckpoint.activeThreadId = "invented-wrong-checkpoint"; return true; }), "the actual checkpoint response supplies the continuation target");
 		await checkpointGuard.getByRole("button", { name: "Discard changes" }).click();
 		try {
-			await checkpointFetchStarted;
+			const requested = await Promise.race([checkpointFetchStarted.then(() => "original"), wrongCheckpointStarted.then(() => "wrong")]);
+			assert(requested === "original", "the admitted checkpoint continuation retains its original conversation target");
 			await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).evaluate((node) => (node as HTMLElement).click());
 			await page.waitForTimeout(250);
 			assert((await page.title()).includes("Remember Room") && checkpointApprovals === 1, "the committed bind remains reserved during its real thread fetch without resending approval");
@@ -542,6 +553,7 @@ try {
 		await dialog.getByText("Memory updated", { exact: true }).waitFor({ timeout: 20000 });
 		await page.unroute("**/checkpoint/approve");
 		await page.unroute("**/threads/*");
+		await page.evaluate(() => (window as any).restoreCheckpointJson());
 		assert(await dialog.getByText(nineteenHeadsUp, { exact: true }).count() === 0, "the saved page does not repeat the heads-up the review showed");
 		let releaseRest!: () => void, startRest!: () => void, restRequests = 0;
 		const restReleased = new Promise<void>((resolve) => { releaseRest = resolve; });

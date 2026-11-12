@@ -175,12 +175,13 @@ type DocumentContext = Readonly<{
 	roomGeneration: number;
 }>;
 
-type DocumentLocalAction = Readonly<{ kind: "select-file" | "close-tab"; path: string } | { kind: "leave-room"; target: "home" | "memory" } | { kind: "room-operation"; operation: "memento" | "archive" | "purge"; roomId: string; conversationId: string }>;
+type DocumentLocalAction = Readonly<{ kind: "select-file" | "close-tab"; path: string } | { kind: "leave-room"; target: "home" | "memory" } | { kind: "replace-conversation"; roomId: string; conversationId: string } | { kind: "room-operation"; operation: "memento" | "archive" | "purge"; roomId: string; conversationId: string }>;
 
 function sameDocumentLocalAction(a: DocumentLocalAction | null, b: DocumentLocalAction | null): boolean {
 	if (!a || !b) return a === b;
 	if (a.kind === "room-operation") return b.kind === "room-operation" && a.operation === b.operation && a.roomId === b.roomId && a.conversationId === b.conversationId;
 	if (a.kind === "leave-room") return b.kind === "leave-room" && a.target === b.target;
+	if (a.kind === "replace-conversation") return b.kind === "replace-conversation" && a.roomId === b.roomId && a.conversationId === b.conversationId;
 	return (b.kind === "select-file" || b.kind === "close-tab") && a.kind === b.kind && a.path === b.path;
 }
 
@@ -749,6 +750,8 @@ export function App() {
 			if ((intent.operation !== "memento" && intent.operation !== "archive" && intent.operation !== "purge") || typeof intent.roomId !== "string" || !intent.roomId || typeof intent.conversationId !== "string" || !intent.conversationId || !context || context.roomId !== intent.roomId || context.conversationId !== intent.conversationId) return null;
 		} else if (intent?.kind === "leave-room") {
 			if (intent.target !== "home" && intent.target !== "memory") return null;
+		} else if (intent?.kind === "replace-conversation") {
+			if (typeof intent.roomId !== "string" || !intent.roomId || typeof intent.conversationId !== "string" || !intent.conversationId || !context || context.roomId !== intent.roomId) return null;
 		} else if (intent && ((intent.kind !== "select-file" && intent.kind !== "close-tab") || typeof intent.path !== "string" || !intent.path)) return null;
 		return { requestId, ownerId: documentOwnerId, ownerGeneration, roomGeneration: current.generation, initialHostGeneration: hostGeneration, initialDraftGeneration: draftGeneration, context, intent: intent && { ...intent } };
 	}
@@ -5671,6 +5674,10 @@ export function App() {
 		return !unmountedRef.current && !personHasChanged() && checkpointContextRef.current.generation === generation && checkpointContextRef.current.key === `${targetChat.agentId}\u0000${targetChat.conversationId}`;
 	}
 
+	function captureCheckpointApproval(approval: CheckpointApprovalResponse): CheckpointApprovalResponse {
+		return { ...approval, postCheckpoint: { ...approval.postCheckpoint }, runtimeBoundary: { ...approval.runtimeBoundary } };
+	}
+
 	async function bindToApprovedCheckpointRuntime(approval: CheckpointApprovalResponse, targetChat: NonNullable<PersistentChatConfig>, generation: number): Promise<boolean> {
 		// The save landed; a tab that moved to another conversation meanwhile does not switch, and parks with the saved line.
 		if (!checkpointOriginCurrent(targetChat, generation)) return false;
@@ -5822,16 +5829,18 @@ export function App() {
 				if (checkpointOriginCurrent(targetChat, generation)) setCheckpointApprovalError(null);
 			}
 			if (!checkpointOriginCurrent(targetChat, generation)) return;
+			approval = captureCheckpointApproval(approval);
 			void refreshPersistentAgentStatus();
 			// A save that had already landed parks the window, unless it filled the room or this window's answer was the one lost: then its page shows.
 			const park = approval.alreadySaved && !answerWasLost && !roomFilledBy(approval);
 			// A save that fills the room never binds: the empty conversation would be refused. Its page offers Memorize.
 			if (roomFilledBy(approval)) { setCheckpointApprovalResult(approval); return; }
+			const intent: DocumentLocalAction = park ? { kind: "leave-room", target: "home" } : { kind: "replace-conversation", roomId: targetChat.agentId, conversationId: approval.postCheckpoint.activeThreadId || approval.runtimeBoundary.newThreadId };
 			const continueApproval = async (): Promise<void> => {
 				if (!checkpointOriginCurrent(targetChat, generation)) return;
-				const cleanAction = admitCleanMarkdownEditorAction(continueApproval);
+				const cleanAction = admitCleanMarkdownEditorAction(continueApproval, undefined, intent);
 				if (cleanAction) { await cleanAction; return; }
-				if (!guardMarkdownEditorAction(continueApproval, "navigate")) return;
+				if (!guardMarkdownEditorAction(continueApproval, "navigate", intent)) return;
 				if (!checkpointOriginCurrent(targetChat, generation)) return;
 				if (park) { parkAfterSavedRemember(targetChat, savedHereBefore ? REMEMBER_SAVED_REOPEN_SENTENCE : REMEMBER_SAVED_ELSEWHERE_SENTENCE); return; }
 				try {
@@ -5965,17 +5974,19 @@ export function App() {
 				approval = { ...landed, alreadySaved: undefined };
 			}
 			if (!checkpointOriginCurrent(targetChat, generation)) return;
+			approval = captureCheckpointApproval(approval);
 			void refreshPersistentAgentStatus();
 			if (roomFilledBy(approval)) {
 				setCheckpointApprovalResult(approval);
 				setCheckpointPreviewOpen(true);
 				return;
 			}
+			const intent: DocumentLocalAction = approval.alreadySaved ? { kind: "leave-room", target: "home" } : { kind: "replace-conversation", roomId: targetChat.agentId, conversationId: approval.postCheckpoint.activeThreadId || approval.runtimeBoundary.newThreadId };
 			const continueQuick = async (): Promise<void> => {
 				if (!checkpointOriginCurrent(targetChat, generation)) return;
-				const cleanAction = admitCleanMarkdownEditorAction(continueQuick);
+				const cleanAction = admitCleanMarkdownEditorAction(continueQuick, undefined, intent);
 				if (cleanAction) { await cleanAction; return; }
-				if (!guardMarkdownEditorAction(continueQuick, "navigate")) return;
+				if (!guardMarkdownEditorAction(continueQuick, "navigate", intent)) return;
 				if (!checkpointOriginCurrent(targetChat, generation)) return;
 				if (approval.alreadySaved) { parkAfterSavedRemember(targetChat, savedHereBefore ? REMEMBER_SAVED_REOPEN_SENTENCE : REMEMBER_SAVED_ELSEWHERE_SENTENCE); return; }
 				try {
