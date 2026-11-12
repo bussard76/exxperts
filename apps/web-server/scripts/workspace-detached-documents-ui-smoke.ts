@@ -129,6 +129,7 @@ try {
 			if (await dismiss.count()) await dismiss.click();
 			await page.locator(".persistent-agent-card").filter({ hasText: "Cedar Studio" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
 			await page.locator(".sidebar-workspace-files").waitFor();
+			assert(await page.locator(".sidebar-workspace-files").evaluate((tree) => Boolean(tree.closest(".docs-host"))), "the attached tree belongs to the single document container");
 			const detach = page.getByRole("button", { name: "Detach", exact: true });
 			const detachCount = await detach.count();
 			assert(detachCount === 1, `a selected room shows one Detach control before opening a tab (found ${detachCount})`);
@@ -308,12 +309,15 @@ try {
 			} finally {
 				await page.evaluate(`window.open = window.__t20OriginalOpen; delete window.__t20OriginalOpen`);
 			}
+			await page.evaluate(`window.__t20OriginalTree = document.querySelector(".sidebar-workspace-files"); window.__t20OriginalEditor = document.querySelector('[aria-label="Raw Markdown source"]'); window.__t20OriginalHost = window.__t20OriginalEditor?.closest(".docs-host");`);
+			assert(await page.evaluate(`Boolean(window.__t20OriginalHost && window.__t20OriginalHost.contains(window.__t20OriginalTree))`), "the attached tree and editor share one stable document container");
 			const opened = page.waitForEvent("popup");
 			await detach.click();
 			const child = await opened;
 			await child.locator(".workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
 			await child.locator(".workspace-tab[data-active='true']", { hasText: "invented.md" }).waitFor();
 			assert(await child.getByRole("textbox", { name: "Raw Markdown source" }).inputValue() === rawDisplay, "the child presents the source and active tab");
+			assert(await child.evaluate(`document.querySelector(".docs-host") === opener.__t20OriginalHost && document.querySelector(".sidebar-workspace-files") === opener.__t20OriginalTree && document.querySelector('[aria-label="Raw Markdown source"]') === opener.__t20OriginalEditor`), "the actual child holds the same container, tree, and editor nodes");
 			assert(await page.locator("textarea").first().isVisible(), "chat remains usable in the owner window");
 			await page.getByRole("button", { name: "Attachments", exact: true }).click();
 			await page.getByRole("region", { name: "Attachments" }).waitFor();
