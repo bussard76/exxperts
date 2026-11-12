@@ -792,3 +792,7 @@ The supplemental owner test first failed because native commit was unsupported. 
 ## Checkpoint: bounded native write join
 
 The owner browser test accelerated only the specified 30-second join timer while holding the real invented Markdown PUT, and first failed because no unknown result was emitted. The owner now emits unknown at that bound and retains the arbiter until the write settles and the matching abort is acknowledged. The attributed `workspace-documents-owner-ui` run passed 1/1; UI/scripts typechecks and UI build passed. This is controlled browser endpoint evidence, not a native shell round trip.
+
+## Checkpoint: actual native close sends preparation
+
+The sandboxed Electron test initially failed because a real main-window close never sent `native-prepare`. The close handler now queues one private hide preparation against the most recently validated owner binding and stamp, preserves an identical envelope on retry, and strictly validates the staged no-session reply without continuing the close. The attributed `T20_NATIVE_PREPARE=1` sandboxed native run passed 1/1; the malformed and `T20_NATIVE_STUCK=1` native runs also passed 1/1 each, and desktop typecheck/build passed. This is a partial actual shell/owner exchange: active-session guard results, abort, commit, child evidence and all native continuation are not yet connected. Ordinary close-to-hide remains blocked, quit/update/reload remain unguarded, and the no-session ordering escalation remains unresolved; these tests do not establish native support.

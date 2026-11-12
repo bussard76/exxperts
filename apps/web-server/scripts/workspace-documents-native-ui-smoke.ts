@@ -16,6 +16,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../.
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "exxperts-documents-native-"));
 const port = await freePort();
 const stuck = process.env.T20_NATIVE_STUCK === "1";
+const prepare = process.env.T20_NATIVE_PREPARE === "1";
 const feed = http.createServer((_request, response) => {
 	response.writeHead(200, { "content-type": "application/json" });
 	response.end(JSON.stringify({ tag_name: "v0.0.0", prerelease: false, draft: false }));
@@ -40,6 +41,26 @@ try {
 		if (!window) throw new Error("no owner window");
 		return window.id;
 	}, port);
+	if (prepare) {
+		await application.evaluate(({ BrowserWindow }, id) => {
+			const window = BrowserWindow.fromId(id)!;
+			const original = window.webContents.executeJavaScript.bind(window.webContents);
+			(window as any).__t20Polls = 0;
+			(window as any).__t20Prepares = 0;
+			(window.webContents as any).executeJavaScript = (script: string, ...args: unknown[]) => {
+				if (script.includes("__exxpertsDocuments")) {
+					(window as any).__t20Polls++;
+					if (script.includes('"native-prepare"')) (window as any).__t20Prepares++;
+				}
+				return (original as any)(script, ...args);
+			};
+		}, owner);
+		await waitUntil(() => application!.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Polls >= 2, owner), "the real owner has been polled");
+		await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.close(), owner);
+		await new Promise((resolve) => setTimeout(resolve, 1_000));
+		assert(await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20Prepares === 1, owner), "the actual native close sends exactly one owner prepare");
+		assert(await application.evaluate(({ BrowserWindow }, id) => Boolean(BrowserWindow.fromId(id)?.isVisible()), owner), "the staged no-session response cannot yet continue the native close");
+	} else {
 	// Fault the shell's actual outbound exchange, retaining its ordinary close entrypoint.
 	await application.evaluate(({ BrowserWindow }, fault) => {
 		const window = BrowserWindow.fromId(fault.id)!;
@@ -67,6 +88,7 @@ try {
 		await application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any).__t20Release(), owner);
 		await new Promise((resolve) => setTimeout(resolve, 500));
 		assert(await application.evaluate(({ BrowserWindow }, id) => Boolean(BrowserWindow.fromId(id)?.isVisible()), owner), "a late owner reply cannot revive the expired native close");
+	}
 	}
 } finally {
 	if (application) await application.close().catch(() => {});

@@ -245,6 +245,7 @@ function wireNavigation(win: BrowserWindow): void {
 
 
 const documentsPollInFlight = new WeakSet<BrowserWindow>();
+const requestDocumentsHide = new WeakMap<BrowserWindow, () => void>();
 
 // The first C5 transport checkpoint accepts only hello and empty polls. It
 // cannot authorize native actions or register a child until the remaining
@@ -257,27 +258,47 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
   let sequence = 1;
   let ownerId: string | null = null;
   let ownerGeneration = 0;
+  let latestStamp: Record<string, unknown> | null | undefined;
+  let hideRequest: { nativeRequestId: string; observedStamp: Record<string, unknown> | null } | null = null;
+  let hideSent = false;
+  let retryInput: { version: number; nativeSessionId: string; sequence: number; ack: number; items: Record<string, unknown>[] } | null = null;
+  requestDocumentsHide.set(win, () => {
+    if (!active || hideRequest || ownerId === null || latestStamp === undefined) return;
+    hideRequest = { nativeRequestId: randomUUID(), observedStamp: latestStamp };
+  });
   const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
   const keys = (value: Record<string, unknown>, expected: string) => Object.keys(value).sort().join(",") === expected;
   const positive = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
-  const accept = (value: unknown): boolean => {
+  const accept = (value: unknown, sentPrepare: boolean): boolean => {
+    let receivedNoSession = false;
     if (!record(value) || !keys(value, "ack,items,nativeSessionId,sequence,status,version") || value.version !== 1 || value.nativeSessionId !== session || value.sequence !== sequence || value.ack !== sequence || !Array.isArray(value.items) || !record(value.status) || !keys(value.status, "binding,child,stamp") || !record(value.status.binding) || !keys(value.status.binding, "nativeSessionId,ownerGeneration,ownerId") || value.status.binding.nativeSessionId !== session || typeof value.status.binding.ownerId !== "string" || !uuid.test(value.status.binding.ownerId) || !positive(value.status.binding.ownerGeneration) || value.status.child !== null) return false;
     const binding = value.status.binding;
     if (ownerId === null) {
       const hello = value.items[0];
       if (sequence !== 1 || value.items.length !== 1 || !record(hello) || !keys(hello, "kind,ownerGeneration,ownerId") || hello.kind !== "hello" || hello.ownerId !== binding.ownerId || hello.ownerGeneration !== binding.ownerGeneration) return false;
-    } else if (binding.ownerId !== ownerId || binding.ownerGeneration !== ownerGeneration || value.items.length !== 0) return false;
+    } else if (binding.ownerId !== ownerId || binding.ownerGeneration !== ownerGeneration) return false;
+    else if (sentPrepare && hideRequest && !hideSent) {
+      const reply = value.items[0];
+      if (hideRequest.observedStamp !== null || value.status.stamp !== null || value.items.length !== 1 || !record(reply) || !keys(reply, "binding,disposition,kind,nativeRequestId") || reply.kind !== "no-session" || reply.nativeRequestId !== hideRequest.nativeRequestId || reply.disposition !== "hide" || !record(reply.binding) || !keys(reply.binding, "nativeSessionId,ownerGeneration,ownerId") || reply.binding.nativeSessionId !== session || reply.binding.ownerId !== ownerId || reply.binding.ownerGeneration !== ownerGeneration) return false;
+      receivedNoSession = true;
+    } else if (value.items.length !== 0) return false;
     if (value.status.stamp !== null) {
       const stamp = value.status.stamp;
       if (!record(stamp) || !keys(stamp, "conversationId,draftGeneration,hostGeneration,ownerGeneration,ownerId,roomGeneration,roomId") || stamp.ownerId !== binding.ownerId || stamp.ownerGeneration !== binding.ownerGeneration || typeof stamp.roomId !== "string" || !stamp.roomId || typeof stamp.conversationId !== "string" || !stamp.conversationId || !positive(stamp.roomGeneration) || !positive(stamp.hostGeneration) || !positive(stamp.draftGeneration)) return false;
     }
+    if (receivedNoSession) hideSent = true;
+    latestStamp = value.status.stamp as Record<string, unknown> | null;
     ownerId = binding.ownerId as string;
     ownerGeneration = binding.ownerGeneration as number;
     return true;
   };
   const poll = () => {
     if (!active || pending || documentsPollInFlight.has(win) || win.isDestroyed() || win.webContents.isDestroyed() || !isAppOrigin(win.webContents.getURL()) || !Number.isSafeInteger(sequence)) return;
-    const input = { version: 1, nativeSessionId: session, sequence, ack: sequence - 1, items: sequence === 1 ? [{ kind: "hello" }] : [] };
+    if (!retryInput) {
+      const items = sequence === 1 ? [{ kind: "hello" }] : hideRequest && !hideSent && ownerId !== null ? [{ kind: "native-prepare", binding: { nativeSessionId: session, ownerId, ownerGeneration }, nativeRequestId: hideRequest.nativeRequestId, observedStamp: hideRequest.observedStamp, disposition: "hide" }] : [];
+      retryInput = { version: 1, nativeSessionId: session, sequence, ack: sequence - 1, items };
+    }
+    const input = retryInput;
     const expression = `(() => { const endpoint = window.__exxpertsDocuments; return endpoint && typeof endpoint.step === "function" ? endpoint.step(${JSON.stringify(input)}) : null; })()`;
     pending = true;
     documentsPollInFlight.add(win);
@@ -287,12 +308,12 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
     try { evaluation = win.webContents.executeJavaScript(expression); }
     catch { clearTimeout(deadline); pending = false; documentsPollInFlight.delete(win); return; }
     void evaluation.then((output: unknown) => {
-      if (active && !expired && accept(output)) sequence++;
+      if (active && !expired && accept(output, input.items[0]?.kind === "native-prepare")) { sequence++; retryInput = null; }
     }).catch(() => {}).finally(() => { clearTimeout(deadline); pending = false; documentsPollInFlight.delete(win); });
   };
   const timer = setInterval(poll, 100);
   poll();
-  return () => { active = false; clearInterval(timer); };
+  return () => { active = false; clearInterval(timer); requestDocumentsHide.delete(win); };
 }
 
 function createMainWindow(): BrowserWindow {
@@ -333,6 +354,7 @@ function createMainWindow(): BrowserWindow {
       // The C5 continuation is not connected yet. A missing or untrusted
       // owner result cannot authorize hiding the live window.
       event.preventDefault();
+      requestDocumentsHide.get(win)?.();
     }
   });
   win.on("show", () => setTrayBadge(false));
