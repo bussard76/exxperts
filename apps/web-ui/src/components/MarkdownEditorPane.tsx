@@ -139,8 +139,6 @@ function useDocumentState<T>(initial: T, onMutation: () => void, equals: (a: T, 
 interface SurfaceHandle {
 	setFence: (value: boolean) => void;
 	save: (resolvedConflict?: boolean) => Promise<boolean>;
-	settle: () => Promise<void>;
-	pendingWrite: () => boolean;
 	discard: () => void;
 	focus: () => void;
 	getContent: () => string;
@@ -361,8 +359,6 @@ function MarkdownEditorSurface({
 			editorRef.current?.setEditable(canEdit && !readOnly && !value, false);
 		},
 		save,
-		settle: async () => { await saveInFlightRef.current; },
-		pendingWrite: () => saveInFlightRef.current !== null,
 		discard,
 		focus: () => editorRef.current?.commands.focus(),
 		getContent: () => editorRef.current ? editorMarkdown(editorRef.current) : draftRef.current,
@@ -727,7 +723,7 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 	}, []);
 	const settle = useCallback(async () => {
 		await keepMineInFlightRef.current;
-		await surfaceRef.current?.settle();
+		await saveInFlight.current;
 		const unknown = unknownWriteRef.current;
 		if (!unknown) return true;
 		if (!unknown.terminal) return false;
@@ -757,14 +753,14 @@ export const MarkdownEditorPane = forwardRef(function MarkdownEditorPane({ agent
 		} catch {
 			return false;
 		}
-	}, [agentId, conversationId, path, reconcileServerContent, recordConfirmedWrite, setDirty]);
+	}, [agentId, conversationId, path, reconcileServerContent, recordConfirmedWrite, saveInFlight, setDirty]);
 	const discard = useCallback(() => {
 		if (unknownWriteRef.current || !surfaceRef.current) return false;
 		surfaceRef.current.discard();
 		return true;
 	}, []);
 	const focus = useCallback(() => surfaceRef.current?.focus(), []);
-	const pendingWrite = useCallback(() => unknownWriteRef.current ? "unknown" as const : keepMineInFlightRef.current || surfaceRef.current?.pendingWrite() ? "pending" as const : null, []);
+	const pendingWrite = useCallback(() => unknownWriteRef.current ? "unknown" as const : keepMineInFlightRef.current || saveInFlight.current ? "pending" as const : null, [saveInFlight]);
 	const handlePreviewLink = useCallback((href: string, isWikiLink = false): boolean => {
 		const workspacePath = resolveWorkspaceMarkdownPath(path, href, isWikiLink);
 		if (workspacePath && onOpenMarkdown) {

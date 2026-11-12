@@ -134,9 +134,14 @@ try {
 				await savingChild.getByRole("button", { name: "Return", exact: true }).click();
 				await closedSavingChild;
 				assert(await raw.inputValue() === edited && Number(writes) === 1, "Return retains a single pending Save and its source");
+				await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+				const pendingGuard = page.getByRole("dialog", { name: "Unsaved Markdown changes" });
+				await pendingGuard.getByRole("button", { name: "Discard changes" }).click();
+				assert((await page.evaluate(() => location.hash)).includes("/room/"), "Discard cannot leave while the retained Save is pending");
+				await pendingGuard.getByRole("button", { name: "Cancel", exact: true }).click();
 			} finally { releaseWrite(); }
 			await waitUntil(() => fs.readFileSync(path.join(workspace, "invented.md"), "utf8") === edited, "the retained Save reaches the original workspace");
-			assert(Number(writes) === 1, "moving the pending Save does not send another write");
+			assert(Number(writes) === 1 && (await page.evaluate(() => location.hash)).includes("/room/"), "moving the pending Save sends no second write and the canceled leave stays canceled");
 		} finally { await context.close(); }
 	} finally { await browser.close(); }
 	console.log("workspace-detached-documents-ui smoke: ok");
