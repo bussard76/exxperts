@@ -511,6 +511,10 @@ try {
 				await closePage.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
 				await waitUntil(() => heldChild.evaluate(`window.__t20CloseCalls > 0`), "the real Home flow requests the registered child close");
 				assert(!heldChild.isClosed() && (await closePage.evaluate(() => location.hash)).includes("/room/"), "Home waits when the actual child is not closed");
+				await closePage.getByText("Invented Close Ordering · Documents unavailable", { exact: true }).waitFor({ timeout: 8_000 });
+				assert(!heldChild.isClosed() && (await closePage.evaluate(() => location.hash)).includes("/room/"), "a child-close settlement deadline keeps the original continuation fenced");
+				await closePage.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
+				assert((await closePage.evaluate(() => location.hash)).includes("/room/"), "a second Home cannot replace the unresolved original action");
 				const childClosed = heldChild.waitForEvent("close");
 				await heldChild.evaluate(`window.close = window.__t20OriginalClose; window.close()`);
 				await childClosed;

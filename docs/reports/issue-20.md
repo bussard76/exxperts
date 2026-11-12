@@ -647,3 +647,7 @@ The `sidebar-reopen-ui` smoke now also hovers the actual tree file and verifies 
 ## Checkpoint: attached RAW and drag after clipping
 
 The attributed `workspace-markdown-raw-ui` and `workspace-markdown-images-ui` smokes passed 2/2 after the collapsed-tree clipping change. These exercise attached editor/RAW and drag paths, not a child-host transfer.
+
+## Checkpoint: child-close settlement deadline case
+
+The detached smoke now specifies that an actual Home request held behind a real child close reaches the existing unavailable strip by the five-second settlement deadline, keeps the original room and rejects a competing Home, then continues only after the same child actually closes. Scripts typecheck passed. This case has not executed because Detach remains disabled; the deadline implementation and native abort/ack semantics remain open, and no passing child-close claim is made.
