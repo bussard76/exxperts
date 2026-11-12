@@ -499,3 +499,7 @@ The private host hook now tracks owner slots and at most one opening, prepared o
 ## Checkpoint: in-flight preview transfer case
 
 The detached smoke now specifies holding the actual HTML metadata request across Detach, completing it in the child, and returning without another content request. Scripts typecheck passed; the attributed smoke remains red at the initial unavailable Detach control, so the new case was not reached and does not establish transfer behavior.
+
+## Checkpoint: controlled frame generation draft
+
+The owner now publishes host generation to the document components. HTML, PPTX and Excalidraw keep their component, in-flight fetch and error state while a changed host generation creates a fresh concrete iframe identity; the prior listener also rejects messages after its element changes owner window. UI and scripts typechecks, UI asset build, and the attributed `workspace-file-tabs-ui` smoke passed (1/1), including attached real-frame source and navigation checks. No transfer currently advances the generation, and the child/in-flight cases remain unexecuted; preflight identity allocation and actual controlled-move security still require completion and proof.

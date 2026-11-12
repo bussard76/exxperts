@@ -567,6 +567,7 @@ export function App() {
 	const [documentOwnerId] = useState(allocateDocumentId);
 	const documentOwnerGenerationRef = useRef(1);
 	const documentHostGenerationRef = useRef(1);
+	const [documentHostGeneration, setDocumentHostGeneration] = useState(1);
 	const documentDraftGenerationRef = useRef(1);
 	const documentSaveInFlightRef = useRef<Promise<boolean> | null>(null);
 	const documentKeepMineInFlightRef = useRef<Promise<boolean> | null>(null);
@@ -1121,6 +1122,7 @@ export function App() {
 				const generation = Number.isSafeInteger(old) && old < Number.MAX_SAFE_INTEGER ? old + 1 : Number.NaN;
 				checkpointContextRef.current = { key, generation, roomId: next?.agentId ?? null, conversationId: next?.conversationId ?? null };
 				documentHostGenerationRef.current = 1;
+				setDocumentHostGeneration(1);
 				documentDraftGenerationRef.current = 1;
 			}
 		}
@@ -9183,7 +9185,7 @@ export function App() {
 						agentId={persistentChat.agentId}
 						conversationId={persistentChat.conversationId}
 						contextGeneration={checkpointContextRef.current.generation}
-						hostGeneration={documentHostGenerationRef.current}
+						hostGeneration={documentHostGeneration}
 						onMutation={onDocumentMutation}
 						path={rightPane.path}
 						fenced={markdownEditorFenced}
@@ -9202,13 +9204,13 @@ export function App() {
 						<WorkspaceWordPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} />
 					</div>)}
 					{workspaceTabs.paths.filter((path) => /\.html?$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceHtml" || rightPane.path !== path}>
-						<WorkspaceHtmlPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} createFrameId={allocateDocumentId} />
+						<WorkspaceHtmlPreview hostGeneration={documentHostGeneration} agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} createFrameId={allocateDocumentId} />
 					</div>)}
 					{workspaceTabs.paths.filter((path) => /\.(?:txt|json)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceText" || rightPane.path !== path}>
 						<WorkspaceTextPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} />
 					</div>)}
 					{workspaceTabs.paths.filter((path) => /\.(?:pptx|excalidraw)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceFramed" || rightPane.path !== path}>
-						<WorkspaceFramedPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} createFrameId={allocateDocumentId} />
+						<WorkspaceFramedPreview hostGeneration={documentHostGeneration} agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} createFrameId={allocateDocumentId} />
 					</div>)}
 					{workspaceTabs.paths.filter((path) => /\.xlsx$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceSpreadsheet" || rightPane.path !== path}>
 						<WorkspaceSpreadsheetPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} />
@@ -9217,7 +9219,7 @@ export function App() {
 						<WorkspacePdfPreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} />
 					</div>)}
 					{workspaceTabs.paths.filter((path) => /\.(png|jpe?g|gif|webp|svg)$/i.test(path)).map((path) => <div className="workspace-preview-content" key={path} hidden={rightPane?.kind !== "workspaceImage" || rightPane.path !== path}>
-						<WorkspaceImagePreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} hostGeneration={documentHostGenerationRef.current} />
+						<WorkspaceImagePreview agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} path={path} retained={documentPreviewSnapshotsRef.current.get(path)!} hostGeneration={documentHostGeneration} />
 					</div>)}
 				</div>, documentHost)}
 				</>
@@ -9305,7 +9307,7 @@ export function App() {
 					appearance={appearance}
 					onSetAppearance={setAppearance}
 					onSettings={openSettings}
-					workspaceSlot={persistentChat ? <><div ref={mountDocumentTreeHost} style={{ display: "contents" }} />{createPortal(<WorkspaceFileBrowser agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} hostGeneration={documentHostGenerationRef.current} selectedPath={activeWorkspacePath(rightPane)} onFileSelect={openWorkspaceMarkdown} />, documentTreeHost)}</> : undefined}
+					workspaceSlot={persistentChat ? <><div ref={mountDocumentTreeHost} style={{ display: "contents" }} />{createPortal(<WorkspaceFileBrowser agentId={persistentChat.agentId} conversationId={persistentChat.conversationId} hostGeneration={documentHostGeneration} selectedPath={activeWorkspacePath(rightPane)} onFileSelect={openWorkspaceMarkdown} />, documentTreeHost)}</> : undefined}
 					assetsSlot={persistentChat ? <AttachmentsEntry count={attachmentRows.length} open={attachmentsView !== null} onClick={toggleAttachments} /> : undefined}
 				/>
 			}
