@@ -118,9 +118,12 @@ try {
 				await loadReleased;
 				await route.fulfill({ status: 403, json: { code: "workspace_read_forbidden", error: "Invented read refusal" } });
 			});
+			await page.evaluate(`window.__t20PopupOpen = window.open; window.open = function (...args) { window.__t20PopupArgs = args; return window.__t20PopupOpen.apply(this, args); }`);
 			const emptyOpened = page.waitForEvent("popup");
 			await detach.click();
 			const emptyChild = await emptyOpened;
+			const popupArgs = await page.evaluate(`window.open = window.__t20PopupOpen; delete window.__t20PopupOpen; window.__t20PopupArgs`) as string[];
+			assert(popupArgs[0] === "about:blank" && typeof popupArgs[1] === "string" && !/Cedar|invented|draft/i.test(popupArgs[1]) && /width=\d+/.test(popupArgs[2]) && /height=\d+/.test(popupArgs[2]) && /left=-?\d+/.test(popupArgs[2]) && /top=-?\d+/.test(popupArgs[2]), "the real browser popup request excludes room and draft text and includes placement hints");
 			assert(await emptyChild.locator(".workspace-tab").count() === 0, "an empty document session has no invented tab");
 			await emptyChild.locator(".workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
 			fs.writeFileSync(path.join(workspace, "focused.md"), "# Invented focus refresh\n");

@@ -505,3 +505,7 @@ The detached smoke now specifies holding the actual HTML metadata request across
 The owner now publishes host generation to the document components. HTML, PPTX and Excalidraw keep their component, in-flight fetch and error state while a changed host generation creates a fresh concrete iframe identity; the prior listener also rejects messages after its element changes owner window. UI and scripts typechecks, UI asset build, and the attributed `workspace-file-tabs-ui` smoke passed (1/1), including attached real-frame source and navigation checks. No transfer currently advances the generation, and the child/in-flight cases remain unexecuted; preflight identity allocation and actual controlled-move security still require completion and proof.
 
 The pending child fixture was corrected to avoid duplicate invented-file writes and to release the held HTML response if child opening or its loading assertion fails. Scripts typecheck passed; the child test remains blocked before these lines by unavailable Detach.
+
+## Checkpoint: browser popup request case
+
+The detached browser smoke now captures the real `window.open` arguments while still invoking the real opener, and requires an about:blank popup name without the invented room/draft text plus size and position hints. Scripts typecheck passed; the attributed run still stops at the first unavailable Detach assertion, so this does not establish placement, popup registration or monitor behavior.
