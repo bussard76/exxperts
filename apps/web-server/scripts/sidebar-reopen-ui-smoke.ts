@@ -97,7 +97,13 @@ try {
 			const settingsItem = page.getByRole("menuitem", { name: "Settings" });
 			await settingsItem.waitFor();
 			assert(await settingsItem.evaluate((item) => { const rect = item.getBoundingClientRect(); const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2); return hit === item || item.contains(hit); }), "sidebar menu remains above the document tree");
+			await settingsItem.click();
+			await page.locator(".settings-dialog-backdrop").waitFor();
+			assert(await note.evaluate((node) => { const rect = node.getBoundingClientRect(); const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2); return !hit || !node.contains(hit); }), "settings overlays the document tree");
 			await page.keyboard.press("Escape");
+			await page.locator(".settings-dialog-backdrop").waitFor({ state: "detached" });
+			await page.locator(".sidebar-drawer-backdrop").click({ position: { x: 380, y: 400 } });
+			await page.getByRole("button", { name: "Show sidebar" }).click();
 			await note.click();
 			await page.getByRole("complementary", { name: "Markdown editor: notes.md" }).waitFor();
 		}

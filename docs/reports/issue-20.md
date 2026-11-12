@@ -619,3 +619,7 @@ The `sidebar-reopen-ui` smoke now measures the single host's tree against its re
 ## Open: narrow-screen tree stacking
 
 An added real 390px browser check failed because the fixed attached tree is under the sidebar drawer and its slot intercepts file clicks. A trial raising the tree above the drawer made the file clickable but caused it to cover the sidebar settings menu; the later hit-test failed, so that trial was removed. The new assertions remain in `sidebar-reopen-ui` and the narrow-screen layout is unresolved; no responsive-layout pass is claimed. The Controller's C7 review separately found the written pre-readiness guarantee applies and awaits Sascha's decision; it does not authorize a protocol or scope change.
+
+## Checkpoint: narrow-screen tree stacking
+
+The attached single-container draft now gives the narrow-screen drawer background, tree and footer menu separate stacking layers. The attributed `sidebar-reopen-ui` smoke passed 1/1 after exercising a 390px real sidebar tree click, settings-menu hit and settings overlay, backdrop dismissal and reopening, in addition to the desktop resize/collapse checks; the UI asset build passed. This resolves the two recorded browser regressions for those entry points only; child movement and broader responsive/native evidence remain open.
