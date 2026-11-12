@@ -7619,6 +7619,8 @@ export function App() {
 		const cleanAction = admitCleanMarkdownEditorAction(() => openPersistentAgentResume(status));
 		if (cleanAction) { await cleanAction; return; }
 		if (!guardMarkdownEditorAction(() => openPersistentAgentResume(status), "navigate")) return;
+		const admission = markdownEditorAdmissionRef.current;
+		if (!admission || !preparedDocumentAdmissionIsCurrent(admission)) return;
 		setPersistentResumeError(null);
 		clearBackgroundActivityBadge(status.id);
 		const runtimeThreadId = status.runtime.state === "standby" || status.runtime.state === "active" ? status.runtime.activeThreadId : null;
@@ -7631,6 +7633,7 @@ export function App() {
 		}
 		try {
 			const record = await fetchPersistentAgentThread(status.id, threadId);
+			if (!preparedDocumentAdmissionIsCurrent(admission)) return;
 			const thread = threadRecordToLocalThread(record, shownRoomName(status.displayName) || "Exxpert");
 			const liveThread = { ...thread, state: "live" as const };
 			// Standby → resume re-queues the persisted pending-transfer queue (§2.3)
@@ -7638,6 +7641,7 @@ export function App() {
 			const restoredQueue = readConsultHandoffQueue(record.pendingHandoffs);
 			applyPendingHandoffs(restoredQueue, deriveTrailingConsultIds(liveThread.items, restoredQueue.length));
 			await savePersistentAgentThread(liveThread, "active", "launcher", liveThread.items, restoredQueue);
+			if (!preparedDocumentAdmissionIsCurrent(admission)) return;
 			setRightPane(null);
 			resetLiveUiState();
 			const savedDraft = roomDraftsRef.current.get(status.id);
@@ -7658,6 +7662,7 @@ export function App() {
 			// to watch land. Clear again now that the room is committed.
 			clearBackgroundActivityBadge(status.id);
 		} catch (e) {
+			if (!preparedDocumentAdmissionIsCurrent(admission)) return;
 			setPersistentResumeError(formatDirectResumeError(e));
 			setView("home");
 			await refreshPersistentAgentStatus();

@@ -420,6 +420,58 @@ try {
 			await rebind.close();
 		}
 		{
+			const reloadAgent = agents.createPersistentAgentFromScaffoldInput({ displayName: "Invented Late Reload", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }).agent.agentId;
+			roomModels.writeRoomModels(reloadAgent, { conversation: CLAUDE });
+			assert((await authedFetch(`${baseUrl}/api/persistent-agents/${encodeURIComponent(reloadAgent)}/workspace-default`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ root: workspace, workspaceAccessMode: "localFiles" }) })).ok, "the invented late-Reload room uses the temporary workspace");
+			const stale = await ctx.newPage();
+			await stale.addInitScript({ content: `window.addEventListener("beforeunload", (event) => { event.preventDefault(); event.returnValue = ""; });` });
+			stale.on("dialog", (dialog) => { void dialog.dismiss(); });
+			await stale.goto(`${baseUrl}/#/room/${reloadAgent}`);
+			const staleComposer = stale.locator("textarea").first();
+			await stale.locator('button[title="Send"]').first().waitFor({ timeout: 15000 });
+			await staleComposer.fill("Invented old Reload question.");
+			await staleComposer.press("Enter");
+			await stale.getByText("Answer from claude-fake.").first().waitFor({ timeout: 20000 });
+			await waitUntil(async () => Boolean(((await (await authedFetch(`${baseUrl}/api/persistent-agents/${reloadAgent}/status`)).json()) as { runtime?: { activeThreadId?: string } }).runtime?.activeThreadId), "the invented Reload room has an active thread");
+			const oldThread = String(((await (await authedFetch(`${baseUrl}/api/persistent-agents/${reloadAgent}/status`)).json()) as { runtime?: { activeThreadId?: string } }).runtime?.activeThreadId ?? "");
+			await waitUntil(async () => JSON.stringify(await (await authedFetch(`${baseUrl}/api/persistent-agents/${reloadAgent}/threads/${oldThread}`)).json()).includes("Invented old Reload question."), "the invented old Reload question is saved");
+			const mover = await ctx.newPage();
+			await mover.goto(`${baseUrl}/#/room/${reloadAgent}`);
+			await mover.getByText("Invented old Reload question.", { exact: true }).waitFor();
+			await mover.getByRole("button", { name: "Forget", exact: true }).first().click();
+			await mover.getByRole("alertdialog", { name: "Forget this conversation and start fresh?" }).getByRole("button", { name: "Forget", exact: true }).click();
+			await waitUntil(async () => { const now = String(((await (await authedFetch(`${baseUrl}/api/persistent-agents/${reloadAgent}/status`)).json()) as { runtime?: { activeThreadId?: string } }).runtime?.activeThreadId ?? ""); return !!now && now !== oldThread; }, "the invented room moves to a fresh conversation");
+			await staleComposer.fill("Invented unsent Reload question.");
+			await staleComposer.press("Enter");
+			await stale.getByText(MOVED).first().waitFor();
+			let releaseThread!: () => void, beginThread!: () => void, holdThread = true;
+			const threadReleased = new Promise<void>((resolve) => { releaseThread = resolve; });
+			const threadStarted = new Promise<void>((resolve) => { beginThread = resolve; });
+			await stale.route("**/threads/**", async (route) => {
+				if (!holdThread || route.request().method() !== "GET") return route.continue();
+				holdThread = false;
+				const response = await route.fetch();
+				beginThread();
+				await threadReleased;
+				await route.fulfill({ response });
+			});
+			await stale.getByRole("button", { name: "Reload", exact: true }).click();
+			try {
+				await threadStarted;
+				await stale.route("**/workspace-files?*", (route) => route.fulfill({ status: 409, json: { code: "person_changed", error: "Invented identity change" } }));
+				await stale.evaluate(() => window.dispatchEvent(new Event("focus")));
+				await stale.getByText("Someone else is now signed in on this server.", { exact: true }).waitFor();
+				assert(await stale.getByText("Invented old Reload question.", { exact: true }).count() === 1, "the invalidated chat retains its earlier text before the late thread reply");
+				const response = stale.waitForResponse((candidate) => candidate.request().method() === "GET" && candidate.url().includes("/threads/"));
+				releaseThread();
+				assert((await response).ok(), "the current invented thread read completed before its answer was released");
+				await stale.waitForTimeout(500);
+				assert(await stale.getByText("Invented old Reload question.", { exact: true }).count() === 1, "a late Reload thread read cannot replace the invalidated chat");
+			} finally { releaseThread(); }
+			await stale.close();
+			await mover.close();
+		}
+		{
 			const policyAgent = agents.createPersistentAgentFromScaffoldInput({ displayName: "Invented Policy Room", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }).agent.agentId;
 			roomModels.writeRoomModels(policyAgent, { conversation: CLAUDE });
 			const policyUrl = `${baseUrl}/api/persistent-agents/${encodeURIComponent(policyAgent)}/workspace-default`;
