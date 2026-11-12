@@ -172,13 +172,23 @@ try {
 			await page.unroute("**/workspace-markdown?*");
 			const conflictOpened = page.waitForEvent("popup");
 			await detach.click();
-			const conflictChild = await conflictOpened;
+			let conflictChild = await conflictOpened;
 			const conflictRaw = conflictChild.getByRole("textbox", { name: "Raw Markdown source" });
 			await conflictRaw.waitFor();
 			const conflictDraft = "# Invented child conflict draft\n";
-			await conflictRaw.fill(conflictDraft);
-			fs.writeFileSync(path.join(workspace, "invented.md"), "# Invented external revision\n");
-			await conflictChild.locator(".markdown-editor-save").click();
+			await page.evaluate(`window.__t20OriginalTimeout = window.setTimeout; window.setTimeout = (callback, delay, ...args) => window.__t20OriginalTimeout(callback, delay === 1000 ? 30000 : delay, ...args)`);
+			await conflictChild.evaluate(`window.__t20OriginalTimeout = window.setTimeout; window.setTimeout = (callback, delay, ...args) => window.__t20OriginalTimeout(callback, delay === 1000 ? 30000 : delay, ...args)`);
+			try {
+				await conflictRaw.fill(conflictDraft);
+				fs.writeFileSync(path.join(workspace, "invented.md"), "# Invented external revision\n");
+				await conflictChild.locator(".markdown-editor-conflict").waitFor();
+			} finally { await page.evaluate(`window.setTimeout = window.__t20OriginalTimeout; delete window.__t20OriginalTimeout`); }
+			await conflictChild.close();
+			await page.locator(".markdown-editor-conflict").waitFor();
+			assert(await raw.inputValue() === conflictDraft && Number(writes) === 1, "unexpected browser-child closure retains the polled conflict and exact local source without writing");
+			const conflictReopened = page.waitForEvent("popup");
+			await detach.click();
+			conflictChild = await conflictReopened;
 			await conflictChild.locator(".markdown-editor-conflict").waitFor();
 			let releaseKeep!: () => void, beginKeep!: () => void;
 			const keepReleased = new Promise<void>((resolve) => { releaseKeep = resolve; });
@@ -195,10 +205,10 @@ try {
 				const closedConflictChild = conflictChild.waitForEvent("close");
 				await conflictChild.getByRole("button", { name: "Return", exact: true }).click();
 				await closedConflictChild;
-				assert(await raw.inputValue() === conflictDraft && Number(writes) === 3, "Return retains the pending conflict resolution and exact draft");
+				assert(await raw.inputValue() === conflictDraft && Number(writes) === 2, "Return retains the pending conflict resolution and exact draft");
 			} finally { releaseKeep(); }
 			await waitUntil(() => fs.readFileSync(path.join(workspace, "invented.md"), "utf8") === conflictDraft, "the retained Keep mine reaches the original workspace");
-			assert(Number(writes) === 3, "returning a pending Keep mine sends no duplicate write");
+			assert(Number(writes) === 2, "returning a pending Keep mine sends no duplicate write");
 			await waitUntil(async () => await page.locator(".markdown-editor-status").textContent() === "Saved", "the retained Keep mine settles");
 			await page.unroute("**/workspace-markdown?*");
 			const unknownOpened = page.waitForEvent("popup");
@@ -214,19 +224,19 @@ try {
 			const closedUnknownChild = unknownChild.waitForEvent("close");
 			await unknownChild.getByRole("button", { name: "Return", exact: true }).click();
 			await closedUnknownChild;
-			assert(await raw.inputValue() === unknownDraft && Number(writes) === 4, "Return retains an unknown write and its source");
+			assert(await raw.inputValue() === unknownDraft && Number(writes) === 3, "Return retains an unknown write and its source");
 			await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
 			const unknownGuard = page.getByRole("dialog", { name: "Unsaved Markdown changes" });
 			await unknownGuard.getByRole("button", { name: "Discard changes" }).click();
 			await unknownGuard.waitFor({ state: "hidden" });
-			assert((await page.evaluate(() => location.hash)).includes("/room/") && await raw.inputValue() === unknownDraft && Number(writes) === 4, "an unresolved returned write refuses Discard without a retry");
+			assert((await page.evaluate(() => location.hash)).includes("/room/") && await raw.inputValue() === unknownDraft && Number(writes) === 3, "an unresolved returned write refuses Discard without a retry");
 			const lossOpened = page.waitForEvent("popup");
 			await detach.click();
 			const lostChild = await lossOpened;
 			await lostChild.getByRole("textbox", { name: "Raw Markdown source" }).waitFor();
 			await lostChild.close();
 			await waitUntil(async () => await raw.isVisible(), "the owner recovers after the real browser child closes");
-			assert(await raw.inputValue() === unknownDraft && Number(writes) === 4, "unexpected browser-child closure retains the unresolved source without a retry");
+			assert(await raw.inputValue() === unknownDraft && Number(writes) === 3, "unexpected browser-child closure retains the unresolved source without a retry");
 		} finally { await context.close(); }
 	} finally { await browser.close(); }
 	console.log("workspace-detached-documents-ui smoke: ok");

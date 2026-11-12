@@ -226,7 +226,7 @@ function MarkdownEditorSurface({
 	const userEditedRef = useRef(false);
 	const draftRef = useRef(content);
 	const revisionRef = useRef(revision);
-	revisionRef.current = revision;
+	if (!hasExternalUpdate) revisionRef.current = revision;
 	const headerSaveRef = useRef<(() => Promise<boolean>) | null>(null);
 	const searchStateRef = useRef<SearchDecorationState | null>(null);
 	const resolveImageSrcRef = useRef(resolveImageSrc);
