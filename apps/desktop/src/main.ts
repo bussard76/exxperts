@@ -394,37 +394,42 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
       popup.registered = true;
       const child = popup.child;
       if (child && !child.isDestroyed() && popup.placement) {
-        child.setBounds(popup.placement.bounds);
-        trackDocumentsWindowState(child);
-        if (popup.maximized) child.once("show", () => { if (!child.isDestroyed()) child.maximize(); });
-        child.show();
-        const revalidatePlacement = () => {
-          if (child.isDestroyed()) return;
-          const placement = loadDocumentsWindowState(win, { bounds: child.getBounds(), maximized: child.isMaximized() });
-          if (!placement) return;
+        const placement = popup.placement;
+        const maximized = popup.maximized;
+        setImmediate(() => {
+          if (!active || win.isDestroyed() || child.isDestroyed() || popup?.child !== child) return;
           child.setBounds(placement.bounds);
-          if (placement.maximized && !child.isMaximized()) child.maximize();
-          else if (!placement.maximized && child.isMaximized()) child.unmaximize();
-        };
-        child.on("focus", revalidatePlacement);
-        const onDisplayChange = () => revalidatePlacement();
-        const displayEvents = screen as unknown as { on: (event: string, listener: () => void) => void; removeListener: (event: string, listener: () => void) => void };
-        try {
-          displayEvents.on("display-removed", onDisplayChange);
-          displayEvents.on("display-metrics-changed", onDisplayChange);
-        } catch { /* keep the registered child usable if display notifications are unavailable */ }
-        child.once("closed", () => {
-          child.removeListener("focus", revalidatePlacement);
+          trackDocumentsWindowState(child);
+          if (maximized) child.once("show", () => { if (!child.isDestroyed()) child.maximize(); });
+          child.show();
+          const revalidatePlacement = () => {
+            if (child.isDestroyed()) return;
+            const placement = loadDocumentsWindowState(win, { bounds: child.getBounds(), maximized: child.isMaximized() });
+            if (!placement) return;
+            child.setBounds(placement.bounds);
+            if (placement.maximized && !child.isMaximized()) child.maximize();
+            else if (!placement.maximized && child.isMaximized()) child.unmaximize();
+          };
+          child.on("focus", revalidatePlacement);
+          const onDisplayChange = () => revalidatePlacement();
+          const displayEvents = screen as unknown as { on: (event: string, listener: () => void) => void; removeListener: (event: string, listener: () => void) => void };
           try {
-            displayEvents.removeListener("display-removed", onDisplayChange);
-            displayEvents.removeListener("display-metrics-changed", onDisplayChange);
-          } catch {}
-          if (popup?.child === child) {
-            closedChildPermitId = popup.permit.permitId;
-            popup.child = null;
-            popup = null;
-            documentPopupPermits.delete(win);
-          }
+            displayEvents.on("display-removed", onDisplayChange);
+            displayEvents.on("display-metrics-changed", onDisplayChange);
+          } catch { /* keep the registered child usable if display notifications are unavailable */ }
+          child.once("closed", () => {
+            child.removeListener("focus", revalidatePlacement);
+            try {
+              displayEvents.removeListener("display-removed", onDisplayChange);
+              displayEvents.removeListener("display-metrics-changed", onDisplayChange);
+            } catch {}
+            if (popup?.child === child) {
+              closedChildPermitId = popup.permit.permitId;
+              popup.child = null;
+              popup = null;
+              documentPopupPermits.delete(win);
+            }
+          });
         });
       }
     }

@@ -304,6 +304,7 @@ try {
 				markNativeDetachPhase("fresh-permit-enabled");
 				const ownerConsole: string[] = [];
 				page.on("console", (message) => ownerConsole.push(`${message.type()}: ${message.text()}`));
+				page.on("pageerror", (error) => ownerConsole.push(`pageerror: ${error.message}`));
 				const returnedChildPagePromise = application.waitForEvent("window", { timeout: 30_000 }).catch(async (error) => {
 					const state = await Promise.race([application!.evaluate(({ BrowserWindow }, id) => ({ counters: Object.fromEntries(["__t20Arms", "__t20Permits", "__t20Registered", "__t20RegisteredAck", "__t20OpaquePermit", "__t20PermitName"].map((key) => [key, (BrowserWindow.fromId(id) as any)?.[key]])), windows: BrowserWindow.getAllWindows().map((window: any) => ({ id: window.id, visible: window.isVisible(), url: window.webContents.getURL() })) }), owner), new Promise<"owner-state-evaluation-stalled">((resolve) => setTimeout(() => resolve("owner-state-evaluation-stalled"), 2_000))]);
 					throw new Error(`fresh Detach did not create its registered native child (${JSON.stringify(state)})`, { cause: error });
@@ -395,7 +396,7 @@ try {
 				const closureChildPagePromise = application.waitForEvent("window", { timeout: 30_000 }).catch(async (error) => {
 						const shellState = await Promise.race([application!.evaluate(({ BrowserWindow }, id) => ({ counters: Object.fromEntries(["__t20Arms", "__t20Permits", "__t20Registered", "__t20RegisteredAck", "__t20PermitName", "__t20Trace", "__t20OwnerRequestKinds"].map((key) => [key, (BrowserWindow.fromId(id) as any)?.[key]])), windows: BrowserWindow.getAllWindows().map((window: any) => ({ id: window.id, owner: window.id === id, visible: window.isVisible(), url: window.webContents.getURL(), child: window.webContents.opener === BrowserWindow.fromId(id)?.webContents.mainFrame })) }), owner), new Promise<"shell-state-evaluation-stalled">((resolve) => setTimeout(() => resolve("shell-state-evaluation-stalled"), 2_000))]);
 						const ownerState = await Promise.race([page.evaluate(() => ({ hostCount: document.querySelectorAll(".docs-host").length, detachButtons: [...document.querySelectorAll("button")].filter((button) => button.textContent === "Detach").map((button) => ({ disabled: button.disabled, visible: !!button.offsetWidth })) })), new Promise<"owner-renderer-evaluation-stalled">((resolve) => setTimeout(() => resolve("owner-renderer-evaluation-stalled"), 2_000))]);
-					throw new Error(`fresh Detach did not create the closure evidence child (${JSON.stringify({ shellState, ownerState })})`, { cause: error });
+						throw new Error(`fresh Detach did not create the closure evidence child (${JSON.stringify({ shellState, ownerState, ownerConsole })})`, { cause: error });
 				});
 				const detachForClosure = page.getByRole("button", { name: "Detach", exact: true });
 				await waitUntil(() => detachForClosure.isEnabled(), "Return issues a fresh permit for the closure evidence child").catch(async (error) => {

@@ -1069,9 +1069,9 @@ export function App() {
 		const settlementDeadline = window.setTimeout(() => {
 			if (documentHostCommitRef.current === commit && markdownEditorPendingActionRef.current?.admission === commit.admission) setDocumentHostStatus("recovering");
 		}, 5_000);
-		try { if (!commit.child.child.closed) commit.child.child.close(); } catch {}
+		const closeChild = window.setTimeout(() => { try { if (!commit.child.child.closed) commit.child.child.close(); } catch {} }, 0);
 		settle();
-		return () => { window.clearInterval(poll); window.clearTimeout(settlementDeadline); };
+		return () => { window.clearInterval(poll); window.clearTimeout(settlementDeadline); window.clearTimeout(closeChild); };
 	}, [documentHostGeneration]);
 
 	function noDocumentSession(): boolean {
