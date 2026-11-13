@@ -30,6 +30,9 @@ const markNativeDetachPhase = (phase: string): void => {
 	fs.appendFileSync(nativeDetachTrace, `${phase}\n`);
 	console.error(`T20 native Detach phase: ${phase}`);
 };
+const electronExecutablePath = process.platform === "darwin"
+	? path.join(root, "apps/desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron")
+	: path.join(root, "apps/desktop/node_modules/electron/dist/electron");
 const fallbackBounds = process.env.T20_NATIVE_BOUNDS_FALLBACK === "1";
 const bounds = process.env.T20_NATIVE_BOUNDS === "1" || fallbackBounds;
 const popup = process.env.T20_NATIVE_POPUP === "1" || bounds || nativeDetach;
@@ -64,7 +67,7 @@ const nativeLifecycleEvidence: string[] = [];
 try {
 	application = await electron.launch({
 		chromiumSandbox: true,
-		executablePath: path.join(root, "apps/desktop/node_modules/electron/dist/electron"),
+		executablePath: electronExecutablePath,
 		args: [path.join(root, "apps/desktop/dist/main.js")],
 		cwd: path.join(root, "apps/desktop"),
 		env: { ...process.env, HOME: scratch, XDG_CONFIG_HOME: path.join(scratch, "config"), EXXPERTS_DESKTOP_SCRATCH_HOME: scratch, EXXPERTS_DESKTOP_SERVER_ROOT: root, EXXPERTS_DESKTOP_PORT: String(port), EXXPERTS_SERVER_BUNDLE: "1", EXXPERTS_DESKTOP_UPDATE_FEED: `http://127.0.0.1:${address.port}/feed` },
@@ -111,6 +114,7 @@ try {
 			(window as any).__t20CompletionAtForgedClose = null;
 			(window as any).__t20OwnerRequestKinds = [];
 			(window as any).__t20Trace = [];
+			(window as any).__t20OwnerClosing = false;
 			(window.webContents as any).executeJavaScript = (script: string, ...args: unknown[]) => {
 				const inputMatch = script.includes("__exxpertsDocuments") ? script.match(/endpoint\.step\((.*)\) : null/) : null;
 				const input = inputMatch ? JSON.parse(inputMatch[1]) : null;
@@ -126,8 +130,11 @@ try {
 				}
 				if (script.includes("__exxpertsDocuments")) {
 					(window as any).__t20Polls++;
+					if ((window as any).__t20OwnerClosing && script.includes('"native-prepare"')) markNativeDetachPhase("owner-close-prepare-sent");
 					if (script.includes('"native-prepare"')) { (window as any).__t20Prepares++; (window as any).__t20Trace.push("prepare"); if (script.includes('"disposition":"quit"')) (window as any).__t20QuitPrepares++; if (script.includes('"disposition":"reload"')) (window as any).__t20ReloadPrepares++; }
+					if ((window as any).__t20OwnerClosing && script.includes('"native-abort"')) markNativeDetachPhase("owner-close-abort-sent");
 					if (script.includes('"native-abort"')) (window as any).__t20Trace.push("abort");
+					if ((window as any).__t20OwnerClosing && script.includes('"native-commit"')) markNativeDetachPhase("owner-close-native-commit-sent");
 					if (script.includes('"native-commit"')) (window as any).__t20Commits++;
 					if (script.includes('"child-registered"')) (window as any).__t20Registered++;
 					if (script.includes('"popup-permit"')) {
@@ -143,17 +150,19 @@ try {
 				}
 				if (fixture.holdCommit && script.includes('"native-commit"') && !(window as any).__t20CommitHeld) {
 					(window as any).__t20CommitHeld = true;
-					return new Promise((resolve, reject) => { (window as any).__t20ReleaseCommit = () => Promise.resolve((original as any)(forwardedScript, ...args)).then(resolve, reject); });
+					if ((window as any).__t20OwnerClosing) markNativeDetachPhase("owner-close-native-commit-held");
+					return new Promise((resolve, reject) => { (window as any).__t20ReleaseCommit = () => Promise.resolve((original as any)(forwardedScript, ...args)).then((output) => { if ((window as any).__t20OwnerClosing) markNativeDetachPhase("owner-close-native-commit-replied"); resolve(output); }, reject); });
 				}
 				const result = (original as any)(forwardedScript, ...args);
 				const tracked = Promise.resolve(result).then((output: any) => {
+					if ((window as any).__t20OwnerClosing && output?.items?.[0]?.kind === "guard-result") markNativeDetachPhase(`owner-close-guard-reply-${output.items[0].result?.kind ?? "unknown"}`);
 					if (output?.status?.stamp?.roomId) (window as any).__t20ActivePolls++;
 					if (script.includes('"child-registered"') && output?.items?.length === 0 && output?.sequence === output?.ack) (window as any).__t20RegisteredAck++;
 					if (output?.items?.[0]?.kind === "no-session") (window as any).__t20NoSession++;
 					if (output?.items?.[0]?.kind === "arm-popup") (window as any).__t20Arms++;
 					if (output?.items?.[0]?.kind === "completed") (window as any).__t20Completed++;
 					if (childClosedInput && output === null) { (window as any).__t20ForgedCloseRejected++; (window as any).__t20CompletionAtForgedClose = (window as any).__t20Completed; }
-					if (output?.items?.[0]?.kind === "abort-ack") { (window as any).__t20AbortAck++; (window as any).__t20Trace.push("abort-ack"); }
+					if (output?.items?.[0]?.kind === "abort-ack") { (window as any).__t20AbortAck++; (window as any).__t20Trace.push("abort-ack"); if ((window as any).__t20OwnerClosing) markNativeDetachPhase("owner-close-abort-ack-received"); }
 					if (output?.items?.[0]?.kind === "guard-result" && output.items[0].result?.kind === "prepared") (window as any).__t20Prepared++;
 					return output;
 				});
@@ -476,7 +485,8 @@ try {
 				assert(immediateBounds.x === finalBounds.x && immediateBounds.y === finalBounds.y && immediateBounds.width === finalBounds.width && immediateBounds.height === finalBounds.height && actualFinalBounds.x === finalBounds.x && actualFinalBounds.y === finalBounds.y && actualFinalBounds.width === finalBounds.width && actualFinalBounds.height === finalBounds.height && JSON.stringify(saved.bounds) === JSON.stringify(originalMainBounds) && saved.documents?.schemaVersion === 1 && JSON.stringify(saved.documents.bounds) === JSON.stringify(actualFinalBounds) && saved.documents.maximized === false && saved.documents.source === "electron-normal-bounds", `child movement updates only the existing documents state record (immediate=${JSON.stringify(immediateBounds)}, actual=${JSON.stringify(actualFinalBounds)}, window=${JSON.stringify(windowState)}, requested=${JSON.stringify(finalBounds)}, record=${JSON.stringify(saved)})`);
 			}
 			}
-			await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)!.close(), owner);
+			await application.evaluate(({ BrowserWindow }, id) => { (BrowserWindow.fromId(id) as any).__t20OwnerClosing = true; BrowserWindow.fromId(id)!.close(); }, owner);
+			markNativeDetachPhase("owner-close-requested");
 			await waitUntil(() => application!.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20CommitHeld === true, owner), "the real native commit reply is held before shell closure");
 			const ownerCloseState = await application.evaluate(({ BrowserWindow }, ids) => ({ child: Boolean(BrowserWindow.fromId(ids.child)), completed: (BrowserWindow.fromId(ids.owner) as any)?.__t20Completed }), { owner, child: childId });
 			assert(ownerCloseState.child && ownerCloseState.completed === 0, "a registered child cannot be mistaken for no-child evidence");
@@ -635,13 +645,34 @@ try {
 } finally {
 	if (application) {
 		const ownedServers: number[] = [];
+		const serverEntry = path.join(root, "apps/web-server/dist/server.mjs");
 		if (process.platform === "linux") {
 			try {
 				const pids = execFileSync("fuser", ["-n", "tcp", String(port)], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim().split(/\s+/).filter(Boolean).map(Number);
 				for (const pid of pids) {
 					try {
 						const args = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8");
-						if (args.includes(path.join(root, "apps/web-server/dist/server.mjs"))) ownedServers.push(pid);
+						if (args.includes(serverEntry)) ownedServers.push(pid);
+					} catch { /* The owned server may already have exited. */ }
+				}
+			} catch { /* The owned port may already have closed. */ }
+		} else if (process.platform === "darwin") {
+			try {
+				const pids = execFileSync("lsof", ["-tiTCP:" + port, "-sTCP:LISTEN"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim().split(/\s+/).filter(Boolean).map(Number);
+				for (const pid of pids) {
+					try {
+						const args = execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+						if (args.includes(serverEntry)) ownedServers.push(pid);
+					} catch { /* The owned server may already have exited. */ }
+				}
+			} catch { /* The owned port may already have closed. */ }
+		} else if (process.platform === "win32") {
+			try {
+				const pids = execFileSync("powershell.exe", ["-NoProfile", "-Command", `$port = ${port}; Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-CimInstance Win32_Process -Filter \"ProcessId=$($_.OwningProcess)\"; if ($p.CommandLine -like '*server.mjs*') { $p.ProcessId } }`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim().split(/\s+/).filter(Boolean).map(Number);
+				for (const pid of pids) {
+					try {
+						const args = execFileSync("powershell.exe", ["-NoProfile", "-Command", `(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').CommandLine`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+						if (args.includes(serverEntry)) ownedServers.push(pid);
 					} catch { /* The owned server may already have exited. */ }
 				}
 			} catch { /* The owned port may already have closed. */ }
