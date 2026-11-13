@@ -218,11 +218,6 @@ function isAppOrigin(url: string): boolean {
 type NativeDocumentPopup = { request: Record<string, unknown>; permit: { frameName: string; permitId: string }; expiresAt: number; pending: boolean; revoked: boolean; opening: boolean; registrationPending: boolean; registered: boolean; maximized: boolean; placement: ReturnType<typeof loadDocumentsWindowState>; child: BrowserWindow | null };
 const documentPopupPermits = new WeakMap<BrowserWindow, NativeDocumentPopup>();
 
-function traceNativePopupChild(child: BrowserWindow, event: string, extra: Record<string, unknown> = {}): void {
-  const identity = { windowId: child.id, webContentsId: child.webContents.id, destroyed: child.isDestroyed(), url: child.webContents.isDestroyed() ? "<destroyed>" : child.webContents.getURL() };
-  console.error(`[T20-NATIVE-CHILD] ${JSON.stringify({ event, ...identity, ...extra })}`);
-}
-
 function wireNavigation(win: BrowserWindow): void {
   win.webContents.setWindowOpenHandler(({ url, frameName }) => {
     const popup = documentPopupPermits.get(win);
@@ -252,19 +247,12 @@ function wireNavigation(win: BrowserWindow): void {
   // Child windows inherit the same policy, else a popup could navigate
   // anywhere in-app.
   win.webContents.on("did-create-window", (child, details) => {
-    traceNativePopupChild(child, "created", { openerWebContentsId: win.webContents.id, frameName: details.frameName, requestedUrl: details.url });
-    child.webContents.on("did-start-navigation", (_event, url, isInPlace, isMainFrame) => traceNativePopupChild(child, "did-start-navigation", { url, isInPlace, isMainFrame }));
-    child.webContents.on("dom-ready", () => traceNativePopupChild(child, "dom-ready"));
-    child.webContents.on("did-frame-finish-load", (_event, isMainFrame) => traceNativePopupChild(child, "did-frame-finish-load", { isMainFrame }));
-    child.webContents.on("render-process-gone", (_event, details) => traceNativePopupChild(child, "render-process-gone", { reason: details.reason, exitCode: details.exitCode }));
-    child.webContents.on("destroyed", () => traceNativePopupChild(child, "webContents-destroyed"));
-    child.on("closed", () => traceNativePopupChild(child, "window-closed"));
     const popup = documentPopupPermits.get(win);
     if (popup?.opening && details.frameName === popup.permit.frameName) {
       popup.opening = false;
-      if (win.isDestroyed() || child.webContents.opener !== win.webContents.mainFrame || Date.now() >= popup.expiresAt) { traceNativePopupChild(child, "rejected-registration"); child.destroy(); return; }
+      if (win.isDestroyed() || child.webContents.opener !== win.webContents.mainFrame || Date.now() >= popup.expiresAt) { child.destroy(); return; }
       const placement = loadDocumentsWindowState(win);
-      if (!placement) { traceNativePopupChild(child, "rejected-placement"); popup.revoked = true; child.destroy(); return; }
+      if (!placement) { popup.revoked = true; child.destroy(); return; }
       popup.child = child;
       popup.registrationPending = true;
       popup.maximized = placement.maximized;
@@ -409,13 +397,11 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
         const placement = popup.placement;
         const maximized = popup.maximized;
         setImmediate(() => {
-          if (!active || win.isDestroyed() || child.isDestroyed() || popup?.child !== child) { traceNativePopupChild(child, "show-skipped", { active, ownerDestroyed: win.isDestroyed(), stillRegisteredChild: popup?.child === child }); return; }
-          traceNativePopupChild(child, "registered-show-start", { maximized, bounds: placement.bounds });
+          if (!active || win.isDestroyed() || child.isDestroyed() || popup?.child !== child) return;
           child.setBounds(placement.bounds);
           trackDocumentsWindowState(child);
           if (maximized) child.once("show", () => { if (!child.isDestroyed()) child.maximize(); });
           child.show();
-          traceNativePopupChild(child, "registered-show-complete", { visible: child.isVisible(), bounds: child.getBounds() });
           const revalidatePlacement = () => {
             if (child.isDestroyed()) return;
             const placement = loadDocumentsWindowState(win, { bounds: child.getBounds(), maximized: child.isMaximized() });
