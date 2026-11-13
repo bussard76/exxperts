@@ -567,6 +567,7 @@ export function App() {
 	const documentChildRef = useRef<PreparedDocumentChild | null>(null);
 	const documentChildContextRef = useRef<DocumentContext | null>(null);
 	const nativePopupRef = useRef<{ request: { requestId: string; stamp: DocumentContext & { hostGeneration: number; draftGeneration: number }; direction: "detach" }; permit: { frameName: string; permitId: string } | null; expiresAt: number; registered: boolean; disarmed: boolean } | null>(null);
+	const nativeClosedChildPermitRef = useRef<string | null>(null);
 	const [nativePopupReady, setNativePopupReady] = useState(false);
 	const [documentHostStatus, setDocumentHostStatus] = useState<"attached" | "opening" | "detached" | "returning" | "recovering">("attached");
 	const [documentHostError, setDocumentHostError] = useState<string | null>(null);
@@ -1037,6 +1038,7 @@ export function App() {
 		}
 		const settle = () => {
 			if (!documentChildClosed(commit.child)) return;
+			if (commit.direction === "exit") nativeClosedChildPermitRef.current = nativePopupRef.current?.registered ? nativePopupRef.current.permit?.permitId ?? null : null;
 			documentChildRef.current = null;
 			documentChildContextRef.current = null;
 			setDocumentHostStatus("attached");
@@ -1274,10 +1276,15 @@ export function App() {
 						}
 					} else if (request.kind === "native-commit") {
 						if (Object.keys(request).sort().join(",") !== "binding,correlation,kind" || !nativePrepared || nativePrepared.phase !== "prepared" || !matchesCorrelation(request.correlation) || markdownEditorPendingActionRef.current?.admission !== nativePrepared.admission || !preparedDocumentAdmissionIsCurrent(nativePrepared.admission)) return null;
+						if (documentChildRef.current && markdownEditorPendingActionRef.current) void closeDocumentChildForExit(markdownEditorPendingActionRef.current);
 						nativePrepared.phase = "committed";
 						items = [{ kind: "committed", binding: currentBinding, correlation: nativePrepared.correlation }];
 					} else if (request.kind === "child-closed") {
-						if (Object.keys(request).sort().join(",") !== "binding,child,context,correlation,hostGeneration,kind,transfer" || !nativePrepared || nativePrepared.phase !== "committed" || !matchesCorrelation(request.correlation) || request.transfer !== null || request.child !== null || request.hostGeneration !== nativePrepared.correlation.stamp.hostGeneration) return null;
+						const registeredPermitId = nativePopupRef.current?.registered ? nativePopupRef.current.permit?.permitId ?? null : null;
+						const childMatches = registeredPermitId === null
+							? request.child === null && nativeClosedChildPermitRef.current === null
+							: !!request.child && typeof request.child === "object" && !Array.isArray(request.child) && Object.keys(request.child).sort().join(",") === "permitId" && (request.child as Record<string, unknown>).permitId === registeredPermitId && (!documentChildRef.current || nativeClosedChildPermitRef.current === registeredPermitId);
+						if (Object.keys(request).sort().join(",") !== "binding,child,context,correlation,hostGeneration,kind,transfer" || !nativePrepared || nativePrepared.phase !== "committed" || !matchesCorrelation(request.correlation) || request.transfer !== null || !childMatches || request.hostGeneration !== nativePrepared.correlation.stamp.hostGeneration) return null;
 						const expected = nativePrepared.correlation.stamp;
 						if (nativePrepared.admission.context === null ? request.context !== null : !request.context || typeof request.context !== "object" || Array.isArray(request.context) || Object.keys(request.context as object).sort().join(",") !== "conversationId,ownerGeneration,ownerId,roomGeneration,roomId" || !["ownerId", "ownerGeneration", "roomId", "conversationId", "roomGeneration"].every((key) => (request.context as Record<string, unknown>)[key] === (expected as Record<string, unknown>)[key])) return null;
 						if (!preparedDocumentAdmissionIsCurrent(nativePrepared.admission)) return null;
@@ -1287,6 +1294,7 @@ export function App() {
 						if (Object.keys(request).sort().join(",") !== "binding,correlation,kind" || !nativePrepared || nativePrepared.phase !== "completed" || !matchesCorrelation(request.correlation) || markdownEditorPendingActionRef.current?.admission !== nativePrepared.admission) return null;
 						nativeGuardRef.current = null;
 						nativePrepared = null;
+						nativeClosedChildPermitRef.current = null;
 						markdownEditorPendingActionRef.current = null;
 						preparedDocumentAdmissionRef.current = null;
 						markdownEditorRef.current?.setFence(false);

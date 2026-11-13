@@ -292,10 +292,14 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
   let nativeContinuationUsed = false;
   let nativeReceiptPending = false;
   let popup: NativeDocumentPopup | null = null;
+  let hideChildPermitId: string | null = null;
+  let closedChildPermitId: string | null = null;
   let retryInput: { version: number; nativeSessionId: string; sequence: number; ack: number; items: Record<string, unknown>[] } | null = null;
   requestDocumentsAction.set(win, (disposition) => {
     if (!active || hideRequest || ownerId === null || latestStamp === undefined) return;
     hideRequest = { nativeRequestId: randomUUID(), observedStamp: latestStamp, disposition };
+    hideChildPermitId = popup?.registered ? popup.permit.permitId : null;
+    closedChildPermitId = null;
     if (popup) popup.revoked = true;
   });
   const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -416,6 +420,7 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
             displayEvents.removeListener("display-metrics-changed", onDisplayChange);
           } catch {}
           if (popup?.child === child) {
+            closedChildPermitId = popup.permit.permitId;
             popup.child = null;
             popup = null;
             documentPopupPermits.delete(win);
@@ -454,7 +459,8 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
       else if (hidePhase === "close-evidence" && hideCorrelation && !popup?.child && record(hideCorrelation.stamp)) {
         const stamp = hideCorrelation.stamp;
         const context = "roomId" in stamp ? { ownerId: stamp.ownerId, ownerGeneration: stamp.ownerGeneration, roomId: stamp.roomId, conversationId: stamp.conversationId, roomGeneration: stamp.roomGeneration } : null;
-        items = [{ kind: "child-closed", binding, correlation: hideCorrelation, transfer: null, child: null, context, hostGeneration: stamp.hostGeneration }];
+        const child = hideChildPermitId && closedChildPermitId === hideChildPermitId ? { permitId: hideChildPermitId } : null;
+        items = [{ kind: "child-closed", binding, correlation: hideCorrelation, transfer: null, child, context, hostGeneration: stamp.hostGeneration }];
       }
       retryInput = { version: 1, nativeSessionId: session, sequence, ack: sequence - 1, items };
     }
@@ -473,13 +479,14 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
       if (expired && kind !== "native-prepare" && kind !== "native-abort") { transportPoisoned = true; return; }
       if (accept(output, kind, expired)) {
         sequence++; retryInput = null;
+        if (kind === "native-commit" && popup?.child && !popup.child.isDestroyed()) popup.child.close();
         if (kind === "child-closed" && hidePhase === "completed" && !nativeContinuationUsed) {
           nativeContinuationUsed = true;
           if (hideRequest?.disposition === "hide") { win.hide(); nativeReceiptPending = true; }
           else if (hideRequest?.disposition === "quit") { nativeQuitPermit = true; app.quit(); }
           else if (hideRequest?.disposition === "reload") win.webContents.reload();
         } else if (kind === "native-completed") {
-          nativeReceiptPending = false; hideRequest = null; hideCorrelation = null; hideSent = false; hidePhase = "idle"; nativeContinuationUsed = false;
+          nativeReceiptPending = false; hideRequest = null; hideCorrelation = null; hideSent = false; hidePhase = "idle"; nativeContinuationUsed = false; hideChildPermitId = null; closedChildPermitId = null;
         }
       }
       else if (expired) transportPoisoned = true;
