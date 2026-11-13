@@ -25,6 +25,8 @@ const late = process.env.T20_NATIVE_LATE === "1" || lateEmpty;
 const foreignOpener = process.env.T20_NATIVE_FOREIGN === "1";
 const nativeDetach = process.env.T20_NATIVE_DETACH === "1";
 const nativeDetachTrace = nativeDetach ? path.join(os.tmpdir(), `t20-native-detach-phase-${process.pid}.log`) : null;
+const nativeShellTrace = nativeDetach ? path.join(os.tmpdir(), `t20-native-detach-shell-${process.pid}.log`) : null;
+if (nativeShellTrace) fs.writeFileSync(nativeShellTrace, "");
 const markNativeDetachPhase = (phase: string): void => {
 	if (!nativeDetachTrace) return;
 	fs.appendFileSync(nativeDetachTrace, `${phase}\n`);
@@ -69,6 +71,21 @@ try {
 		env: { ...process.env, HOME: scratch, XDG_CONFIG_HOME: path.join(scratch, "config"), EXXPERTS_DESKTOP_SCRATCH_HOME: scratch, EXXPERTS_DESKTOP_SERVER_ROOT: root, EXXPERTS_DESKTOP_PORT: String(port), EXXPERTS_SERVER_BUNDLE: "1", EXXPERTS_DESKTOP_UPDATE_FEED: `http://127.0.0.1:${address.port}/feed` },
 		timeout: 60_000,
 	});
+	if (nativeShellTrace) {
+		const shellStderr = application.process().stderr;
+		if (shellStderr) {
+			let pending = "";
+			const captureShellLine = (line: string) => {
+				if (line.includes("[T20-NATIVE-CHILD]")) fs.appendFileSync(nativeShellTrace, `${line}\n`);
+			};
+			shellStderr.on("data", (chunk: Buffer | string) => {
+				const lines = `${pending}${chunk.toString()}`.split(/\r?\n/);
+				pending = lines.pop() ?? "";
+				for (const line of lines) captureShellLine(line);
+			});
+			shellStderr.on("end", () => captureShellLine(pending));
+		} else fs.appendFileSync(nativeShellTrace, "Electron stderr unavailable\n");
+	}
 	const waitUntil = waitEvery(100, 30_000);
 	await waitUntil(async () => application!.evaluate(({ BrowserWindow }, portNumber) => BrowserWindow.getAllWindows().some((window: any) => window.webContents.getURL().startsWith(`http://localhost:${portNumber}/`) && window.isVisible()), port), "the real desktop owner is visible");
 	const owner = await application.evaluate(({ BrowserWindow }, portNumber) => {
