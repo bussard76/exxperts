@@ -60,6 +60,7 @@ if (active) {
 	fs.writeFileSync(path.join(app, "persistent-agent-ai-profile.json"), JSON.stringify({ profileId: "openai-compatible" }));
 }
 let application: ElectronApplication | undefined;
+const nativeLifecycleEvidence: string[] = [];
 try {
 	application = await electron.launch({
 		chromiumSandbox: true,
@@ -68,6 +69,12 @@ try {
 		cwd: path.join(root, "apps/desktop"),
 		env: { ...process.env, HOME: scratch, XDG_CONFIG_HOME: path.join(scratch, "config"), EXXPERTS_DESKTOP_SCRATCH_HOME: scratch, EXXPERTS_DESKTOP_SERVER_ROOT: root, EXXPERTS_DESKTOP_PORT: String(port), EXXPERTS_SERVER_BUNDLE: "1", EXXPERTS_DESKTOP_UPDATE_FEED: `http://127.0.0.1:${address.port}/feed` },
 		timeout: 60_000,
+	});
+	application.process().stderr?.on("data", (chunk: Buffer) => {
+		for (const line of chunk.toString().split(/\r?\n/)) {
+			const marker = line.match(/\[T20-LIFECYCLE\] ([a-z-]+)(?: (.*))?/);
+			if (marker) nativeLifecycleEvidence.push(`${marker[1]}${marker[2] ? ` ${marker[2]}` : ""}`);
+		}
 	});
 	const waitUntil = waitEvery(100, 30_000);
 	await waitUntil(async () => application!.evaluate(({ BrowserWindow }, portNumber) => BrowserWindow.getAllWindows().some((window: any) => window.webContents.getURL().startsWith(`http://localhost:${portNumber}/`) && window.isVisible()), port), "the real desktop owner is visible");
@@ -289,10 +296,36 @@ try {
 					await childPage.locator(".docs-host").waitFor();
 					markNativeDetachPhase("first-child-adopted");
 					assert(await childPage.locator(".docs-host").count() === 1 && await page.locator(".docs-host").count() === 0 && await childPage.getByRole("button", { name: "Return", exact: true }).isEnabled(), "the owner moves its existing host into the acknowledged child before showing Return");
+					const captureRendererLifecycle = (message: import("playwright").ConsoleMessage) => {
+						const marker = message.text().match(/^\[T20-LIFECYCLE\] (.*)$/);
+						if (marker) nativeLifecycleEvidence.push(marker[1]);
+					};
+					childPage.on("console", captureRendererLifecycle);
+					page.on("console", captureRendererLifecycle);
+					await childPage.evaluate(() => window.addEventListener("beforeunload", () => console.error("[T20-LIFECYCLE] child-beforeunload"), { once: true }));
+					await page.evaluate(() => {
+						const observer = new MutationObserver(() => {
+							if (!document.querySelector(".docs-host")) return;
+							observer.disconnect();
+							console.error("[T20-LIFECYCLE] owner-host-adopted");
+						});
+						observer.observe(document, { childList: true, subtree: true });
+					});
+					await application.evaluate(({ BrowserWindow }, ownerId) => {
+						const ownerWindow = BrowserWindow.fromId(ownerId)!;
+						const childWindow = BrowserWindow.getAllWindows().find((window: any) => window.webContents.opener === ownerWindow.webContents.mainFrame)!;
+						childWindow.webContents.once("will-navigate", (event: any, url: string) => console.error(`[T20-LIFECYCLE] will-navigate defaultPrevented=${event.defaultPrevented} url=${url}`));
+						childWindow.webContents.once("destroyed", () => console.error("[T20-LIFECYCLE] webcontents-destroyed"));
+						childWindow.once("closed", () => console.error("[T20-LIFECYCLE] browserwindow-closed"));
+					}, owner);
 					const ownerURL = page.url();
 					void childPage.evaluate((url) => { window.location.href = url; }, `http://localhost:${port}/`).catch(() => {});
 					await waitUntil(() => page.locator(".docs-host").count().then((count) => count === 1), "an attempted in-app navigation rehosts the documents to chat");
 				await waitUntil(() => application!.evaluate(({ BrowserWindow }, id) => !BrowserWindow.fromId(id), childId), "in-app navigation cannot replace the registered child");
+				await waitUntil(() => nativeLifecycleEvidence.includes("browserwindow-closed"), "the actual native child lifecycle is captured", 5_000);
+				const lifecycleOrder = ["child-beforeunload", "will-navigate", "owner-host-adopted", "webcontents-destroyed", "browserwindow-closed"];
+				const lifecycleIndexes = lifecycleOrder.map((event) => nativeLifecycleEvidence.findIndex((line) => line.startsWith(event)));
+				assert(lifecycleIndexes.every((index, position) => index >= 0 && (position === 0 || index > lifecycleIndexes[position - 1])) && nativeLifecycleEvidence.find((line) => line.startsWith("will-navigate"))?.includes("defaultPrevented=true"), `the actual child observes beforeunload, canceled navigation, owner host adoption, WebContents destruction, then BrowserWindow close (evidence=${JSON.stringify(nativeLifecycleEvidence)})`);
 				markNativeDetachPhase("returned-after-in-app-navigation");
 				assert(childPage.url() === "about:blank" && page.url() === ownerURL && await page.locator(".docs-host").count() === 1, "in-app navigation is denied and the existing host remains with its original chat");
 				const registeredBeforeReturn = await Promise.race([application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20RegisteredAck ?? 0, owner), new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("owner registration count evaluation stalled")), 5_000))]);
