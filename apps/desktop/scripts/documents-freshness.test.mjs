@@ -46,7 +46,6 @@ test("close samples the owner after an in-flight exchange settles", async () => 
     assert.equal(received.length, 2);
     release(); await flush();
     tick(); await flush();
-    tick(); await flush();
     assert.deepEqual(received.map((input) => input.items[0]?.kind ?? "poll"), ["hello", "poll", "poll", "native-prepare"]);
     assert.equal(replies[2].status.stamp.hostGeneration, 2);
     assert.deepEqual(received[3].items[0].observedStamp, JSON.parse(JSON.stringify(replies[2].status.stamp)));

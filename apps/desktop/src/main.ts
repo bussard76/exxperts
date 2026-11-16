@@ -285,8 +285,9 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
   let ownerId: string | null = null;
   let ownerGeneration = 0;
   let latestStamp: Record<string, unknown> | null | undefined;
-  let hideRequest: { nativeRequestId: string; observedStamp: Record<string, unknown> | null; disposition: "hide" | "quit" | "reload" } | null = null;
+  let hideRequest: { nativeRequestId: string; observedStamp: Record<string, unknown> | null | undefined; disposition: "hide" | "quit" | "reload" } | null = null;
   let hideSent = false;
+  let sampleSequence: number | null = null;
   let hidePhase: "idle" | "preparing" | "abort" | "commit" | "close-evidence" | "completed" = "idle";
   let hideCorrelation: Record<string, unknown> | null = null;
   let nativeContinuationUsed = false;
@@ -297,7 +298,7 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
   let retryInput: { version: number; nativeSessionId: string; sequence: number; ack: number; items: Record<string, unknown>[] } | null = null;
   requestDocumentsAction.set(win, (disposition) => {
     if (!active || hideRequest || ownerId === null || latestStamp === undefined) return;
-    hideRequest = { nativeRequestId: randomUUID(), observedStamp: latestStamp, disposition };
+    hideRequest = { nativeRequestId: randomUUID(), observedStamp: undefined, disposition };
     hideChildPermitId = popup?.registered ? popup.permit.permitId : null;
     closedChildPermitId = null;
     if (popup) popup.revoked = true;
@@ -455,9 +456,10 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
       const binding = { nativeSessionId: session, ownerId, ownerGeneration };
       let items: Record<string, unknown>[] = [];
       if (sequence === 1) items = [{ kind: "hello" }];
+      else if (hideRequest && hideRequest.observedStamp === undefined) sampleSequence = sequence;
+      else if (hideRequest && !hideSent && ownerId !== null) items = [{ kind: "native-prepare", binding, nativeRequestId: hideRequest.nativeRequestId, observedStamp: hideRequest.observedStamp, disposition: hideRequest.disposition }];
       else if (popup?.pending && ownerId !== null) items = [{ kind: "popup-permit", binding, request: popup.request, permit: popup.permit }];
       else if (popup?.registrationPending && popup.child && !popup.child.isDestroyed() && ownerId !== null) items = [{ kind: "child-registered", binding, request: popup.request, permitId: popup.permit.permitId }];
-      else if (hideRequest && !hideSent && ownerId !== null) items = [{ kind: "native-prepare", binding, nativeRequestId: hideRequest.nativeRequestId, observedStamp: hideRequest.observedStamp, disposition: hideRequest.disposition }];
       else if (hidePhase === "abort" && hideCorrelation) items = [{ kind: "native-abort", binding, correlation: hideCorrelation }];
       else if (hidePhase === "commit" && hideCorrelation) items = [{ kind: "native-commit", binding, correlation: hideCorrelation }];
       else if (nativeReceiptPending && hideCorrelation) items = [{ kind: "native-completed", binding, correlation: hideCorrelation }];
@@ -474,7 +476,8 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
     pending = true;
     documentsPollInFlight.add(win);
     let expired = false;
-    const deadline = setTimeout(() => { expired = true; }, 2_000);
+    let sampled = false;
+    const deadline = setTimeout(() => { expired = true; if (sampleSequence === input.sequence) transportPoisoned = true; }, 2_000);
     let evaluation: Promise<unknown>;
     try { evaluation = win.webContents.executeJavaScript(expression); }
     catch { clearTimeout(deadline); pending = false; documentsPollInFlight.delete(win); return; }
@@ -483,6 +486,7 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
       const kind = input.items[0]?.kind;
       if (expired && kind !== "native-prepare" && kind !== "native-abort") { transportPoisoned = true; return; }
       if (accept(output, kind, expired)) {
+        if (sampleSequence === input.sequence && hideRequest) { hideRequest.observedStamp = latestStamp; sampleSequence = null; sampled = true; }
         sequence++; retryInput = null;
         if (kind === "native-commit" && popup?.child && !popup.child.isDestroyed()) popup.child.close();
         if (kind === "child-closed" && hidePhase === "completed" && !nativeContinuationUsed) {
@@ -494,8 +498,8 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
           nativeReceiptPending = false; hideRequest = null; hideCorrelation = null; hideSent = false; hidePhase = "idle"; nativeContinuationUsed = false; hideChildPermitId = null; closedChildPermitId = null;
         }
       }
-      else if (expired) transportPoisoned = true;
-    }).catch(() => {}).finally(() => { clearTimeout(deadline); pending = false; documentsPollInFlight.delete(win); });
+      else if (expired || sampleSequence === input.sequence) transportPoisoned = true;
+    }).catch(() => { if (sampleSequence === input.sequence) transportPoisoned = true; }).finally(() => { clearTimeout(deadline); pending = false; documentsPollInFlight.delete(win); if (sampled && !transportPoisoned) poll(); });
   };
   const timer = setInterval(poll, 100);
   poll();

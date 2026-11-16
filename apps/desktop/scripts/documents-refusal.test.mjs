@@ -37,8 +37,8 @@ test("a stale-stamp refusal is aborted without replay or native continuation", a
     tick(); await flush();
     tick(); await flush();
     tick(); await flush();
-    assert.deepEqual(received.map((input) => input.items[0]?.kind ?? "poll"), ["hello", "native-prepare", "native-abort", "poll"]);
-    assert.equal(received[2].items[0].correlation.stamp.hostGeneration, 2);
+    assert.deepEqual(received.map((input) => input.items[0]?.kind ?? "poll"), ["hello", "poll", "native-prepare", "native-abort", "poll"]);
+    assert.equal(received[3].items[0].correlation.stamp.hostGeneration, 2);
     assert.equal(hidden, false);
   } finally { stop(); }
 });
