@@ -946,3 +946,32 @@ The existing browser owner contract smoke (`apps/web-server/scripts/workspace-do
 No qualifying existing non-native producer/consumer seam was found, so per the continuation instruction no product code or tests were edited. Minimal proposal: authorize a testable internal transport seam (factor the existing poll/accept state machine behind an injectable Electron window adapter, without changing the wire contract), then run an in-process fake window against the actual owner endpoint or an explicitly approved owner contract harness; alternatively authorize one tightly scoped existing native Electron producer/consumer test. The first option introduces a boundary and requires explicit architectural authorization, while the second requires an exception to the native-test prohibition. In either case first demonstrate stale-generation refusal replay red, then assert one matching abort/ack, no commit or hide, and a fresh attempt only after terminal settlement. Do not treat this proposal as implemented or as proof of the Mac-specific reason.
 
 Checks: source/test seam inspection and `git diff --check` only; no native or server-native gate, tests, typechecks or product build were run. No tests added, assertions changed, screenshots created, main merged or real data accessed. `scripts/run-smokes.mjs` real-home tools behavior remains solely a ticket candidate for Controller status/Sascha; no ticket was created.
+
+## T20-CLOSE-REFUSAL-FIX continuation: blocked by existing assertion
+
+Architecture impact: level 2 continuation within the existing T20 desktop shell and owner; no public API, dependency, route, persistent store or wire-contract change is authorized. Clean starting state was `6f3eb64b3ee437be21fb49ced0e10a3f82356abd` on `agents/t20-harden`. Assumption: the accepted contract's prohibition on a competing attempt before matching abort applies to immediate invalidated refusals, as it explicitly does to refusal/unknown.
+
+- [x] Reproduce the consumer replay using a non-native test against the actual complete desktop shell module. The test compiles the full module in an isolated VM with mocked Electron and injects access to its existing private closures in the test-only compilation; no production export, dependency or wire API is added. This is a test harness only, not an implementation fix.
+- [ ] Fix and verify both the shell refusal and the owner matching abort. An existing assertion conflicts with the accepted contract: `apps/web-server/scripts/workspace-documents-owner-ui-smoke.ts` asserts at the `clean` check that sequence 8, a new `native-prepare`, succeeds immediately after sequence 7 returned invalidated, without the matching abort. Contract C4 step 4 requires the matching abort and says not to begin a competing attempt before acknowledgement. Implementing that requirement makes the unchanged existing assertion fail; inserting the abort shifts the sequence and requires rewriting existing assertions, explicitly prohibited by this task. Repository instructions require escalation if a test is wrong. No production changes were retained.
+- [ ] Green regression, targeted checks, preserved-assertion comparison after a fix, and Mac T20-MAC-4 verification remain pending. The Mac-specific reason is still unproven; source diagnosis is a counterexample, not evidence of the Mac cause. No gates, native smoke or full suite were run. `scripts/run-smokes.mjs` was untouched; its previously recorded real-home tools concern remains a debt candidate.
+
+Exact red command: `node --test apps/desktop/scripts/documents-refusal.test.mjs` (exit 1). Relevant exact TAP output:
+
+```text
+not ok 1 - a stale-stamp refusal is aborted without replay or native continuation
+    Expected values to be strictly deep-equal:
+    + actual - expected
+      [
+        'hello',
+        'native-prepare',
+    +   'native-prepare',
+    +   'native-prepare'
+    -   'native-abort',
+    -   'poll'
+      ]
+# tests 1
+# pass 0
+# fail 1
+```
+
+Files changed: this report and the new focused test. No pre-existing test or assertion was modified. The test uses invented IDs and a fake owner response, so it proves the actual shell consumer replay but does not by itself prove real owner abort settlement. An experimental uncommitted shell/owner edit made the shell test pass but was discarded after identifying the conflicting existing assertion; no green result is claimed for a completed fix. No screenshots were created.
