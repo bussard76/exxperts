@@ -164,7 +164,7 @@ try {
 				}
 				const result = (original as any)(forwardedScript, ...args);
 				const tracked = Promise.resolve(result).then((output: any) => {
-					if ((window as any).__t20OwnerClosing && output?.items?.[0]?.kind === "guard-result") (app as any).__t20PhaseTrace.push(`owner-close-guard-reply-${output.items[0].result?.kind ?? "unknown"}`);
+					if ((window as any).__t20OwnerClosing && output?.items?.[0]?.kind === "guard-result") (app as any).__t20PhaseTrace.push(`owner-close-guard-reply-${output.items[0].result?.kind ?? "unknown"}${output.items[0].result?.reason ? `-${output.items[0].result.reason}` : ""}`);
 					if (output?.status?.stamp?.roomId) (window as any).__t20ActivePolls++;
 					if (script.includes('"child-registered"') && output?.items?.length === 0 && output?.sequence === output?.ack) (window as any).__t20RegisteredAck++;
 					if (output?.items?.[0]?.kind === "no-session") (window as any).__t20NoSession++;
