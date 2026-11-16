@@ -12,7 +12,7 @@ async function setup({ empty = false, controls = false } = {}) {
   assert.ok(start >= 0 && end > start);
   const ownerCode = await transform(ownerSource.slice(start, end + '\n\t}, [documentOwnerId]);'.length), { loader: "ts" });
   const ref = (current) => ({ current });
-  const window = {};
+  const window = { setTimeout, clearTimeout };
   const owner = { window, document: { documentElement: { classList: { contains: () => true } } }, useEffect: (fn) => fn(), documentOwnerId: "11111111-1111-4111-8111-111111111111", documentOwnerGenerationRef: ref(1), documentHostGenerationRef: ref(1), documentDraftGenerationRef: ref(1), checkpointContextRef: ref({ key: "room\0thread", roomId: "room", conversationId: "thread", generation: 1 }), unmountedRef: ref(false), personHasChanged: () => false, allocateDocumentId: () => controls ? "33333333-3333-4333-8333-333333333333" : null, setNativePopupReady() {}, noDocumentSession: () => empty, nativePopupRef: ref(null), markdownEditorPendingActionRef: ref(null), performance, markdownEditorRef: ref(null), documentSaveInFlightRef: ref(false), documentKeepMineInFlightRef: ref(false), documentWriteRef: ref(null), captureDocumentAdmission: (requestId) => ({ requestId, context: empty ? null : {}, ownerGeneration: 1, roomGeneration: 0 }), preparedDocumentAdmissionIsCurrent: () => true, markdownEditorPromptBusyRef: ref(false), markdownEditorPromptTimerRef: ref(null), setMarkdownEditorPrompt() {}, setMarkdownEditorPromptBusy() {}, documentChildRef: ref(null), nativeClosedChildPermitRef: ref(null), preparedDocumentAdmissionRef: ref(null), setMarkdownEditorFenced() {}, nativeGuardRef: ref(null), markdownEditorDirtyRef: ref(false), prepareDocumentAdmission: () => true };
   if (empty) owner.checkpointContextRef.current = { key: null, roomId: null, conversationId: null, generation: 0 };
   vm.runInNewContext(ownerCode.code, owner);
@@ -176,6 +176,24 @@ test("a session appearing after a null sample is refused and aborted", async () 
     assert.equal(h.replies[2].items[0].result.reason, "invalidated");
     h.tick(); await h.flush();
     assert.equal(h.replies[3].items[0].kind, "abort-ack");
+    assert.equal(h.hidden(), false);
+  } finally { h.stop(); }
+});
+
+test("unknown preparation settles through its matching abort only", async () => {
+  const h = await setup();
+  try {
+    h.owner.markdownEditorDirtyRef.current = true;
+    h.close(); h.tick(); await h.flush();
+    assert.equal(h.received[2].items[0].kind, "native-prepare");
+    h.owner.nativeGuardRef.current.deadline();
+    h.tick(); await h.flush();
+    assert.equal(h.replies[3].items[0].result.kind, "unknown");
+    h.tick(); await h.flush();
+    assert.equal(h.replies[4].items[0].kind, "abort-ack");
+    assert.deepEqual(h.received[4].items[0].correlation, JSON.parse(JSON.stringify(h.replies[4].items[0].correlation)));
+    h.tick(); await h.flush();
+    assert.deepEqual(h.received.map((input) => input.items[0]?.kind ?? "poll"), ["hello", "poll", "native-prepare", "poll", "native-abort", "poll"]);
     assert.equal(h.hidden(), false);
   } finally { h.stop(); }
 });
