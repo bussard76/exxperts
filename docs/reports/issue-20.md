@@ -998,3 +998,25 @@ Architecture impact: level 1, inside the existing UI owner; no module boundary, 
 The test `busy close abort preserves the admitted action and permits a later close` in `apps/desktop/scripts/documents-owner-refusal.test.mjs` drives the owner endpoint with a current stamp and an independent pending action. Before the fix, `node --test apps/desktop/scripts/documents-owner-refusal.test.mjs` failed because the exact matching abort returned null instead of an acknowledgement; the prior wrong-correlation abort was also rejected. The owner now retains the busy refusal correlation in the existing immediate-refusal slot, so the exact abort acknowledges it without touching the admitted action or its in-flight state; once that action settles, a fresh close prepares successfully. The harness uses invented values and mocked surrounding UI state; it does not prove a native or browser exchange.
 
 Focused owner and shell contract tests passed 3/3, and `npm run test:scripts -- apps/desktop/scripts/documents-owner-refusal.test.mjs apps/desktop/scripts/documents-refusal.test.mjs` passed 57/57. `npx tsc --noEmit -p apps/web-ui/tsconfig.json && npm run typecheck:scripts` passed. No pre-existing assertion or browser smoke was changed in this rework. Native, browser, server-native and full gates were not run under the explicit task restriction; platform behavior remains for independent verification.
+
+## T20-C4 guard reason after Detach — work in progress
+
+Architecture impact: level 1 within existing modules; no public export, dependency, route, store, contract or data-flow change. Assumption: the task addresses I5's native close after Detach/Return; the other original issue acceptance items remain under the existing T20 evidence and are not newly claimed by this focused continuation. Graph: no; existing diagnostic tests and report identify the seam (five tool calls before this report edit); no graph used. Screenshots: none.
+
+Result and Observable checklist from T20-HARDEN (I1–I10; scope of this task is I5):
+- [ ] I1 Full document host and deterministic empty/loading/denied states.
+- [ ] I2 One host per owner/context and one editor/socket/save pipeline.
+- [ ] I3 Current host routing/focus; stale focus/context does nothing.
+- [ ] I4 Return preserves tabs/source/revision/conflict without save; tab close keeps guard.
+- [ ] I5 Native close guards before hide and dependent closure; cancellation preserves context.
+- [ ] I6 Latest save and explicit discard/reconciliation preserve drafts.
+- [ ] I7 Recovery strip, validated bounds and popup failure behavior.
+- [ ] I8 Host events, previews and unchanged permission rules.
+- [ ] I9 Relative path drag and selection without side effects.
+- [ ] I10 Q5 limits and actual entrypoint evidence before support claims.
+
+Focused continuation checklist:
+- [ ] Correlate Mac trace, source and exact refusal reason; add reason-only phase marker instrumentation.
+- [ ] Focused non-native regression red, then minimal accepted-contract fix green; no automatic retry.
+- [ ] Preserve all existing assertions; run focused tests and UI/scripts typechecks.
+- [ ] Merge origin/main, rerun affected suites, self-review and push final report.
