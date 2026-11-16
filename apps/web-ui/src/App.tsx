@@ -1091,6 +1091,7 @@ export function App() {
 		type NativeStamp = (DocumentContext & { hostGeneration: number; draftGeneration: number }) | { ownerId: string; ownerGeneration: number; roomGeneration: number; hostGeneration: number; draftGeneration: number };
 		type NativeCorrelation = { requestId: string; stamp: NativeStamp; action: { kind: "chat-close"; disposition: "hide" | "quit" | "update" | "reload" } };
 		let nativePrepared: { admission: DocumentAdmission; correlation: NativeCorrelation; phase: "preparing" | "prepared" | "refused" | "aborting" | "committed" | "completed" } | null = null;
+		let immediateRefusal: NativeCorrelation | null = null;
 		let outbound: unknown[] = [];
 		const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 		const matchesStamp = (value: unknown, expected: NativeStamp): boolean => {
@@ -1157,7 +1158,15 @@ export function App() {
 					const bound = binding as Record<string, unknown>;
 					if (bound.nativeSessionId !== nativeSessionId || bound.ownerId !== documentOwnerId || bound.ownerGeneration !== documentOwnerGenerationRef.current) return null;
 					const currentBinding = { nativeSessionId, ownerId: documentOwnerId, ownerGeneration: documentOwnerGenerationRef.current };
-					if (request.kind === "popup-permit") {
+					if (immediateRefusal && request.kind !== "native-abort") return null;
+					if (request.kind === "native-abort" && immediateRefusal) {
+						if (Object.keys(request).sort().join(",") !== "binding,correlation,kind" || !request.correlation || typeof request.correlation !== "object" || Array.isArray(request.correlation)) return null;
+						const correlation = request.correlation as Record<string, unknown>;
+						const action = correlation.action;
+						if (Object.keys(correlation).sort().join(",") !== "action,requestId,stamp" || correlation.requestId !== immediateRefusal.requestId || !matchesStamp(correlation.stamp, immediateRefusal.stamp) || !action || typeof action !== "object" || Array.isArray(action) || Object.keys(action).sort().join(",") !== "disposition,kind" || (action as Record<string, unknown>).kind !== "chat-close" || (action as Record<string, unknown>).disposition !== immediateRefusal.action.disposition) return null;
+						items = [{ kind: "abort-ack", binding: currentBinding, correlation: immediateRefusal }];
+						immediateRefusal = null;
+					} else if (request.kind === "popup-permit") {
 						const armed = nativePopupRef.current;
 						const permit = request.permit;
 						if (Object.keys(request).sort().join(",") !== "binding,kind,permit,request" || !armed || armed.permit || performance.now() >= armed.expiresAt || JSON.stringify(request.request) !== JSON.stringify(armed.request) || !permit || typeof permit !== "object" || Array.isArray(permit)) return null;
@@ -1188,6 +1197,7 @@ export function App() {
 						const correlation: NativeCorrelation = { requestId: request.nativeRequestId, stamp, action: { kind: "chat-close" as const, disposition } };
 							if (request.observedStamp === null || !matchesStamp(request.observedStamp, stamp)) {
 								if (request.observedStamp !== null && (!request.observedStamp || typeof request.observedStamp !== "object" || Array.isArray(request.observedStamp) || Object.keys(request.observedStamp).sort().join(",") !== "conversationId,draftGeneration,hostGeneration,ownerGeneration,ownerId,roomGeneration,roomId")) return null;
+								immediateRefusal = correlation;
 								items = [{ kind: "guard-result", binding: currentBinding, nativeRequestId: request.nativeRequestId, result: { kind: "refused", correlation, reason: "invalidated" } }];
 							} else if (markdownEditorPendingActionRef.current) {
 								items = [{ kind: "guard-result", binding: currentBinding, nativeRequestId: request.nativeRequestId, result: { kind: "refused", correlation, reason: "busy" } }];

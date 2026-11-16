@@ -1,0 +1,33 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import test from "node:test";
+import vm from "node:vm";
+import { transform } from "esbuild";
+
+test("owner settles an invalidated preparation before a new attempt", async () => {
+  const source = fs.readFileSync(new URL("../../web-ui/src/App.tsx", import.meta.url), "utf8");
+  const start = source.indexOf('\tuseEffect(() => {\n\t\tif (!documentOwnerId || !document.documentElement.classList.contains("desktop-app")');
+  const end = source.indexOf('\n\t}, [documentOwnerId]);', start);
+  assert.ok(start >= 0 && end > start);
+  const compiled = await transform(source.slice(start, end + '\n\t}, [documentOwnerId]);'.length), { loader: "ts" });
+  const ownerId = "11111111-1111-4111-8111-111111111111";
+  const nativeSessionId = "22222222-2222-4222-8222-222222222222";
+  const window = {};
+  const ref = (current) => ({ current });
+  const context = { window, document: { documentElement: { classList: { contains: () => true } } }, useEffect: (fn) => fn(), documentOwnerId: ownerId, documentOwnerGenerationRef: ref(1), documentHostGenerationRef: ref(1), documentDraftGenerationRef: ref(1), checkpointContextRef: ref({ key: "room\0thread", roomId: "room", conversationId: "thread", generation: 1 }), unmountedRef: ref(false), personHasChanged: () => false, nativePopupRef: ref(null), markdownEditorPendingActionRef: ref(null), performance, markdownEditorRef: ref(null), documentSaveInFlightRef: ref(false), documentKeepMineInFlightRef: ref(false), documentWriteRef: ref(null), captureDocumentAdmission: (requestId) => ({ requestId }), preparedDocumentAdmissionRef: ref(null), setMarkdownEditorFenced() {}, nativeGuardRef: ref(null), markdownEditorDirtyRef: ref(false), prepareDocumentAdmission: () => true };
+  vm.runInNewContext(compiled.code, context);
+  const step = (sequence, items) => window.__exxpertsDocuments.step({ version: 1, nativeSessionId, sequence, ack: sequence - 1, items });
+  const hello = step(1, [{ kind: "hello" }]);
+  const binding = hello.status.binding;
+  const prepare = (id, observedStamp) => ({ kind: "native-prepare", binding, nativeRequestId: id, observedStamp, disposition: "hide" });
+  const refusal = step(2, [prepare("33333333-3333-4333-8333-333333333333", null)]).items[0];
+  assert.equal(refusal.result.reason, "invalidated");
+  assert.equal(step(3, [prepare("44444444-4444-4444-8444-444444444444", null)]), null);
+  const correlation = refusal.result.correlation;
+  assert.equal(step(3, [{ kind: "native-abort", binding, correlation: { ...correlation, requestId: "55555555-5555-4555-8555-555555555555" } }]), null);
+  const abort = step(3, [{ kind: "native-abort", binding, correlation }]);
+  assert.equal(abort.items[0].kind, "abort-ack");
+  assert.deepEqual(JSON.parse(JSON.stringify(abort.items[0].correlation)), JSON.parse(JSON.stringify(correlation)));
+  const next = step(4, [prepare("44444444-4444-4444-8444-444444444444", correlation.stamp)]);
+  assert.equal(next.items[0].result.kind, "prepared");
+});
