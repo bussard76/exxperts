@@ -17,7 +17,7 @@ try {
 		assert(saved.status === 200, "the invented native-owner workspace is configured");
 	});
 	browser = await chromium.launch();
-	const page = await browser.newPage();
+	const page = await browser.newPage({ userAgent: "ExxpertsDesktop/1.0" });
 	await page.addInitScript({ content: `window.addEventListener("beforeunload", (event) => { event.preventDefault(); event.returnValue = ""; }); const realTimeout = window.setTimeout; window.setTimeout = (callback, delay, ...args) => realTimeout(callback, delay === 1000 ? 30000 : delay, ...args);` });
 	page.on("dialog", (dialog) => { void dialog.dismiss(); });
 	await page.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
@@ -298,7 +298,7 @@ try {
 	await page.getByText("Someone else is now signed in on this server.", { exact: true }).waitFor();
 	const invalidated = await page.evaluate(({ binding }) => (window as any).__exxpertsDocuments.step({ version: 1, nativeSessionId: binding.nativeSessionId, sequence: 43, ack: 42, items: [] }), { binding: first.status.binding });
 	assert(invalidated == null, "a changed person cannot receive another owner status");
-	const abortPage = await browser.newPage();
+	const abortPage = await browser.newPage({ userAgent: "ExxpertsDesktop/1.0" });
 	await abortPage.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
 	await abortPage.waitForLoadState("networkidle");
 	const emptyAbort = await abortPage.evaluate(() => {
@@ -317,7 +317,7 @@ try {
 	});
 	assert(emptyAbort.prepared?.items?.[0]?.kind === "no-session" && emptyAbort.wrong == null && emptyAbort.abort?.items?.[0]?.kind === "abort-ack" && JSON.stringify(emptyAbort.replay) === JSON.stringify(emptyAbort.abort) && emptyAbort.after == null, "a matching empty abort releases only its one-use attempt, replays idempotently and cannot continue late");
 	await abortPage.close();
-	const racePage = await browser.newPage();
+	const racePage = await browser.newPage({ userAgent: "ExxpertsDesktop/1.0" });
 	let releaseRoomEntry!: () => void, beginRoomEntry!: () => void;
 	const roomEntryStarted = new Promise<void>((resolve) => { beginRoomEntry = resolve; });
 	const roomEntryReleased = new Promise<void>((resolve) => { releaseRoomEntry = resolve; });
