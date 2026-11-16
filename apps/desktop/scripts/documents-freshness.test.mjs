@@ -163,3 +163,19 @@ test("empty reservation rejects wrong abort and replays matching abort", async (
     assert.equal(h.hidden(), false);
   } finally { h.stop(); }
 });
+
+test("a session appearing after a null sample is refused and aborted", async () => {
+  const h = await setup({ empty: true });
+  try {
+    h.intercept((input, result) => {
+      if (input.sequence === 2) h.owner.checkpointContextRef.current = { key: "room\0thread", roomId: "room", conversationId: "thread", generation: 1 };
+      return result;
+    });
+    h.close(); h.tick(); await h.flush();
+    assert.equal(h.received[2].items[0].observedStamp, null);
+    assert.equal(h.replies[2].items[0].result.reason, "invalidated");
+    h.tick(); await h.flush();
+    assert.equal(h.replies[3].items[0].kind, "abort-ack");
+    assert.equal(h.hidden(), false);
+  } finally { h.stop(); }
+});
