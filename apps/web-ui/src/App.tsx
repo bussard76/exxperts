@@ -1200,6 +1200,7 @@ export function App() {
 								immediateRefusal = correlation;
 								items = [{ kind: "guard-result", binding: currentBinding, nativeRequestId: request.nativeRequestId, result: { kind: "refused", correlation, reason: "invalidated" } }];
 							} else if (markdownEditorPendingActionRef.current) {
+								immediateRefusal = correlation;
 								items = [{ kind: "guard-result", binding: currentBinding, nativeRequestId: request.nativeRequestId, result: { kind: "refused", correlation, reason: "busy" } }];
 							} else {
 								const editor = markdownEditorRef.current;
