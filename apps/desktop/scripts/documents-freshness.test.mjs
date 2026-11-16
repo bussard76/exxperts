@@ -17,11 +17,12 @@ async function setup({ empty = false, controls = false } = {}) {
   if (empty) owner.checkpointContextRef.current = { key: null, roomId: null, conversationId: null, generation: 0 };
   vm.runInNewContext(ownerCode.code, owner);
   const shellSource = fs.readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
-  const shellCode = await transform(`${shellSource}\nglobalThis.testShell = { startDocumentsPoll, requestDocumentsAction };`, { loader: "ts", format: "cjs" });
+  const shellCode = await transform(`${shellSource}\nwireNavigation = () => {}; wireContextMenu = () => {}; globalThis.testShell = { startDocumentsPoll, createMainWindow };`, { loader: "ts", format: "cjs" });
   const app = { setName() {}, getVersion: () => "1", setAboutPanelOptions() {}, isPackaged: true, requestSingleInstanceLock: () => false, quit() {} };
   const require = createRequire(import.meta.url);
   let tick;
-  const shell = { exports: {}, process, console, URL, setTimeout, clearTimeout, setImmediate, setInterval: (fn) => { tick = fn; return 1; }, clearInterval() {}, require: (id) => id === "electron" ? { app } : id.startsWith("./") ? { payloadVersion: () => "test", SERVER_ORIGIN: "http://127.0.0.1:8790", ServerHandle: class {} } : require(id) };
+  let mockWin;
+  const shell = { exports: {}, process, console, URL, setTimeout, clearTimeout, setImmediate, setInterval: (fn) => { tick = fn; return 1; }, clearInterval() {}, require: (id) => id === "electron" ? { app, BrowserWindow: class { constructor() { return mockWin; } } } : id.startsWith("./") ? { loadWindowState: () => ({ bounds: {} }), trackWindowState() {}, payloadVersion: () => "test", SERVER_ORIGIN: "http://127.0.0.1:8790", ServerHandle: class {} } : require(id) };
   vm.runInNewContext(shellCode.code, shell);
   const received = [];
   const replies = [];
@@ -29,7 +30,8 @@ async function setup({ empty = false, controls = false } = {}) {
   let hold = false;
   let hidden = false;
   let intercept = (input, result) => result;
-  const win = { isDestroyed: () => false, hide: () => { hidden = true; }, webContents: { isDestroyed: () => false, getURL: () => "http://127.0.0.1:8790/", executeJavaScript: (expression) => {
+  const handlers = {};
+  const win = { on: (event, handler) => { handlers[event] = handler; }, isDestroyed: () => false, hide: () => { hidden = true; }, webContents: { isDestroyed: () => false, getURL: () => "http://127.0.0.1:8790/", executeJavaScript: (expression) => {
     const input = JSON.parse(expression.match(/endpoint\.step\((.*)\) : null/)[1]);
     received.push(input);
     const result = window.__exxpertsDocuments.step(input);
@@ -37,10 +39,12 @@ async function setup({ empty = false, controls = false } = {}) {
     if (hold) { hold = false; return new Promise((resolve) => { release = () => resolve(result); }); }
     return Promise.resolve(intercept(input, result));
   } } };
+  mockWin = win;
+  shell.testShell.createMainWindow();
   const flush = () => new Promise((resolve) => setImmediate(resolve));
   const stop = shell.testShell.startDocumentsPoll(win);
   await flush();
-  return { owner, received, replies, tick: () => tick(), flush, stop, close: () => shell.testShell.requestDocumentsAction.get(win)("hide"), hold: () => { hold = true; }, release: () => release(), intercept: (fn) => { intercept = fn; }, hidden: () => hidden };
+  return { owner, received, replies, tick: () => tick(), flush, stop, close: () => { let prevented = false; handlers.close({ preventDefault: () => { prevented = true; } }); assert.equal(prevented, true); }, hold: () => { hold = true; }, release: () => release(), intercept: (fn) => { intercept = fn; }, hidden: () => hidden };
 }
 
 test("close samples the owner after an in-flight exchange settles", async () => {
