@@ -480,7 +480,7 @@ function startDocumentsPoll(win: BrowserWindow): () => void {
     const deadline = setTimeout(() => { expired = true; if (sampleSequence === input.sequence) transportPoisoned = true; }, 2_000);
     let evaluation: Promise<unknown>;
     try { evaluation = win.webContents.executeJavaScript(expression); }
-    catch { clearTimeout(deadline); pending = false; documentsPollInFlight.delete(win); return; }
+    catch { if (sampleSequence === input.sequence) transportPoisoned = true; clearTimeout(deadline); pending = false; documentsPollInFlight.delete(win); return; }
     void evaluation.then((output: unknown) => {
       if (!active) return;
       const kind = input.items[0]?.kind;
