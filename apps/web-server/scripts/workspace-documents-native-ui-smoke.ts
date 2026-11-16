@@ -64,6 +64,14 @@ if (active) {
 }
 let application: ElectronApplication | undefined;
 const nativeLifecycleEvidence: string[] = [];
+const flushNativeDetachPhases = async (): Promise<void> => {
+	if (!nativeDetachTrace || !application) return;
+	const phases = await Promise.race([
+		application.evaluate(({ app }) => ((app as any).__t20PhaseTrace ?? []).splice(0) as string[]),
+		new Promise<string[]>((resolve) => setTimeout(() => resolve([]), 2_000)),
+	]).catch(() => [] as string[]);
+	for (const phase of phases) markNativeDetachPhase(phase);
+};
 try {
 	application = await electron.launch({
 		chromiumSandbox: true,
@@ -88,7 +96,8 @@ try {
 	}, port);
 	if (prepare) {
 		const page = application.windows().find((candidate) => candidate.url().startsWith(`http://localhost:${port}/`));
-		await application.evaluate(({ BrowserWindow }, fixture) => {
+		await application.evaluate(({ BrowserWindow, app }, fixture) => {
+				(app as any).__t20PhaseTrace = [];
 				const window = BrowserWindow.fromId(fixture.id)!;
 				const original = window.webContents.executeJavaScript.bind(window.webContents);
 			(window as any).__t20Polls = 0;
@@ -130,11 +139,11 @@ try {
 				}
 				if (script.includes("__exxpertsDocuments")) {
 					(window as any).__t20Polls++;
-					if ((window as any).__t20OwnerClosing && script.includes('"native-prepare"')) markNativeDetachPhase("owner-close-prepare-sent");
+					if ((window as any).__t20OwnerClosing && script.includes('"native-prepare"')) (app as any).__t20PhaseTrace.push("owner-close-prepare-sent");
 					if (script.includes('"native-prepare"')) { (window as any).__t20Prepares++; (window as any).__t20Trace.push("prepare"); if (script.includes('"disposition":"quit"')) (window as any).__t20QuitPrepares++; if (script.includes('"disposition":"reload"')) (window as any).__t20ReloadPrepares++; }
-					if ((window as any).__t20OwnerClosing && script.includes('"native-abort"')) markNativeDetachPhase("owner-close-abort-sent");
+					if ((window as any).__t20OwnerClosing && script.includes('"native-abort"')) (app as any).__t20PhaseTrace.push("owner-close-abort-sent");
 					if (script.includes('"native-abort"')) (window as any).__t20Trace.push("abort");
-					if ((window as any).__t20OwnerClosing && script.includes('"native-commit"')) markNativeDetachPhase("owner-close-native-commit-sent");
+					if ((window as any).__t20OwnerClosing && script.includes('"native-commit"')) (app as any).__t20PhaseTrace.push("owner-close-native-commit-sent");
 					if (script.includes('"native-commit"')) (window as any).__t20Commits++;
 					if (script.includes('"child-registered"')) (window as any).__t20Registered++;
 					if (script.includes('"popup-permit"')) {
@@ -150,19 +159,19 @@ try {
 				}
 				if (fixture.holdCommit && script.includes('"native-commit"') && !(window as any).__t20CommitHeld) {
 					(window as any).__t20CommitHeld = true;
-					if ((window as any).__t20OwnerClosing) markNativeDetachPhase("owner-close-native-commit-held");
-					return new Promise((resolve, reject) => { (window as any).__t20ReleaseCommit = () => Promise.resolve((original as any)(forwardedScript, ...args)).then((output) => { if ((window as any).__t20OwnerClosing) markNativeDetachPhase("owner-close-native-commit-replied"); resolve(output); }, reject); });
+					if ((window as any).__t20OwnerClosing) (app as any).__t20PhaseTrace.push("owner-close-native-commit-held");
+					return new Promise((resolve, reject) => { (window as any).__t20ReleaseCommit = () => Promise.resolve((original as any)(forwardedScript, ...args)).then((output) => { if ((window as any).__t20OwnerClosing) (app as any).__t20PhaseTrace.push("owner-close-native-commit-replied"); resolve(output); }, reject); });
 				}
 				const result = (original as any)(forwardedScript, ...args);
 				const tracked = Promise.resolve(result).then((output: any) => {
-					if ((window as any).__t20OwnerClosing && output?.items?.[0]?.kind === "guard-result") markNativeDetachPhase(`owner-close-guard-reply-${output.items[0].result?.kind ?? "unknown"}`);
+					if ((window as any).__t20OwnerClosing && output?.items?.[0]?.kind === "guard-result") (app as any).__t20PhaseTrace.push(`owner-close-guard-reply-${output.items[0].result?.kind ?? "unknown"}`);
 					if (output?.status?.stamp?.roomId) (window as any).__t20ActivePolls++;
 					if (script.includes('"child-registered"') && output?.items?.length === 0 && output?.sequence === output?.ack) (window as any).__t20RegisteredAck++;
 					if (output?.items?.[0]?.kind === "no-session") (window as any).__t20NoSession++;
 					if (output?.items?.[0]?.kind === "arm-popup") (window as any).__t20Arms++;
 					if (output?.items?.[0]?.kind === "completed") (window as any).__t20Completed++;
 					if (childClosedInput && output === null) { (window as any).__t20ForgedCloseRejected++; (window as any).__t20CompletionAtForgedClose = (window as any).__t20Completed; }
-					if (output?.items?.[0]?.kind === "abort-ack") { (window as any).__t20AbortAck++; (window as any).__t20Trace.push("abort-ack"); if ((window as any).__t20OwnerClosing) markNativeDetachPhase("owner-close-abort-ack-received"); }
+					if (output?.items?.[0]?.kind === "abort-ack") { (window as any).__t20AbortAck++; (window as any).__t20Trace.push("abort-ack"); if ((window as any).__t20OwnerClosing) (app as any).__t20PhaseTrace.push("owner-close-abort-ack-received"); }
 					if (output?.items?.[0]?.kind === "guard-result" && output.items[0].result?.kind === "prepared") (window as any).__t20Prepared++;
 					return output;
 				});
@@ -642,7 +651,11 @@ try {
 		assert(await application.evaluate(({ BrowserWindow }, id) => Boolean(BrowserWindow.fromId(id)?.isVisible()), owner), "a late owner reply cannot revive the expired native close");
 	}
 	}
+} catch (error) {
+	await flushNativeDetachPhases();
+	throw error;
 } finally {
+	await flushNativeDetachPhases();
 	if (application) {
 		const ownedServers: number[] = [];
 		const serverEntry = path.join(root, "apps/web-server/dist/server.mjs");
