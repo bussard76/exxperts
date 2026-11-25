@@ -1100,7 +1100,7 @@ index 4fddd03..e792930 100644
 
 Checks and review:
 
-- `npm run typecheck:scripts`: passed. No gate command was run.
+- `npm run typecheck:scripts`: passed. The mandatory pre-commit static hook additionally ran the web UI TypeScript check and repeated scripts typechecking; both passed. No gate command was run. The first commit attempt caught whitespace in diff context pasted into this report; the zero-context exact assertion diff fixed it and the next hook passed.
 - Focused non-native temporary assertion harness: before the change, a valid renderer-first cross-channel delivery failed; afterward, both renderer-first and main-first deliveries passed. Removing each of the five events, reversing renderer order, reversing either main-order edge, or replacing `defaultPrevented=true` with `false` each failed as required. The harness evaluated the actual assertion text; it was temporary and no test file was added.
 - Baseline comparison against each SHA: removing just the three authorized assertion lines from each version left the remaining smoke text byte-identical. Each version has 57 `assert(` occurrences, in the same positions; no other assertion was removed, weakened, made conditional or renumbered. `git diff --check` passed.
 - Renderer `child-beforeunload < owner-host-adopted`, main `will-navigate < webcontents-destroyed < browserwindow-closed`, all five events, and the existing `defaultPrevented=true` predicate are exercised by the focused harness above. The existing predicate and its exactness remain unchanged.
