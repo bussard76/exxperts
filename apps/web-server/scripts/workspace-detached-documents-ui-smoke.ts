@@ -232,17 +232,41 @@ try {
 			let releasePreview!: () => void, startPreview!: () => void, loadingReads = 0;
 			const previewReleased = new Promise<void>((resolve) => { releasePreview = resolve; });
 			const previewStarted = new Promise<void>((resolve) => { startPreview = resolve; });
+			context.on("request", (request) => {
+				const url = new URL(request.url());
+				if (url.pathname.endsWith("/workspace-preview")) console.log(`[trace] preview request emitted: loading=${url.searchParams.get("path") === "loading.html"} frame=${url.searchParams.get("frame") === "1"}`);
+			});
+			context.on("requestfinished", (request) => {
+				const url = new URL(request.url());
+				if (url.pathname.endsWith("/workspace-preview") && url.searchParams.get("path") === "loading.html") console.log("[trace] loading preview response completed");
+			});
+			context.on("requestfailed", (request) => {
+				const url = new URL(request.url());
+				if (url.pathname.endsWith("/workspace-preview") && url.searchParams.get("path") === "loading.html") console.log("[trace] loading preview request failed");
+			});
 			await page.route("**/workspace-preview?*", async (route) => {
+				console.log("[trace] preview route callback entered");
 				const url = new URL(route.request().url());
-				if (url.searchParams.get("path") !== "loading.html" || url.searchParams.get("frame") === "1") return route.continue();
+				if (url.searchParams.get("path") !== "loading.html" || url.searchParams.get("frame") === "1") {
+					console.log("[trace] preview route predicate rejected");
+					await route.continue();
+					console.log("[trace] rejected preview route continued");
+					return;
+				}
+				console.log("[trace] preview route predicate accepted");
 				loadingReads++;
 				startPreview();
+				console.log("[trace] preview route awaiting release");
 				await previewReleased;
-				await route.continue().catch(() => {});
+				console.log("[trace] preview route released; continuing");
+				await route.continue().catch(() => { console.log("[trace] accepted preview route continue failed"); });
+				console.log("[trace] accepted preview route callback completed");
 			});
+			console.log("[phase] click loading.html");
 			await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "loading.html" }).click();
 			console.log("[phase] await previewStarted");
 			await previewStarted;
+			console.log("[phase] previewStarted resolved");
 			let loadingChild!: import("playwright").Page;
 			try {
 				console.log("[phase] register loadingOpened (page.waitForEvent)");
