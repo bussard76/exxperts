@@ -101,6 +101,7 @@ async function api(pathname: string, init: AuthedFetchInit = {}): Promise<{ stat
 let server: ChildProcessWithoutNullStreams | undefined;
 const serverOutput: string[] = [];
 try {
+	console.log("[phase] start server");
 	server = spawn("npx", ["tsx", "src/index.ts"], {
 		shell: process.platform === "win32",
 		...SMOKE_SERVER_SPAWN_TREE_OPTIONS,
@@ -119,6 +120,7 @@ try {
 	try {
 		const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
 		try {
+			console.log("[phase] open room");
 			const page = await context.newPage();
 			await page.addInitScript({ content: `(() => { const original = window.setInterval; window.__t20RestoreInterval = () => { window.setInterval = original; }; window.setInterval = (callback, delay, ...args) => original(callback, delay === 2000 ? 30000 : delay, ...args); })();` });
 			let writes = 0;
@@ -134,6 +136,7 @@ try {
 			const detachCount = await detach.count();
 			assert(detachCount === 1, `a selected room shows one Detach control before opening a tab (found ${detachCount})`);
 			assert(await detach.isEnabled(), "Detach is available for an empty selected room when safeguards are ready");
+			console.log("[phase] post-adoption failure recovery");
 			await page.evaluate(`window.__t20AppendOpen = window.open; window.open = function (...args) { const child = window.__t20AppendOpen.apply(this, args); if (child) { child.__t20Append = child.Node.prototype.appendChild; child.Node.prototype.appendChild = function (node) { if (node.className === "docs-host") throw new Error("invented post-adoption fault"); return child.__t20Append.call(this, node); }; } return child; };`);
 			let appendChild: import("playwright").Page | undefined;
 			try {
@@ -141,8 +144,10 @@ try {
 				page.on("console", (message) => { if (message.type() === "error") rendererErrors.push(message.text()); });
 				page.on("pageerror", (error) => rendererErrors.push(error.message));
 				await page.evaluate(() => { const testOpen = window.open; (window as any).__t20AppendCalls = 0; window.open = function (...args) { (window as any).__t20AppendCalls++; return testOpen.apply(this, args); }; });
+				console.log("[phase] register appendOpened (page.waitForEvent)");
 				const appendOpened = page.waitForEvent("popup");
 				await detach.click();
+				console.log("[phase] await appendOpened");
 				appendChild = await appendOpened.catch(async (error) => {
 					const state = await Promise.race([page.evaluate(() => ({ openCalls: (window as any).__t20AppendCalls, text: document.body.innerText.slice(-800), detachedHosts: document.querySelectorAll(".docs-host").length })), new Promise<"owner-renderer-evaluation-stalled">((resolve) => setTimeout(() => resolve("owner-renderer-evaluation-stalled"), 2_000))]);
 					throw new Error(`${error instanceof Error ? error.message : String(error)} (${JSON.stringify({ state, rendererErrors })})`, { cause: error });
@@ -151,8 +156,10 @@ try {
 				assert(await page.locator(".sidebar-workspace-files").count() === 0 && writes === 0, "a post-adoption failure retains the fenced host rather than reporting an ordinary refusal");
 				await page.evaluate(`window.open = window.__t20AppendOpen;`);
 				await appendChild.evaluate(`Node.prototype.appendChild = window.__t20Append;`);
+				console.log("[phase] register appendClosed (appendChild.waitForEvent)");
 				const appendClosed = appendChild.waitForEvent("close");
 				await page.getByRole("button", { name: "Return", exact: true }).click();
+				console.log("[phase] await appendClosed");
 				await appendClosed;
 				await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
 				assert(writes === 0, "recovering the post-adoption failure sends no write");
@@ -160,17 +167,22 @@ try {
 				await page.evaluate(`window.open = window.__t20AppendOpen; delete window.__t20AppendOpen;`);
 				if (appendChild && !appendChild.isClosed()) await appendChild.evaluate(`if (window.__t20Append) Node.prototype.appendChild = window.__t20Append;`).catch(() => {});
 			}
+			console.log("[phase] partial move recovery");
 			await page.evaluate(`window.__t20RecoveryOpen = window.open; window.__t20RecoveryAdopt = document.adoptNode; document.adoptNode = function () { throw new Error("invented rollback fault"); }; window.open = function (...args) { const child = window.__t20RecoveryOpen.apply(this, args); if (child) { child.__t20RecoveryAdopt = child.document.adoptNode; child.document.adoptNode = function (node) { if (node.className === "docs-host") throw new Error("invented adoption fault"); return child.__t20RecoveryAdopt.call(this, node); }; } return child; };`);
 			let recoveryChild: import("playwright").Page | undefined;
 			try {
+				console.log("[phase] register recoveryOpened (page.waitForEvent)");
 				const recoveryOpened = page.waitForEvent("popup");
 				await detach.click();
+				console.log("[phase] await recoveryOpened");
 				recoveryChild = await recoveryOpened;
 				await page.getByText("Cedar Studio · Documents unavailable", { exact: true }).waitFor();
 				await page.evaluate(`window.open = window.__t20RecoveryOpen; document.adoptNode = window.__t20RecoveryAdopt;`);
 				await recoveryChild.evaluate(`document.adoptNode = window.__t20RecoveryAdopt;`);
+				console.log("[phase] register recoveredClosed (recoveryChild.waitForEvent)");
 				const recoveredClosed = recoveryChild.waitForEvent("close");
 				await page.getByRole("button", { name: "Return", exact: true }).click();
+				console.log("[phase] await recoveredClosed");
 				await recoveredClosed;
 				await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
 				assert(await page.locator(".workspace-tab").count() === 0 && writes === 0, "recovering a partial move retains one empty owner session without a write");
@@ -178,6 +190,7 @@ try {
 				await page.evaluate(`window.open = window.__t20RecoveryOpen; document.adoptNode = window.__t20RecoveryAdopt; delete window.__t20RecoveryOpen; delete window.__t20RecoveryAdopt`).catch(() => {});
 				if (recoveryChild && !recoveryChild.isClosed()) await recoveryChild.evaluate(`document.adoptNode = window.__t20RecoveryAdopt; delete window.__t20RecoveryAdopt`).catch(() => {});
 			}
+			console.log("[phase] empty detached session and read refusal");
 			let releaseLoad!: () => void, beginLoad!: () => void;
 			const loadReleased = new Promise<void>((resolve) => { releaseLoad = resolve; });
 			const loadStarted = new Promise<void>((resolve) => { beginLoad = resolve; });
@@ -188,8 +201,10 @@ try {
 				await route.fulfill({ status: 403, json: { code: "workspace_read_forbidden", error: "Invented read refusal" } });
 			});
 			await page.evaluate(`window.__t20PopupOpen = window.open; window.open = function (...args) { window.__t20PopupArgs = args; return window.__t20PopupOpen.apply(this, args); }`);
+			console.log("[phase] register emptyOpened (page.waitForEvent)");
 			const emptyOpened = page.waitForEvent("popup");
 			await detach.click();
+			console.log("[phase] await emptyOpened");
 			const emptyChild = await emptyOpened;
 			const popupArgs = await page.evaluate(`window.open = window.__t20PopupOpen; delete window.__t20PopupOpen; window.__t20PopupArgs`) as string[];
 			assert(popupArgs[0] === "about:blank" && typeof popupArgs[1] === "string" && !/Cedar|invented|draft/i.test(popupArgs[1]) && /width=\d+/.test(popupArgs[2]) && /height=\d+/.test(popupArgs[2]) && /left=-?\d+/.test(popupArgs[2]) && /top=-?\d+/.test(popupArgs[2]), "the real browser popup request excludes room and draft text and includes placement hints");
@@ -201,15 +216,19 @@ try {
 			await page.evaluate(() => (window as any).__t20RestoreInterval());
 			try {
 				await emptyChild.locator(".workspace-file-browser-file", { hasText: "invented.md" }).click();
+				console.log("[phase] await loadStarted");
 				await loadStarted;
 				await emptyChild.getByText("Loading file…", { exact: true }).waitFor();
 			} finally { releaseLoad(); }
 			await emptyChild.getByText("Invented read refusal", { exact: true }).waitFor();
+			console.log("[phase] register closedEmptyChild (emptyChild.waitForEvent)");
 			const closedEmptyChild = emptyChild.waitForEvent("close");
 			await emptyChild.getByRole("button", { name: "Return", exact: true }).click();
+			console.log("[phase] await closedEmptyChild");
 			await closedEmptyChild;
 			assert(await page.getByText("Invented read refusal", { exact: true }).isVisible() && Number(writes) === 0, "Return retains a load error without inventing a draft or writing");
 			await page.unroute("**/workspace-markdown?*");
+			console.log("[phase] moving a loading preview");
 			let releasePreview!: () => void, startPreview!: () => void, loadingReads = 0;
 			const previewReleased = new Promise<void>((resolve) => { releasePreview = resolve; });
 			const previewStarted = new Promise<void>((resolve) => { startPreview = resolve; });
@@ -222,23 +241,29 @@ try {
 				await route.continue().catch(() => {});
 			});
 			await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "loading.html" }).click();
+			console.log("[phase] await previewStarted");
 			await previewStarted;
 			let loadingChild!: import("playwright").Page;
 			try {
+				console.log("[phase] register loadingOpened (page.waitForEvent)");
 				const loadingOpened = page.waitForEvent("popup");
 				await detach.click();
+				console.log("[phase] await loadingOpened");
 				loadingChild = await loadingOpened;
 				await loadingChild.locator(".workspace-preview-html").getByText("Loading preview…", { exact: true }).waitFor();
 			} finally { releasePreview(); }
 			await loadingChild.frameLocator('.workspace-preview-html iframe[title="loading.html"]').getByText("Invented loading snapshot").waitFor();
 			assert(loadingReads === 1, "moving a loading preview preserves its existing content request");
+			console.log("[phase] register loadingClosed (loadingChild.waitForEvent)");
 			const loadingClosed = loadingChild.waitForEvent("close");
 			await loadingChild.getByRole("button", { name: "Return", exact: true }).click();
+			console.log("[phase] await loadingClosed");
 			await loadingClosed;
 			await page.frameLocator('.workspace-preview-html iframe[title="loading.html"]').getByText("Invented loading snapshot").waitFor();
 			assert(loadingReads === 1, "Return does not refetch a preview loaded during the move");
 			await page.locator(".workspace-tab", { hasText: "loading.html" }).locator(".workspace-tab-close").click();
 			await page.unroute("**/workspace-preview?*");
+			console.log("[phase] retained HTML snapshot");
 			let htmlReads = 0;
 			context.on("request", (request) => {
 				const url = new URL(request.url());
@@ -248,8 +273,10 @@ try {
 			await page.frameLocator('.workspace-preview-html iframe[title="snapshot.html"]').getByText("Invented original snapshot").waitFor();
 			assert(await page.frameLocator('.workspace-preview-html iframe[title="snapshot.html"]').locator("body").getAttribute("data-executed") === "yes", "the authorized original HTML snapshot executes in its opaque frame");
 			fs.writeFileSync(path.join(workspace, "snapshot.html"), '<body><p>Invented later disk content</p></body>');
+			console.log("[phase] register previewOpened (page.waitForEvent)");
 			const previewOpened = page.waitForEvent("popup");
 			await detach.click();
+			console.log("[phase] await previewOpened");
 			const previewChild = await previewOpened;
 			await previewChild.frameLocator('.workspace-preview-html iframe[title="snapshot.html"]').getByText("Invented original snapshot").waitFor();
 			assert(await previewChild.frameLocator('.workspace-preview-html iframe[title="snapshot.html"]').locator("body").getAttribute("data-executed") === "yes" && htmlReads === 1, "the child executes the retained snapshot without rereading changed disk content");
@@ -259,13 +286,16 @@ try {
 				await page.getByRole("button", { name: "Show documents", exact: true }).click();
 				assert(await previewChild.evaluate(`window.__t20FocusCalls`) === 1, "Show documents targets the existing registered child once");
 			} finally { await previewChild.evaluate(`window.focus = window.__t20OriginalFocus; delete window.__t20OriginalFocus; delete window.__t20FocusCalls`); }
+			console.log("[phase] register previewClosed (previewChild.waitForEvent)");
 			const previewClosed = previewChild.waitForEvent("close");
 			await page.getByRole("button", { name: "Return", exact: true }).click();
+			console.log("[phase] await previewClosed");
 			await previewClosed;
 			await page.getByText("Cedar Studio · Documents in another window", { exact: true }).waitFor({ state: "detached" });
 			assert(await page.getByText("Cedar Studio · Documents in another window", { exact: true }).count() === 0, "chat Return clears the strip after the registered child closes");
 			await page.frameLocator('.workspace-preview-html iframe[title="snapshot.html"]').getByText("Invented original snapshot").waitFor();
 			assert(htmlReads === 1, "Return keeps the original HTML snapshot without another content read");
+			console.log("[phase] retained document snapshots");
 			let textReads = 0, imageReads = 0, wordReads = 0, pdfReads = 0, sheetReads = 0;
 			context.on("request", (request) => {
 				const url = new URL(request.url());
@@ -275,8 +305,10 @@ try {
 				if (url.searchParams.get("path") === "retained.xlsx" && url.pathname.endsWith("/workspace-preview")) sheetReads++;
 				if (url.searchParams.get("path") === "retained.png" && url.pathname.endsWith("/workspace-image")) imageReads++;
 			});
+			console.log("[phase] register snapshotsOpened (page.waitForEvent)");
 			const snapshotsOpened = page.waitForEvent("popup");
 			await detach.click();
+			console.log("[phase] await snapshotsOpened");
 			const snapshotsChild = await snapshotsOpened;
 			await snapshotsChild.locator(".workspace-file-browser-file", { hasText: "retained.pdf" }).click();
 			await snapshotsChild.locator('.workspace-preview-pdf img[alt="Page 1"]').waitFor();
@@ -299,8 +331,10 @@ try {
 			fs.writeFileSync(path.join(workspace, "retained.docx"), "Invented damaged later document");
 			fs.writeFileSync(path.join(workspace, "retained.txt"), "Invented later text snapshot");
 			fs.writeFileSync(path.join(workspace, "retained.png"), "Invented invalid later image");
+			console.log("[phase] register snapshotsClosed (snapshotsChild.waitForEvent)");
 			const snapshotsClosed = snapshotsChild.waitForEvent("close");
 			await snapshotsChild.getByRole("button", { name: "Return", exact: true }).click();
+			console.log("[phase] await snapshotsClosed");
 			await snapshotsClosed;
 			await page.locator('.workspace-preview-image img[alt="retained.png"]').waitFor();
 			await waitUntil(() => page.locator('.workspace-preview-image img[alt="retained.png"]').evaluate((image) => (image as HTMLImageElement).naturalWidth === 1).catch(() => false), "Return retains the image snapshot opened first in the child");
@@ -321,6 +355,7 @@ try {
 			await page.locator(".workspace-tab", { hasText: "retained.png" }).locator(".workspace-tab-close").click();
 			await page.locator(".workspace-tab", { hasText: "snapshot.html" }).locator(".workspace-tab-close").click();
 			await page.locator(".workspace-tab", { hasText: "invented.md" }).locator(".workspace-tab-close").click();
+			console.log("[phase] open Markdown editor");
 			await page.locator(".sidebar-workspace-files .workspace-file-browser-file", { hasText: "invented.md" }).click();
 			await page.locator(".markdown-editor-tiptap .ProseMirror").getByText("Invented source").waitFor();
 			await page.getByRole("button", { name: "RAW", exact: true }).click();
@@ -337,8 +372,10 @@ try {
 			}
 			await page.evaluate(`window.__t20OriginalTree = document.querySelector(".sidebar-workspace-files"); window.__t20OriginalEditor = document.querySelector('[aria-label="Raw Markdown source"]'); window.__t20OriginalHost = window.__t20OriginalEditor?.closest(".docs-host");`);
 			assert(await page.evaluate(`Boolean(window.__t20OriginalHost && window.__t20OriginalHost.contains(window.__t20OriginalTree))`), "the attached tree and editor share one stable document container");
+			console.log("[phase] register opened (page.waitForEvent)");
 			const opened = page.waitForEvent("popup");
 			await detach.click();
+			console.log("[phase] await opened");
 			const child = await opened;
 			await child.locator(".workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
 			await child.locator(".workspace-tab[data-active='true']", { hasText: "invented.md" }).waitFor();
@@ -431,13 +468,16 @@ try {
 				const guard = page.getByRole("dialog", { name: "Unsaved Markdown changes" });
 				await guard.getByRole("button", { name: "Cancel", exact: true }).click();
 				assert(!child.isClosed() && (await page.evaluate(() => location.hash)).includes("/room/") && await childRaw.inputValue() === edited, "Cancel retains the room, child and exact draft");
+				console.log("[phase] register closed (child.waitForEvent)");
 				const closed = child.waitForEvent("close");
 				await child.getByRole("button", { name: "Return", exact: true }).click();
+				console.log("[phase] await closed");
 				await closed;
 				assert(await raw.inputValue() === edited && writes === 0 && fs.readFileSync(path.join(workspace, "invented.md"), "utf8") === original, "Return retains the child's exact unsaved source without a movement write");
 			} finally {
 				await page.evaluate(`window.setTimeout = window.__t20OriginalTimeout; delete window.__t20OriginalTimeout`);
 			}
+			console.log("[phase] pending save");
 			let releaseWrite!: () => void, beginWrite!: () => void;
 			const writeReleased = new Promise<void>((resolve) => { releaseWrite = resolve; });
 			const writeStarted = new Promise<void>((resolve) => { beginWrite = resolve; });
@@ -447,15 +487,20 @@ try {
 				await writeReleased;
 				await route.continue();
 			});
+			console.log("[phase] register reopened (page.waitForEvent)");
 			const reopened = page.waitForEvent("popup");
 			await detach.click();
+			console.log("[phase] await reopened");
 			const savingChild = await reopened;
 			await savingChild.getByRole("textbox", { name: "Raw Markdown source" }).waitFor();
 			try {
 				await savingChild.locator(".markdown-editor-save").click();
+				console.log("[phase] await writeStarted");
 				await writeStarted;
+				console.log("[phase] register closedSavingChild (savingChild.waitForEvent)");
 				const closedSavingChild = savingChild.waitForEvent("close");
 				await savingChild.getByRole("button", { name: "Return", exact: true }).click();
+				console.log("[phase] await closedSavingChild");
 				await closedSavingChild;
 				assert(await raw.inputValue() === edited && Number(writes) === 1, "Return retains a single pending Save and its source");
 				await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
@@ -468,8 +513,11 @@ try {
 			assert(Number(writes) === 1 && (await page.evaluate(() => location.hash)).includes("/room/"), "moving the pending Save sends no second write and the canceled leave stays canceled");
 			await waitUntil(async () => await page.locator(".markdown-editor-status").textContent() === "Saved", "the retained Save settles");
 			await page.unroute("**/workspace-markdown?*");
+			console.log("[phase] conflict recovery");
+			console.log("[phase] register conflictOpened (page.waitForEvent)");
 			const conflictOpened = page.waitForEvent("popup");
 			await detach.click();
+			console.log("[phase] await conflictOpened");
 			let conflictChild = await conflictOpened;
 			const conflictRaw = conflictChild.getByRole("textbox", { name: "Raw Markdown source" });
 			await conflictRaw.waitFor();
@@ -486,8 +534,10 @@ try {
 			assert(await raw.inputValue() === conflictDraft && Number(writes) === 1, "unexpected browser-child closure retains the polled conflict and exact local source without writing");
 			assert(await detach.isEnabled(), "Detach remains available after child conflict recovery");
 			const pageCountBeforeConflictReopen = context.pages().length;
+			console.log("[phase] register conflictReopened (page.waitForEvent)");
 			const conflictReopened = page.waitForEvent("popup");
 			await detach.click();
+			console.log("[phase] await conflictReopened");
 			conflictChild = await conflictReopened;
 			assert(context.pages().includes(conflictChild), "the fresh conflict child belongs to the smoke browser context");
 			assert(await conflictChild.opener() === page, "the owner remains the actual opener after conflict recovery");
@@ -505,11 +555,14 @@ try {
 			try {
 				const keepMine = conflictChild.getByRole("button", { name: "Keep mine", exact: true });
 				await keepMine.click();
+				console.log("[phase] await keepStarted");
 				await keepStarted;
+				console.log("[phase] register closedConflictChild (conflictChild.waitForEvent)");
 				const closedConflictChild = conflictChild.waitForEvent("close");
 				const returnFromConflict = conflictChild.getByRole("button", { name: "Return", exact: true });
 				await returnFromConflict.waitFor({ timeout: 30_000 });
 				await returnFromConflict.click({ timeout: 30_000 });
+				console.log("[phase] await closedConflictChild");
 				await closedConflictChild;
 				assert(await raw.inputValue() === conflictDraft && Number(writes) === 2, "Return retains the pending conflict resolution and exact draft");
 			} finally { releaseKeep(); }
@@ -517,14 +570,17 @@ try {
 			assert(Number(writes) === 2, "returning a pending Keep mine sends no duplicate write");
 			await waitUntil(async () => await page.locator(".markdown-editor-status").textContent() === "Saved", "the retained Keep mine settles");
 			await context.unroute("**/workspace-markdown?*");
+			console.log("[phase] unresolved write recovery");
 			let unknownPutIntercepted = 0;
 			await context.route(/\/workspace-markdown(?:\?|$)/, (route) => {
 				if (route.request().method() !== "PUT") return route.continue();
 				unknownPutIntercepted++;
 				return route.abort();
 			});
+			console.log("[phase] register unknownOpened (page.waitForEvent)");
 			const unknownOpened = page.waitForEvent("popup");
 			await detach.click();
+			console.log("[phase] await unknownOpened");
 			const unknownChild = await unknownOpened;
 			const unknownRaw = unknownChild.getByRole("textbox", { name: "Raw Markdown source" });
 			await unknownRaw.waitFor();
@@ -536,8 +592,10 @@ try {
 			await waitUntil(() => unknownPutIntercepted === 1, "one unknown workspace PUT reaches the browser boundary");
 			assert(unknownPutIntercepted === 1, "Save in the fresh child sends one intercepted unresolved write");
 			await unknownChild.locator(".markdown-editor-error").waitFor();
+			console.log("[phase] register closedUnknownChild (unknownChild.waitForEvent)");
 			const closedUnknownChild = unknownChild.waitForEvent("close");
 			await unknownChild.getByRole("button", { name: "Return", exact: true }).click();
+			console.log("[phase] await closedUnknownChild");
 			await closedUnknownChild;
 			assert(await raw.inputValue() === unknownDraft && Number(writes) === 3, "Return retains an unknown write and its source");
 			await page.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
@@ -545,13 +603,16 @@ try {
 			await unknownGuard.getByRole("button", { name: "Discard changes" }).click();
 			await unknownGuard.waitFor({ state: "hidden" });
 			assert((await page.evaluate(() => location.hash)).includes("/room/") && await raw.inputValue() === unknownDraft && Number(writes) === 3, "an unresolved returned write refuses Discard without a retry");
+			console.log("[phase] register lossOpened (page.waitForEvent)");
 			const lossOpened = page.waitForEvent("popup");
 			await detach.click();
+			console.log("[phase] await lossOpened");
 			const lostChild = await lossOpened;
 			await lostChild.getByRole("textbox", { name: "Raw Markdown source" }).waitFor();
 			await lostChild.close();
 			await waitUntil(async () => await raw.isVisible(), "the owner recovers after the real browser child closes");
 			assert(await raw.inputValue() === unknownDraft && Number(writes) === 3, "unexpected browser-child closure retains the unresolved source without a retry");
+			console.log("[phase] close ordering");
 			const closeRoom = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Invented Close Ordering", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
 			assert(closeRoom.status === 201, "the close-order room is created");
 			const closeRoomId = String(closeRoom.body?.agent?.id ?? "");
@@ -564,8 +625,10 @@ try {
 				if (await closeDismiss.count()) await closeDismiss.click();
 				await closePage.locator(".persistent-agent-card").filter({ hasText: "Invented Close Ordering" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
 				await closePage.locator(".sidebar-workspace-files").waitFor();
+				console.log("[phase] register closeOpened (closePage.waitForEvent)");
 				const closeOpened = closePage.waitForEvent("popup");
 				await closePage.getByRole("button", { name: "Detach", exact: true }).click();
+				console.log("[phase] await closeOpened");
 				const heldChild = await closeOpened;
 				await heldChild.locator(".workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
 				await heldChild.evaluate(`window.__t20OriginalClose = window.close; window.__t20CloseCalls = 0; window.close = () => { window.__t20CloseCalls++; }`);
@@ -576,8 +639,10 @@ try {
 				assert(!heldChild.isClosed() && (await closePage.evaluate(() => location.hash)).includes("/room/"), "a child-close settlement deadline keeps the original continuation fenced");
 				await closePage.getByRole("navigation", { name: "Room navigation" }).getByRole("button", { name: "Home", exact: true }).click();
 				assert((await closePage.evaluate(() => location.hash)).includes("/room/"), "a second Home cannot replace the unresolved original action");
+				console.log("[phase] register childClosed (heldChild.waitForEvent)");
 				const childClosed = heldChild.waitForEvent("close");
 				await heldChild.evaluate(`window.close = window.__t20OriginalClose; window.close()`);
+				console.log("[phase] await childClosed");
 				await childClosed;
 				await waitUntil(async () => !(await closePage.evaluate(() => location.hash)).includes("/room/"), "Home continues after actual child closure");
 			} finally { await closePage.close().catch(() => {}); }
@@ -590,19 +655,25 @@ try {
 				await historyPage.locator(".persistent-agent-card").filter({ hasText: "Invented Close Ordering" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
 				await historyPage.locator(".sidebar-workspace-files").waitFor();
 				await waitUntil(async () => (await historyPage.evaluate(() => location.hash)).includes("/room/"), "the history source room is recorded");
+				console.log("[phase] history ordering");
+				console.log("[phase] register historyOpened (historyPage.waitForEvent)");
 				const historyOpened = historyPage.waitForEvent("popup");
 				await historyPage.getByRole("button", { name: "Detach", exact: true }).click();
+				console.log("[phase] await historyOpened");
 				const historyChild = await historyOpened;
 				await historyChild.locator(".workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
 				await historyChild.evaluate(`window.__t20OriginalClose = window.close; window.__t20CloseCalls = 0; window.close = () => { window.__t20CloseCalls++; }`);
 				await historyPage.evaluate(() => window.history.back());
 				await waitUntil(() => historyChild.evaluate(`window.__t20CloseCalls > 0`), "browser Back requests the registered child close");
 				assert(!historyChild.isClosed() && await historyPage.getByRole("navigation", { name: "Room navigation" }).isVisible(), "browser Back keeps the current room visible until the child actually closes");
+				console.log("[phase] register historyClosed (historyChild.waitForEvent)");
 				const historyClosed = historyChild.waitForEvent("close");
 				await historyChild.evaluate(`window.close = window.__t20OriginalClose; window.close()`);
+				console.log("[phase] await historyClosed");
 				await historyClosed;
 				await historyPage.getByRole("heading", { name: "Your rooms." }).waitFor();
 			} finally { await historyPage.close().catch(() => {}); }
+			console.log("[phase] reload ordering");
 			const reloadRoom = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Invented Reload Ordering", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
 			assert(reloadRoom.status === 201, "the reload-order room is created");
 			const reloadRoomId = String(reloadRoom.body?.agent?.id ?? "");
@@ -622,8 +693,10 @@ try {
 				const oldStatus = await api(`/api/persistent-agents/${encodeURIComponent(reloadRoomId)}/status`);
 				const oldThread = String(oldStatus.body?.runtime?.activeThreadId ?? "");
 				assert(oldThread, "the reload-order room has a current conversation");
+				console.log("[phase] register reloadOpened (reloadPage.waitForEvent)");
 				const reloadOpened = reloadPage.waitForEvent("popup");
 				await reloadPage.getByRole("button", { name: "Detach", exact: true }).click();
+				console.log("[phase] await reloadOpened");
 				const reloadChild = await reloadOpened;
 				await reloadChild.locator(".workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
 				await reloadChild.evaluate(`window.__t20OriginalClose = window.close; window.__t20CloseCalls = 0; window.close = () => { window.__t20CloseCalls++; }`);
@@ -636,8 +709,10 @@ try {
 				await composer.press("Enter");
 				await reloadPage.getByText("This room went on in another window. Reload to continue there.", { exact: true }).waitFor();
 				await reloadPage.route("**/api/persistent-agents", (route) => route.fulfill({ status: 503, json: { error: "Invented unavailable status" } }));
+				console.log("[phase] register refusedStatus (reloadPage.waitForResponse)");
 				const refusedStatus = reloadPage.waitForResponse((response) => response.url().endsWith("/api/persistent-agents") && response.status() === 503);
 				await reloadPage.getByRole("button", { name: "Reload", exact: true }).click();
+				console.log("[phase] await refusedStatus");
 				await refusedStatus;
 				await reloadPage.waitForTimeout(250);
 				assert(await reloadPage.getByRole("navigation", { name: "Room navigation" }).isVisible() && !reloadChild.isClosed() && await reloadChild.evaluate(`window.__t20CloseCalls`) === 0, "a failed Reload status read retains the current room and child");
@@ -647,8 +722,10 @@ try {
 				const sameContextStatuses = liveStatuses.body.map((status: any) => status.id === reloadRoomId ? { ...status, runtime: { ...status.runtime, state: "active", activeThreadId: oldThread }, activeLock: { ...status.activeLock, surface: "web" } } : status);
 				await reloadPage.route("**/api/persistent-agents", (route) => route.fulfill({ status: 200, json: sameContextStatuses }));
 				await reloadPage.route("**/threads/**", (route) => route.request().method() === "GET" ? route.fulfill({ status: 503, json: { error: "Invented unavailable thread" } }) : route.continue());
+				console.log("[phase] register refusedThread (reloadPage.waitForResponse)");
 				const refusedThread = reloadPage.waitForResponse((response) => response.url().includes("/threads/") && response.status() === 503);
 				await reloadPage.getByRole("button", { name: "Reload", exact: true }).click();
+				console.log("[phase] await refusedThread");
 				await refusedThread;
 				await reloadPage.waitForTimeout(250);
 				assert(await reloadPage.getByRole("navigation", { name: "Room navigation" }).isVisible() && !reloadChild.isClosed() && await reloadChild.evaluate(`window.__t20CloseCalls`) === 0, "a failed same-context resume retains the current room and child");
@@ -677,11 +754,14 @@ try {
 				await reloadPage.getByRole("button", { name: "Reload", exact: true }).click();
 				await waitUntil(() => reloadChild.evaluate(`window.__t20CloseCalls > 0`), "moved-room Reload requests the registered child close");
 				assert(!reloadChild.isClosed() && replacementReads === 0, "moved-room Reload withholds the replacement thread while the actual child is open");
+				console.log("[phase] register reloadClosed (reloadChild.waitForEvent)");
 				const reloadClosed = reloadChild.waitForEvent("close");
 				await reloadChild.evaluate(`window.close = window.__t20OriginalClose; window.close()`);
+				console.log("[phase] await reloadClosed");
 				await reloadClosed;
 				await waitUntil(() => replacementReads > 0, "moved-room Reload reads the replacement only after child closure");
 			} finally { await reloadPage.close().catch(() => {}); await moverPage.close().catch(() => {}); }
+			console.log("[phase] Memento ordering");
 			const mementoRoom = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Invented Memento Ordering", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
 			assert(mementoRoom.status === 201, "the Memento-order room is created");
 			const mementoRoomId = String(mementoRoom.body?.agent?.id ?? "");
@@ -694,8 +774,10 @@ try {
 				if (await dismissMemento.count()) await dismissMemento.click();
 				await mementoPage.locator(".persistent-agent-card").filter({ hasText: "Invented Memento Ordering" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
 				await mementoPage.locator(".sidebar-workspace-files").waitFor();
+				console.log("[phase] register mementoOpened (mementoPage.waitForEvent)");
 				const mementoOpened = mementoPage.waitForEvent("popup");
 				await mementoPage.getByRole("button", { name: "Detach", exact: true }).click();
+				console.log("[phase] await mementoOpened");
 				const mementoChild = await mementoOpened;
 				await mementoChild.locator(".workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
 				await mementoChild.evaluate(`window.__t20OriginalClose = window.close; window.__t20CloseCalls = 0; window.close = () => { window.__t20CloseCalls++; }`);
@@ -710,12 +792,16 @@ try {
 				await confirm.getByRole("button", { name: "Forget", exact: true }).click();
 				await waitUntil(() => mementoChild.evaluate(`window.__t20CloseCalls > 0`), "confirmed Memento requests the registered child close");
 				assert(!mementoChild.isClosed() && mementoRequests === 0, "Memento waits for actual child closure before its request");
+				console.log("[phase] register mementoClosed (mementoChild.waitForEvent)");
 				const mementoClosed = mementoChild.waitForEvent("close");
+				console.log("[phase] register mementoResponse (mementoPage.waitForResponse)");
 				const mementoResponse = mementoPage.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/memento"));
 				await mementoChild.evaluate(`window.close = window.__t20OriginalClose; window.close()`);
+				console.log("[phase] await mementoClosed");
 				await mementoClosed;
 				assert((await mementoResponse).ok(), "confirmed Memento reaches its real route after the child closes");
 			} finally { await mementoPage.close().catch(() => {}); }
+			console.log("[phase] settings Memento ordering");
 			const settingsRoom = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Invented Settings Memento", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
 			assert(settingsRoom.status === 201, "the settings Memento room is created");
 			const settingsRoomId = String(settingsRoom.body?.agent?.id ?? "");
@@ -728,8 +814,10 @@ try {
 				if (await dismissSettings.count()) await dismissSettings.click();
 				await settingsPage.locator(".persistent-agent-card").filter({ hasText: "Invented Settings Memento" }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
 				await settingsPage.locator(".sidebar-workspace-files").waitFor();
+				console.log("[phase] register settingsOpened (settingsPage.waitForEvent)");
 				const settingsOpened = settingsPage.waitForEvent("popup");
 				await settingsPage.getByRole("button", { name: "Detach", exact: true }).click();
+				console.log("[phase] await settingsOpened");
 				const settingsChild = await settingsOpened;
 				await settingsChild.locator(".workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
 				await settingsChild.evaluate(`window.__t20OriginalClose = window.close; window.__t20CloseCalls = 0; window.close = () => { window.__t20CloseCalls++; }`);
@@ -747,13 +835,18 @@ try {
 				await settingsConfirm.getByRole("button", { name: "Forget", exact: true }).click();
 				await waitUntil(() => settingsChild.evaluate(`window.__t20CloseCalls > 0`), "confirmed settings Memento requests child closure");
 				assert(!settingsChild.isClosed() && settingsRequests === 0, "room-settings Memento waits for actual child closure before its request");
+				console.log("[phase] register settingsClosed (settingsChild.waitForEvent)");
 				const settingsClosed = settingsChild.waitForEvent("close");
+				console.log("[phase] register settingsResponse (settingsPage.waitForResponse)");
 				const settingsResponse = settingsPage.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/memento"));
 				await settingsChild.evaluate(`window.close = window.__t20OriginalClose; window.close()`);
+				console.log("[phase] await settingsClosed");
 				await settingsClosed;
 				assert((await settingsResponse).ok(), "room-settings Memento reaches its real route after child closure");
 			} finally { await settingsPage.close().catch(() => {}); }
+			console.log("[phase] archive and purge ordering");
 			for (const operation of ["archive", "purge"] as const) {
+				console.log(`[phase] ${operation} ordering`);
 				const roomName = operation === "archive" ? "Invented Archive Ordering" : "Invented Purge Ordering";
 				const room = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: roomName, userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
 				assert(room.status === 201, `the ${operation} ordering room is created`);
@@ -767,8 +860,10 @@ try {
 					if (await operationDismiss.count()) await operationDismiss.click();
 					await operationPage.locator(".persistent-agent-card").filter({ hasText: roomName }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
 					await operationPage.locator(".sidebar-workspace-files").waitFor();
+					console.log("[phase] register operationOpened (operationPage.waitForEvent)");
 					const operationOpened = operationPage.waitForEvent("popup");
 					await operationPage.getByRole("button", { name: "Detach", exact: true }).click();
+					console.log("[phase] await operationOpened");
 					const operationChild = await operationOpened;
 					await operationChild.locator(".workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
 					await operationChild.evaluate(`window.__t20OriginalClose = window.close; window.__t20CloseCalls = 0; window.close = () => { window.__t20CloseCalls++; }`);
@@ -788,13 +883,17 @@ try {
 					if (operation === "purge") await operationPage.getByRole("alertdialog", { name: `Delete ${roomName}?` }).getByRole("button", { name: "Delete room", exact: true }).click();
 					await waitUntil(() => operationChild.evaluate(`window.__t20CloseCalls > 0`), `${operation} requests the registered child close`);
 					assert(!operationChild.isClosed() && operationRequests === 0, `${operation} waits for actual child closure before its route`);
+					console.log("[phase] register operationClosed (operationChild.waitForEvent)");
 					const operationClosed = operationChild.waitForEvent("close");
+					console.log("[phase] register operationResponse (operationPage.waitForResponse)");
 					const operationResponse = operationPage.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith(`/${operation}`) && response.ok());
 					await operationChild.evaluate(`window.close = window.__t20OriginalClose; window.close()`);
+					console.log("[phase] await operationClosed");
 					await operationClosed;
 					assert((await operationResponse).ok(), `${operation} reaches its real route after the child closes`);
 				} finally { await operationPage.close().catch(() => {}); }
 			}
+			console.log("[phase] checkpoint ordering");
 			const checkpointRoom = await api("/api/persistent-agents", { method: "POST", body: JSON.stringify({ displayName: "Invented Checkpoint Ordering", userName: "Synthetic User", preferredUserAddress: "Synthetic User" }) });
 			assert(checkpointRoom.status === 201, "the checkpoint ordering room is created");
 			const checkpointRoomId = String(checkpointRoom.body?.agent?.id ?? "");
@@ -818,8 +917,10 @@ try {
 					const thread = await api(`/api/persistent-agents/${encodeURIComponent(checkpointRoomId)}/threads/${encodeURIComponent(threadId)}`);
 					return JSON.stringify(thread.body).includes("Invented fake answer.");
 				}, "the fake answer is saved before checkpointing");
+				console.log("[phase] register checkpointOpened (checkpointPage.waitForEvent)");
 				const checkpointOpened = checkpointPage.waitForEvent("popup");
 				await checkpointPage.getByRole("button", { name: "Detach", exact: true }).click();
+				console.log("[phase] await checkpointOpened");
 				const checkpointChild = await checkpointOpened;
 				await checkpointChild.locator(".workspace-file-browser-file", { hasText: "invented.md" }).waitFor();
 				await checkpointChild.evaluate(`window.__t20OriginalClose = window.close; window.__t20CloseCalls = 0; window.close = () => { window.__t20CloseCalls++; }`);
@@ -829,21 +930,26 @@ try {
 				await checkpointDialog.getByText("Invented checkpoint point 12 is agreed for the synthetic workspace.", { exact: true }).waitFor({ timeout: 30_000 });
 				const threadGets: string[] = [];
 				checkpointPage.on("request", (request) => { if (request.method() === "GET" && request.url().includes("/threads/")) threadGets.push(request.url()); });
+				console.log("[phase] register approvalResponse (checkpointPage.waitForResponse)");
 				const approvalResponse = checkpointPage.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/checkpoint/approve") && response.ok());
 				await checkpointDialog.getByRole("button", { name: "Save to memory" }).click();
+				console.log("[phase] await approvalResponse");
 				const approval = await (await approvalResponse).json();
 				const nextThread = String(approval.postCheckpoint?.activeThreadId || approval.runtimeBoundary?.newThreadId || "");
 				assert(nextThread, "checkpoint supplies the invented replacement conversation");
 				await waitUntil(() => checkpointChild.evaluate(`window.__t20CloseCalls > 0`), "checkpoint replacement requests child closure");
 				assert(!checkpointChild.isClosed() && !threadGets.some((url) => url.endsWith(`/threads/${encodeURIComponent(nextThread)}`)), "checkpoint save completes but the replacement waits for the actual child close");
+				console.log("[phase] register checkpointClosed (checkpointChild.waitForEvent)");
 				const checkpointClosed = checkpointChild.waitForEvent("close");
 				await checkpointChild.evaluate(`window.close = window.__t20OriginalClose; window.close()`);
+				console.log("[phase] await checkpointClosed");
 				await checkpointClosed;
 				await waitUntil(() => Promise.resolve(threadGets.some((url) => url.endsWith(`/threads/${encodeURIComponent(nextThread)}`))), "checkpoint replacement reads the original target after child closure");
 				await checkpointDialog.getByText("Memory updated", { exact: true }).waitFor({ timeout: 20_000 });
 			} finally { await checkpointPage.close().catch(() => {}); }
 		} finally { await context.close(); }
 	} finally { await browser.close(); }
+	console.log("[phase] complete");
 	console.log("workspace-detached-documents-ui smoke: ok");
 } catch (error) {
 	console.error(serverOutput.join("").slice(-4000));
