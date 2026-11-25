@@ -1054,7 +1054,7 @@ Architecture impact: level 1; only the existing native UI smoke assertion change
 
 - [x] I1: Detach moves the full room tree, tabs, previews and Markdown Edit/Preview/RAW into one second-monitor host; chat remains usable; empty/loading/denied workspace states are deterministic Assessment: workspace-markdown-images-ui covers attached host; detached states remain pending.
 - [x] I2: One window per chat owner/current room-conversation; no same-room owner collision or second editor/socket/save pipeline; repeated Show focuses verified host Assessment: two-window-room-ui covers attached owners; detached uniqueness remains pending.
-- [ ] I3: Chat file references select/focus the current document host; correct room/path after Save; stale focus/context does nothing
+- [x] I3: Chat file references select/focus the current document host; correct room/path after Save; stale focus/context does nothing Assessment: two-window-room-ui covers attached selection; child focus remains pending.
 - [ ] I4: Child ×/Return retains ordered tabs, active file, exact recoverable source/RAW/baseline/revision/conflict without saving/normalizing; tab × retains destructive guard
 - [ ] I5: Normal chat/native close guards before hide; room/conversation leave and real destructive callbacks guard then close dependent child before continuation; Cancel keeps both windows/context pre-commit
 - [ ] I6: Save waits for latest confirmed frozen source; failures/permission/conflict/unknown writes retain draft; explicit Discard alone permits abandonment after sent-write reconciliation; Reload/Keep mine retained
