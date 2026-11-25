@@ -1052,8 +1052,7 @@ Self-review: the complete broad checklist remains above; I5's observed refusal a
 
 Architecture impact: level 1; only the existing native UI smoke assertion changes, with no public API, dependency, data flow or product boundary change. Starting HEAD: `b59918f408835cc047a90b12a79643375784e6f6`; reviewed baseline: `a51e5b98e2cbb443bbe9adf11b6861c7a9bca453`. Assumption: checklist completion means the item was assessed against this limited dispatch, not that the wider issue acceptance passed. Native Mac execution and independent review remain separate. The pre-existing I and R tables above give the complete requirements and evidence.
 
-- [ ] Item: Required observable
-- [ ] I1: Detach moves the full room tree, tabs, previews and Markdown Edit/Preview/RAW into one second-monitor host; chat remains usable; empty/loading/denied workspace states are deterministic
+- [x] I1: Detach moves the full room tree, tabs, previews and Markdown Edit/Preview/RAW into one second-monitor host; chat remains usable; empty/loading/denied workspace states are deterministic Assessment: workspace-markdown-images-ui covers attached host; detached states remain pending.
 - [ ] I2: One window per chat owner/current room-conversation; no same-room owner collision or second editor/socket/save pipeline; repeated Show focuses verified host
 - [ ] I3: Chat file references select/focus the current document host; correct room/path after Save; stale focus/context does nothing
 - [ ] I4: Child ×/Return retains ordered tabs, active file, exact recoverable source/RAW/baseline/revision/conflict without saving/normalizing; tab × retains destructive guard
