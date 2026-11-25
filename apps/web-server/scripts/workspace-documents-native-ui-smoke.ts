@@ -341,9 +341,9 @@ try {
 					await waitUntil(() => page.locator(".docs-host").count().then((count) => count === 1), "an attempted in-app navigation rehosts the documents to chat");
 				await waitUntil(() => application!.evaluate(({ BrowserWindow }, id) => !BrowserWindow.fromId(id), childId), "in-app navigation cannot replace the registered child");
 				await waitUntil(() => nativeLifecycleEvidence.includes("browserwindow-closed"), "the actual native child lifecycle is captured", 5_000);
-				const lifecycleOrder = ["child-beforeunload", "will-navigate", "owner-host-adopted", "webcontents-destroyed", "browserwindow-closed"];
-				const lifecycleIndexes = lifecycleOrder.map((event) => nativeLifecycleEvidence.findIndex((line) => line.startsWith(event)));
-				assert(lifecycleIndexes.every((index, position) => index >= 0 && (position === 0 || index > lifecycleIndexes[position - 1])) && nativeLifecycleEvidence.find((line) => line.startsWith("will-navigate"))?.includes("defaultPrevented=true"), `the actual child observes beforeunload, canceled navigation, owner host adoption, WebContents destruction, then BrowserWindow close (evidence=${JSON.stringify(nativeLifecycleEvidence)})`);
+				const lifecycleOrder = [["child-beforeunload", "owner-host-adopted"], ["will-navigate", "webcontents-destroyed", "browserwindow-closed"]];
+				const lifecycleIndexes = lifecycleOrder.map((channel) => channel.map((event) => nativeLifecycleEvidence.findIndex((line) => line.startsWith(event))));
+				assert(lifecycleIndexes.every((channel) => channel.every((index, position) => index >= 0 && (position === 0 || index > channel[position - 1]))) && nativeLifecycleEvidence.find((line) => line.startsWith("will-navigate"))?.includes("defaultPrevented=true"), `the actual child observes beforeunload before owner host adoption and canceled navigation before WebContents destruction before BrowserWindow close (evidence=${JSON.stringify(nativeLifecycleEvidence)})`);
 				markNativeDetachPhase("returned-after-in-app-navigation");
 				assert(childPage.url() === "about:blank" && page.url() === ownerURL && await page.locator(".docs-host").count() === 1, "in-app navigation is denied and the existing host remains with its original chat");
 				const registeredBeforeReturn = await Promise.race([application.evaluate(({ BrowserWindow }, id) => (BrowserWindow.fromId(id) as any)?.__t20RegisteredAck ?? 0, owner), new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("owner registration count evaluation stalled")), 5_000))]);

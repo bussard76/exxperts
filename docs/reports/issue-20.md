@@ -1077,3 +1077,33 @@ Architecture impact: level 1; only the existing native UI smoke assertion change
 - [x] R13 `registered-child-bounds-recovery`: Actual child receives outer DIP workarea-clamped visible bounds or defined fallback; main fields preserved both write directions; no content persistence. Chat Return without child access works; browser limits explicit. Pure geometry-unit tests supplement but do not establish adapter/child integration. Assessment: workspace-documents-native-ui specifies native bounds; full scenario remains pending.
 - [x] R14 `popup-policy-and-bootstrap`: Failed bootstrap leaves attached state; only exact registered child gets C5/geometry privilege; inherited security preserved. Read-only/policy unchanged; implicit/refused OS action calls fake opener zero times; mock/intercept all external destinations. Assessment: workspace-detached-documents-ui specifies popup policy; full scenario remains pending.
 - [x] R15 `packed-mac-normal-entrypoints`: Trace native prevent before hide/server.stop/updater/reload; matching refusal/allow/abort/commit/closed ordering; exact draft/conflict and geometry preserved. Record final full candidateSHA, OS/app/package/entrypoint. DOM pagehide, browser page.close and existing smoke app.exit cannot prove it. Other platform claims need their own evidence. Assessment: workspace-documents-native-ui specifies native entrypoints; separately authorized packed Mac test remains pending.
+
+### T20-MAC-6 implementation and self-review
+
+Sascha decided option A on 2026-11-25: compare renderer events with renderer events, and main-process events with main-process events. The two channels are delivered independently to the smoke; no global cross-channel order is assumed. This is a test-only correction to the specified assertion. The test seam was explicitly selected by the dispatch, so no new seam or product implementation was introduced.
+
+The full line-by-line smoke diff below is identical against both `a51e5b98e2cbb443bbe9adf11b6861c7a9bca453` and the pre-change head `b59918f408835cc047a90b12a79643375784e6f6`; those two baseline versions of this smoke are identical. No other test or product file was changed for this dispatch.
+
+```diff
+diff --git a/apps/web-server/scripts/workspace-documents-native-ui-smoke.ts b/apps/web-server/scripts/workspace-documents-native-ui-smoke.ts
+index 4fddd03..e792930 100644
+--- a/apps/web-server/scripts/workspace-documents-native-ui-smoke.ts
++++ b/apps/web-server/scripts/workspace-documents-native-ui-smoke.ts
+@@ -344,3 +344,3 @@ try {
+-				const lifecycleOrder = ["child-beforeunload", "will-navigate", "owner-host-adopted", "webcontents-destroyed", "browserwindow-closed"];
+-				const lifecycleIndexes = lifecycleOrder.map((event) => nativeLifecycleEvidence.findIndex((line) => line.startsWith(event)));
+-				assert(lifecycleIndexes.every((index, position) => index >= 0 && (position === 0 || index > lifecycleIndexes[position - 1])) && nativeLifecycleEvidence.find((line) => line.startsWith("will-navigate"))?.includes("defaultPrevented=true"), `the actual child observes beforeunload, canceled navigation, owner host adoption, WebContents destruction, then BrowserWindow close (evidence=${JSON.stringify(nativeLifecycleEvidence)})`);
++				const lifecycleOrder = [["child-beforeunload", "owner-host-adopted"], ["will-navigate", "webcontents-destroyed", "browserwindow-closed"]];
++				const lifecycleIndexes = lifecycleOrder.map((channel) => channel.map((event) => nativeLifecycleEvidence.findIndex((line) => line.startsWith(event))));
++				assert(lifecycleIndexes.every((channel) => channel.every((index, position) => index >= 0 && (position === 0 || index > channel[position - 1]))) && nativeLifecycleEvidence.find((line) => line.startsWith("will-navigate"))?.includes("defaultPrevented=true"), `the actual child observes beforeunload before owner host adoption and canceled navigation before WebContents destruction before BrowserWindow close (evidence=${JSON.stringify(nativeLifecycleEvidence)})`);
+```
+
+Checks and review:
+
+- `npm run typecheck:scripts`: passed. No gate command was run.
+- Focused non-native temporary assertion harness: before the change, a valid renderer-first cross-channel delivery failed; afterward, both renderer-first and main-first deliveries passed. Removing each of the five events, reversing renderer order, reversing either main-order edge, or replacing `defaultPrevented=true` with `false` each failed as required. The harness evaluated the actual assertion text; it was temporary and no test file was added.
+- Baseline comparison against each SHA: removing just the three authorized assertion lines from each version left the remaining smoke text byte-identical. Each version has 57 `assert(` occurrences, in the same positions; no other assertion was removed, weakened, made conditional or renumbered. `git diff --check` passed.
+- Renderer `child-beforeunload < owner-host-adopted`, main `will-navigate < webcontents-destroyed < browserwindow-closed`, all five events, and the existing `defaultPrevented=true` predicate are exercised by the focused harness above. The existing predicate and its exactness remain unchanged.
+- Scope and safety: only this report and `apps/web-server/scripts/workspace-documents-native-ui-smoke.ts` changed; no product code, dependency, native server gate, browser gate, full build/smokes, native smoke or Mac run. No real data or paid API was used; no screenshots were created. Any future captures must remain untracked in `.build/screenshots/`.
+- The I1–I10 and R1–R15 audit above identifies the relevant existing test and its limit for each acceptance item; checkmarks indicate assessment only, not product acceptance. This dispatch does not claim any previously pending scenario passed. Independent Tester review and a separately authorized Mac DETACH task on the reviewed SHA remain outstanding.
+- Debt candidates: native Mac execution and the issue's previously recorded broader evidence gaps remain open; the previously recorded real-home tools concern is outside this change. No load or foreign-network failure occurred in these checks.
