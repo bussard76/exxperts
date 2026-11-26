@@ -11,3 +11,19 @@ Authored `docs/specs/T23-uparrow-history.md` from issue #23, the prior Architect
 Files authored: this report and `docs/specs/T23-uparrow-history.md`. No product code or tests were changed or added. No tests, builds, lint, browser tests or gates were run, as directed.
 
 The spec and report were committed and pushed to `agents/t23-uparrow-spec` at `7b67da465040d3cf284571e122f54b32b57e5a8c`. That documentation-only commit passed the mandatory pre-commit hook; its static-check step skipped typecheck and lint. No tests, builds, lint or browser checks were run. The pre-existing `package-lock.json` modification is unrelated and remains untouched. This follow-up records only the accepted room-only rule and corrects the status; the independent Architect spec review is still pending and must pass before implementation.
+
+## Implementation checklist
+
+- [ ] Up and Down navigate sent room prompts in order, stop at bounds, and restore the exact original draft after the newest.
+- [ ] Escape restores the original draft, including after editing a recalled entry; recall is editable, puts the caret at the end, and does not send.
+- [ ] Up starts only on the first line or an empty field; empty history leaves native behavior intact.
+- [ ] Mention, IME, overlay, approval, selection, caret, and existing send handling retain precedence.
+- [ ] Room switching clears browsing state and isolates each room's history and draft.
+- [ ] Restored room transcript supplies recall after reload without new persistence.
+- [ ] Consecutive exact duplicate user prompts collapse across other items; non-consecutive repeats remain; empty attachment-only prompts and wire-only text are excluded.
+- [ ] Accepted sends become recallable; reset and accepted send clear browsing; failed send preserves draft.
+- [ ] Accepted composer @ consults sent to another room are excluded.
+- [ ] Document the user-visible behavior and self-review every item with named tests.
+- [ ] Run targeted typechecks, affected suites, and covering browser specs through gate; merge origin/main and rerun affected suites.
+
+Assumption: the existing textarea and browser-level room interactions are the public test seam. Graph: no; no graph was requested for this task.

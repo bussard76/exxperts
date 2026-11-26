@@ -37,3 +37,7 @@ These are future implementation checks using invented data; the existing send, m
 ## Review and implementation order
 
 An independent Architect must review this revised spec before implementation. TDD and the repository's normal implementation and review checks apply to subsequent behavioral work. There are no additional recommendations or unrecorded product decisions in this spec.
+
+## Outside-in sign-off
+
+Decided by Sascha, 2026-11-26: “Ja, Sign-off”. The signed-off UI adds no surface: recall writes only text in the existing composer field; the design export is omitted. Up at the first line or in an empty field recalls the previous sent prompt from this room, and further Up moves backward. Down moves forward and restores the original draft after the newest entry; Escape also restores it. Consecutive duplicates appear once, recall never sends without Enter, and the @ mention popup retains its own arrow keys. The source is this room's saved user history and survives reload; accepted composer @ consult prompts sent to another room are explicitly excluded. This decision resolves the outside-in finding in `T23-UPARROW-R2-architecture-spec.md` and the earlier consult concern; no further Architect round is requested.
