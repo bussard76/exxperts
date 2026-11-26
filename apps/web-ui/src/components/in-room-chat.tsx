@@ -1099,8 +1099,13 @@ export function ComposerInput({
 		if (e.key === "Escape" && browsing) {
 			e.preventDefault();
 			browsingRef.current = null;
-			pendingCaretRef.current = browsing.draft.length;
-			setDraft(browsing.draft);
+			if (draft === browsing.draft) {
+				e.currentTarget.setSelectionRange(draft.length, draft.length);
+				setCaret(draft.length);
+			} else {
+				pendingCaretRef.current = browsing.draft.length;
+				setDraft(browsing.draft);
+			}
 			return;
 		}
 		if (!e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "ArrowUp" || (e.key === "ArrowDown" && browsing))) {

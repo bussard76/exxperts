@@ -27,3 +27,5 @@ The spec and report were committed and pushed to `agents/t23-uparrow-spec` at `7
 - [ ] Run targeted typechecks, affected suites, and covering browser specs through gate; merge origin/main and rerun affected suites.
 
 Assumption: the existing textarea and browser-level room interactions are the public test seam. Graph: no; no graph was requested for this task.
+
+Caret regression: `consult-mention-smoke.ts` first failed when an identical recalled prompt was escaped and edited; a pending programmatic caret move survived because the draft value did not change. The fix restores the caret immediately for identical text; the browser smoke passed. The initial navigation test also needed to wait until queued messages actually reached the transcript; a run before that wait failed at `ArrowUp recalls gamma`, and the corrected test passed.

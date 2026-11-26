@@ -539,11 +539,12 @@ async function checkMessageBox(chromium: BrowserType): Promise<void> {
 					assert(await page.evaluate(() => document.documentElement.dataset.theme) === theme, `${label}: the page shows the ${theme} theme`);
 					await composer.click();
 					if (width === 1280 && theme === "light") {
-						for (const prompt of ["alpha", "beta", "gamma"]) {
+						for (const [index, prompt] of ["alpha", "beta", "gamma"].entries()) {
 							await composer.fill(prompt);
 							await waitUntil(async () => await page.locator("button.send-btn").isEnabled(), `ready to send ${prompt}`);
 							await composer.press("Enter");
 							await waitUntil(async () => (await composer.inputValue()) === "", `sent ${prompt}`);
+							await waitUntil(async () => await page.locator(".bubble-row.user:not(.queued)").count() >= index + 1, `${prompt} reached the transcript`);
 						}
 						await composer.fill("original draft");
 						for (const [key, value] of [["ArrowUp", "gamma"], ["ArrowUp", "beta"], ["ArrowUp", "alpha"], ["ArrowUp", "alpha"], ["ArrowDown", "beta"], ["ArrowDown", "gamma"], ["ArrowDown", "original draft"]]) {
@@ -555,6 +556,12 @@ async function checkMessageBox(chromium: BrowserType): Promise<void> {
 						await composer.fill("edited recall");
 						await composer.press("Escape");
 						assert(await composer.inputValue() === "original draft", "Escape restores the draft after editing recall");
+						await composer.fill("gamma");
+						await composer.press("ArrowUp");
+						await composer.press("Escape");
+						await composer.press("End");
+						await composer.press("x");
+						assert(await composer.evaluate((node: HTMLTextAreaElement) => node.selectionStart === node.value.length), "editing after restoring identical text keeps the caret at the end");
 						await composer.fill("first line\nsecond line");
 						await composer.evaluate((node: HTMLTextAreaElement) => node.setSelectionRange(node.value.length, node.value.length));
 						await composer.press("ArrowUp");
