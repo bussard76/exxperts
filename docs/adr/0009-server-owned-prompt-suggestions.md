@@ -38,13 +38,19 @@ The dispatch supplied that exact quote and the following accepted architecture c
 - Do not persist suggestions. Discard a result stale for a different answer, room or thread.
 - Preserve issue #24's grey ghost text, Tab/Shift+Tab cycling and Right Arrow acceptance. Acceptance inserts ordinary composer text without sending; typing hides the suggestion; suggestions never trigger tools, connectors or actions.
 
+### Reconciled amendment — recipient scope (2026-11-26)
+
+Decided by: Sascha (2026-11-26), option A: “A: nur ins Fenster, das die Antwort führt”.
+
+Keep the existing owner/adopter semantics. Suggestion lifecycle messages and suggestion results go only to the existing window that leads the answer. Do not add an observer channel or fan out to other same-room windows. The Q08 goal of suggestions for all windows and background answers is superseded: a background answer with no leading window produces no suggestions. This narrows the recipient scope; it does not change the server-owned generation decision, the Q07 payload, answer identity, or detached-adoption identity.
+
 The accepted answer selects the provider's existing `processes.absorb` Memorize model, avoiding a new model table. It fixes context limits, usage/logging policy, cancellation, the `suggestions` room-socket message, ephemeral lifecycle, JSON parsing, composer precedence and keyboard behavior. The answers do not name literal provider model IDs: implementation must use the configured Memorize model for the provider that produced the answer and must not add a provider or model mapping.
 
 ## Consequences
 
 The server gains responsibility for the bounded post-answer provider call, validation and correlation. The UI receives plain text for an explicitly accepted composer action. Conversation text leaves the room for an additional call to the same provider, with additional latency, usage and potential cost; staying with the same provider does not establish its retention or logging policy. Suggestion generation cannot execute tools or read extra room content.
 
-No eligible configured Memorize model, a silent error or a 10-second timeout leaves the ordinary hint. Suggestions are ephemeral: room switches lose them, reconnect and restart do not restore them, and all windows observing the room receive the same current result. The answer fixes correlation fields and client-side last-answer validation.
+No eligible configured Memorize model, a silent error or a 10-second timeout leaves the ordinary hint. Suggestions are ephemeral: room switches lose them, reconnect and restart do not restore them. Only the existing window leading an answer receives its suggestion lifecycle and current result; other windows receive no observer copy. A background answer without a leading window produces no suggestions. The answer fixes correlation fields and client-side last-answer validation.
 
 The existing isolated worker, room model catalog and composer hint logic remain candidate seams, not a mandate for a new module or refactoring. No new dependency or route is specified. Sascha approved no dedicated design export because the UI change is limited to the existing placeholder's grey text; the fixture-gallery fake and Mermaid logic diagram are the outside-in artifacts. Implementation remains blocked pending a fresh independent Architect spec review.
 
