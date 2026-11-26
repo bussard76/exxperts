@@ -592,6 +592,7 @@ async function checkMessageBox(chromium: BrowserType): Promise<void> {
 						await composer.press("ArrowUp");
 						assert(await composer.inputValue() === "", "switching rooms does not carry history");
 						await page.goBack();
+						await page.locator(".persistent-agent-card").filter({ hasText: desk }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
 						await composer.waitFor({ timeout: 20_000 });
 						await page.reload({ waitUntil: "networkidle" });
 						await composer.waitFor({ timeout: 20_000 });
