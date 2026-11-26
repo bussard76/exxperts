@@ -14,7 +14,7 @@ The spec and report were committed and pushed to `agents/t23-uparrow-spec` at `7
 
 ## Implementation checklist
 
-- [ ] Up and Down navigate sent room prompts in order, stop at bounds, and restore the exact original draft after the newest.
+- [x] Up and Down navigate sent room prompts in order, stop at bounds, and restore the exact original draft after the newest: `consult-mention-smoke.ts`, browser composer path. The test failed first on `ArrowUp recalls gamma`, then passed.
 - [ ] Escape restores the original draft, including after editing a recalled entry; recall is editable, puts the caret at the end, and does not send.
 - [ ] Up starts only on the first line or an empty field; empty history leaves native behavior intact.
 - [ ] Mention, IME, overlay, approval, selection, caret, and existing send handling retain precedence.

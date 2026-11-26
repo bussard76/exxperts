@@ -759,6 +759,7 @@ const TranscriptItems = memo(function TranscriptItems({
 });
 
 interface ComposerInputProps {
+	items?: ChatItem[];
 	onSend: (text: string) => boolean;
 	onStop?: () => void;
 	stopVisible?: boolean;
@@ -824,6 +825,7 @@ function alignMirror(box: HTMLTextAreaElement, mirror: HTMLElement): void {
 
 /** The room's message box. Exported so a smoke can type into it and press its keys. */
 export function ComposerInput({
+	items = [],
 	onSend,
 	onStop,
 	stopVisible = false,
@@ -849,6 +851,7 @@ export function ComposerInput({
 	onBoxTextChange,
 }: ComposerInputProps) {
 	const [draft, setDraft] = useState(() => initialDraftValue ?? "");
+	const browsingRef = useRef<{ draft: string; index: number } | null>(null);
 	const boxHasText = draft.trim() !== "";
 	useEffect(() => {
 		onBoxTextChange?.(boxHasText);
@@ -906,6 +909,7 @@ export function ComposerInput({
 
 	useEffect(() => {
 		setDraft(initialDraftValue ?? "");
+		browsingRef.current = null;
 		setMentionDismissed(false);
 	}, [draftResetKey]);
 
@@ -1057,6 +1061,7 @@ export function ComposerInput({
 			// retry.
 			const accepted = mention.onConsultRequest(leadingMention.room.id, leadingMention.question);
 			if (accepted) {
+				browsingRef.current = null;
 				setDraft("");
 				setMentionDismissed(false);
 			}
@@ -1064,6 +1069,7 @@ export function ComposerInput({
 		}
 		const accepted = onSend(draft);
 		if (accepted) {
+			browsingRef.current = null;
 			setDraft("");
 		}
 	}, [draft, onSend, sendDisabled, mention, leadingMention]);
@@ -1089,11 +1095,36 @@ export function ComposerInput({
 			else keyboardApproval.decline();
 			return;
 		}
+		const browsing = browsingRef.current;
+		if (e.key === "Escape" && browsing) {
+			e.preventDefault();
+			browsingRef.current = null;
+			pendingCaretRef.current = browsing.draft.length;
+			setDraft(browsing.draft);
+			return;
+		}
+		if (!e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "ArrowUp" || (e.key === "ArrowDown" && browsing))) {
+			const history: string[] = [];
+			for (const item of items) {
+				if (item.kind === "user" && item.text && history[history.length - 1] !== item.text) history.push(item.text);
+			}
+			if (history.length && (browsing || (e.key === "ArrowUp" && !draft.slice(0, e.currentTarget.selectionStart).includes("\n")))) {
+				e.preventDefault();
+				const state = browsing ?? { draft, index: history.length };
+				state.index = e.key === "ArrowUp" ? Math.max(0, state.index - 1) : Math.min(history.length, state.index + 1);
+				const text = state.index === history.length ? state.draft : history[state.index];
+				browsingRef.current = state.index === history.length ? null : state;
+				pendingCaretRef.current = text.length;
+				if (text === draft) { e.currentTarget.setSelectionRange(text.length, text.length); pendingCaretRef.current = null; setCaret(text.length); }
+				else setDraft(text);
+				return;
+			}
+		}
 		// Cmd+Enter on a Mac, Ctrl+Enter elsewhere: now, even through the answer; in an empty box, the first queued message goes now.
 		if (e.key === "Enter" && !e.shiftKey && !e.altKey && chordHeld(e.nativeEvent) && (onSendNow || onSendQueuedNow)) {
 			e.preventDefault();
 			if (!boxHasText) onSendQueuedNow?.();
-			else if (!sendUnavailable && !queueRefused && onSendNow?.(draft)) setDraft("");
+			else if (!sendUnavailable && !queueRefused && onSendNow?.(draft)) { browsingRef.current = null; setDraft(""); }
 			return;
 		}
 		if (e.key === "Enter" && !e.shiftKey) {
@@ -1710,6 +1741,7 @@ export function InRoomChatShellView({
 						<div className={composerLayoutClass}>
 							<div className="composer-stack">
 							<ComposerInput
+								items={items}
 								onSend={onSend}
 								onStop={onStop}
 								stopVisible={stopVisible}

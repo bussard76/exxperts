@@ -538,6 +538,20 @@ async function checkMessageBox(chromium: BrowserType): Promise<void> {
 					await composer.waitFor({ timeout: 20_000 });
 					assert(await page.evaluate(() => document.documentElement.dataset.theme) === theme, `${label}: the page shows the ${theme} theme`);
 					await composer.click();
+					if (width === 1280 && theme === "light") {
+						for (const prompt of ["alpha", "beta", "gamma"]) {
+							await composer.fill(prompt);
+							await waitUntil(async () => await page.locator("button.send-btn").isEnabled(), `ready to send ${prompt}`);
+							await composer.press("Enter");
+							await waitUntil(async () => (await composer.inputValue()) === "", `sent ${prompt}`);
+						}
+						await composer.fill("original draft");
+						for (const [key, value] of [["ArrowUp", "gamma"], ["ArrowUp", "beta"], ["ArrowUp", "alpha"], ["ArrowUp", "alpha"], ["ArrowDown", "beta"], ["ArrowDown", "gamma"], ["ArrowDown", "original draft"]]) {
+							await composer.press(key);
+							assert(await composer.inputValue() === value, `${key} recalls ${value}`);
+						}
+						await composer.fill("");
+					}
 
 					// The list after "@cl": no dot before its row.
 					await page.keyboard.type("@cl");
