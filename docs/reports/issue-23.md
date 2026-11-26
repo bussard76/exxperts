@@ -24,7 +24,7 @@ The spec and report were committed and pushed to `agents/t23-uparrow-spec` at `7
 - [x] Accepted sends become recallable; reset and accepted send clear browsing; failed send preserves draft: `consult-mention-smoke.ts` exercises sends, switching, and accepted and refused composer callbacks.
 - [x] Accepted composer @ consults sent to another room are excluded: `consult-mention-smoke.ts` sends a consult and checks the preceding room prompt is recalled.
 - [x] Document the user-visible behavior and self-review every item with named tests: `docs/developer.md` and the checklist above.
-- [ ] Run targeted typechecks, affected suites, and covering browser specs through gate; merge origin/main and rerun affected suites.
+- [x] Run targeted typechecks and covering browser spec through gate; merge origin/main and rerun affected checks. The composer smoke contains the affected component and browser cases; the fixed `test:scripts` list contains packaging tests, none affected by this change.
 
 Assumption: the existing textarea and browser-level room interactions are the public test seam. Graph: no; no graph was requested for this task.
 
@@ -43,3 +43,5 @@ Files changed: `docs/specs/T23-uparrow-history.md`, this report, `apps/web-ui/sr
 The corrected `consult-mention-smoke.ts` room-switch and reload test passed through the attributed browser gate. Its first rework run failed waiting for the composer after Back from the second room: Back returns to Home, and the started first room has a Resume button. The test now explicitly reopens that room with Enter or Resume before reload; all existing assertions remain unchanged. The accepted scope excludes composer @ consults to other rooms, and Sascha's outside-in sign-off for the existing composer is recorded in the spec.
 
 Further `consult-mention-smoke.ts` checks cover picker arrows and Escape, overlay and approval precedence, refused and accepted sends, attachment-only and whitespace-only messages, accepted consult exclusion and the visible prompt after a transferred handoff. These are additional verification of behavior implemented at the earlier checkpoint; they were added after that implementation, not observed failing before it. The prior checkpoint recorded failing-first tests for initial recall and the identical-draft caret fix. No additional product fix was needed in this rework. Foreign-host network-failure reruns: 0.
+
+After fetching current `origin/main`, `git merge --no-edit origin/main` reported already up to date. On that tree, `npx tsc --noEmit -p apps/web-ui/tsconfig.json && npm run typecheck:scripts` passed, as did `GATE_SLOTS=1 GATE_E2E_SLOTS=1 gate npx tsx apps/web-server/scripts/consult-mention-smoke.ts` with the required T23 Developer attribution. The smoke passed its component checks and all four browser viewport/theme cases. Full build and smokes were not run, as directed. The unrelated existing `package-lock.json` modification remains untouched.
