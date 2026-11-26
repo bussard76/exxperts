@@ -4,7 +4,7 @@ Status: accepted for implementation planning; fresh independent Architect spec r
 Date: 2026-11-26
 Issue: [#24](https://github.com/bussard76/exxperts/issues/24)
 Architecture decision: [ADR-0009](../adr/0009-server-owned-prompt-suggestions.md)
-Decision answers: `/home/developer/controller-exxperts/t24-front-answers-2026-11-26.md`; Sascha confirmed 2026-11-26: “Ja, so übergeben”.
+Decision answers: `/home/developer/controller-exxperts/t24-front-answers-2026-11-26.md`; Sascha confirmed 2026-11-26: “Ja, so übergeben”. On 2026-11-26 Sascha additionally authorized the internal answer identity lifecycle: “Ja, interne Antwort-ID einführen”.
 Prior review: `docs/reviews/T24-SUGGESTIONS-architecture-spec.md`, verdict `level-3`, commit `c1dcdc21ba4c54b35760c28059d9426a796e48e9`.
 
 ## Architecture impact
@@ -34,8 +34,9 @@ ADR-0009 is accepted. Sascha's source answer for Q01–Q14 is the answer file ab
 ### Producer-consumer message and lifetime
 
 - Use the existing room socket. Emit message type `suggestions` with exactly `{ roomId, threadId, answerId, items }`, where `items` is an array of zero to three strings. Send only to clients in the same room under existing authorization.
-- The client discards a message if its `answerId` is not the last answer in its current thread. Send to every window observing the room.
-- Results exist only in memory and are not persisted. Switching rooms loses their suggestions; returning does not restore them. Reconnect and server restart show no suggestions until the next answer. Background/disconnected generation does not imply queuing or replaying delivery.
+- The server creates a fresh, unique opaque internal `answerId` for each logical answer before its execution starts, scoped by room and thread. It belongs to the complete answer, including all assistant parts and tool steps, and stays the same across retries and detached adoption; a queued subsequent answer gets a different ID. Interactive, detached and background execution use this same lifecycle, not a turn ID or transcript item ID. Only a successful final completion makes that ID the current completed answer; failed, stopped and retry-intermediate attempts do not.
+- For each room/thread, serialize lifecycle changes and delivery: publish invalidation when a new prompt is sent or an answer starts, then publish the successful completion and its `answerId` to every currently authorized window observing that thread before any `suggestions` message for it. Use an internal room-socket frame `{ type: "answer_lifecycle", roomId, threadId, phase: "invalidate" }` for invalidation and `{ type: "answer_lifecycle", roomId, threadId, phase: "complete", answerId }` for completion; these are separate from the unchanged Q07 payload. Enqueue these frames and suggestions in that order on each observer socket under the same per-thread serialization, so a result cannot overtake its completion or a later invalidation. Background execution publishes the same completion after its complete answer is available, even though it has a separate execution path; detached adoption retains the original ID. The producer checks currentness again at delivery, and sends only to currently authorized same-room observers, never through turn replay.
+- A consumer records the live completion ID for its current room/thread before accepting a matching suggestion. The sending window clears immediately on sending a prompt; the ordered invalidation clears the recorded ID and suggestions in every observing window on a new prompt or answer start; switching room or thread, disconnecting, or reconnecting also clears both. A connection accepts only a completion observed live on that connection, not a replay or a completion from before reconnect; after reconnect or server restart there are no suggestions until a subsequent answer completes. Reject a suggestion unless room, thread and ID match the current live completion, so late results and results delivered out of order after a newer prompt, start or completion cannot revive older suggestions. Results exist only in memory, are not persisted or replayed, and background/disconnected generation does not imply queued delivery.
 
 ### Model response and validation
 
@@ -44,8 +45,8 @@ ADR-0009 is accepted. Sascha's source answer for Q01–Q14 is the answer file ab
 ### Composer behavior
 
 - Suggestions replace the ordinary placeholder only when no higher-priority system hint applies. Connection loss, an active answer, approval required, read-only or otherwise locked states take precedence. An open mention popup suppresses suggestions and owns Tab and Right Arrow.
-- When the field is empty and at least two suggestions exist, Tab advances and Shift+Tab moves back cyclically. With zero or one suggestion, native Tab moves focus. Right Arrow accepts the shown suggestion only while the field is empty; acceptance inserts normal text without sending. The other suggestions remain cycleable while the field stays empty.
-- Typing hides the ghost text; clearing the field restores the current suggestion. Sending a prompt, starting a new answer, or a generation error clears suggestions. Escape hides them until the next answer. During IME composition, do not handle these keys.
+- When the field is empty and at least two suggestions exist, Tab advances and Shift+Tab moves back cyclically. With zero or one suggestion, native Tab moves focus. Right Arrow accepts the shown suggestion only while the field is empty; acceptance inserts normal text without sending and removes that item from the available list. Select the item that followed it in the previous cyclic order, wrapping to the first remaining item when the accepted item was last. With one remaining it is selected; with none there is no selection and the ordinary placeholder applies. Remaining suggestions are cycleable only while the field is empty and at least two remain.
+- Typing hides the ghost text; clearing the field restores the selected remaining suggestion, never a consumed item. Sending a prompt, starting a new answer, or a generation error clears suggestions. Escape hides them until the next answer. During IME composition, do not handle these keys.
 - Expose the suggestion using `aria-describedby` and the hint “Tab: weiter, →: übernehmen”.
 
 ## Outside-in evidence
@@ -59,16 +60,23 @@ sequenceDiagram
     participant Model as Provider Memorize model
     participant Socket as Authorized room socket clients
     participant UI as Current thread composer
-    Turn->>Server: successful agent_end (roomId, threadId, answerId)
+    Turn->>Server: start logical answer (allocate answerId)
+    Server-->>Socket: invalidate current answer
+    Turn->>Server: successful final completion (roomId, threadId, answerId)
+    Server-->>Socket: publish live completion and answerId
     Server->>Server: dedupe and bound last 3 text exchanges
     Server->>Model: tool-less request, at most 200 output tokens, 10 s
     Model-->>Server: JSON array or error
     Server->>Server: validate; error becomes empty items
     Server-->>Socket: suggestions {roomId, threadId, answerId, items}
     Socket-->>UI: same-room authorized delivery
-    UI->>UI: discard unless answerId is current thread's last answer
+    UI->>UI: record live completion; discard unless answerId matches current completion
     UI->>UI: show eligible ghost text; accept only on Right Arrow
 ```
+
+Acceptance coverage for finding 1 must exercise the real producer through real consumers with a fake model: two authorized current-thread windows observe the same live completion ID before receiving the same Q07 result for an interactive answer with multiple parts and a retry; detached adoption retains that ID; and a background answer publishes its completion before its result to eligible observers. Delay an older result until after a newer prompt, answer start, and completion and prove it is rejected in each window; cover room/thread switches, reconnect, and no replay. Verify failed and stopped attempts do not publish successful completion and queued answers receive distinct IDs. Include a window that did not observe a completion live, and prove it cannot accept that answer's late result.
+
+Acceptance coverage for finding 2: with `[A, B, C]` selected at `B`, Right Arrow inserts `B` and leaves `[A, C]` selected at `C`; clearing the composer shows `C`, Tab shows `A`, and `B` never returns. After cycling back to `C`, accepting last-selected `C` from `[A, C]` selects `A`; clearing shows `A` and Tab moves focus natively. Accepting `A` leaves no selection; clearing shows the ordinary placeholder and Tab moves focus natively. Also verify Shift+Tab cycles the remaining list when at least two remain, and typing and clearing without acceptance restores the current unconsumed selection.
 
 The fixture-gallery fake is required before UI implementation. Preserve invented data and a fake model source in tests; never call a paid model API in development or tests.
 
