@@ -539,7 +539,10 @@ async function checkMessageBox(chromium: BrowserType): Promise<void> {
 					assert(await page.evaluate(() => document.documentElement.dataset.theme) === theme, `${label}: the page shows the ${theme} theme`);
 					await composer.click();
 					if (width === 1280 && theme === "light") {
-						for (const [index, prompt] of ["alpha", "beta", "gamma"].entries()) {
+						await composer.fill("no history yet");
+						await composer.press("ArrowUp");
+						assert(await composer.inputValue() === "no history yet", "empty history leaves the draft intact");
+						for (const [index, prompt] of ["alpha", "beta", "gamma", "gamma"].entries()) {
 							await composer.fill(prompt);
 							await waitUntil(async () => await page.locator("button.send-btn").isEnabled(), `ready to send ${prompt}`);
 							await composer.press("Enter");
@@ -566,6 +569,16 @@ async function checkMessageBox(chromium: BrowserType): Promise<void> {
 						await composer.evaluate((node: HTMLTextAreaElement) => node.setSelectionRange(node.value.length, node.value.length));
 						await composer.press("ArrowUp");
 						assert(await composer.inputValue() === "first line\nsecond line", "Up on line two retains the multiline draft");
+						assert(await page.locator(".bubble-row.user:not(.queued)").count() === 4, "recall alone does not send");
+						await composer.fill("alpha");
+						await waitUntil(async () => await page.locator("button.send-btn").isEnabled(), "ready to repeat alpha");
+						await composer.press("Enter");
+						await waitUntil(async () => await page.locator(".bubble-row.user:not(.queued)").count() === 5, "repeated alpha reached the transcript");
+						for (const value of ["alpha", "gamma", "beta", "alpha"]) {
+							await composer.press("ArrowUp");
+							assert(await composer.inputValue() === value, `history retains separated repeat ${value}`);
+						}
+						await composer.press("Escape");
 						await composer.fill("draft for IME");
 						const intercepted = await composer.evaluate((node: HTMLTextAreaElement) => !node.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true, isComposing: true })));
 						assert(!intercepted && await composer.inputValue() === "draft for IME", "IME Up remains with the input method");

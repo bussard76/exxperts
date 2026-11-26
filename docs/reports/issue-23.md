@@ -16,11 +16,11 @@ The spec and report were committed and pushed to `agents/t23-uparrow-spec` at `7
 
 - [x] Up and Down navigate sent room prompts in order, stop at bounds, and restore the exact original draft after the newest: `consult-mention-smoke.ts`, browser composer path. The test failed first on `ArrowUp recalls gamma`, then passed.
 - [x] Escape restores the original draft, including after editing a recalled entry; recall is editable, puts the caret at the end, and does not send: `consult-mention-smoke.ts` browser composer.
-- [ ] Up starts only on the first line or an empty field; empty history leaves native behavior intact. `consult-mention-smoke.ts` covers line two; empty history remains.
+- [x] Up starts only on the first line or an empty field; empty history leaves native behavior intact: `consult-mention-smoke.ts` covers empty history and line two.
 - [ ] Mention, IME, overlay, approval, selection, caret, and existing send handling retain precedence. `consult-mention-smoke.ts` covers IME; remaining precedence checks are pending.
 - [ ] Room switching clears browsing state and isolates each room's history and draft.
 - [ ] Restored room transcript supplies recall after reload without new persistence.
-- [ ] Consecutive exact duplicate user prompts collapse across other items; non-consecutive repeats remain; empty attachment-only prompts and wire-only text are excluded.
+- [ ] Consecutive exact duplicate user prompts collapse across other items; non-consecutive repeats remain; empty attachment-only prompts and wire-only text are excluded. `consult-mention-smoke.ts` covers repeated and separated prompts; attachment coverage remains.
 - [ ] Accepted sends become recallable; reset and accepted send clear browsing; failed send preserves draft.
 - [ ] Accepted composer @ consults sent to another room are excluded.
 - [ ] Document the user-visible behavior and self-review every item with named tests.
