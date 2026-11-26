@@ -582,6 +582,22 @@ async function checkMessageBox(chromium: BrowserType): Promise<void> {
 						await composer.fill("draft for IME");
 						const intercepted = await composer.evaluate((node: HTMLTextAreaElement) => !node.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true, isComposing: true })));
 						assert(!intercepted && await composer.inputValue() === "draft for IME", "IME Up remains with the input method");
+						await composer.fill("first room draft");
+						await composer.press("ArrowUp");
+						assert(await composer.inputValue() === "alpha", "browsing before switching rooms");
+						await page.goBack();
+						await page.locator(".persistent-agent-card").filter({ hasText: "Client Contracts" }).getByRole("button", { name: "Enter" }).click();
+						await composer.waitFor({ timeout: 20_000 });
+						assert(await composer.inputValue() === "", "switching rooms does not carry the draft");
+						await composer.press("ArrowUp");
+						assert(await composer.inputValue() === "", "switching rooms does not carry history");
+						await page.goBack();
+						await composer.waitFor({ timeout: 20_000 });
+						await page.reload({ waitUntil: "networkidle" });
+						await composer.waitFor({ timeout: 20_000 });
+						await waitUntil(async () => await page.locator(".bubble-row.user:not(.queued)").count() === 5, "saved transcript restored after reload");
+						await composer.press("ArrowUp");
+						assert(await composer.inputValue() === "alpha", "restored room transcript supplies history after reload");
 						await composer.fill("");
 					}
 
