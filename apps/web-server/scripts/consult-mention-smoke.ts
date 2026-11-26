@@ -550,6 +550,18 @@ async function checkMessageBox(chromium: BrowserType): Promise<void> {
 							await composer.press(key);
 							assert(await composer.inputValue() === value, `${key} recalls ${value}`);
 						}
+						await composer.press("ArrowUp");
+						assert(await composer.evaluate((node: HTMLTextAreaElement) => node.selectionStart === node.value.length && node.selectionEnd === node.value.length), "recall places the caret at the end");
+						await composer.fill("edited recall");
+						await composer.press("Escape");
+						assert(await composer.inputValue() === "original draft", "Escape restores the draft after editing recall");
+						await composer.fill("first line\nsecond line");
+						await composer.evaluate((node: HTMLTextAreaElement) => node.setSelectionRange(node.value.length, node.value.length));
+						await composer.press("ArrowUp");
+						assert(await composer.inputValue() === "first line\nsecond line", "Up on line two retains the multiline draft");
+						await composer.fill("draft for IME");
+						const intercepted = await composer.evaluate((node: HTMLTextAreaElement) => !node.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true, isComposing: true })));
+						assert(!intercepted && await composer.inputValue() === "draft for IME", "IME Up remains with the input method");
 						await composer.fill("");
 					}
 
