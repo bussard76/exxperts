@@ -16,7 +16,7 @@ Level 1: the existing web UI room transcript and composer are the affected modul
 
 ## Recall source and code-derived precision
 
-Derive history from the open room's existing transcript, in transcript order, selecting `kind: "user"` entries and their `text` only. Use the visible stored strings, never wire text, attachment notes, handoffs or another room's items. Newly accepted sends become eligible as the transcript updates; removed or replaced entries follow the current transcript. The following are code-derived deductions, not new Sascha decisions:
+Sascha decided: “Nein, nur Prompts dieses Raums” (“No, only prompts from this room”). Derive history from the open room's existing transcript, in transcript order, selecting stored `kind: "user"` entries and their `text` only. @-consults to other rooms are excluded; they are not stored user prompts in this room. Use the visible stored strings, never wire text, attachment notes, handoffs or another room's items. Add no new storage. Newly accepted sends become eligible as the transcript updates; removed or replaced entries follow the current transcript. The following are code-derived deductions, not new Sascha decisions:
 
 - The existing send path trims visible prompt text before creating its user item. Compare stored prompt strings by exact equality, after that existing trim; apply no additional case, whitespace or other normalization.
 - Empty or whitespace-only attachment-free sends are rejected; attachment-only items have empty visible text and are not recall entries. Ignore empty visible prompt strings when deriving history.
