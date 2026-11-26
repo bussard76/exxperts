@@ -17,13 +17,13 @@ The spec and report were committed and pushed to `agents/t23-uparrow-spec` at `7
 - [x] Up and Down navigate sent room prompts in order, stop at bounds, and restore the exact original draft after the newest: `consult-mention-smoke.ts`, browser composer path. The test failed first on `ArrowUp recalls gamma`, then passed.
 - [x] Escape restores the original draft, including after editing a recalled entry; recall is editable, puts the caret at the end, and does not send: `consult-mention-smoke.ts` browser composer.
 - [x] Up starts only on the first line or an empty field; empty history leaves native behavior intact: `consult-mention-smoke.ts` covers empty history and line two.
-- [ ] Mention, IME, overlay, approval, selection, caret, and existing send handling retain precedence. `consult-mention-smoke.ts` covers IME; remaining precedence checks are pending.
+- [x] Mention, IME, overlay, approval, selection, caret, and existing send handling retain precedence: `consult-mention-smoke.ts` checks picker navigation and dismissal, IME, overlay, approval, selection, caret, accepted and refused sends.
 - [x] Room switching clears browsing state and isolates each room's history and draft: `consult-mention-smoke.ts` switches while browsing and checks the second room's empty draft and history.
 - [x] Restored room transcript supplies recall after reload without new persistence: `consult-mention-smoke.ts` reopens the first room and recalls after reload.
-- [ ] Consecutive exact duplicate user prompts collapse across other items; non-consecutive repeats remain; empty attachment-only prompts and wire-only text are excluded. `consult-mention-smoke.ts` covers repeated and separated prompts; attachment coverage remains.
-- [ ] Accepted sends become recallable; reset and accepted send clear browsing; failed send preserves draft.
-- [ ] Accepted composer @ consults sent to another room are excluded.
-- [ ] Document the user-visible behavior and self-review every item with named tests.
+- [x] Consecutive exact duplicate user prompts collapse across other items; non-consecutive repeats remain; empty attachment-only prompts and wire-only text are excluded: `consult-mention-smoke.ts` sends duplicates and separated repeats, whitespace, an attachment-only message and a prompt carrying a transferred consult handoff.
+- [x] Accepted sends become recallable; reset and accepted send clear browsing; failed send preserves draft: `consult-mention-smoke.ts` exercises sends, switching, and accepted and refused composer callbacks.
+- [x] Accepted composer @ consults sent to another room are excluded: `consult-mention-smoke.ts` sends a consult and checks the preceding room prompt is recalled.
+- [x] Document the user-visible behavior and self-review every item with named tests: `docs/developer.md` and the checklist above.
 - [ ] Run targeted typechecks, affected suites, and covering browser specs through gate; merge origin/main and rerun affected suites.
 
 Assumption: the existing textarea and browser-level room interactions are the public test seam. Graph: no; no graph was requested for this task.
@@ -41,3 +41,5 @@ Files changed: `docs/specs/T23-uparrow-history.md`, this report, `apps/web-ui/sr
 ## Rework 1
 
 The corrected `consult-mention-smoke.ts` room-switch and reload test passed through the attributed browser gate. Its first rework run failed waiting for the composer after Back from the second room: Back returns to Home, and the started first room has a Resume button. The test now explicitly reopens that room with Enter or Resume before reload; all existing assertions remain unchanged. The accepted scope excludes composer @ consults to other rooms, and Sascha's outside-in sign-off for the existing composer is recorded in the spec.
+
+Further `consult-mention-smoke.ts` checks cover picker arrows and Escape, overlay and approval precedence, refused and accepted sends, attachment-only and whitespace-only messages, accepted consult exclusion and the visible prompt after a transferred handoff. These are additional verification of behavior implemented at the earlier checkpoint; they were added after that implementation, not observed failing before it. The prior checkpoint recorded failing-first tests for initial recall and the identical-draft caret fix. No additional product fix was needed in this rework. Foreign-host network-failure reruns: 0.
