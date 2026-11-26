@@ -25,6 +25,7 @@ The spec and report were committed and pushed to `agents/t23-uparrow-spec` at `7
 - [x] Accepted composer @ consults sent to another room are excluded: `consult-mention-smoke.ts` sends a consult and checks the preceding room prompt is recalled.
 - [x] Document the user-visible behavior and self-review every item with named tests: `docs/developer.md` and the checklist above.
 - [x] Run targeted typechecks and covering browser spec through gate; merge origin/main and rerun affected checks. The composer smoke contains the affected component and browser cases; the fixed `test:scripts` list contains packaging tests, none affected by this change.
+- [ ] Establish the dispatch's failing-first evidence for the additional acceptance cases: their checks were written after the checkpoint's implementation and were not observed failing before it. Coordinator disposition is needed for that historical sequencing requirement.
 
 Assumption: the existing textarea and browser-level room interactions are the public test seam. Graph: no; no graph was requested for this task.
 
