@@ -3,7 +3,7 @@
 # when it is bound for EXXETA: it is named exxeta/*, it has an open PR there, or EXXETA_GUARD_ALL=1 (the clean clone).
 set -eu
 UPSTREAM_URL=https://github.com/EXXETA/exxperts
-FACTORY_PATHS='^(\.agents/|\.factory/|\.githooks/|\.claude/|docs/adr/|docs/tasks/|docs/reviews/|docs/reports/|docs/handoffs/|docs/(coordinator|dev-workflow|review-protocol|architect-protocol|debt|controller-rules)\.md|tools/|factory\.config\.json|AGENTS\.md|CODING_STANDARDS\.md|design/)'
+FACTORY_PATHS='^(\.agents/|\.factory/|\.githooks/|\.claude/|docs/adr/|docs/tasks/|docs/reviews/|docs/reports/|docs/handoffs/|docs/(coordinator|dev-workflow|review-protocol|architect-protocol|debt|controller-rules)\.md|tools/|factory\.config\.json|AGENTS\.md|CODING_STANDARDS\.md|design/|graphify-out/|\.graphify|CLAUDE\.md)'
 fetched=no
 status=0
 while read -r _local_ref local_sha remote_ref _remote_sha; do
