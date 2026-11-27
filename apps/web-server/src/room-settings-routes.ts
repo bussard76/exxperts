@@ -1,6 +1,6 @@
 import type { FastifyRequest } from "fastify";
 import { MAINTENANCE_DIAGNOSTICS_KEEP, MAINTENANCE_DIAGNOSTICS_DEFAULT_LIMIT, listMaintenanceDiagnostics, exportMaintenanceDiagnostics } from "./maintenance-diagnostics.js";
-import { createPersistentAgentInstance, saveWithOpenConversationCheck, getPersistentRoomInstructionsView, savePersistentRoomGlobalInstructionsEnabled, savePersistentRoomInstructions } from "./persistent-agents.js";
+import { createPersistentAgentInstance, getPersistentAgentThread, saveWithOpenConversationCheck, getPersistentRoomInstructionsView, savePersistentRoomGlobalInstructionsEnabled, savePersistentRoomInstructions } from "./persistent-agents.js";
 import { normalizePersistentRoomWorkspaceToolSelectionInput } from "./persistent-room-tool-policy.js";
 import { PersistentRoomWorkspacePolicyError, assertPersistentRoomWorkspaceDefaultMutable, type PersistentRoomCapabilityPolicy, persistentRoomCapabilityPolicyView, readPersistentRoomCapabilityPolicy, PERSISTENT_ROOM_WORKSPACE_POLICY_STORAGE_SOURCE, deletePersistentRoomCapabilityPolicy, readPersistentRoomDefaultCapabilityPolicy, PERSISTENT_ROOM_WORKSPACE_DEFAULT_STORAGE_SOURCE, missingPersistentRoomWorkspaceRootWarnings, normalizePersistentRoomWorkspaceAccessModeInput, createPersistentRoomDefaultCapabilityPolicy, updatePersistentRoomCapabilityPolicyWorkspaceSettings, writePersistentRoomDefaultCapabilityPolicy, deletePersistentRoomDefaultCapabilityPolicy, createPersistentRoomCapabilityPolicy, writePersistentRoomCapabilityPolicy, persistentRoomCommandsStartOn, PERSISTENT_ROOM_WORKSPACE_DEFAULT_CONVERSATION_ID, resolvePersistentRoomEffectiveWorkspacePolicy } from "./persistent-room-workspace-policy.js";
 import { readPersistentRoomMaintenanceSettings, writePersistentRoomMaintenanceSettings } from "./persistent-room-maintenance-settings.js";
@@ -611,6 +611,25 @@ function refuseUnusableRoomFolder(policy: PersistentRoomCapabilityPolicy): void 
 function entryView(entry: AlsoAllowedEntry) {
 	return entry.kind === "folder" ? { kind: "folder", name: folderName(entry.path), path: entry.path, access: entry.access } : { kind: "site", host: entry.host, port: entry.port };
 }
+
+app.get("/api/persistent-agents/:id/workspace-files", async (req, reply) => {
+	reply.headers({ "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
+	const query = (req.query ?? {}) as Record<string, unknown>;
+	if (typeof query.conversationId !== "string" || !query.conversationId.trim() || (query.path !== undefined && typeof query.path !== "string")) {
+		return reply.code(400).send({ code: "invalid_request", error: "Invalid workspace request." });
+	}
+	const requestedPath = (query.path as string | undefined ?? "").replace(/\\/g, "/");
+	if (requestedPath && (requestedPath.includes("\0") || requestedPath.includes(":") || requestedPath.split("/").some((part) => !part || part.startsWith(".")))) {
+		return reply.code(400).send({ code: "invalid_path", error: "Invalid workspace path." });
+	}
+	try {
+		const { id } = getUsablePersistentAgentStatusForNormalUse(String((req.params as any).id ?? "").trim());
+		if (!getPersistentAgentThread(id, query.conversationId.trim())) return reply.code(404).send({ code: "conversation_not_found", error: "Conversation not found." });
+		return reply.code(503).send({ code: "workspace_unavailable", error: "Workspace is unavailable." });
+	} catch {
+		return reply.code(404).send({ code: "room_not_found", error: "Room not found." });
+	}
+});
 
 app.get("/api/persistent-agents/:id/workspace-default", async (req, reply) => {
 	const idRaw = String((req.params as any).id ?? "").trim();

@@ -118,6 +118,8 @@ try {
 	assert(putDefault.status === 200, `PUT default should succeed, got ${putDefault.status}: ${JSON.stringify(putDefault.body)}`);
 	writePersistentAgentThread(agentId, "demo-thread", { state: "standby", origin: "home", model, items: [] });
 	fs.writeFileSync(path.join(workspaceRoot, "invented.txt"), "invented content");
+	const invalidListing = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-files?conversationId=demo-thread&path=${encodeURIComponent("../secret")}`);
+	assert(invalidListing.status === 400 && invalidListing.body.code === "invalid_path", "workspace listing rejects traversal paths");
 	const listing = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-files?conversationId=demo-thread`);
 	assert(listing.status === 200 && listing.body.entries.some((entry: { name: string }) => entry.name === "invented.txt"), "workspace listing exposes an allowed file through the public route");
 	assert(putDefault.body?.storage?.kind === "persistent-agent-runtime-default", "PUT should report room-default storage kind");
