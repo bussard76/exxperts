@@ -104,6 +104,15 @@ try {
 	try { fs.ftruncateSync(largeFile, 16_777_217); } finally { fs.closeSync(largeFile); }
 	const large = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-preview?conversationId=invented-thread&path=large.txt`, headers: SMOKE_AUTH_HEADERS });
 	if (large.statusCode !== 413 || large.json().code !== "file_too_large") throw new Error("text preview refuses a file over its bound");
+	for (const [extension, limit] of [["json", 16_777_216], ["md", 16_777_216], ["html", 16_777_216], ["htm", 16_777_216], ["xlsx", 26_214_400], ["pdf", 26_214_400], ["docx", 26_214_400], ["pptx", 26_214_400]] as const) {
+		const name = `large.${extension}`;
+		const fd = fs.openSync(path.join(shelf, name), "w");
+		try { fs.ftruncateSync(fd, limit + 1); } finally { fs.closeSync(fd); }
+		const tooLarge = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-preview?conversationId=invented-thread&path=${name}`, headers: SMOKE_AUTH_HEADERS });
+		if (tooLarge.statusCode !== 413 || tooLarge.json().code !== "file_too_large") throw new Error(`${extension} preview must refuse a file over its bound`);
+	}
+	const legacy = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-preview?conversationId=invented-thread&path=invented.doc`, headers: SMOKE_AUTH_HEADERS });
+	if (legacy.statusCode !== 415 || legacy.json().code !== "legacy_doc") throw new Error("legacy Word preview must return its specified guidance code");
 	console.log("workspace shared shelf listing smoke passed");
 } finally {
 	await app.close();

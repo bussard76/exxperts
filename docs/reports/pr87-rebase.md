@@ -422,6 +422,23 @@ The nine affected route and ownership script files, together with the fixed scri
 
 The spreadsheet, PDF, Word, snapshot-validation and shared-preview-race scripts, together with the fixed script-runner suites, passed 107/107 on Linux after the package-retention change.
 
+The Controller confirmed that the reviewed contract requires `association_unverified` and zero handoffs when native launch cwd is unbindable; the present Mac/Windows refusal is the specified behavior for those unresolved cases. This does not establish that any bindable native case exists or that native APIs were measured here.
+
+| Format and route item | Evidence |
+| --- | --- |
+| Text, JSON and Markdown, 16 MiB, UTF-8 replacement | `workspace-shared-listing-smoke.ts` covers route output, replacement decoding and the over-limit response for each extension; `workspace-text-html-components-ui-smoke.ts` covers the consumer and stale/invalid data. |
+| HTML/HTM, 16 MiB and opaque frame | `workspace-shared-listing-smoke.ts` checks JSON, frame CSP and both over-limit extensions; `workspace-text-html-components-ui-smoke.ts` checks the sandboxed consumer. |
+| Images, 20 MiB and artifact headers | `workspace-shared-listing-smoke.ts` checks PNG bytes, MIME, headers, unsupported type and the bound; `workspace-grant-parity-api-smoke.ts` checks the selected local grant and `workspace-image-component-ui-smoke.ts` the consumer. |
+| DOCX, 25 MiB, sanitized worker output and notice | `workspace-shared-listing-smoke.ts` checks the guarded route and bound; `workspace-word-snapshot-smoke.ts` checks rendering, blocked external content, oversized image, damaged input and abort; `workspace-document-components-ui-smoke.ts` checks the consumer. |
+| XLSX, 25 MiB and validated workbook | `workspace-shared-listing-smoke.ts` checks the route and bound; `workspace-spreadsheet-snapshot-smoke.ts` checks values, styles, grid/ZIP limits, errors, concurrency and cleanup; `workspace-local-real-app-ui-smoke.ts` checks the real Linux app-to-worker-to-cell path and revocation. |
+| PDF, 25 MiB and JPEG pages | `workspace-shared-listing-smoke.ts` checks the route and bound; `workspace-pdf-snapshot-smoke.ts` checks page order, JPEG output, page/input limits, damaged input and abort; `workspace-document-components-ui-smoke.ts` checks the consumer. |
+| PPTX, 25 MiB and frame handshake | `workspace-shared-listing-smoke.ts` checks route bytes, frame CSP and bound; `workspace-shared-frame-ui-smoke.ts` checks the real frame transfer/render; `workspace-pptx-component-ui-smoke.ts` covers source checks, failure and timeout. |
+| Legacy and unsupported files | `workspace-shared-listing-smoke.ts` checks `legacy_doc` and unsupported preview; `workspace-app-integration-ui-smoke.ts` checks source selection and Excalidraw behavior. |
+| ZIP, grid, image, PDF, JSON and worker bounds | Constants and checks were compared item by item in `shelf-parse-worker.mjs`, `persistent-room-shelf-reading.ts` and `WorkspaceFramedPreview.tsx` against the reviewed limits. `workspace-spreadsheet-snapshot-smoke.ts`, `workspace-word-snapshot-smoke.ts`, `workspace-pdf-snapshot-smoke.ts` and `workspace-snapshot-validation-smoke.ts` exercise representative over-limit, malformed, busy, timeout and abort cases; not every numerical boundary has a separate measured fixture. |
+| Request, authorization and error handling | `persistent-room-workspace-default-api-smoke.ts`, `workspace-grant-parity-api-smoke.ts`, `workspace-shared-listing-smoke.ts`, `workspace-box-preview-smoke.ts`, `workspace-shared-preview-race-smoke.ts`, `workspace-open-refusal-smoke.ts` and `workspace-open-handoff-smoke.ts` cover the stated route guards, no-data refusals, observed races and key error families. The independent Tester must check the complete error matrix and platform-specific behavior. |
+
+The full target-relative source patch at implementation checkpoint `c846d5d` applied cleanly with `git apply --index` to the pinned target. It contained 69 paths and no `docs/` files, and produced tree `a508658319afef5f6ab92f92e10fec3aa2fefe17`; comparing that tree to the implementation checkpoint outside the two evidence reports showed no differences. With the same-project fork hook files available locally, the configured pre-commit test-count, staged-safety and typechecks passed over the entire staged replay. No contribution commit or upstream push was made; the replay tree must be regenerated if later product files change.
+
 | Reviewed obligation | Current evidence and gap |
 | --- | --- |
 | Source and target pins, clean ancestry | Pins last rechecked as recorded above; recheck before publication, exclude evidence files from the contribution, and show final target-relative diff and ancestry. |
