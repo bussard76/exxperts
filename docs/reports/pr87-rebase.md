@@ -85,3 +85,5 @@ Restored the source file-tree consumer and its tooltip and drag helpers. Its lis
 ## Isolated file tabs
 
 Restored the source file tabs and workspace stylesheet for later app integration. The attributed Chromium component gate exercised selection, drag reorder and closing with the source stylesheet, and both UI and scripts typechecks passed. The stylesheet is not imported into the app yet because its sidebar rules depend on the accompanying integration; real app layout and protected-route acceptance remain open.
+
+The snapshot validation smoke now also uses a deliberately stalled fake child and an accelerated worker timer to verify timeout and in-flight cancellation kill the child and remove the private temporary copy. `EXXETA_SKIP_BROWSER_INSTALL=1 npm run test:scripts -- apps/web-server/scripts/workspace-snapshot-validation-smoke.ts` passed 101/101 and `npm run typecheck:scripts` passed. This exercises the lifecycle with a fake child; a real worker running to its full timeout has not been measured.
