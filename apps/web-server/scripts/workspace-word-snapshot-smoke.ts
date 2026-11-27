@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import JSZip from "jszip";
 import { runWorkspaceWordSnapshot } from "../src/persistent-room-shelf-reading.js";
 
 // Invented, generated OOXML fixture for the preview tests.
@@ -22,6 +23,27 @@ export async function smallDocx(): Promise<Buffer> {
 }
 
 
+export async function vmlDocx(): Promise<Buffer> {
+	const { default: JSZip } = await import("jszip");
+	const zip = await JSZip.loadAsync(await smallDocx());
+	const namespaces = `xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:v="urn:schemas-microsoft-com:vml"`;
+	const shape = `<w:p><w:r><w:pict><v:rect onload="inventedHandler()" href="https://example.invalid/active" style="width:40pt;height:15pt"><v:textbox><w:txbxContent><w:p><w:r><w:t>Invented box</w:t></w:r></w:p></w:txbxContent></v:textbox></v:rect></w:pict></w:r></w:p>`;
+	const line = `<w:p><w:r><w:pict><v:line style="width:80pt;height:1pt;transform:url(https://example.invalid/vml)" from="0,0" to="80pt,0"/></w:pict></w:r></w:p>`;
+	let document = await zip.file("word/document.xml")!.async("string");
+	const picture = document.match(/<a:graphic>.*?<\/a:graphic>/)![0].replace("<a:xfrm>", '<a:xfrm rot="16200000">');
+	const anchor = (relative: string, left: number, top: number) => `<w:p><w:r><w:drawing><wp:anchor><wp:positionH relativeFrom="${relative}"><wp:posOffset>${left}</wp:posOffset></wp:positionH><wp:positionV relativeFrom="paragraph"><wp:posOffset>${top}</wp:posOffset></wp:positionV><wp:extent cx="95250" cy="95250"/><wp:wrapNone/>${picture}</wp:anchor></w:drawing></w:r></w:p>`;
+	document = document.replace("<w:document ", `<w:document xmlns:v="urn:schemas-microsoft-com:vml" `).replace("</w:body>", `${shape}${line}${anchor("page", 1828800, 914400)}${anchor("margin", 1828800, 1828800)}<w:p><w:r><w:lastRenderedPageBreak/><w:t>Second saved page</w:t></w:r></w:p><w:sectPr><w:headerReference w:type="default" r:id="header"/><w:footerReference w:type="default" r:id="footer"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:bottom="1440" w:left="1440" w:right="1440" w:header="720" w:footer="720"/></w:sectPr></w:body>`);
+	zip.file("word/document.xml", document);
+	const rels = await zip.file("word/_rels/document.xml.rels")!.async("string");
+	zip.file("word/_rels/document.xml.rels", rels.replace("</Relationships>", `<Relationship Id="header" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/><Relationship Id="footer" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/></Relationships>`));
+	const types = await zip.file("[Content_Types].xml")!.async("string");
+	zip.file("[Content_Types].xml", types.replace("</Types>", `<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/></Types>`));
+	zip.file("word/header1.xml", `<w:hdr ${namespaces} xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">${shape}${anchor("page", 1828800, 914400)}</w:hdr>`);
+	zip.file("word/_rels/header1.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/pixel.png"/></Relationships>`);
+	zip.file("word/footer1.xml", `<w:ftr ${namespaces}>${shape}</w:ftr>`);
+	return zip.generateAsync({ type: "nodebuffer" });
+}
+
 const bytes = await smallDocx();
 const result = await runWorkspaceWordSnapshot(bytes, new AbortController().signal);
 assert.equal(result.ok, true);
@@ -32,8 +54,33 @@ assert(!result.result?.html.includes("https://example.invalid"));
 assert(!result.result?.html.includes("<script>"));
 assert(result.result?.html.includes("default-src 'none'"));
 assert(result.notices?.some((notice: any) => notice.code === "external_resources_blocked"));
+const vml = await runWorkspaceWordSnapshot(await vmlDocx(), new AbortController().signal);
+assert.equal(vml.ok, true);
+assert(!vml.result?.html.includes("Invented box"));
+assert(!vml.result?.html.includes("inventedHandler"));
+assert(!vml.result?.html.includes("https://example.invalid"));
+const { JSDOM } = await import("jsdom");
+const dom = new JSDOM(vml.result!.html);
+const header = dom.window.document.querySelector("header"), footer = dom.window.document.querySelector("footer");
+assert.equal(dom.window.document.querySelectorAll("section.docx").length, 2);
+assert(header && footer && header.style.marginTop && header.style.minHeight && footer.style.marginBottom && footer.style.minHeight);
+assert([...header.querySelectorAll<HTMLElement>("[style*='left:']")].some((node) => node.style.left === "72pt"));
+const anchors = [...dom.window.document.querySelectorAll<HTMLElement>("[style*='left:']")].filter((node) => node.style.top);
+assert(anchors.some((node) => node.style.left === "72pt" && node.style.top === "72pt") && anchors.some((node) => node.style.left === "144pt" && node.style.top === "144pt"));
+assert([...dom.window.document.querySelectorAll("img")].some((img) => img.style.transform.includes("rotate(270deg)")));
+assert(!dom.window.document.querySelector("svg,foreignObject,script"));
+assert([...dom.window.document.querySelectorAll("div")].some((node) => node.style.borderTopStyle === "double"));
+dom.window.close();
 assert.equal((await runWorkspaceWordSnapshot(Buffer.from("invalid"), new AbortController().signal)).code, "damaged_file");
 assert.equal((await runWorkspaceWordSnapshot(Buffer.alloc(26_214_401), new AbortController().signal)).code, "file_too_large");
+const imageZip = await JSZip.loadAsync(bytes);
+const largeImage = Buffer.alloc(24);
+Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(largeImage);
+largeImage.writeUInt32BE(8001, 16);
+largeImage.writeUInt32BE(5000, 20);
+imageZip.file("word/media/pixel.png", largeImage);
+const oversizedImage = await runWorkspaceWordSnapshot(await imageZip.generateAsync({ type: "nodebuffer" }), new AbortController().signal);
+assert.equal(oversizedImage.code, "decoded_image_too_large");
 const controller = new AbortController();
 const cancelled = runWorkspaceWordSnapshot(bytes, controller.signal);
 controller.abort();
