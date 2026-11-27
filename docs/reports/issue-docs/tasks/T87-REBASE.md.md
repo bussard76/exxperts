@@ -30,3 +30,7 @@ Validation: `npm run build --prefix runtime` passed. `node --import tsx apps/web
 `npm ci` completed with normal lifecycle scripts, but I used `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` instead of the project-specific `EXXETA_SKIP_BROWSER_INSTALL=1`; its postinstall invoked the Playwright Chromium installer. The command emitted no download progress, but a download cannot be ruled out. Future installs must use the project-specific skip variable.
 
 Files changed: `apps/web-server/scripts/persistent-room-workspace-default-api-smoke.ts` and this report. Test added: the public listing assertion. Assumption: a conversation's socket-local box cannot be safely supplied to an independent HTTP request without a newly specified integration mechanism. Debt candidates and the dependency audit remain unassessed.
+
+## Rework 1
+
+`workspace-grant-parity-api-smoke.ts` proves the authorized POSIX colon file and directory appear in the parent listing and can be previewed and expanded; its parent assertion failed before the shared validation fix and passed after. The unchanged `buttons-look-ui-smoke.ts` failed on the original import order and passed after the stylesheet correction. The unchanged `restart-holders-smoke.ts` passed after documenting the active preview counter and live box bindings. The unchanged `windows-box-request-smoke.ts` still fails on the additional route import; a reviewed decision on routing the Windows wait is required.
