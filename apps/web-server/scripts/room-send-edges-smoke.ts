@@ -104,6 +104,7 @@ let held: Promise<void> = Promise.resolve();
 const holdNextLeg = () => { held = new Promise<void>((resolve) => { release = resolve; }); };
 // Every model call: its user messages and its tool results, in order.
 const calls: { userTexts: string[]; toolTexts: string[] }[] = [];
+const suggestionCalls: { userTexts: string[]; toolTexts: string[] }[] = [];
 const textOf = (content: unknown): string => typeof content === "string" ? content : Array.isArray(content) ? content.map((part: any) => (typeof part?.text === "string" ? part.text : "")).join("") : "";
 const sseChunk = (payload: unknown): string => `data: ${JSON.stringify(payload)}\n\n`;
 const gateway = http.createServer((req, res) => {
@@ -114,7 +115,18 @@ const gateway = http.createServer((req, res) => {
 		let parsed: any = {};
 		try { parsed = JSON.parse(body); } catch {}
 		const messages: any[] = Array.isArray(parsed?.messages) ? parsed.messages : [];
-		calls.push({ userTexts: messages.filter((m) => m?.role === "user").map((m) => textOf(m.content)), toolTexts: messages.filter((m) => m?.role === "tool").map((m) => textOf(m.content)) });
+		const call = { userTexts: messages.filter((m) => m?.role === "user").map((m) => textOf(m.content)), toolTexts: messages.filter((m) => m?.role === "tool").map((m) => textOf(m.content)) };
+		const suggestion = messages.some((m) => (m?.role === "system" || m?.role === "developer") && textOf(m.content).includes("Generate next prompt suggestions"));
+		if (suggestion) suggestionCalls.push(call);
+		else calls.push(call);
+		if (suggestion) {
+			res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+			const base = { id: "suggestion", object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: String(parsed?.model ?? "room-model") };
+			res.write(sseChunk({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: '["Ask another question"]' }, finish_reason: null }] }));
+			res.write(sseChunk({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 100, completion_tokens: 5, total_tokens: 105 } }));
+			res.end("data: [DONE]\n\n");
+			return;
+		}
 		const leg = legs.shift() ?? { text: "Done." };
 		res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
 		const base = { id: `cmpl_${calls.length}`, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: String(parsed?.model ?? "room-model") };
@@ -360,6 +372,8 @@ try {
 		release();
 		await waitUntil(async () => (await taken("Also the second part.").count()) === 1 && (await queued().count()) === 0, "the room took the message: its bubble is the conversation's");
 		await waitUntil(() => shown("Then the second part."), "the room answers it");
+		await waitUntil(() => suggestionCalls.length > 0, "the suggestion request arrives");
+		assert(!suggestionCalls.some((call) => calls.includes(call)), "suggestion calls are separate from scripted chat and consult calls");
 		assert(await shown("Writing the first part and the rest."), "the first answer ran to its end");
 		assert(lastUserText() === "Also the second part.", `the model read the message as written, got ${JSON.stringify(lastUserText())}`);
 		const order = await page.evaluate(() => {
@@ -1055,7 +1069,7 @@ try {
 	if (failed.length) throw new Error(`${failed.length} case(s) failed:\n- ${failed.join("\n- ")}`);
 	console.log("room-send-edges smoke: ok");
 } catch (error) {
-	console.error(serverOutput.join("").split("\n").filter((line) => !line.includes("token=")).join("\n").slice(-6000));
+	console.error(serverOutput.join("").split("\n").filter((line) => !/token=/.test(line)).join("\n").slice(-6000));
 	throw error;
 } finally {
 	release();
