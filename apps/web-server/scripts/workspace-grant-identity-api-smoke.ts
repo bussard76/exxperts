@@ -153,6 +153,20 @@ try {
 	assert(broken.status >= 400, "undecodable storage is distinct from absent policy");
 	const brokenListing = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-files?conversationId=demo-thread`);
 	assert(brokenListing.status >= 400 && !brokenListing.body?.entries, "undecodable storage does not manufacture an empty listing");
+	fs.writeFileSync(defaultPath, JSON.stringify(fixture));
+	await stopSmokeServer(server);
+	server = spawn("npx", ["tsx", "src/index.ts"], {
+		shell: process.platform === "win32", ...SMOKE_SERVER_SPAWN_TREE_OPTIONS, cwd: webServerDir,
+		env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome, PORT: String(port), ...SMOKE_SERVER_AUTH_ENV, EXXETA_HOME: repoRoot, EXXETA_PERSISTENT_AGENTS_ROOT: tempAgentsRoot },
+	});
+	server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
+	server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
+	await waitForServer(server, baseUrl, 15000);
+	const restarted = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-default`);
+	assert(restarted.status === 200 && restarted.body.policy?.rootCount === 1 && restarted.body.folderRefused === true, "restart retains and refuses an unqualified identity");
+	assert(!JSON.stringify(restarted.body).includes("birthtimeNs"), "restart view keeps identity private");
+	assert(JSON.stringify(JSON.parse(fs.readFileSync(defaultPath, "utf8")).roots[0].identity) === JSON.stringify(validIdentity), "restart does not refresh the stored identity");
+	assert(!serverOutput.join("").includes("birthtimeNs") && !serverOutput.join("").includes("fs-stat"), "server logs do not expose private identity");
 	console.log("workspace grant identity refusal smoke passed");
 } finally {
 	await stopSmokeServer(server);
