@@ -349,3 +349,7 @@ Closure: 247 lock nodes; unresolved: none.
 ## Composer file-path drop
 
 Restored the source file-tree-to-composer drop behavior. An attributed Chromium component check exercises inserting a relative path at the caret, replacing selected text, restoring the caret and ignoring unrelated drags; the existing attributed `skill-pick-ui-smoke.ts` also passed. UI and scripts typechecks passed. This check uses an invented intercepted listing; the actual file-tree route and app integration are still pending.
+
+## Sidebar integration primitives
+
+Restored the optional workspace slot without changing the target's existing Rooms label, and the optional resizable sidebar with the source keyboard and pointer controls. Attributed Chromium checks passed the slot and Rooms action, keyboard bounds and pointer resizing; an initial resize harness needed a test-only grid height before the separator could be visible. The existing attributed `create-room-opens-smoke.ts` and both UI and scripts typechecks passed. The app does not yet enable the slot or resize control, and the workspace stylesheet is not yet imported into the live app.
