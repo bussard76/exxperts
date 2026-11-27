@@ -211,12 +211,34 @@ function runShelfWorker(request: Record<string, unknown>, timeoutMs: number, sig
 		// V8's OOM abort reports on stderr; keep a bounded tail so a heap-capped
 		// death maps to the honest too_complex refusal below.
 		let stderrTail = "";
+		let diagnosticLine = "";
+		let diagnosticOverflow = false;
+		let diagnostic: string | undefined;
+		let duplicateDiagnostic = false;
 		child.stderr?.on("data", (chunk: Buffer) => {
-			stderrTail = (stderrTail + chunk.toString()).slice(-8192);
+			const data = chunk.toString("latin1");
+			stderrTail = (stderrTail + data).slice(-8192);
+			if (request.mode !== "workspace-preview-v1" || request.kind !== "word") return;
+			for (const char of data) {
+				if (char === "\n") {
+					if (!diagnosticOverflow && /^WORD_PREVIEW_DIAGNOSTIC (Error|TypeError|ReferenceError|RangeError|SyntaxError|UnknownError)\|(requestAnimationFrame is not defined|Unexpected renderer error)$/.test(diagnosticLine)) {
+						if (diagnostic) duplicateDiagnostic = true;
+						else diagnostic = diagnosticLine;
+					}
+					diagnosticLine = "";
+					diagnosticOverflow = false;
+				} else if (!diagnosticOverflow) {
+					if (diagnosticLine.length >= 128) { diagnosticLine = ""; diagnosticOverflow = true; }
+					else diagnosticLine += char;
+				}
+			}
 		});
 		let settled = false;
 		let closed = false;
-		child.once("close", () => { closed = true; });
+		child.once("close", () => {
+			closed = true;
+			if (diagnostic && !duplicateDiagnostic) console.error(diagnostic);
+		});
 		const settle = (fn: () => void) => {
 			if (settled) return;
 			settled = true;
@@ -340,7 +362,7 @@ function previewJpegDimensions(bytes: Buffer): { width: number; height: number }
 let activeWorkspacePreviews = 0;
 
 /** Parse an already authorized snapshot through a private temporary copy. */
-async function runWorkspaceSnapshot(snapshot: Buffer, kind: "pdf" | "spreadsheet", signal: AbortSignal): Promise<ShelfWorkerMessage> {
+async function runWorkspaceSnapshot(snapshot: Buffer, kind: "pdf" | "spreadsheet" | "word", signal: AbortSignal): Promise<ShelfWorkerMessage> {
 	if (signal.aborted) return { ok: false, code: "preview_aborted" };
 	if (snapshot.length > SHELF_READ_MAX_FILE_BYTES) return { ok: false, code: "file_too_large" };
 	if (activeWorkspacePreviews >= 2) return { ok: false, code: "preview_busy" };
@@ -366,6 +388,16 @@ async function runWorkspaceSnapshot(snapshot: Buffer, kind: "pdf" | "spreadsheet
 		try { if (temporary) await fs.promises.rm(temporary, { recursive: true, force: true }); }
 		finally { activeWorkspacePreviews--; }
 	}
+}
+
+export async function runWorkspaceWordSnapshot(snapshot: Buffer, signal: AbortSignal): Promise<{ ok: boolean; code?: string; result?: { kind: "word"; html: string }; notices?: unknown[] }> {
+	const message = await runWorkspaceSnapshot(snapshot, "word", signal);
+	if (!message.ok) return { ok: false, code: message.code };
+	const result = message.result as { kind?: unknown; html?: unknown } | undefined;
+	const prefix = `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">`;
+	const validNotice = (notice: any) => notice && hasExactKeys(notice, ["code", "text"]) && notice.code === "external_resources_blocked" && notice.text === "External document resources are blocked.";
+	if (!hasExactKeys(message, ["ok", "schemaVersion", "notices", "result"]) || !Array.isArray(message.notices) || message.notices.length > 1 || !message.notices.every(validNotice) || !result || !hasExactKeys(result, ["kind", "html"]) || result.kind !== "word" || typeof result.html !== "string" || Buffer.byteLength(result.html) > 16_777_216 || !result.html.startsWith(prefix)) return { ok: false, code: "preview_failed" };
+	return { ok: true, result: result as { kind: "word"; html: string }, notices: message.notices };
 }
 
 export async function runWorkspaceSpreadsheetSnapshot(snapshot: Buffer, signal: AbortSignal): Promise<{ ok: boolean; code?: string; result?: { kind: "spreadsheet"; workbook: any }; notices?: unknown[] }> {

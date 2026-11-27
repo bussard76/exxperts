@@ -408,6 +408,41 @@ function previewZipEntries(buffer) {
 }
 
 
+function rasterMime(buffer) {
+	if (buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+	if (buffer[0] === 0xff && buffer[1] === 0xd8) return "image/jpeg";
+	if (/^GIF8[79]a$/.test(buffer.subarray(0, 6).toString("ascii"))) return "image/gif";
+	if (buffer.subarray(0, 4).toString("ascii") === "RIFF" && buffer.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
+	return null;
+}
+
+function countXmlElements(text, current) {
+	let offset = 0;
+	while ((offset = text.indexOf("<", offset)) !== -1) {
+		if (text.startsWith("<!--", offset) || text.startsWith("<![CDATA[", offset) || text.startsWith("<?", offset)) {
+			const close = text.startsWith("<!--", offset) ? "-->" : text.startsWith("<![CDATA[", offset) ? "]]>" : "?>";
+			const end = text.indexOf(close, offset + 2);
+			if (end < 0) throw previewError("damaged_file");
+			offset = end + close.length;
+			continue;
+		}
+		const next = text[offset + 1];
+		if (!next || next === "!") throw previewError("unsupported_document_feature");
+		if (next !== "/" && ++current > 200_000) throw previewError("preview_too_complex");
+		let quote = "";
+		let end = offset + 1;
+		for (; end < text.length; end++) {
+			const char = text[end];
+			if (quote) { if (char === quote) quote = ""; }
+			else if (char === "\"" || char === "'") quote = char;
+			else if (char === ">") break;
+		}
+		if (end === text.length) throw previewError("damaged_file");
+		offset = end + 1;
+	}
+	return current;
+}
+
 function inflatePreviewEntry(buffer, entry) {
 	let output;
 	try {
@@ -418,6 +453,49 @@ function inflatePreviewEntry(buffer, entry) {
 	return output;
 }
 
+
+async function preflightPreviewZip(buffer) {
+	const entries = previewZipEntries(buffer);
+	const relationships = new Map();
+	let imagePixels = 0;
+	let xmlElements = 0;
+	for (const entry of entries) {
+		let output;
+		try {
+			const compressed = buffer.subarray(entry.dataOffset, entry.dataOffset + entry.compressed);
+			output = entry.method === 0 ? compressed : inflateRawSync(compressed, { maxOutputLength: Math.max(1, entry.expanded) });
+		} catch { throw previewError("damaged_file"); }
+		if (output.length !== entry.expanded || crc32(output) !== entry.checksum) throw previewError("damaged_file");
+		if (/\.(?:xml|rels)$/i.test(entry.name)) {
+			let encoding = "utf-8";
+			if (output[0] === 0xff && output[1] === 0xfe || output[0] === 0x3c && output[1] === 0) encoding = "utf-16le";
+			if (output[0] === 0xfe && output[1] === 0xff || output[0] === 0 && output[1] === 0x3c) encoding = "utf-16be";
+			let text;
+			try { text = new TextDecoder(encoding, { fatal: true }).decode(output); } catch { throw previewError("damaged_file"); }
+			xmlElements = countXmlElements(text, xmlElements);
+			if (entry.name.endsWith(".rels")) relationships.set(entry.name, text);
+		}
+		if (!entry.name.endsWith("/") && (entry.name.startsWith("word/media/") || /\.(?:png|jpe?g|gif|webp)$/i.test(entry.name))) {
+			const mime = rasterMime(output);
+			if (!mime) throw previewError("unsupported_document_feature");
+			const extension = entry.name.slice(entry.name.lastIndexOf(".")).toLowerCase();
+			const expectedMime = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp" }[extension];
+			if (mime !== expectedMime) throw previewError("damaged_file");
+			const dimensions = sniffImageDimensions(output);
+			if (!dimensions || dimensions.width < 1 || dimensions.height < 1) throw previewError("unsupported_document_feature");
+			const pixels = dimensions.width * dimensions.height;
+			imagePixels += pixels;
+			if (pixels > 40_000_000 || imagePixels > 80_000_000) throw previewError("decoded_image_too_large");
+			let canvas;
+			try { canvas = await loadNapiCanvas(); } catch { throw previewError("renderer_unavailable"); }
+			try {
+				const image = await canvas.loadImage(output);
+				if (image.width !== dimensions.width || image.height !== dimensions.height) throw previewError("damaged_file");
+			} catch { throw previewError("damaged_file"); }
+		}
+	}
+	return relationships;
+}
 
 function denyPreviewNetwork() {
 	const deny = () => { throw previewError("unsupported_document_feature"); };
@@ -436,6 +514,235 @@ function denyPreviewNetwork() {
 	syncBuiltinESMExports();
 }
 
+
+const WORD_CSP = "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
+const WORD_CSS_PROPERTIES = new Set(("background background-color border border-top border-right border-bottom border-left border-color border-style border-width border-collapse border-spacing border-radius box-sizing color display direction flex flex-basis flex-direction flex-flow flex-grow flex-shrink flex-wrap align-items align-self justify-content z-index font font-family font-size font-style font-weight font-variant height line-height margin margin-top margin-right margin-bottom margin-left max-height max-width min-height min-width overflow overflow-wrap padding padding-top padding-right padding-bottom padding-left page-break-after page-break-before page-break-inside position left top right bottom transform transform-origin text-align text-decoration text-indent text-transform vertical-align white-space width word-break word-spacing letter-spacing list-style-type table-layout").split(" "));
+
+function safeWordStyle(style, markBlocked) {
+	const declarations = [];
+	let declarationBytes = 0;
+	for (let index = 0; index < style.length; index++) {
+		const property = style[index].toLowerCase();
+		const value = style.getPropertyValue(property);
+		if (Buffer.byteLength(value) > 16_777_216) throw previewError("preview_too_complex");
+		const decoded = value.replace(/\\([0-9a-fA-F]{1,6}\s?|.)/g, (_, escape) => /^[0-9a-fA-F]/.test(escape) ? String.fromCodePoint(Number.parseInt(escape.trim(), 16) || 0xfffd) : escape);
+		if (/url\s*\(|(?:-webkit-)?image-set\s*\(|cross-fade\s*\(|src\s*\(/i.test(decoded)) markBlocked();
+		if (!WORD_CSS_PROPERTIES.has(property) || /url\s*\(|(?:-webkit-)?image-set\s*\(|cross-fade\s*\(|src\s*\(|expression\s*\(|behavior|binding|@|[<>\x00-\x1f]/i.test(decoded)) continue;
+		declarationBytes += Buffer.byteLength(property) + Buffer.byteLength(value) + 16;
+		if (declarationBytes > 16_777_216) throw previewError("preview_too_complex");
+		declarations.push(`${property}: ${value}${style.getPropertyPriority(property) ? " !important" : ""}`);
+	}
+	return declarations.join("; ");
+}
+
+function serializeWordBody(document, head) {
+	const chunks = [];
+	let bytes = 0;
+	const append = (value) => {
+		const size = Buffer.byteLength(value);
+		if (bytes + size > 16_777_216) throw previewError("preview_too_complex");
+		bytes += size;
+		chunks.push(value);
+	};
+	const escaped = (value, attribute) => {
+		let extra = 0;
+		for (const character of value) {
+			if (character === "&") extra += 4;
+			else if (character === "<" || character === ">") extra += 3;
+			else if (attribute && character === '"') extra += 5;
+		}
+		if (bytes + Buffer.byteLength(value) + extra > 16_777_216) throw previewError("preview_too_complex");
+		return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', attribute ? "&quot;" : '"');
+	};
+	append(head);
+	const voidTags = new Set(["BR", "HR", "IMG", "COL"]);
+	const stack = [{ node: document.body, closing: false }];
+	while (stack.length) {
+		const { node, closing } = stack.pop();
+		if (node.nodeType === 3) { append(escaped(node.nodeValue ?? "", false)); continue; }
+		if (node.nodeType !== 1) continue;
+		const tag = node.tagName.toLowerCase();
+		if (closing) { append(`</${tag}>`); continue; }
+		append(`<${tag}`);
+		for (const attribute of node.attributes) {
+			append(` ${attribute.name}="`);
+			append(escaped(attribute.value, true));
+			append('"');
+		}
+		append(">");
+		if (voidTags.has(node.tagName)) continue;
+		stack.push({ node, closing: true });
+		for (let child = node.lastChild; child; child = child.previousSibling) stack.push({ node: child, closing: false });
+	}
+	append("</html>");
+	return chunks.join("");
+}
+
+function sanitizeWordDocument(document, notices) {
+	const markBlocked = () => {
+		if (!notices.some((notice) => notice.code === "external_resources_blocked")) notices.push({ code: "external_resources_blocked", text: "External document resources are blocked." });
+	};
+	const styles = [];
+	let styleBytes = 0;
+	for (const element of document.querySelectorAll("style")) {
+		try {
+			for (const rule of element.sheet?.cssRules ?? []) {
+				if (!rule.selectorText || !rule.style || /[@\\{}<>]/.test(rule.selectorText)) continue;
+				const body = safeWordStyle(rule.style, markBlocked);
+				if (body) {
+					styleBytes += Buffer.byteLength(rule.selectorText) + Buffer.byteLength(body) + 6;
+					if (styleBytes > 16_777_216) throw previewError("preview_too_complex");
+					styles.push(`${rule.selectorText} { ${body} }`);
+				}
+			}
+		} catch (error) { if (error?.previewCode) throw error; throw previewError("damaged_file"); }
+	}
+	// Word's horizontal lines (VML) come out of docx-preview as <svg>, which is removed below; keep them as a plain double rule.
+	for (const svg of document.querySelectorAll("svg")) {
+		const rule = document.createElement("div");
+		rule.setAttribute("style", svg.getAttribute("style") || "");
+		if (!rule.style.width) continue;
+		rule.style.height = "0";
+		rule.style.borderTop = "3px double #000";
+		svg.replaceWith(rule);
+	}
+	for (const element of document.querySelectorAll("script, style, link, iframe, frame, object, embed, svg, math, form, input, button, textarea, select, meta, base, video, audio, source")) element.remove();
+	const allowedTags = new Set("DIV SECTION ARTICLE HEADER FOOTER P SPAN B STRONG I EM U S STRIKE TABLE TBODY THEAD TFOOT TR TD TH COLGROUP COL BR HR IMG H1 H2 H3 H4 H5 H6 OL UL LI SUP SUB BLOCKQUOTE PRE CODE A".split(" "));
+	const elements = [...document.body.querySelectorAll("*")];
+	let renderedPixels = 0;
+	if (elements.length > 200_000) throw previewError("preview_too_complex");
+	for (const element of elements) {
+		if (!allowedTags.has(element.tagName)) { element.replaceWith(...element.childNodes); continue; }
+		for (const attr of [...element.attributes]) {
+			const name = attr.name.toLowerCase();
+			if (name === "style") {
+				const value = safeWordStyle(element.style, markBlocked);
+				if (value) element.setAttribute("style", value); else element.removeAttribute("style");
+			} else if (name === "class" || name === "colspan" || name === "rowspan" || name === "width" || name === "height" || name === "alt") {
+				continue;
+			} else if (element.tagName === "IMG" && name === "src" && /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+=*$/i.test(attr.value)) {
+				continue;
+			} else element.removeAttribute(attr.name);
+		}
+		if (element.tagName === "IMG") {
+			const src = element.getAttribute("src");
+			if (!src) throw previewError("unsupported_document_feature");
+			const base64 = src.slice(src.indexOf(",") + 1);
+			if (base64.length > 22_369_624 || base64.length % 4 !== 0) throw previewError("preview_too_complex");
+			const bytes = Buffer.from(base64, "base64");
+			if (rasterMime(bytes) !== src.slice(5, src.indexOf(";")).toLowerCase()) throw previewError("damaged_file");
+			const dimensions = sniffImageDimensions(bytes);
+			if (!dimensions || dimensions.width < 1 || dimensions.height < 1) throw previewError("damaged_file");
+			const pixels = dimensions.width * dimensions.height;
+			renderedPixels += pixels;
+			if (pixels > 40_000_000 || renderedPixels > 80_000_000) throw previewError("decoded_image_too_large");
+		}
+	}
+	const escapedCsp = WORD_CSP.replaceAll("&", "&amp;").replaceAll('"', "&quot;");
+	// docx-preview paints a grey desk behind its pages; a light desk keeps the white page reading as paper.
+	const css = `${styles.join("\n")}\nbody { margin: 0; background: #f3f0ea; }\n.docx-wrapper { background: #f3f0ea; padding: 24px; align-items: safe center; width: fit-content; min-width: 100%; box-sizing: border-box; }\n.docx-wrapper > section.docx { flex: none; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18); margin-bottom: 24px; }`.replaceAll("<", "\\3c ");
+	const html = serializeWordBody(document, `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${escapedCsp}"><style>${css}</style></head>`);
+	return { ok: true, schemaVersion: 1, notices, result: { kind: "word", html } };
+}
+
+// Word also allows sizes like w:sz="4.3mm" (Teams transcripts do this). docx-preview reads only the number,
+// so that text comes out at 2pt. It gets the plain numbers it expects: half-points for font sizes, twips elsewhere.
+function wordMeasuresToNumbers(xml) {
+	const points = (value, unit) => Number(value) * { mm: 72 / 25.4, cm: 72 / 2.54, in: 72, pt: 1, pc: 12, pi: 12 }[unit];
+	return xml
+		.replace(/(<w:(?:sz|szCs|kern|position)\b[^>]*?w:val=")(-?[\d.]+)(mm|cm|in|pt|pc|pi)"/g, (_, start, value, unit) => `${start}${Math.round(points(value, unit) * 2)}"`)
+		.replace(/(\sw:[A-Za-z]+=")(-?[\d.]+)(mm|cm|in|pt|pc|pi)"/g, (_, start, value, unit) => `${start}${Math.round(points(value, unit) * 20)}"`);
+}
+
+async function previewWord(buffer) {
+	const relationships = await preflightPreviewZip(buffer);
+	denyPreviewNetwork();
+	let JSDOM, JSZip, renderAsync;
+	try {
+		({ JSDOM } = await import("jsdom"));
+		({ default: JSZip } = await import("jszip"));
+		({ renderAsync } = await import("docx-preview"));
+	} catch { throw previewError("renderer_unavailable"); }
+	const dom = new JSDOM("<!doctype html><html><head></head><body><div id=styles></div><div id=content></div></body></html>", { pretendToBeVisual: true });
+	const { window } = dom;
+	try {
+		for (const name of ["window", "document", "HTMLElement", "Element", "Node", "DOMParser", "XMLSerializer", "FileReader", "Blob"]) globalThis[name] = name === "window" ? window : window[name];
+		globalThis.getComputedStyle = window.getComputedStyle.bind(window);
+		// docx-preview measures legacy drawings (VML) in a frame callback; jsdom has no layout, so the callback never runs.
+		globalThis.requestAnimationFrame = () => 0;
+		globalThis.cancelAnimationFrame = () => {};
+		let createdElements = 0;
+		let createdTextBytes = 0;
+		let encodedImageBytes = 0;
+		const readDataUrl = window.FileReader.prototype.readAsDataURL;
+		window.FileReader.prototype.readAsDataURL = function(blob) {
+			encodedImageBytes += Math.ceil(blob.size / 3) * 4 + 100;
+			if (encodedImageBytes > 16_777_216) throw previewError("preview_too_complex");
+			return readDataUrl.call(this, blob);
+		};
+		const createText = window.document.createTextNode.bind(window.document);
+		window.document.createTextNode = (value) => {
+			createdTextBytes += Buffer.byteLength(String(value));
+			if (createdTextBytes > 16_777_216) throw previewError("preview_too_complex");
+			return createText(value);
+		};
+		for (const name of ["createElement", "createElementNS"]) {
+			const create = window.document[name].bind(window.document);
+			window.document[name] = (...args) => {
+				if (++createdElements > 200_000) throw previewError("preview_too_complex");
+				return create(...args);
+			};
+		}
+		window.fetch = () => { throw previewError("unsupported_document_feature"); };
+		window.WebSocket = window.EventSource = window.XMLHttpRequest = function() { throw previewError("unsupported_document_feature"); };
+		const zip = await JSZip.loadAsync(buffer);
+		let blocked = false;
+		for (const [name, text] of relationships) {
+			const xml = new window.DOMParser().parseFromString(text, "application/xml");
+			if (xml.querySelector("parsererror, doctype")) throw previewError("damaged_file");
+			const externalImages = new Set();
+			for (const relation of [...xml.getElementsByTagNameNS("*", "Relationship")]) {
+				if (relation.getAttribute("TargetMode")?.toLowerCase() === "external") {
+					if (relation.getAttribute("Type")?.endsWith("/image")) externalImages.add(relation.getAttribute("Id"));
+					relation.remove(); blocked = true;
+				}
+			}
+			zip.file(name, new window.XMLSerializer().serializeToString(xml));
+			if (externalImages.size) {
+				const partName = name.replace(/(^|\/)_rels\/([^/]+)\.rels$/, "$1$2");
+				const part = zip.file(partName);
+				if (!part) throw previewError("damaged_file");
+				const partXml = new window.DOMParser().parseFromString(await part.async("string"), "application/xml");
+				if (partXml.querySelector("parsererror")) throw previewError("damaged_file");
+				for (const blip of [...partXml.getElementsByTagNameNS("*", "blip")]) {
+					const link = blip.getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "link");
+					if (!externalImages.has(link)) continue;
+					let drawing = blip.parentNode;
+					while (drawing && drawing.localName !== "drawing") drawing = drawing.parentNode;
+					if (!drawing?.parentNode) throw previewError("unsupported_document_feature");
+					const text = partXml.createElementNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main", "w:t");
+					text.textContent = "External image blocked.";
+					drawing.parentNode.replaceChild(text, drawing);
+				}
+				zip.file(partName, new window.XMLSerializer().serializeToString(partXml));
+			}
+		}
+		// docx-preview lays every anchored drawing out from its paragraph, so a page-relative horizontal offset must lose the page's left margin.
+		const pageMarginLeftEmu = Number(/<w:pgMar\b[^>]*\sw:left="(\d+)"/.exec(await zip.file("word/document.xml")?.async("string") ?? "")?.[1] ?? 0) * 635;
+		const anchoredFromPage = (xml) => pageMarginLeftEmu ? xml.replace(/(<wp:positionH\b[^>]*relativeFrom="page"[^>]*>\s*<wp:posOffset>)(-?\d+)(<\/wp:posOffset>)/g, (_, head, offset, tail) => `${head}${Number(offset) - pageMarginLeftEmu}${tail}`) : xml;
+		for (const part of zip.file(/^word\/[^/]+\.xml$/)) zip.file(part.name, anchoredFromPage(wordMeasuresToNumbers(await part.async("string"))));
+		const sanitized = await zip.generateAsync({ type: "nodebuffer", compression: "STORE" });
+		await renderAsync(sanitized, window.document.getElementById("content"), window.document.getElementById("styles"), { inWrapper: true, ignoreWidth: false, ignoreHeight: false, ignoreLastRenderedPageBreak: false, useBase64URL: true });
+		const notices = blocked ? [{ code: "external_resources_blocked", text: "External document resources are blocked." }] : [];
+		return sanitizeWordDocument(window.document, notices);
+	} catch (error) {
+		if (error?.previewCode) throw error;
+		const name = ["Error", "TypeError", "ReferenceError", "RangeError", "SyntaxError"].includes(error?.name) ? error.name : "UnknownError";
+		const message = error?.message === "requestAnimationFrame is not defined" ? error.message : "Unexpected renderer error";
+		await new Promise((resolve) => process.stderr.write(`WORD_PREVIEW_DIAGNOSTIC ${name}|${message}\n`, resolve));
+		throw previewError("damaged_file");
+	} finally { window.close(); }
+}
 
 async function previewPdf(buffer) {
 	if (buffer.subarray(0, 5).toString("ascii") !== "%PDF-") throw previewError("damaged_file");
@@ -639,6 +946,11 @@ async function parseDocx(buffer) {
 	try {
 		const request = JSON.parse(process.argv[2] ?? "");
 		const { absolutePath, kind, maxPages, maxChars } = request;
+		if (request.mode === "workspace-preview-v1" && kind === "word") {
+			const buffer = readPreviewSnapshot(request);
+			post(await previewWord(buffer));
+			return;
+		}
 		if (request.mode === "workspace-preview-v1" && kind === "pdf") {
 			const buffer = readPreviewSnapshot(request);
 			denyPreviewNetwork();
