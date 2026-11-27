@@ -629,7 +629,8 @@ app.get("/api/persistent-agents/:id/workspace-files", async (req, reply) => {
 		const effectivePolicy = resolvePersistentRoomEffectiveWorkspacePolicy(id, conversationId);
 		if (effectivePolicy.source === "none") return { agentId: id, conversationId, root: null, path: requestedPath, entries: [] };
 		return reply.code(503).send({ code: "workspace_unavailable", error: "Workspace is unavailable." });
-	} catch {
+	} catch (error) {
+		if ((error as { code?: string })?.code === "workspace_unavailable") return reply.code(503).send({ code: "workspace_unavailable", error: "Workspace is unavailable." });
 		return reply.code(404).send({ code: "room_not_found", error: "Room not found." });
 	}
 });
@@ -650,7 +651,7 @@ app.get("/api/persistent-agents/:id/workspace-default", async (req, reply) => {
 			shellMissingNote: isSharedServer() || persistentRoomWindowsBoxed(id) || persistentRoomShellFound() ? null : PERSISTENT_ROOM_SHELL_MISSING_SENTENCE,
 			commandsStartOn: persistentRoomCommandsStartOn(id),
 			// Judged afresh too: a folder saved before the rule, or one that became a closed place since.
-			folderRefused: policy ? roomFence(policy, () => []).refused : false,
+			folderRefused: policy ? roomFence(policy, () => []).room === null : false,
 			...protectionView(id),
 		};
 	} catch (e) {
