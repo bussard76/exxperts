@@ -858,8 +858,6 @@ export function App() {
 		} finally {
 			if (noFolderWindowRef.current?.controller === folderWindow) noFolderWindowRef.current = null;
 		}
-		let beforeFolder: Awaited<ReturnType<typeof fetchPersistentRoomWorkspaceDefault>> | null = null;
-		try { beforeFolder = await fetchPersistentRoomWorkspaceDefault(roomId); } catch { /* An unknown before state cannot establish a lost save. */ }
 		try {
 			const response = await savePersistentRoomWorkspaceDefault(roomId, { root: path });
 			settle(null);
@@ -867,20 +865,6 @@ export function App() {
 			setRoomBashEnabled(response.policy?.workspaceAccessMode === "localFiles" && response.policy?.bashEnabled === true);
 			setWorkspaceHint(workspaceHintOf(roomId, response));
 		} catch (e) {
-			try {
-				const current = await fetchPersistentRoomWorkspaceDefault(roomId);
-				const previousId = beforeFolder?.policy?.policyId;
-				const currentId = current.policy?.policyId;
-				const knownBefore = beforeFolder !== null && (beforeFolder.policy === null || (typeof previousId === "string" && previousId.length > 0));
-				if (knownBefore && typeof currentId === "string" && currentId.length > 0 && currentId !== previousId && current.policy?.roots[0]?.path === path && current.folderRefused === false) {
-					settle(null);
-					if (persistentChatRef.current?.agentId === roomId) {
-						setRoomBashEnabled(current.policy.workspaceAccessMode === "localFiles" && current.policy.bashEnabled === true);
-						setWorkspaceHint(workspaceHintOf(roomId, current));
-					}
-					return;
-				}
-			} catch { /* A failed read cannot establish a lost save. */ }
 			settle({ roomId, press: folderWindow, state: "refused", line: (e as Error).message || "Couldn't save the folder. Try again." });
 		}
 	}

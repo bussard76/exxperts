@@ -45,8 +45,6 @@ export interface PersistentRoomWorkspaceRootGrant {
 	pathHash: PersistentRoomPathHash;
 	source: PersistentRoomWorkspaceRootSource;
 	grantedAt: string;
-	/** Private selected-directory evidence; null means a stored grant cannot be used. */
-	identity?: { version: 1; kind: "fs-stat"; platform: "linux" | "darwin" | "win32"; dev: string; ino: string; birthtimeNs: string } | null;
 }
 
 export interface PersistentRoomDeniedRootView {
@@ -297,6 +295,14 @@ function safeBasename(input: string): string {
 	return path.basename(input) || input;
 }
 
+function safeDisplayLabel(input: { displayLabel?: string; basename: string }): string {
+	const fallback = input.basename || "workspace";
+	const label = String(input.displayLabel ?? "").trim();
+	if (!label) return fallback;
+	if (label.includes("/") || label.includes("\\") || label.includes("~")) return fallback;
+	return label.slice(0, 80) || fallback;
+}
+
 interface NormalizedForbiddenRoot {
 	kind: PersistentRoomForbiddenRootKind;
 	path: string;
@@ -464,15 +470,6 @@ export function persistentRoomWorkspaceDefaultPath(agentIdRaw: string, options: 
 	return path.join(workspaceRuntimeDir(agentId, options), "workspace-default.json");
 }
 
-function normalizeRootIdentity(raw: unknown): PersistentRoomWorkspaceRootGrant["identity"] {
-	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-	const value = raw as Record<string, unknown>;
-	if (Object.keys(value).sort().join(",") !== "birthtimeNs,dev,ino,kind,platform,version" || value.version !== 1 || value.kind !== "fs-stat" || (value.platform !== "linux" && value.platform !== "darwin" && value.platform !== "win32")) return null;
-	const integer = (v: unknown, max: bigint): v is string => typeof v === "string" && /^[1-9][0-9]{0,19}$/.test(v) && BigInt(v) <= max;
-	if (!integer(value.dev, 18446744073709551615n) || !integer(value.ino, 18446744073709551615n) || !integer(value.birthtimeNs, 9223372036854775807n)) return null;
-	return { version: 1, kind: "fs-stat", platform: value.platform, dev: value.dev, ino: value.ino, birthtimeNs: value.birthtimeNs };
-}
-
 function normalizePersistentRoomWorkspaceRootGrant(raw: any): PersistentRoomWorkspaceRootGrant | null {
 	if (!raw || typeof raw !== "object") return null;
 	const id = String(raw.id ?? "").trim();
@@ -494,7 +491,6 @@ function normalizePersistentRoomWorkspaceRootGrant(raw: any): PersistentRoomWork
 		pathHash: { algorithm: "sha256", value: hashValue },
 		source,
 		grantedAt,
-		identity: normalizeRootIdentity(raw.identity),
 	};
 }
 
@@ -789,15 +785,9 @@ export function deletePersistentRoomCapabilityPolicy(agentIdRaw: string, convers
 export function readPersistentRoomDefaultCapabilityPolicy(agentIdRaw: string, options: PersistentRoomWorkspacePolicyStorageOptions = {}): PersistentRoomCapabilityPolicy | null {
 	const agentId = safePolicyFileId(agentIdRaw, "agent id");
 	const file = persistentRoomWorkspaceDefaultPath(agentId, options);
-	try { fs.lstatSync(file); } catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-		throw Object.assign(new Error("Workspace settings are unavailable."), { statusCode: 503, code: "workspace_unavailable" });
-	}
+	if (!fs.existsSync(file)) return null;
 	const stored = normalizePersistentRoomCapabilityPolicy(readJson(file), agentId, PERSISTENT_ROOM_WORKSPACE_DEFAULT_CONVERSATION_ID);
-	if (!stored && !serverHooks().ignoresStoredWorkspaceSettings?.()) throw Object.assign(new Error("Workspace settings are unavailable."), { statusCode: 503, code: "workspace_unavailable" });
-	const folded = stored && foldedPersistentRoomPolicy(stored);
-	if (stored && !folded) throw Object.assign(new Error("Workspace settings are unavailable."), { statusCode: 503, code: "workspace_unavailable" });
-	return folded;
+	return stored && foldedPersistentRoomPolicy(stored);
 }
 
 export function missingPersistentRoomWorkspaceRootWarnings(policy: PersistentRoomCapabilityPolicy | null): string[] {
@@ -977,9 +967,19 @@ export function validatePersistentRoomWorkspaceRoot(root: string, context: Persi
 	}
 	const forbiddenRoots = normalizeForbiddenRoots(context.forbiddenRoots ?? defaultPersistentRoomForbiddenRoots(context));
 	assertAllowedWorkspaceRoot({ rootPath: resolvedPath, rootRealpath, forbiddenRoots });
-	// No platform/filesystem/provider combination has been qualified. Selection
-	// must capture verified identity before any local grant can be returned.
-	throw Object.assign(new Error("This folder cannot be selected right now."), { statusCode: 400, code: "folder_refused" });
+	const basename = safeBasename(rootRealpath);
+	const pathHash = hashPersistentRoomPath(rootRealpath);
+	const now = (context.now ?? new Date()).toISOString();
+	return {
+		id: `root_${pathHash.value.slice(0, 16)}`,
+		displayLabel: safeDisplayLabel({ displayLabel: context.displayLabel, basename }),
+		path: resolvedPath,
+		realpath: rootRealpath,
+		basename,
+		pathHash,
+		source: context.source ?? "manual",
+		grantedAt: now,
+	};
 }
 
 export function createPersistentRoomCapabilityPolicy(input: CreatePersistentRoomCapabilityPolicyInput): PersistentRoomCapabilityPolicy {
@@ -1096,9 +1096,16 @@ export function persistentRoomCapabilityPolicyView(policy: PersistentRoomCapabil
 	};
 }
 
-function workspacePolicyRootCurrentlyUsable(_policy: PersistentRoomCapabilityPolicy): boolean {
-	// No selected local root has qualified identity evidence yet.
-	return false;
+function workspacePolicyRootCurrentlyUsable(policy: PersistentRoomCapabilityPolicy): boolean {
+	const root = policy.roots[0];
+	if (!root) return false;
+	const rootRealpath = existingRealpath(root.realpath) ?? existingRealpath(root.path);
+	if (!rootRealpath) return false;
+	try {
+		return fs.statSync(rootRealpath).isDirectory();
+	} catch {
+		return false;
+	}
 }
 
 function fingerprintEffectiveWorkspacePolicy(input: {
@@ -1218,7 +1225,7 @@ export function persistentRoomRuntimeCwdForEffectiveWorkspacePolicy(effectivePol
 	// cwd, but the session claiming to run from the repo root was a lie).
 	const root = effectivePolicy?.policy?.roots[0];
 	// A room's own files hold only what people and the room put there: the session's own settings never come from them.
-	if (!root || !effectivePolicy?.workspaceToolsEnabled || effectivePolicy.source === "room-files") return fallback;
+	if (!root || effectivePolicy?.source === "room-files") return fallback;
 	const rootRealpath = existingRealpath(root.realpath) ?? existingRealpath(root.path);
 	if (!rootRealpath) return fallback;
 	try {

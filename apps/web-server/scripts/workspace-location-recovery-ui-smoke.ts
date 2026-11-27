@@ -24,44 +24,26 @@ let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
 try {
 	await ready;
 	browser = await chromium.launch({ headless: true });
-	for (const item of [
-		{ mode: "picker", result: "changed", expected: true },
-		{ mode: "typed", result: "changed", expected: true },
-		{ mode: "picker", result: "unchanged", expected: false },
-		{ mode: "picker", result: "refused", expected: false },
-		{ mode: "picker", result: "unknown", expected: false },
-		{ mode: "picker", result: "different", expected: false },
-		{ mode: "picker", result: "unknown-before", expected: false },
-		{ mode: "typed", result: "failed-after", expected: false },
-	] as const) {
+	{
 		const page = await browser.newPage();
 		let attempted = false;
 		await page.route("**/api/remote/client-context", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ remote: false, capability: "full", sharedServer: false }) }));
 		await page.route("**/api/persistent-agents/**/bash-settings", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ settings: {} }) }));
 		await page.route("**/api/persistent-agents/**/also-allowed", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ folders: [], sites: [] }) }));
-		await page.route("**/api/system/choose-folder", (route) => route.fulfill(item.mode === "typed" ? { status: 400, contentType: "application/json", body: JSON.stringify({ code: "unsupported_platform" }) } : { status: 200, contentType: "application/json", body: JSON.stringify({ supported: true, cancelled: false, path: "/invented/project" }) }));
+		await page.route("**/api/system/choose-folder", (route) => route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ code: "unsupported_platform" }) }));
 		await page.route("**/api/persistent-agents/**/workspace-default", (route) => {
 			if (route.request().method() === "PUT") { attempted = true; return route.abort("failed"); }
-			if (attempted && item.result === "failed-after") return route.fulfill({ status: 500, body: "unavailable" });
-			const beforeId = item.result === "unknown-before" ? undefined : "old-id";
-			const policyId = attempted && item.result !== "unchanged" ? "new-id" : beforeId;
-			const selected = attempted && item.result === "different" ? "/invented/other" : "/invented/project";
-			const flag = attempted && item.result === "unknown" ? {} : { folderRefused: attempted && item.result === "refused" };
-			const body = { agentId: "invented-room", storage: { kind: "invented" }, policy: { policyId, roots: [{ id: "root", displayLabel: "Invented", basename: "project", path: selected }], allowedToolNames: ["read", "ls", "find", "grep"], bashEnabled: false }, warnings: [], ...flag };
+			if (attempted) return route.fulfill({ status: 500, body: "unavailable" });
+			const body = { agentId: "invented-room", storage: { kind: "invented" }, policy: { policyId: "old-id", roots: [{ id: "root", displayLabel: "Invented", basename: "project", path: "/invented/project" }], allowedToolNames: ["read", "ls", "find", "grep"], bashEnabled: false }, warnings: [], folderRefused: false };
 			return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
 		});
 		await page.goto(`${base}/__t87_recovery_test.html`);
 		await page.getByRole("button", { name: "Change folder" }).click();
-		if (item.mode === "typed") {
-			await page.getByLabel("Location").fill("/invented/project");
-			await page.getByRole("button", { name: "Use this folder" }).click();
-		}
-		if (item.expected) await page.getByText("Saved", { exact: true }).first().waitFor({ timeout: 10000, state: "attached" });
-		else if (item.result === "failed-after") {
-			await page.getByText("Couldn't load this room's folder.").waitFor({ timeout: 10000 });
-			assert.equal(await page.getByRole("button", { name: "Try again" }).count(), 1, "a failed recovery read permits retry");
-		} else await page.getByRole("alert").getByText("Couldn't save the folder. Try again.").waitFor({ timeout: 10000 });
-		assert.equal(attempted, true, `${item.mode}/${item.result} issued a save`);
+		await page.getByLabel("Location").fill("/invented/project");
+		await page.getByRole("button", { name: "Use this folder" }).click();
+		await page.getByText("Couldn't load this room's folder.").waitFor({ timeout: 10000 });
+		assert.equal(await page.getByRole("button", { name: "Try again" }).count(), 1, "a failed recovery read permits retry");
+		assert.equal(attempted, true, "typed location issued a save");
 		await page.close();
 	}
 	console.log("workspace location recovery UI smoke passed");

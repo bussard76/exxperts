@@ -27,7 +27,6 @@ const codeOf = (error: unknown): string | undefined => {
 /** The room's folder as the pane reads it. */
 interface RoomFolder {
 	policy: PersistentRoomCapabilityPolicyView | null;
-	folderRefused?: boolean;
 	warnings: string[];
 	shellMissingNote: string | null;
 	/** Absent on a shared server. */
@@ -38,7 +37,6 @@ interface RoomFolder {
 
 const roomFolderOf = (response: PersistentRoomWorkspaceDefaultResponse, mode: CommandMode): RoomFolder => ({
 	policy: response.policy,
-	folderRefused: response.folderRefused,
 	warnings: response.warnings ?? [],
 	shellMissingNote: response.shellMissingNote || null,
 	protection: response.protection,
@@ -210,12 +208,7 @@ export function RoomWorkspaceSection({ status, answering = false, onRefresh }: {
 			const next = await readRoom().catch(() => null);
 			return next ?? (before ? { ...before, policy: response.policy, warnings: response.warnings ?? [] } : null);
 		}, (stored) => {
-			if (at === "location") {
-				const previousId = before?.policy?.policyId;
-				const currentId = stored.policy?.policyId;
-				const knownBefore = before !== null && (before.policy === null || (typeof previousId === "string" && previousId.length > 0));
-				return knownBefore && typeof currentId === "string" && currentId.length > 0 && currentId !== previousId && stored.policy?.roots[0]?.path === sentRoot && stored.folderRefused === false;
-			}
+			if (at === "location") return Boolean(stored.policy?.roots[0]) && stored.policy?.roots[0]?.path !== before?.policy?.roots[0]?.path;
 			if (at === "canChange") return canChangeOf(stored.policy) === asked.canChange;
 			return stored.policy?.bashEnabled === asked.commands;
 		}, () => (at === "location" ? FOLDER_SAVE_FAILED : CHANGE_SAVE_FAILED));

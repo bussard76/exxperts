@@ -54,8 +54,8 @@ try {
 	const policyFile = path.join(home, "agents", room, "runtime", "workspace-default.json");
 	fs.mkdirSync(path.dirname(policyFile), { recursive: true });
 	fs.writeFileSync(policyFile, JSON.stringify(policy));
-	const unqualified = await call(headers);
-	if (unqualified.statusCode !== 403 || unqualified.json().code !== "workspace_read_forbidden" || unqualified.body.includes('"accepted":true')) throw new Error("an unqualified legacy grant cannot open a file");
+	const unverified = await call(headers);
+	if (unverified.statusCode !== 403 || unverified.json().code !== "association_unverified" || unverified.body.includes('"accepted":true')) throw new Error("a path-only grant cannot dispatch an unverified association");
 	registerServerHooks({});
 	const shared = await call(headers);
 	if (shared.statusCode !== 403 || shared.json().code !== "local_action_forbidden") throw new Error("shared servers cannot invoke a local handoff");

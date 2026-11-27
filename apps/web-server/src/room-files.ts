@@ -369,9 +369,6 @@ export interface RoomFence {
 function roomFolder(policy: PersistentRoomCapabilityPolicy, against?: JudgedAgainst): string | "moved" | "refused" {
 	const root = policy.roots[0];
 	if (!root) return "moved";
-	// No local filesystem/provider has been qualified for the private identity
-	// tuple yet. A stored tuple alone never grants access.
-	if (root.source !== "room-files") return "moved";
 	const real = safeRealpath(root.realpath) ?? safeRealpath(root.path);
 	if (!real) return "moved";
 	try {

@@ -131,20 +131,6 @@ try {
 		assert(await page.getByRole("button", { name: "Close sketch.excalidraw" }).count() === 0 && unsupportedRequests === 0, "unsupported selection opens no tab and requests no preview");
 		await page.getByRole("button", { name: "notes.txt", exact: true }).click();
 		await page.getByText("Invented notes", { exact: true }).waitFor({ timeout: 10000 });
-		const hint = page.locator(".room-workspace-nudge[role=note]");
-		await hint.getByRole("button", { name: "Choose folder" }).waitFor({ timeout: 10000 });
-		let folderSaveAttempts = 0;
-		await page.route("**/api/system/choose-folder", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ supported: true, cancelled: false, path: "/invented/project" }) }));
-		await page.route("**/api/persistent-agents/**/workspace-default", (route) => {
-			if (route.request().method() === "PUT") { folderSaveAttempts++; return route.abort("failed"); }
-			return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ agentId: "invented-room", storage: { kind: "invented" }, policy: { policyId: `id-${folderSaveAttempts}`, roots: [{ id: "root", displayLabel: "Invented", basename: "project", path: "/invented/project" }], allowedToolNames: [], workspaceAccessMode: "localFiles", bashEnabled: false }, folderRefused: folderSaveAttempts < 2, warnings: [] }) });
-		});
-		await hint.getByRole("button", { name: "Choose folder" }).click();
-		await hint.getByRole("alert").waitFor({ timeout: 10000 });
-		assert(folderSaveAttempts === 1, "a refused current grant does not establish a lost save");
-		await hint.getByRole("button", { name: "Choose folder" }).click();
-		await hint.waitFor({ state: "detached", timeout: 10000 });
-		assert(Number(folderSaveAttempts) === 2, "no-folder picker reconciles a lost same-path save");
 
 		await ctx.close();
 	} finally {

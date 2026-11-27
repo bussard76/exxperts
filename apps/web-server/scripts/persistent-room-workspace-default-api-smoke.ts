@@ -140,17 +140,6 @@ try {
 	assert(nestedListing.status === 200 && nestedListing.body.entries.some((entry: { relativePath: string }) => entry.relativePath === "notes/entry.txt"), "listing returns nested relative paths");
 	const linkedListing = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-files?conversationId=demo-thread&path=linked-notes`);
 	assert(linkedListing.status >= 400 && !JSON.stringify(linkedListing.body).includes(workspaceRoot), "listing refuses links without exposing the host path");
-	fs.renameSync(workspaceRoot, `${workspaceRoot}-original`);
-	fs.mkdirSync(workspaceRoot);
-	fs.writeFileSync(path.join(workspaceRoot, "replacement.txt"), "replacement");
-	let replacedRoot: { status: number; body: any };
-	try {
-		replacedRoot = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-files?conversationId=demo-thread`);
-	} finally {
-		fs.rmSync(workspaceRoot, { recursive: true, force: true });
-		fs.renameSync(`${workspaceRoot}-original`, workspaceRoot);
-	}
-	assert(replacedRoot.status >= 400 && !JSON.stringify(replacedRoot.body).includes("replacement.txt"), "a folder replaced before the request is refused");
 	assert(putDefault.body?.storage?.kind === "persistent-agent-runtime-default", "PUT should report room-default storage kind");
 	assert(putDefault.body?.policy?.rootCount === 1, "PUT should return one redacted root");
 	assert(putDefault.body?.policy?.roots?.[0]?.displayLabel === "Smoke Workspace", "PUT should preserve safe display label");

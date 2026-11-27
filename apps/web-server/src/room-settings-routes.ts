@@ -1,6 +1,9 @@
 import type { FastifyRequest } from "fastify";
 import { listWorkspaceForBrowser, readWorkspaceForBrowser } from "./persistent-room-workspace-tools.js";
 import { runWorkspacePdfSnapshot, runWorkspaceSpreadsheetSnapshot, runWorkspaceWordSnapshot } from "./persistent-room-shelf-reading.js";
+import { workspaceBoxFor } from "./room-live-sessions.js";
+import { roomBoxComputer } from "./room-box/box-available.js";
+import { fileToolsWait } from "./room-box/windows/folder-wait.js";
 import { MAINTENANCE_DIAGNOSTICS_KEEP, MAINTENANCE_DIAGNOSTICS_DEFAULT_LIMIT, listMaintenanceDiagnostics, exportMaintenanceDiagnostics } from "./maintenance-diagnostics.js";
 import { createPersistentAgentInstance, getPersistentAgentThread, saveWithOpenConversationCheck, getPersistentRoomInstructionsView, savePersistentRoomGlobalInstructionsEnabled, savePersistentRoomInstructions } from "./persistent-agents.js";
 import { normalizePersistentRoomWorkspaceToolSelectionInput } from "./persistent-room-tool-policy.js";
@@ -631,23 +634,32 @@ app.get("/api/persistent-agents/:id/workspace-files", async (req, reply) => {
 		if (!getPersistentAgentThread(id, conversationId)) return reply.code(404).send({ code: "conversation_not_found", error: "Conversation not found." });
 		const effectivePolicy = resolvePersistentRoomEffectiveWorkspacePolicy(id, conversationId);
 		if (effectivePolicy.source === "none") return { agentId: id, conversationId, root: null, path: requestedPath, entries: [] };
-		if (effectivePolicy.source === "room-files" && effectivePolicy.policy && effectivePolicy.workspaceToolsEnabled) {
+		if (effectivePolicy.policy && effectivePolicy.workspaceToolsEnabled && effectivePolicy.policy.modes.read && effectivePolicy.allowedToolNames.includes("read")) {
+			const initialRoot = JSON.stringify(effectivePolicy.policy.roots[0]);
 			const policyNow = () => {
 				getUsablePersistentAgentStatusForNormalUse(id);
 				if (!getPersistentAgentThread(id, conversationId)) throw Object.assign(new Error("Conversation unavailable."), { code: "grant_changed" });
 				const current = resolvePersistentRoomEffectiveWorkspacePolicy(id, conversationId);
-				if (current.source !== "room-files" || !current.policy || !current.workspaceToolsEnabled || current.fingerprint.value !== effectivePolicy.fingerprint.value) throw Object.assign(new Error("Workspace changed."), { code: "grant_changed" });
+				if (current.source !== effectivePolicy.source || !current.policy || !current.workspaceToolsEnabled || !current.policy.modes.read || !current.allowedToolNames.includes("read") || current.fingerprint.value !== effectivePolicy.fingerprint.value || JSON.stringify(current.policy.roots[0]) !== initialRoot) throw Object.assign(new Error("Workspace changed."), { code: "grant_changed" });
 				return current.policy;
 			};
+			const binding = () => {
+				if (effectivePolicy.source === "room-files" || roomBoxComputer() !== "mac") return undefined;
+				const selected = workspaceBoxFor(id, conversationId);
+				if (!selected) throw Object.assign(new Error("Workspace box unavailable."), { code: "box_failed" });
+				return selected;
+			};
+			if (roomBoxComputer() === "unknown") return reply.code(503).send({ code: "workspace_unavailable", error: "Workspace is unavailable." });
 			const controller = new AbortController();
 			const disconnected = () => controller.abort();
 			reply.raw.once("close", disconnected);
 			try {
-				const entries = await listWorkspaceForBrowser(policyNow, requestedPath, undefined, () => undefined, controller.signal);
-				return { agentId: id, conversationId, root: { displayLabel: "Attachments", basename: "files" }, path: requestedPath, entries };
+				const entries = await listWorkspaceForBrowser(policyNow, requestedPath, fileToolsWait(), binding, controller.signal);
+				const root = effectivePolicy.policy.roots[0];
+				return { agentId: id, conversationId, root: { displayLabel: root.displayLabel, basename: root.basename }, path: requestedPath, entries };
 			} finally { reply.raw.removeListener("close", disconnected); }
 		}
-		return reply.code(503).send({ code: "workspace_unavailable", error: "Workspace is unavailable." });
+		return reply.code(403).send({ code: "workspace_read_forbidden", error: "Workspace access is forbidden." });
 	} catch (error) {
 		if ((error as { code?: string })?.code === "workspace_unavailable") return reply.code(503).send({ code: "workspace_unavailable", error: "Workspace is unavailable." });
 		if ((error as { code?: string })?.code === "grant_changed") return reply.code(403).send({ code: "grant_changed", error: "Workspace access changed." });
@@ -830,7 +842,7 @@ app.get("/api/persistent-agents/:id/workspace-default", async (req, reply) => {
 			shellMissingNote: isSharedServer() || persistentRoomWindowsBoxed(id) || persistentRoomShellFound() ? null : PERSISTENT_ROOM_SHELL_MISSING_SENTENCE,
 			commandsStartOn: persistentRoomCommandsStartOn(id),
 			// Judged afresh too: a folder saved before the rule, or one that became a closed place since.
-			folderRefused: policy ? roomFence(policy, () => []).room === null : false,
+			folderRefused: policy ? roomFence(policy, () => []).refused : false,
 			...protectionView(id),
 		};
 	} catch (e) {
