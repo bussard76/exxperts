@@ -107,3 +107,37 @@ The accepted spec says an answer ID stays the same across retries. Automatic ret
 Front decided on 2026-11-27, implementing Sascha's Q01 and the approved identity contract: manual Try again/continue after a fully ended failed turn starts a new logical answer with a fresh private answer ID. Automatic retries inside a turn and detached adoption retain the original ID. No implementation change or new public seam, frame, persistence or diagnostic content was needed.
 
 `suggestions-producer-smoke.ts` checks that the failed attempt produces neither a successful completion nor suggestions, and that manual continue yields exactly one live completion before its matching suggestion, with the original proven user prompt. The failed ID is deliberately unpublished, so its allocation and the fresh allocation at manual continue are verified by inspection of `beginPersistentAgentTurn` and the socket's continue path; they cannot be compared through the existing socket contract. This is the observability limit accepted by Front, not a claim of direct socket proof.
+
+## Rework 1 (in progress)
+
+Architecture impact: level 3, within ADR-0009 and architecture review 4; fixture changes do not add a product boundary. The existing public socket and browser smokes are the test seams. The review's functional-only verdict remains PASS; the failed regression gate is not waived. Original full evidence: `/tmp/t24-slice1-full-gate.log`; each original isolated red: `/tmp/t24-isolated-<filename>.log`.
+
+| Smoke (`.ts`) | Original full / isolated | Rework status and original first failure |
+| --- | --- | --- |
+| `auto-compaction-failure-smoke` | red / red | Green: separate chat, summary and suggestion capture; `/tmp/t24-rework-auto-red.log`, `/tmp/t24-rework-auto-green.log`. The socket smoke proves both suggestions and the original chat counts, hold and cancellation checks. |
+| `room-failed-message-returns-smoke` | red / red | Green: new separation assertion red in `/tmp/t24-rework-returns-red.log`, both full browser scenarios green in `/tmp/t24-rework-returns-green.log`. Captured suggestion had been selected as chat. |
+| `room-failed-message-returns-away-smoke` | red / red | Green: original file-note assertion and the remaining browser scenario pass in `/tmp/t24-rework-returns-green.log`. |
+| `save-ids-page-smoke` | red / red | Unverified: held-response timeout. |
+| `chat-follow-smoke` | red / red | Unverified: held-response timeout. |
+| `room-send-edges-smoke` | red / red | Unverified: chat capture selected suggestion. |
+| `model-pick-page-smoke` | red / red | Unverified: model sequence includes suggestion. |
+| `effort-while-switching-ui-smoke` | red / red | Unverified: effort sequence includes suggestion. |
+| `room-removed-claude-model-smoke` | red / red | Unverified: model sequence includes suggestion. |
+| `prepared-thread-model-smoke` | red / red | Unverified: model sequence includes suggestion. |
+| `conversation-switch-model-smoke` | red / red | Unverified: model request selection. |
+| `anthropic-api-key-provider-smoke` | red / red | Unverified: credential request selection. |
+| `room-signed-out-reconnect-smoke` | red / red | Unverified: sign-in request selection. |
+| `thinking-levels-sweep-smoke` | red / red | Unverified: extra effort call. |
+| `persistent-room-away-steps-smoke` | red / red | Unverified: extra request changes scripted response selection. |
+| `room-state-page-smoke` | red / red | Unverified: extra request or response selection. |
+| `room-state-continuations-smoke` | red / red | Unverified: extra request or response selection. |
+| `room-state-message-smoke` | red / red | Unverified: extra request or response selection. |
+| `room-self-awareness-smoke` | red / red | Unverified: extra request or response selection. |
+| `persistent-room-pointer-recall-smoke` | red / red | Unverified: three legs instead of two. |
+| `skills-execution-exposure-smoke` | red / red | Unverified: scripted response selection. |
+| `delegate-task-smoke` | red / red | Unverified: specialist calls conflated with suggestions. |
+| `cache-write-cost-smoke` | red / red | Unverified: Wallet total includes suggestion usage, conflicting with the unchanged turn-only total assertion. |
+
+Wallet question: `apps/web-server/scripts/cache-write-cost-smoke.ts:155` requires the entire `/api/usage` total to equal only `BILLED`, and its later export destructuring assumes exactly three rows. The original isolated run observed two billed usage rows and total `0.211856` instead of the single-turn `0.105928`; the fake gives both calls identical usage. `docs/specs/T24-suggestions.md` requires suggestion tokens recorded under `suggestions`; `usage-api.ts` sums all usage rows in Wallet totals. Options: (A) preserve the original exact total assertion by giving the real suggestion call zero synthetic usage and separately assert its row and category, preserving the original three cost rows by selecting chat rows; (B) revise the total/export assertions to include the additional separately accounted suggestion row while retaining the per-chat-row pricing checks. No wallet assertion or fixture has been touched pending direction.
+
+The UI and scripts typechecks passed. The pre-existing `package-lock.json` change remains uncommitted. Graph: no; direct source and log searches found the first edited file after nine tool calls. No full build or full smoke gate was run; independent Tester owns those. Foreign-host network-failure reruns: zero.
