@@ -64,6 +64,7 @@ const CLAUDE = { provider: "fake-claude", model: "claude-fake" };
 const GPT = { provider: "fake-gpt", model: "gpt-fake" };
 
 const requests: Array<{ model: string; raw: string }> = [];
+const suggestionRequests: Array<{ model: string; raw: string }> = [];
 // While set, an answer waits for its release before it ends.
 let gate: Promise<void> | null = null;
 function holdAnswers(): () => void {
@@ -82,9 +83,12 @@ const providers = http.createServer((req, res) => {
 	req.on("data", (chunk) => { raw += chunk; });
 	req.on("end", async () => {
 		const body = JSON.parse(raw || "{}");
-		requests.push({ model: String(body.model), raw });
-		const text = `Answer from ${body.model}.`;
-		const held = gate;
+		const request = { model: String(body.model), raw };
+		const suggestion = JSON.stringify(body.system ?? "").includes("Generate next prompt suggestions") || (body.messages ?? []).some((message: any) => (message.role === "system" || message.role === "developer") && JSON.stringify(message.content).includes("Generate next prompt suggestions"));
+		if (suggestion) suggestionRequests.push(request);
+		else requests.push(request);
+		const text = suggestion ? '["Ask another question"]' : `Answer from ${body.model}.`;
+		const held = suggestion ? null : gate;
 		res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
 		if (String(req.url ?? "").includes("/messages")) {
 			sse(res, "message_start", { type: "message_start", message: { id: `msg_${requests.length}`, type: "message", role: "assistant", model: body.model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 100, output_tokens: 1 } } });
@@ -284,6 +288,8 @@ try {
 		await composer.fill("A question after the switch.");
 		await composer.press("Enter");
 		await page.getByText("Answer from gpt-fake.").waitFor({ timeout: 20000 });
+		await waitUntil(() => suggestionRequests.length > 0, "the suggestion request arrives");
+		assert(!suggestionRequests.some((request) => requests.includes(request)), "suggestions are separate from effort-bearing conversation requests");
 		const asked = requests.filter((request) => request.model === GPT.model && request.raw.includes("A question after the switch."));
 		assert(asked.length > 0 && asked.every((request) => request.raw.includes(`"reasoning_effort":"${level}"`)), `the next answer runs at ${level}, got ${asked.map((request) => JSON.parse(request.raw).reasoning_effort)}`);
 		await page.context().close();
