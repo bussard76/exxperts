@@ -56,6 +56,7 @@ function assert(condition: unknown, message: string): asserts condition {
 // ---------------------------------------------------------------------------
 let chatCalls = 0;
 let summaryCalls = 0;
+let suggestionCalls = 0;
 // Row 4: a message marked OVERFLOW is refused as too long; a summary asked for while a scene holds it waits for the scene to answer it.
 let overflowMode = false;
 let holdNextSummary = false;
@@ -86,6 +87,11 @@ const gateway = http.createServer((req, res) => {
 		try { parsed = JSON.parse(body); } catch {}
 		const model = String(parsed?.model ?? "");
 		const messages: any[] = Array.isArray(parsed?.messages) ? parsed.messages : [];
+		if (messages.some((message) => message?.role === "system" && messageText(message).includes("Generate next prompt suggestions"))) {
+			suggestionCalls += 1;
+			answer(res, model, false, true);
+			return;
+		}
 		// The summarization request wraps the transcript in <conversation> tags.
 		const isSummary = messages.some((message) => message?.role === "user" && messageText(message).includes("<conversation>"));
 		if (overflowMode) {
@@ -101,13 +107,13 @@ const gateway = http.createServer((req, res) => {
 	});
 });
 
-function answer(res: http.ServerResponse, model: string, isSummary: boolean): void {
+function answer(res: http.ServerResponse, model: string, isSummary: boolean, isSuggestion = false): void {
 		res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
 		// The first answer reads little; the second reads enough to trip threshold compaction.
 		const promptTokens = overflowMode || (!isSummary && chatCalls === 1) ? 100 : PROMPT_TOKENS;
 		const base = { id: `cmpl_${chatCalls + summaryCalls}`, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model };
 		res.write(sseChunk({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }] }));
-		for (const chunk of isSummary ? (overflowMode ? ["# Goal\n", "Short answers."] : CUT_SUMMARY_CHUNKS) : ANSWER_CHUNKS) {
+		for (const chunk of isSuggestion ? ['["Ask another question"]'] : isSummary ? (overflowMode ? ["# Goal\n", "Short answers."] : CUT_SUMMARY_CHUNKS) : ANSWER_CHUNKS) {
 			res.write(sseChunk({ ...base, choices: [{ index: 0, delta: { content: chunk }, finish_reason: null }] }));
 		}
 		res.write(sseChunk({
@@ -315,6 +321,7 @@ try {
 	assert(compactionEnd.reason === "threshold", `the oversized reading should trip threshold compaction, got ${JSON.stringify(compactionEnd)}`);
 	assert(typeof compactionEnd.errorMessage === "string" && compactionEnd.errorMessage.includes(RUNTIME_REASON), `the cut summary should be refused by the runtime, got ${JSON.stringify(compactionEnd)}`);
 	assert(summaryCalls === 1, `the gateway should have seen exactly one summary request, got ${summaryCalls}`);
+	assert(suggestionCalls === 2, `the gateway should have seen two suggestion requests, got ${suggestionCalls}`);
 	assert(chatCalls === 2, `the gateway should have seen exactly two chat requests, got ${chatCalls}`);
 	pass("the turn lands and the runtime refuses the summary the gateway cut off");
 
