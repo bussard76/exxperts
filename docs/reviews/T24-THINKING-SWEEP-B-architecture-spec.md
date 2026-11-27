@@ -1,0 +1,46 @@
+# T24-THINKING-SWEEP-B architecture spec
+
+Verdict: change-spec
+Spec: `docs/specs/T24-thinking-sweep-lab.md` at `6bb8bff9a63b7a991800143a7972ad124ae0be10`
+Level: 2 provisionally confirmed for a private lab-only change to the existing exported sweep and recorder interfaces, conditional on resolving the findings within that scope. A new production protocol, instrumentation, public setting or data flow requires reclassification; ADR-0009 does not authorize it.
+Decision: Sascha selected lab-only Option B on 2026-11-27. The Controller must settle the level-2 interfaces and reconcile the contradictory acceptance cases before implementation; return any boundary expansion for a new scope decision.
+
+## Fit checklist
+
+| Requirement | Owning module and seam | Boundary/data flow | Evidence or required change |
+| --- | --- | --- | --- |
+| Suppress only lab suggestions | Child server's `room-socket.ts` call to `generateSuggestions` | A validated private guard skips this call; ordinary paths stay unchanged | The call at 2387–2390 is a suitable narrow seam. A guard is feasible in principle, but the proposed validation does not yet establish launcher ownership or exclusive access (finding 1). |
+| Lab ownership and activation | `runSweep`, launcher, server startup, recorder/reader | Parent owns a fresh child and private state; readiness goes through the existing log | Specify the concrete evidence and launcher interface, including credential/profile setup, before claiming proof (findings 1 and 2). No proxy or public endpoint is needed merely to suppress suggestions. |
+| Rung closure and budget | Recorder, socket frames and sweep reader | Each isolated turn contributes complete, disjoint cost before continuation | Current `callsFor` filters by model/time, fetch answer recording is asynchronous, and socket totals default missing values to zero. Isolation eliminates suggestions but does not itself prove closure or cost. Finding 3 fixes the contract and acceptance conflict. |
+| Rung verdict and privacy | Recorder → `readRecorderLog` → `judgeRung`/TSV | Typed allowlisted request and answer evidence only | The proposed record loses fields needed for existing verdicts and its `SentThinking` permits arbitrary nested content (finding 4). |
+| Outside-in and dependency | Lab spec diagram and issue #24 | Existing UI is unchanged; lab invokes actual server and fake provider | The diagram matches the intended flow; ADR-0009 records the UI design export exception. No parallel build split is stated; if split, the amended launcher/record/result contracts must be fixed before dependent work and tested end-to-end through the real producer and consumer. |
+
+## Prefactoring
+
+None is required as a prerequisite. Keep the guard at the existing producer call and put lab orchestration behind the existing sweep entry point; prove the required properties before adding any additional architecture. Exclusive ownership and closure are required evidence, not permission to add a production correlation system.
+
+## Findings
+
+### 1. Activation and exclusivity are requirements without a buildable proof
+
+The random capability and matching digest establish that a log line relates to a supplied value; alone they do not establish that the process was launched by this launcher, that the scratch state is fresh, or that no other authenticated client can connect. The current server binds loopback (`src/index.ts:227`), while the current sweep supplies the same token on multiple HTTP calls and a WebSocket (`thinking-levels-sweep.ts:155–163, 199–225`); a token by itself does not identify a sole client. The spec asks the child to validate launcher ownership and exclusivity before readiness, but names neither the source of those facts nor how a later unexpected client is detected before a provider departure. A log digest is not an independent ownership attestation. The recorder only watches configured hosts and intercepts selected fetch/WebSocket payloads; an active writable log alone does not prove all provider traffic is covered.
+
+Specify the threat/ownership boundary and an implementable private validation and enforcement mechanism at the existing seams, including startup and later client attempts, token distribution, fresh state and recorder coverage on both transports. Prove it with an actual launcher/server/producer test and the listed negative cases, including an unexpected authenticated client before and during a rung. If that proof needs a new production contract or cannot be made within the stated scope, stop for a scope decision. Do not add an endpoint, instrumentation or a general exclusivity framework as an assumed prerequisite. An accidental env-only launch must retain ordinary suggestions or fail startup before traffic, never silently suppress them.
+
+### 2. Launcher and exported interface are not specified
+
+`SweepOptions` currently requires `base`, `token`, `log` and `out`; `--run` reads an independently started server's address and token. The amendment replaces attachment with child ownership but does not say the new exact `SweepOptions` or CLI arguments, what happens to `--run`, how a valid fake provider and its invented credentials/models enter an otherwise fresh scratch home, or who creates and deletes that state. A caller cannot construct the promised run without making those design decisions. The current smoke itself prepares provider configuration and starts a server, then attaches through a proxy; this is not the proposed launcher.
+
+Fix the launcher input and result contracts, CLI migration/refusal behavior, safe explicit provider configuration provisioning, ownership and cleanup on all exits, and how the real launcher is exercised without real provider calls. Keep the existing selected-model ordering, `onRow`, TSV columns and budget semantics unless explicitly changed. The exported `runSweep` and types are level-2 interfaces even if used only by lab scripts; update every consumer. Do not copy real credentials or inherit an uncontrolled home/environment. The proof may use private process-local state and the existing recorder path if sufficient; the specific digest message is not by itself a reason to add another architecture layer.
+
+### 3. Completeness and the retained smoke assertions conflict
+
+The existing fake returns three HTTP 500 failures with no usage for `flaky-model` (`thinking-levels-sweep-smoke.ts:84–89`), yet asserts a clean four-call rung and fifteen rows (`:304–323`). The amendment correctly makes an unknown failed-attempt cost incomplete and stops further sends, so those exact fixtures and assertions cannot all pass. Similarly, `:325–334` require later rungs after a stalled/aborted answer and repeated failures; the new rules require stopping whenever closure or cost is unknown. The acceptance simultaneously demands unchanged existing assertions/fixtures and no next send for insufficient evidence. This is a functional contradiction, not an optional edge case.
+
+Resolve it explicitly without weakening coverage: designate a fully evidenced retry/timeout scenario if achievable through the real provider/transport and preserve the original assertions there, while separately asserting incomplete and no next send for unknown costs and unclosed timeouts. If preserving those exact existing cases is mandatory, return the incompatibility for decision; do not invent free cost. Fix how each terminal request maps to exactly one disjoint socket or provider cost and how in-flight recorder work and late departures are proven absent, including final-rung closure; otherwise return incomplete. Specify where the stated `turn | estimated | unpriced` provenance and `billed | plan | unattributed` source are recorded and how they are derived from existing evidence. The present socket sum at `:249–258` and asynchronous recorder clone at `thinking-levels-sweep-recorder.mjs:172–198` do not provide this proof by themselves. A deadline or quiet interval is not a barrier.
+
+### 4. The record contract cannot support the existing verdicts or privacy guarantee
+
+The exact proposed `RecordedCall.answer` contains only status, usage and error, but `judgeRung`, `thought`, and the TSV depend on `reasoningTokens`, `thinkingBlocks`, `thinkingChars` and `effort` (`thinking-levels-sweep.ts:36, 79–109, 137–138`); the smoke explicitly checks reasoning and off-still-thought. The proposed `SentThinking` references the existing type, whose `unknown` values and index signatures allow arbitrary nested request data, and the recorder currently copies whole `reasoning` and `thinking` objects and raw error text. The spec's allowlist intention therefore does not match its exact interface.
+
+Specify bounded scalar types and explicit allowed nested fields, answer thinking counters and reported effort with missing/invalid handling, and terminal/error semantics for fetch and WebSocket. Retain the fields needed to judge existing rungs without recording text; reject or mark incomplete rather than stringify arbitrary values. Define how malformed/legacy/duplicate/unmatched lines and the `lab_ready` line coexist in the reader, and keep fixed-category diagnostics sanitized through recorder, TSV and console. Exercise the actual paths with secret-echoing fake errors.
