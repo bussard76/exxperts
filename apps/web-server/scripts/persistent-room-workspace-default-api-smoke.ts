@@ -107,6 +107,9 @@ try {
 	assert(getDefault.body?.policy === null, "missing room default should return null");
 	assert(!fs.existsSync(defaultPath), "missing room default should not create default sidecar");
 	assert(!fs.existsSync(sentinelSidecarPath), "missing room default must not create room_default thread sidecar");
+	writePersistentAgentThread(agentId, "demo-thread", { state: "standby", origin: "home", model, items: [] });
+	const emptyListing = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-files?conversationId=demo-thread`);
+	assert(emptyListing.status === 200 && emptyListing.body.root === null && emptyListing.body.path === "" && Array.isArray(emptyListing.body.entries) && emptyListing.body.entries.length === 0, "workspace listing returns an empty state when no folder is configured");
 
 	// Where commands stay inside the room, a Mac, a new room starts with them on, and its first folder takes that.
 	const startsOn = ((process.env.EXXPERTS_TEST_INTROSPECTION === "1" ? process.env.EXXPERTS_TEST_SHELL_PLATFORM : undefined) ?? process.platform) === "darwin";
@@ -116,7 +119,6 @@ try {
 		body: JSON.stringify({ root: workspaceRoot, displayLabel: "Smoke Workspace", mode: "read-only" }),
 	});
 	assert(putDefault.status === 200, `PUT default should succeed, got ${putDefault.status}: ${JSON.stringify(putDefault.body)}`);
-	writePersistentAgentThread(agentId, "demo-thread", { state: "standby", origin: "home", model, items: [] });
 	fs.writeFileSync(path.join(workspaceRoot, "invented.txt"), "invented content");
 	const invalidListing = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-files?conversationId=demo-thread&path=${encodeURIComponent("../secret")}`);
 	assert(invalidListing.status === 400 && invalidListing.body.code === "invalid_path", "workspace listing rejects traversal paths");

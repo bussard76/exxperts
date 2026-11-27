@@ -624,7 +624,10 @@ app.get("/api/persistent-agents/:id/workspace-files", async (req, reply) => {
 	}
 	try {
 		const { id } = getUsablePersistentAgentStatusForNormalUse(String((req.params as any).id ?? "").trim());
-		if (!getPersistentAgentThread(id, query.conversationId.trim())) return reply.code(404).send({ code: "conversation_not_found", error: "Conversation not found." });
+		const conversationId = query.conversationId.trim();
+		if (!getPersistentAgentThread(id, conversationId)) return reply.code(404).send({ code: "conversation_not_found", error: "Conversation not found." });
+		const effectivePolicy = resolvePersistentRoomEffectiveWorkspacePolicy(id, conversationId);
+		if (effectivePolicy.source === "none") return { agentId: id, conversationId, root: null, path: requestedPath, entries: [] };
 		return reply.code(503).send({ code: "workspace_unavailable", error: "Workspace is unavailable." });
 	} catch {
 		return reply.code(404).send({ code: "room_not_found", error: "Room not found." });
