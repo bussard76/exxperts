@@ -25,7 +25,7 @@ import { withRoomSaveLock } from "./memory-commit.js";
 import { isSharedServer } from "./server-hooks.js";
 import { skillFilesReach } from "./persistent-room-skill-tool.js";
 import { activeRoomLock, REPO_ROOT, roomLockBusyStatus } from "./server-install-root.js";
-import { app, WEB_UI_DIST } from "./server-app.js";
+import { app, PORT, WEB_UI_DIST } from "./server-app.js";
 import { getUsablePersistentAgentStatusForNormalUse, persistentAgentNormalUseErrorReply } from "./room-status.js";
 import { parseRoomModelPatch, roomModelsPayload } from "./ai-models.js";
 import { memoryBudgetRaiseRefusal, refuseMemoryBudgetRaise, refuseMemoryModelTooSmall } from "./ai-profile-models.js";
@@ -37,7 +37,7 @@ import { chooseFolderForRoom, undoAllowChanges } from "./room-box/folder-questio
 import { isInside } from "./room-box/box-closed.js";
 import { chooseLocalFolder, folderPickerPrompt, type LocalFolderPickerResult } from "./local-folder-picker.js";
 import { roomFence } from "./room-files.js";
-import { ARTIFACT_SECURITY_HEADERS, isLocalSystemChooseFolderRequest } from "./request-checks.js";
+import { ARTIFACT_SECURITY_HEADERS, isLocalSystemChooseFolderRequest, remoteMode } from "./request-checks.js";
 import path from "node:path";
 import fs from "node:fs";
 
@@ -657,6 +657,40 @@ app.get("/api/persistent-agents/:id/workspace-files", async (req, reply) => {
 		if (["invalid_name", "not_directory", "file_not_found"].includes((error as { code?: string })?.code ?? "")) return reply.code(400).send({ code: "invalid_path", error: "Invalid workspace path." });
 		return reply.code(404).send({ code: "room_not_found", error: "Room not found." });
 	}
+});
+
+app.post("/api/persistent-agents/:id/workspace-open", async (req, reply) => {
+	reply.headers({ "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
+	const refuse = (status: number, code: string) => reply.code(status).send({ code, error: "This file could not be opened in another program." });
+	const names = req.raw.rawHeaders.filter((_, index) => index % 2 === 0).map((name) => name.toLowerCase());
+	const one = (name: string) => names.filter((entry) => entry === name).length === 1;
+	const host = String(req.headers.host ?? "").toLowerCase();
+	const hosts = [`localhost:${PORT}`, `127.0.0.1:${PORT}`, `[::1]:${PORT}`];
+	const address = req.raw.socket?.remoteAddress;
+	if (isSharedServer() || (req as any).exxRemoteDevice || remoteMode.isRemoteSocket(req.raw.socket)
+		|| !["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(address ?? "")
+		|| names.some((name) => name === "forwarded" || name === "via" || name === "x-real-ip" || name.startsWith("x-forwarded-"))
+		|| !one("host") || !hosts.includes(host) || !one("origin") || req.headers.origin !== `http://${host}`
+		|| !one("x-exxperts-local-action") || req.headers["x-exxperts-local-action"] !== "open-workspace-file") return refuse(403, "local_action_forbidden");
+	const body = req.body;
+	if (!body || typeof body !== "object" || Array.isArray(body)) return refuse(400, "invalid_request");
+	const fields = body as Record<string, unknown>;
+	if (Object.keys(fields).length !== 2 || typeof fields.conversationId !== "string" || !fields.conversationId || typeof fields.path !== "string" || !fields.path) return refuse(400, "invalid_request");
+	const requestedPath = fields.path.replace(/\\/g, "/");
+	if (requestedPath.startsWith("~") || requestedPath.includes("\0") || requestedPath.includes(":") || requestedPath.split("/").some((part) => !part || part.startsWith("."))) return refuse(400, "invalid_path");
+	let id: string;
+	try { id = getUsablePersistentAgentStatusForNormalUse(String((req.params as any).id ?? "").trim()).id; }
+	catch { return refuse(404, "room_not_found"); }
+	try { if (!getPersistentAgentThread(id, fields.conversationId)) return refuse(404, "conversation_not_found"); }
+	catch { return refuse(404, "conversation_not_found"); }
+	try {
+		const effective = resolvePersistentRoomEffectiveWorkspacePolicy(id, fields.conversationId);
+		if (!effective.policy) return refuse(404, "workspace_not_found");
+		if (!effective.workspaceToolsEnabled || !effective.policy.modes.read || !effective.allowedToolNames.includes("read")) return refuse(403, "workspace_read_forbidden");
+		// No association, executable and working directory have been bound to a
+		// checked direct dispatch yet. Refuse without starting any process.
+		return refuse(403, "association_unverified");
+	} catch { return refuse(403, "workspace_read_forbidden"); }
 });
 
 app.get("/api/persistent-agents/:id/workspace-image", async (req, reply) => {
