@@ -34,3 +34,5 @@ Files changed: `apps/web-server/scripts/persistent-room-workspace-default-api-sm
 ## Rework 1
 
 `workspace-grant-parity-api-smoke.ts` proves the authorized POSIX colon file and directory appear in the parent listing and can be previewed and expanded; its parent assertion failed before the shared validation fix and passed after. The unchanged `buttons-look-ui-smoke.ts` failed on the original import order and passed after the stylesheet correction. The unchanged `restart-holders-smoke.ts` passed after documenting the active preview counter and live box bindings. The unchanged `windows-box-request-smoke.ts` still fails on the additional route import; a reviewed decision on routing the Windows wait is required.
+
+The reviewed Windows wait amendment is implemented: `workspace-folder-wait-composition-smoke.ts` exercises all four public consumers with missing, undefined and real factories, and the unchanged `windows-box-request-smoke.ts` now passes. `workspace-preview-folder-wait-smoke.ts` retains its real singleton overlap and parser-hold assertions with the real factory installed in its route-only setup.
