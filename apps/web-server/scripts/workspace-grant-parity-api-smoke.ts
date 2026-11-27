@@ -123,10 +123,31 @@ try {
 	assert(visible.status === 200 && visible.body.entries.some((item: { name: string }) => item.name === "invented.txt"), "selected folder lists through the guarded route");
 	const textPreview = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=invented.txt`);
 	assert(textPreview.status === 200 && textPreview.body.kind === "text" && textPreview.body.text === "invented", "selected path-only grant reads through the guarded preview route");
+	if (process.platform === "linux") {
+		const name = "lesson 1: draft.txt";
+		fs.writeFileSync(path.join(workspaceRoot, name), "invented colon name");
+		const colonPreview = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=${encodeURIComponent(name)}`);
+		assert(colonPreview.status === 200 && colonPreview.body.text === "invented colon name", "a non-URI POSIX filename containing a colon is readable through the guarded route");
+		const directory = "unit 1: draft";
+		fs.mkdirSync(path.join(workspaceRoot, directory));
+		fs.writeFileSync(path.join(workspaceRoot, directory, "invented.txt"), "invented");
+		const colonListing = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-files?conversationId=demo-thread&path=${encodeURIComponent(directory)}`);
+		assert(colonListing.status === 200 && colonListing.body.entries.some((entry: { name: string }) => entry.name === "invented.txt"), "a non-URI POSIX directory containing a colon is listed through the guarded route");
+		for (const route of ["workspace-files", "workspace-image", "workspace-preview"]) {
+			const uri = await requestJson(`/api/persistent-agents/${encodedAgentId}/${route}?conversationId=demo-thread&path=${encodeURIComponent("file:invented.txt")}`);
+			assert(uri.status === 400 && uri.body.code === "invalid_path", `${route} must still refuse URI paths`);
+		}
+	}
 	const image = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==", "base64");
 	fs.writeFileSync(path.join(workspaceRoot, "invented.png"), image);
 	const imageResponse = await authedFetch(`${baseUrl}/api/persistent-agents/${encodedAgentId}/workspace-image?conversationId=demo-thread&path=invented.png`);
 	assert(imageResponse.status === 200 && Buffer.from(await imageResponse.arrayBuffer()).equals(image), "selected path-only grant reads the guarded image route");
+	if (process.platform === "linux") {
+		const name = "image 1: draft.png";
+		fs.writeFileSync(path.join(workspaceRoot, name), image);
+		const colonImage = await authedFetch(`${baseUrl}/api/persistent-agents/${encodedAgentId}/workspace-image?conversationId=demo-thread&path=${encodeURIComponent(name)}`);
+		assert(colonImage.status === 200 && Buffer.from(await colonImage.arrayBuffer()).equals(image), "a non-URI POSIX image name containing a colon is readable through the guarded route");
+	}
 	raw.roots[0].unfamiliar = { future: true };
 	fs.writeFileSync(defaultPath, JSON.stringify(raw));
 	const legacy = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-default`);

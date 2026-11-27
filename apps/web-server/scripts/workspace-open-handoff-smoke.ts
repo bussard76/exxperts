@@ -61,7 +61,7 @@ try {
 	writePersistentRoomDefaultCapabilityPolicy(policy);
 	revoke = () => writePersistentRoomDefaultCapabilityPolicy({ ...policy, denySegments: [...policy.denySegments, "invented.txt"] });
 	const headers = { ...SMOKE_AUTH_HEADERS, host: `127.0.0.1:${PORT}`, origin: `http://127.0.0.1:${PORT}`, "x-exxperts-local-action": "open-workspace-file" };
-	const request = () => app.inject({ method: "POST", url: `/api/persistent-agents/${room}/workspace-open`, headers, payload: { conversationId: "invented-thread", path: "invented.txt" } });
+	const request = (requestedPath = "invented.txt") => app.inject({ method: "POST", url: `/api/persistent-agents/${room}/workspace-open`, headers, payload: { conversationId: "invented-thread", path: requestedPath } });
 	const success = await request();
 	if (success.statusCode !== 202 || success.json().accepted !== true || dispatches !== 1 || types !== 3 || !launched || launched.executable !== fs.realpathSync(binary) || launched.cwd !== fs.realpathSync(cwd) || launched.shell !== false || launched.args.length !== 1 || launched.args[0] !== fs.realpathSync(path.join(folder, "invented.txt"))) throw new Error(`verified handoff was not bound to the checked values and effective file type: ${success.statusCode} ${success.body}`);
 	changed = true; queries = 0;
@@ -171,9 +171,16 @@ try {
 		} finally { release(); persistentRoomLiveSessions.delete(room); }
 		Object.defineProperty(process, "platform", { ...platform, value: "win32" });
 		setRoomBoxForTests({ platform: "win32", windows: "off" });
+		const windowsColon = await app.inject({ method: "POST", url: `/api/persistent-agents/${room}/workspace-open`, headers, payload: { conversationId: "invented-thread", path: "lesson 1: draft.txt" } });
+		if (windowsColon.statusCode !== 400 || windowsColon.json().code !== "invalid_path" || windowsQueries !== 0 || Number(dispatches) !== beforeLateChange) throw new Error("Windows colon paths must be refused before association lookup");
 		const windows = await request();
-		if (windows.statusCode !== 403 || windows.json().code !== "association_unverified" || windowsQueries !== 2 || Number(dispatches) !== beforeLateChange) throw new Error("Windows must query its effective open command and executable and refuse an implicit working directory without dispatch");
+		if (windows.statusCode !== 403 || windows.json().code !== "association_unverified" || Number(windowsQueries) !== 2 || Number(dispatches) !== beforeLateChange) throw new Error("Windows must query its effective open command and executable and refuse an implicit working directory without dispatch");
 	} finally { koffi.load = originalLoad; setRoomBoxForTests(null); Object.defineProperty(process, "platform", platform); }
+	const colonName = "lesson 1: draft.txt";
+	fs.writeFileSync(path.join(folder, colonName), "invented");
+	queries = 0;
+	const colonOpen = await request(colonName);
+	if (colonOpen.statusCode !== 202 || Number(dispatches) !== beforeLateChange + 1 || launched?.args.at(-1) !== fs.realpathSync(path.join(folder, colonName))) throw new Error("a non-URI POSIX filename containing a colon must reach the checked handoff");
 	console.log("workspace checked open handoff smoke passed");
 } finally {
 	childProcess.execFile = originalExecFile; childProcess.spawn = originalSpawn; syncBuiltinESMExports();
