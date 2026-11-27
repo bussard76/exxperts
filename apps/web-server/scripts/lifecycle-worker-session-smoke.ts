@@ -134,7 +134,7 @@ try {
 	if (!model) throw new Error("the synthetic maintenance model should be in the registry");
 	const workerModel: NonNullable<typeof model> = model;
 
-	async function runWorker(systemPrompt: string, timeoutMs?: number, options: { lock?: typeof modelLock; maxTokens?: number; idleTimeoutMs?: number } = {}) {
+	async function runWorker(systemPrompt: string, timeoutMs?: number, options: { lock?: typeof modelLock; maxTokens?: number; idleTimeoutMs?: number; signal?: AbortSignal } = {}) {
 		const lock = options.lock ?? modelLock;
 		const lockModel = lock === modelLock ? workerModel : registry.find(lock.provider, lock.model);
 		if (!lockModel) throw new Error(`the synthetic model ${lock.model} should be in the registry`);
@@ -148,11 +148,18 @@ try {
 			cwd: repoRoot,
 			agentDir,
 			modelRegistry: registry,
+			...(options.signal ? { signal: options.signal } : {}),
 			...(timeoutMs ? { timeoutMs } : {}),
 			...(options.maxTokens ? { maxTokens: options.maxTokens } : {}),
 			...(options.idleTimeoutMs ? { idleTimeoutMs: options.idleTimeoutMs } : {}),
 		});
 	}
+
+	const cancelledBeforeStart = new AbortController();
+	cancelledBeforeStart.abort();
+	let cancelled = false;
+	try { await runWorker("Synthetic cancelled worker.", undefined, { signal: cancelledBeforeStart.signal }); } catch { cancelled = true; }
+	assert(cancelled && requests.length === 0, "a worker cancelled before startup makes no provider call");
 
 	/** The output cap a request asked the provider for, read off the request body. */
 	function requestedOutputCap(body: string): number | undefined {

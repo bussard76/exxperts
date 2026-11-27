@@ -307,7 +307,7 @@ export async function runIsolatedPersistentAgentWorker<TModelLock extends { prov
 		});
 		const onAbort = () => { void Promise.resolve(created.session.abort()).catch(() => {}); };
 		if (input.signal) {
-			if (input.signal.aborted) onAbort();
+			if (input.signal.aborted) throw new IsolatedPersistentAgentWorkerTurnError(workerLabel, "aborted", undefined);
 			else input.signal.addEventListener("abort", onAbort, { once: true });
 		}
 		// The hard ceiling rides the same abort path a cancelling user takes, so
