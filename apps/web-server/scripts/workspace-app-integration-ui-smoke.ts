@@ -117,6 +117,9 @@ try {
 		const open = page.getByRole("button", { name: "Open in Excel" });
 		await open.click({ timeout: 10000 });
 		await page.getByRole("alert").getByText("This file could not be opened in another program.").waitFor({ timeout: 10000 });
+		await page.setViewportSize({ width: 390, height: 844 });
+		const pane = await page.locator(".workspace-pane").boundingBox();
+		assert(pane && pane.x >= 0 && pane.x + pane.width <= 390 && pane.width >= 350, `workspace remains usable on a phone: ${JSON.stringify(pane)}`);
 		await page.getByRole("button", { name: "Close invented.xlsx" }).click();
 
 		await ctx.close();
