@@ -25,7 +25,7 @@ import { withRoomSaveLock } from "./memory-commit.js";
 import { isSharedServer } from "./server-hooks.js";
 import { skillFilesReach } from "./persistent-room-skill-tool.js";
 import { activeRoomLock, REPO_ROOT, roomLockBusyStatus } from "./server-install-root.js";
-import { app } from "./server-app.js";
+import { app, WEB_UI_DIST } from "./server-app.js";
 import { getUsablePersistentAgentStatusForNormalUse, persistentAgentNormalUseErrorReply } from "./room-status.js";
 import { parseRoomModelPatch, roomModelsPayload } from "./ai-models.js";
 import { memoryBudgetRaiseRefusal, refuseMemoryBudgetRaise, refuseMemoryModelTooSmall } from "./ai-profile-models.js";
@@ -37,8 +37,9 @@ import { chooseFolderForRoom, undoAllowChanges } from "./room-box/folder-questio
 import { isInside } from "./room-box/box-closed.js";
 import { chooseLocalFolder, folderPickerPrompt, type LocalFolderPickerResult } from "./local-folder-picker.js";
 import { roomFence } from "./room-files.js";
-import { isLocalSystemChooseFolderRequest } from "./request-checks.js";
+import { ARTIFACT_SECURITY_HEADERS, isLocalSystemChooseFolderRequest } from "./request-checks.js";
 import path from "node:path";
+import fs from "node:fs";
 
 function parsePersistentRoomWorkspaceMode(value: unknown): "read" | "write" {
 	if (value == null || value === "") return "read";
@@ -621,7 +622,7 @@ app.get("/api/persistent-agents/:id/workspace-files", async (req, reply) => {
 		return reply.code(400).send({ code: "invalid_request", error: "Invalid workspace request." });
 	}
 	const requestedPath = (query.path as string | undefined ?? "").replace(/\\/g, "/");
-	if (requestedPath && (requestedPath.includes("\0") || requestedPath.includes(":") || requestedPath.split("/").some((part) => !part || part.startsWith(".")))) {
+	if (requestedPath && (requestedPath.startsWith("~") || requestedPath.includes("\0") || requestedPath.includes(":") || requestedPath.split("/").some((part) => !part || part.startsWith(".")))) {
 		return reply.code(400).send({ code: "invalid_path", error: "Invalid workspace path." });
 	}
 	try {
@@ -658,12 +659,57 @@ app.get("/api/persistent-agents/:id/workspace-files", async (req, reply) => {
 	}
 });
 
+app.get("/api/persistent-agents/:id/workspace-image", async (req, reply) => {
+	reply.headers({ ...ARTIFACT_SECURITY_HEADERS, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
+	const query = (req.query ?? {}) as Record<string, unknown>;
+	if (typeof query.conversationId !== "string" || !query.conversationId.trim() || typeof query.path !== "string" || !query.path) return reply.code(400).send({ code: "invalid_request", error: "Invalid workspace request." });
+	const requestedPath = query.path.replace(/\\/g, "/");
+	if (requestedPath.startsWith("~") || requestedPath.includes("\0") || requestedPath.includes(":") || requestedPath.split("/").some((part) => !part || part.startsWith("."))) return reply.code(400).send({ code: "invalid_path", error: "Invalid workspace path." });
+	const mime: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml" };
+	const type = mime[path.extname(requestedPath).toLowerCase()];
+	let id: string;
+	try { id = getUsablePersistentAgentStatusForNormalUse(String((req.params as any).id ?? "").trim()).id; }
+	catch { return reply.code(404).send({ code: "room_not_found", error: "Room not found." }); }
+	const conversationId = query.conversationId.trim();
+	if (!getPersistentAgentThread(id, conversationId)) return reply.code(404).send({ code: "conversation_not_found", error: "Conversation not found." });
+	try {
+		const initial = resolvePersistentRoomEffectiveWorkspacePolicy(id, conversationId);
+		if (initial.source !== "room-files" || !initial.policy || !initial.workspaceToolsEnabled) return reply.code(503).send({ code: "workspace_unavailable", error: "Workspace is unavailable." });
+		if (!type) return reply.code(400).send({ code: "unsupported_file_type", error: "Only image files can be shown." });
+		const current = () => {
+			getUsablePersistentAgentStatusForNormalUse(id);
+			if (!getPersistentAgentThread(id, conversationId)) throw Object.assign(new Error("Conversation unavailable."), { code: "grant_changed" });
+			const policy = resolvePersistentRoomEffectiveWorkspacePolicy(id, conversationId);
+			if (policy.source !== "room-files" || !policy.policy || !policy.workspaceToolsEnabled || policy.fingerprint.value !== initial.fingerprint.value) throw Object.assign(new Error("Workspace changed."), { code: "grant_changed" });
+			return policy.policy;
+		};
+		const controller = new AbortController();
+		const disconnected = () => controller.abort();
+		reply.raw.once("close", disconnected);
+		try {
+			const snapshot = await readWorkspaceForBrowser(current, requestedPath, 20_971_520, controller.signal);
+			snapshot.recheck();
+			return reply.type(type).send(snapshot.bytes);
+		} finally { reply.raw.removeListener("close", disconnected); }
+	} catch (error) {
+		const code = (error as { code?: string })?.code;
+		if (code === "grant_changed") return reply.code(403).send({ code, error: "Workspace access changed." });
+		if (code === "workspace_unavailable") return reply.code(503).send({ code, error: "Workspace is unavailable." });
+		if (code === "file_changed") return reply.code(409).send({ code, error: "File changed while it was read." });
+		if (code === "file_too_large") return reply.code(413).send({ code, error: "File is too large." });
+		if (code === "file_not_found" || code === "path_not_found") return reply.code(404).send({ code: "file_not_found", error: "File not found." });
+		if (code === "not_file") return reply.code(400).send({ code, error: "Not a file." });
+		if (code === "outside_workspace" || code === "blocked_by_policy") return reply.code(403).send({ code, error: "Workspace access is forbidden." });
+		return reply.code(500).send({ code: "preview_failed", error: "Image is unavailable." });
+	}
+});
+
 app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 	reply.headers({ "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Content-Security-Policy": "sandbox; default-src 'none'" });
 	const query = (req.query ?? {}) as Record<string, unknown>;
 	if (typeof query.conversationId !== "string" || !query.conversationId.trim() || typeof query.path !== "string" || !query.path) return reply.code(400).send({ code: "invalid_request", error: "Invalid workspace request." });
 	const requestedPath = query.path.replace(/\\/g, "/");
-	if (requestedPath.includes("\0") || requestedPath.includes(":") || requestedPath.split("/").some((part) => !part || part.startsWith("."))) return reply.code(400).send({ code: "invalid_path", error: "Invalid workspace path." });
+	if (requestedPath.startsWith("~") || requestedPath.includes("\0") || requestedPath.includes(":") || requestedPath.split("/").some((part) => !part || part.startsWith("."))) return reply.code(400).send({ code: "invalid_path", error: "Invalid workspace path." });
 	let id: string;
 	try { id = getUsablePersistentAgentStatusForNormalUse(String((req.params as any).id ?? "").trim()).id; }
 	catch { return reply.code(404).send({ code: "room_not_found", error: "Room not found." }); }
@@ -680,17 +726,27 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 			return policy.policy;
 		};
 		if (/\.doc$/i.test(requestedPath)) return reply.code(415).send({ code: "legacy_doc", error: "Save this file as .docx to preview it here." });
-		if (/\.(html?|pptx)$/i.test(requestedPath)) return reply.code(503).send({ code: "renderer_unavailable", error: "Preview is unavailable." });
 		const spreadsheet = /\.xlsx$/i.test(requestedPath);
 		const pdf = /\.pdf$/i.test(requestedPath);
 		const word = /\.docx$/i.test(requestedPath);
-		if (!spreadsheet && !pdf && !word && !/\.(txt|json|md)$/i.test(requestedPath)) return reply.code(415).send({ code: "unsupported_file_type", error: "This file type cannot be previewed here." });
+		const html = /\.html?$/i.test(requestedPath);
+		const presentation = /\.pptx$/i.test(requestedPath);
+		if (!spreadsheet && !pdf && !word && !html && !presentation && !/\.(txt|json|md)$/i.test(requestedPath)) return reply.code(415).send({ code: "unsupported_file_type", error: "This file type cannot be previewed here." });
 		const controller = new AbortController();
 		const disconnected = () => controller.abort();
 		reply.raw.once("close", disconnected);
 		try {
-			const snapshot = await readWorkspaceForBrowser(current, requestedPath, spreadsheet || pdf || word ? 26_214_400 : 16_777_216, controller.signal);
+			const snapshot = await readWorkspaceForBrowser(current, requestedPath, spreadsheet || pdf || word || presentation ? 26_214_400 : 16_777_216, controller.signal);
 			snapshot.recheck();
+			if (presentation) {
+				if (query.frame !== "1") return reply.type("application/octet-stream").send(snapshot.bytes);
+				const assets = path.join(WEB_UI_DIST, "assets");
+				const file = fs.existsSync(assets) ? fs.readdirSync(assets).find((name) => /^pptx-frame-entry-[\w-]+\.js$/.test(name)) : undefined;
+				if (!file) return reply.code(503).send({ code: "renderer_unavailable", error: "Preview is unavailable." });
+				const script = fs.readFileSync(path.join(assets, file), "utf8").replaceAll("</script", "<\\/script");
+				snapshot.recheck();
+				return reply.header("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'").type("text/html; charset=utf-8").send(`<!doctype html><html><head><style>html, body { margin: 0; background: #f3f0ea; } #slides { padding: 16px; box-sizing: border-box; }</style></head><body><div id="slides"></div><script>${script}</script></body></html>`);
+			}
 			if (spreadsheet || pdf || word) {
 				const result = spreadsheet ? await runWorkspaceSpreadsheetSnapshot(snapshot.bytes, controller.signal) : pdf ? await runWorkspacePdfSnapshot(snapshot.bytes, controller.signal) : await runWorkspaceWordSnapshot(snapshot.bytes, controller.signal);
 				snapshot.recheck();
@@ -700,6 +756,11 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 					return reply.code(status).send({ code, error: "This file could not be previewed." });
 				}
 				return { schemaVersion: 1, agentId: id, conversationId, path: requestedPath, notices: result.notices, ...result.result };
+			}
+			if (html) {
+				const body = snapshot.bytes.toString("utf8");
+				if (query.frame === "1") return reply.header("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'").type("text/html; charset=utf-8").send(body);
+				return { schemaVersion: 1, agentId: id, conversationId, path: requestedPath, kind: "html", notices: [], html: body };
 			}
 			return { schemaVersion: 1, agentId: id, conversationId, path: requestedPath, kind: "text", notices: [], text: snapshot.bytes.toString("utf8") };
 		} finally { reply.raw.removeListener("close", disconnected); }

@@ -41,6 +41,10 @@ try {
 	if (missing.statusCode !== 404 || missing.body.includes("example.txt")) throw new Error("a missing conversation cannot list the shelf");
 	const nested = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-files?conversationId=invented-thread&path=folder%2Fchild`, headers: SMOKE_AUTH_HEADERS });
 	if (nested.statusCode < 400) throw new Error("shared shelf does not allow nested paths");
+	for (const route of ["workspace-files", "workspace-image", "workspace-preview"]) {
+		const bad = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/${route}?conversationId=invented-thread&path=~invented.png`, headers: SMOKE_AUTH_HEADERS });
+		if (bad.statusCode !== 400 || bad.json().code !== "invalid_path") throw new Error(`${route} refuses a tilde path as invalid`);
+	}
 	const preview = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-preview?conversationId=invented-thread&path=example.txt`, headers: SMOKE_AUTH_HEADERS });
 	if (preview.statusCode !== 200 || preview.json().kind !== "text" || preview.json().text !== "invented" || preview.json().agentId !== room) throw new Error(`shared text preview failed: ${preview.statusCode} ${preview.body}`);
 	if (preview.headers["cache-control"] !== "no-store" || preview.headers["x-content-type-options"] !== "nosniff" || preview.headers["content-security-policy"] !== "sandbox; default-src 'none'") throw new Error("text preview must retain its security headers");
@@ -68,6 +72,29 @@ try {
 	fs.writeFileSync(path.join(shelf, "invented.docx"), await doc.generateAsync({ type: "nodebuffer" }));
 	const word = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-preview?conversationId=invented-thread&path=invented.docx`, headers: SMOKE_AUTH_HEADERS });
 	if (word.statusCode !== 200 || word.json().kind !== "word" || !word.json().html?.includes("Invented paragraph")) throw new Error(`shared Word preview failed: ${word.statusCode}`);
+	fs.writeFileSync(path.join(shelf, "invented.html"), "<p>Invented page</p><script>1</script>");
+	const html = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-preview?conversationId=invented-thread&path=invented.html`, headers: SMOKE_AUTH_HEADERS });
+	if (html.statusCode !== 200 || html.json().kind !== "html" || html.json().html !== "<p>Invented page</p><script>1</script>") throw new Error("shared HTML JSON preview failed");
+	const htmlFrame = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-preview?conversationId=invented-thread&path=invented.html&frame=1`, headers: SMOKE_AUTH_HEADERS });
+	if (htmlFrame.statusCode !== 200 || !String(htmlFrame.headers["content-type"]).startsWith("text/html") || !String(htmlFrame.headers["content-security-policy"]).includes("sandbox allow-scripts") || !String(htmlFrame.headers["content-security-policy"]).includes("connect-src 'none'") || !htmlFrame.body.includes("Invented page")) throw new Error("HTML frame uses the opaque, network-denying sandbox");
+	const deckBytes = Buffer.from("invented presentation bytes");
+	fs.writeFileSync(path.join(shelf, "invented.pptx"), deckBytes);
+	const deck = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-preview?conversationId=invented-thread&path=invented.pptx`, headers: SMOKE_AUTH_HEADERS });
+	if (deck.statusCode !== 200 || !deck.rawPayload.equals(deckBytes) || !String(deck.headers["content-type"]).startsWith("application/octet-stream")) throw new Error("presentation bytes use the bounded snapshot");
+	const deckFrame = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-preview?conversationId=invented-thread&path=invented.pptx&frame=1`, headers: SMOKE_AUTH_HEADERS });
+	if (deckFrame.statusCode !== 200 || !deckFrame.body.includes('<div id="slides">') || !String(deckFrame.headers["content-security-policy"]).includes("sandbox allow-scripts") || !String(deckFrame.headers["content-security-policy"]).includes("connect-src 'none'")) throw new Error("presentation frame has its isolated renderer and CSP");
+	const imageBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==", "base64");
+	fs.writeFileSync(path.join(shelf, "invented.png"), imageBytes);
+	const image = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-image?conversationId=invented-thread&path=invented.png`, headers: SMOKE_AUTH_HEADERS });
+	if (image.statusCode !== 200 || !image.rawPayload.equals(imageBytes) || !String(image.headers["content-type"]).startsWith("image/png") || image.headers["x-content-type-options"] !== "nosniff") throw new Error("image route returns guarded bytes with security headers");
+	const imageOther = await app.inject({ method: "GET", url: `/api/persistent-agents/${other}/workspace-image?conversationId=invented-thread&path=invented.png`, headers: SMOKE_AUTH_HEADERS });
+	if (imageOther.statusCode < 400 || imageOther.rawPayload.equals(imageBytes)) throw new Error("another room cannot read this image");
+	const unsupportedImage = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-image?conversationId=invented-thread&path=example.txt`, headers: SMOKE_AUTH_HEADERS });
+	if (unsupportedImage.statusCode !== 400 || unsupportedImage.json().code !== "unsupported_file_type") throw new Error("image route refuses non-image extensions");
+	const largeImage = fs.openSync(path.join(shelf, "large.png"), "w");
+	try { fs.ftruncateSync(largeImage, 20_971_521); } finally { fs.closeSync(largeImage); }
+	const refusedImage = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-image?conversationId=invented-thread&path=large.png`, headers: SMOKE_AUTH_HEADERS });
+	if (refusedImage.statusCode !== 413 || refusedImage.json().code !== "file_too_large") throw new Error("image route enforces the 20 MiB bound");
 	fs.writeFileSync(path.join(shelf, "encoded.txt"), Buffer.from([0x66, 0x80, 0x6f]));
 	const encoded = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-preview?conversationId=invented-thread&path=encoded.txt`, headers: SMOKE_AUTH_HEADERS });
 	if (encoded.statusCode !== 200 || encoded.json().text !== "f\ufffdo") throw new Error("text preview decodes invalid UTF-8 with replacement");
