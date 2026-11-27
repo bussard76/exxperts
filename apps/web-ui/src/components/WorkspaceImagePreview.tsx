@@ -11,7 +11,7 @@ type View = { scale: number; x: number; y: number };
 
 export function WorkspaceImagePreview({ agentId, conversationId, path }: { agentId: string; conversationId: string; path: string }) {
 	const [src, setSrc] = useState<string | null>(null);
-	const [error, setError] = useState(false);
+	const [error, setError] = useState<string | null>(null);
 	const [loadedFor, setLoadedFor] = useState("");
 	const identity = JSON.stringify([agentId, conversationId, path]);
 	const shownSrc = loadedFor === identity ? src : null;
@@ -33,16 +33,16 @@ export function WorkspaceImagePreview({ agentId, conversationId, path }: { agent
 		const query = new URLSearchParams({ conversationId, path });
 		void apiFetch(`/api/persistent-agents/${encodeURIComponent(agentId)}/workspace-image?${query}`, { signal: controller.signal })
 			.then(async (response) => {
-				if (!response.ok) throw new Error("Image unavailable");
+				if (!response.ok) throw new Error(response.status === 401 ? "Sign in to preview this file." : "This file could not be previewed.");
 				const blob = await response.blob();
 				if (controller.signal.aborted) return;
 				if (blob.size > 20_971_520 || !["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"].includes(blob.type)) throw new Error("Invalid image");
 				objectUrl = URL.createObjectURL(blob);
-				setError(false);
+				setError(null);
 				setSrc(objectUrl);
 				setLoadedFor(identity);
 			})
-			.catch(() => { if (!controller.signal.aborted) { setSrc(null); setLoadedFor(identity); setError(true); } });
+			.catch((cause: unknown) => { if (!controller.signal.aborted) { setSrc(null); setLoadedFor(identity); setError(cause instanceof Error && cause.message === "Sign in to preview this file." ? cause.message : "This file could not be previewed."); } });
 		return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
 	}, [agentId, conversationId, path, identity]);
 
@@ -172,7 +172,7 @@ export function WorkspaceImagePreview({ agentId, conversationId, path }: { agent
 			<button type="button" onClick={() => fit()}>Fit</button>
 		</div>}
 		<div className="workspace-preview-image" ref={stageRef} data-dragging={dragging || undefined} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag} onDoubleClick={onDoubleClick}>
-			{shownSrc ? <img ref={imageRef} src={shownSrc} alt={path.split("/").pop() ?? path} draggable={false} onLoad={onImageLoad} /> : error && loadedFor === identity ? <p>This file could not be previewed.</p> : <p>Loading preview…</p>}
+			{shownSrc ? <img ref={imageRef} src={shownSrc} alt={path.split("/").pop() ?? path} draggable={false} onLoad={onImageLoad} /> : error && loadedFor === identity ? <p>{error}</p> : <p>Loading preview…</p>}
 		</div>
 	</div>;
 }
