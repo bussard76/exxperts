@@ -63,3 +63,7 @@ The attributed targeted browser gate passed after two development failures: the 
 ## Isolated PDF and Word consumers
 
 Restored the source PDF and Word preview components and added current room/conversation/path state guards so previously rendered content is hidden as a different file loads. An attributed Chromium component gate checks PDF page rendering, Word's opaque sandbox and external-resource notice, identity and malformed-schema refusal, and stale-content hiding; it passed after the expected missing-component and stale-display red runs. The harness uses invented intercepted responses, so it is not a real route acceptance check. Both UI and scripts typechecks passed; app wiring, styles, real route/worker browser acceptance, native platforms and independent review remain open.
+
+## Isolated text and HTML consumers
+
+Restored the text and HTML preview consumers and added response identity, schema and UTF-8 byte-bound checks; both hide old content during a path change. The attributed Chromium component gate passed JSON formatting, HTML sandbox attribute, wrong-room refusal, stale-content hiding and over-limit multibyte text/HTML refusal using invented intercepted responses. Its expected red runs included missing components, stale text and an over-limit byte-count case; UI and scripts typechecks passed. The harness does not exercise the real server's HTML CSP or the protected route, and app wiring, browser acceptance and native platform checks remain open.
