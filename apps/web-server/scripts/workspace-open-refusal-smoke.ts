@@ -2,6 +2,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
+import childProcess from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
+import { EventEmitter } from "node:events";
 import { SMOKE_AUTH_HEADERS } from "./smoke-server-process.js";
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "workspace-box-race-"));
@@ -17,6 +20,11 @@ fs.mkdirSync(appDir, { recursive: true });
 fs.writeFileSync(path.join(appDir, "openai-compatible-ai-profile.json"), JSON.stringify({ profileId: "openai-compatible", providerId: "openai-compatible", label: "Synthetic Gateway", roomModels: [{ modelId: "invented" }], maintenanceModel: "invented" }));
 fs.writeFileSync(path.join(appDir, "persistent-agent-ai-profile.json"), JSON.stringify({ profileId: "openai-compatible" }));
 
+const originalExecFile = childProcess.execFile, originalSpawn = childProcess.spawn;
+let dispatches = 0;
+childProcess.execFile = ((_file: unknown, _args: unknown, _options: unknown, callback: any) => { queueMicrotask(() => callback(new Error("unknown invented association"), "", "")); return new EventEmitter(); }) as typeof childProcess.execFile;
+childProcess.spawn = (() => { dispatches++; throw new Error("unexpected dispatch"); }) as typeof childProcess.spawn;
+syncBuiltinESMExports();
 const { app, PORT } = await import("../src/server-app.js");
 await import("../src/room-settings-routes.js");
 const { createPersistentAgentFromScaffoldInput, writePersistentAgentThread } = await import("../src/persistent-agents.js");
@@ -59,8 +67,10 @@ try {
 	registerServerHooks({});
 	const shared = await call(headers);
 	if (shared.statusCode !== 403 || shared.json().code !== "local_action_forbidden") throw new Error("shared servers cannot invoke a local handoff");
+	if (dispatches !== 0) throw new Error("all refusal paths must produce zero handoffs");
 	console.log("workspace open refusal smoke passed");
 } finally {
+	childProcess.execFile = originalExecFile; childProcess.spawn = originalSpawn; syncBuiltinESMExports();
 	await app.close();
 	fs.rmSync(home, { recursive: true, force: true });
 }

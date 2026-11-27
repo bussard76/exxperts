@@ -1794,7 +1794,7 @@ function namedFolders(policy: PersistentRoomCapabilityPolicy, answer: AnswerFold
 export async function readWorkspaceForBrowser<T>(
 	policyNow: () => PersistentRoomCapabilityPolicy, raw: string, limit: number,
 	wait: FolderWait | undefined, binding: () => { box: RoomBox; current: () => boolean } | undefined,
-	signal: AbortSignal | undefined, use: (snapshot: { bytes: Buffer; recheck: () => Promise<void> }) => Promise<T>,
+	signal: AbortSignal | undefined, use: (snapshot: { bytes: Buffer; real: string; recheck: () => Promise<void> }) => Promise<T>, statOnly = false,
 ): Promise<T> {
 	const stopped = () => new RoomFilesError("aborted", "Reading stopped.");
 	const identity = (stat: fs.Stats): PreviewIdentity => ({ dev: stat.dev, ino: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs });
@@ -1822,7 +1822,7 @@ export async function readWorkspaceForBrowser<T>(
 				const boxed = filesFor(target, files);
 				let bytes: Buffer, seen: PreviewIdentity;
 				if (boxed) {
-					const opened = await boxed.previewRead(target, raw, limit, false, signal);
+					const opened = await boxed.previewRead(target, raw, limit, statOnly, signal);
 					bytes = opened.bytes; seen = opened.identity;
 					if (!same(seen, identity(target.stat))) throw new RoomFilesError("file_changed", "File changed.");
 				} else if (fence.kind === "files") {
@@ -1834,7 +1834,7 @@ export async function readWorkspaceForBrowser<T>(
 					try {
 						const before = await handle.stat(); seen = identity(before);
 						if (!before.isFile() || !same(seen, identity(target.stat)) || before.size > limit) throw new RoomFilesError("file_changed", "File changed.");
-						bytes = Buffer.alloc(before.size);
+						bytes = Buffer.alloc(statOnly ? 0 : before.size);
 						let offset = 0;
 						while (offset < bytes.length) {
 							check();
@@ -1864,7 +1864,7 @@ export async function readWorkspaceForBrowser<T>(
 					check();
 				};
 				await recheck();
-				return { value: await use({ bytes, recheck }) };
+				return { value: await use({ bytes, real: target.real, recheck }) };
 			});
 		};
 		const result = wait ? await wait.hold("file", holding, signal, run, stopped) : await run();

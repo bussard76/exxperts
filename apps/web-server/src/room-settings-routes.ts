@@ -43,6 +43,108 @@ import { roomFence } from "./room-files.js";
 import { ARTIFACT_SECURITY_HEADERS, isLocalSystemChooseFolderRequest, remoteMode } from "./request-checks.js";
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
+import { execFile, spawn } from "node:child_process";
+import { pathToFileURL } from "node:url";
+import { connectorStartRefusal, roomWritePlaces } from "./connector-start-check.js";
+
+type WorkspaceAssociation = { executable: string; workingDirectory: string; args: string[]; identity: string };
+
+async function dispatchWorkspaceAssociation(association: WorkspaceAssociation, signal: AbortSignal): Promise<"accepted" | "open_failed" | "open_timeout" | "opener_unavailable"> {
+	if (signal.aborted) return "open_failed";
+	return new Promise((resolve) => {
+		let child: ReturnType<typeof spawn>;
+		const env: NodeJS.ProcessEnv = { PATH: "/usr/bin:/bin", HOME: process.env.HOME || os.homedir() };
+		for (const key of ["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "LANG", "LC_ALL"]) if (process.env[key]) env[key] = process.env[key];
+		try { child = spawn(association.executable, association.args, { cwd: association.workingDirectory, env, shell: false, stdio: "ignore", windowsHide: true }); }
+		catch (error) { resolve(["ENOENT", "EACCES"].includes((error as NodeJS.ErrnoException).code ?? "") ? "opener_unavailable" : "open_failed"); return; }
+		let done = false;
+		const finish = (result: "accepted" | "open_failed" | "open_timeout" | "opener_unavailable") => {
+			if (done) return;
+			done = true; clearTimeout(timer); signal.removeEventListener("abort", abort);
+			if (result !== "accepted") { try { child.kill(); } catch { /* Already ended. */ } }
+			else child.unref();
+			resolve(result);
+		};
+		const abort = () => finish("open_failed");
+		const timer = setTimeout(() => finish("open_timeout"), 10_000);
+		signal.addEventListener("abort", abort, { once: true });
+		child.once("error", (error) => finish(["ENOENT", "EACCES"].includes((error as NodeJS.ErrnoException).code ?? "") ? "opener_unavailable" : "open_failed"));
+		child.once("spawn", () => finish("accepted"));
+		if (signal.aborted) abort();
+	});
+}
+
+/** Only unambiguous, direct Linux desktop entries can be bound to a spawn. */
+async function workspaceAssociation(file: string): Promise<WorkspaceAssociation | null> {
+	if (process.platform !== "linux") return null;
+	try {
+		const helper = fs.realpathSync("/usr/bin/xdg-mime");
+		const places = await roomWritePlaces();
+		if (connectorStartRefusal({ command: helper, args: [], cwd: "/" }, places)) return null;
+		const env: NodeJS.ProcessEnv = { PATH: "/usr/bin:/bin", HOME: process.env.HOME || os.homedir() };
+		for (const key of ["XDG_CONFIG_HOME", "XDG_CONFIG_DIRS", "XDG_DATA_HOME", "XDG_DATA_DIRS", "XDG_CURRENT_DESKTOP", "DESKTOP_SESSION", "DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS"]) if (process.env[key]) env[key] = process.env[key];
+		const query = (args: string[]) => new Promise<string>((resolve, reject) => execFile(helper, args, { cwd: "/", env, timeout: 5000, maxBuffer: 4096, encoding: "utf8" }, (error, stdout) => error ? reject(error) : resolve(stdout.trim())));
+		const mime = await query(["query", "filetype", file]);
+		if (!/^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/.test(mime)) return null;
+		const id = await query(["query", "default", mime]);
+		// Hyphenated desktop IDs can denote nested application paths; refuse that ambiguity.
+		if (!/^[A-Za-z0-9_.]+\.desktop$/.test(id)) return null;
+		const dataHome = process.env.XDG_DATA_HOME || path.join(env.HOME!, ".local", "share");
+		const dataDirs = (process.env.XDG_DATA_DIRS || "/usr/local/share:/usr/share").split(":");
+		if (![dataHome, ...dataDirs].every((dir) => path.isAbsolute(dir))) return null;
+		const candidates = [...new Set([dataHome, ...dataDirs].map((dir) => path.join(dir, "applications", id)))].filter((candidate) => {
+			try { fs.lstatSync(candidate); return true; }
+			catch (error) { if (["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) return false; throw error; }
+		});
+		if (candidates.length !== 1) return null;
+		const desktop = fs.realpathSync(candidates[0]);
+		const desktopFd = fs.openSync(desktop, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+		let desktopStat: fs.BigIntStats, source: string;
+		try {
+			desktopStat = fs.fstatSync(desktopFd, { bigint: true });
+			if (!desktopStat.isFile() || desktopStat.size > 65_536n) return null;
+			const data = Buffer.alloc(Number(desktopStat.size));
+			let offset = 0;
+			while (offset < data.length) { const count = fs.readSync(desktopFd, data, offset, data.length - offset, offset); if (!count) return null; offset += count; }
+			const after = fs.fstatSync(desktopFd, { bigint: true });
+			if (desktopStat.dev !== after.dev || desktopStat.ino !== after.ino || desktopStat.size !== after.size || desktopStat.mtimeNs !== after.mtimeNs || desktopStat.ctimeNs !== after.ctimeNs) return null;
+			source = data.toString("utf8");
+			if (!Buffer.from(source, "utf8").equals(data)) return null;
+		} finally { fs.closeSync(desktopFd); }
+		let section = "", fields: Record<string, string> = {};
+		for (const raw of source.split(/\r?\n/)) {
+			const line = raw.trim();
+			if (!line || line.startsWith("#")) continue;
+			if (line.startsWith("[") && line.endsWith("]")) { section = line; continue; }
+			if (section !== "[Desktop Entry]") continue;
+			const separator = line.indexOf("=");
+			if (separator <= 0) return null;
+			const key = line.slice(0, separator), value = line.slice(separator + 1);
+			if (Object.prototype.hasOwnProperty.call(fields, key)) return null;
+			fields[key] = value;
+		}
+		if (fields.Type !== "Application" || (fields.Terminal && fields.Terminal !== "false") || (fields.DBusActivatable && fields.DBusActivatable !== "false") || (fields.Hidden && fields.Hidden !== "false") || fields.TryExec || fields.OnlyShowIn || fields.NotShowIn || !fields.MimeType?.split(";").includes(mime) || !fields.Exec || !fields.Path || !path.isAbsolute(fields.Path) || /[\\%]/.test(fields.Path)) return null;
+		const parts = fields.Exec.split(/ +/);
+		if (parts.length !== 2 || !path.isAbsolute(parts[0]) || !["%f", "%u"].includes(parts[1]) || !/^[A-Za-z0-9_./+:-]+$/.test(parts[0])) return null;
+		const executable = fs.realpathSync(parts[0]), workingDirectory = fs.realpathSync(fields.Path);
+		const executableStat = fs.statSync(executable, { bigint: true }), cwdStat = fs.statSync(workingDirectory, { bigint: true });
+		if (!executableStat.isFile() || !cwdStat.isDirectory()) return null;
+		fs.accessSync(executable, fs.constants.X_OK);
+		const base = path.basename(executable).toLowerCase();
+		if (/^(?:env|busybox|sh|bash|dash|zsh|fish|node|nodejs|bun|deno|python[0-9.]*|perl|ruby|php|java|xdg-open|gio|flatpak|snap|wine|ld-linux.*)$/.test(base)) return null;
+		const fd = fs.openSync(executable, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+		const magic = Buffer.alloc(4);
+		try {
+			const opened = fs.fstatSync(fd, { bigint: true });
+			if (opened.dev !== executableStat.dev || opened.ino !== executableStat.ino || opened.size !== executableStat.size || opened.mtimeNs !== executableStat.mtimeNs || opened.ctimeNs !== executableStat.ctimeNs || fs.readSync(fd, magic, 0, 4, 0) !== 4 || !magic.equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) return null;
+		} finally { fs.closeSync(fd); }
+		if (connectorStartRefusal({ command: executable, args: [], cwd: workingDirectory }, places)) return null;
+		const stamp = (stat: fs.BigIntStats) => [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].map(String);
+		const args = [parts[1] === "%u" ? pathToFileURL(file).href : file];
+		return { executable, workingDirectory, args, identity: JSON.stringify({ mime, id, desktop, source, desktopStat: stamp(desktopStat), executableStat: stamp(executableStat), cwdStat: stamp(cwdStat) }) };
+	} catch { return null; }
+}
 
 function parsePersistentRoomWorkspaceMode(value: unknown): "read" | "write" {
 	if (value == null || value === "") return "read";
@@ -703,10 +805,41 @@ app.post("/api/persistent-agents/:id/workspace-open", async (req, reply) => {
 		const effective = resolvePersistentRoomEffectiveWorkspacePolicy(id, fields.conversationId);
 		if (!effective.policy) return refuse(404, "workspace_not_found");
 		if (!effective.workspaceToolsEnabled || !effective.policy.modes.read || !effective.allowedToolNames.includes("read")) return refuse(403, "workspace_read_forbidden");
-		// No association, executable and working directory have been bound to a
-		// checked direct dispatch yet. Refuse without starting any process.
-		return refuse(403, "association_unverified");
-	} catch { return refuse(403, "workspace_read_forbidden"); }
+		if (![".xlsx", ".xlsm", ".docx", ".pptx", ".drawio", ".dio", ".txt", ".json", ".pdf", ".html", ".htm", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"].includes(path.extname(requestedPath).toLowerCase())) return refuse(415, "unsupported_file_type");
+		if (roomBoxComputer() === "unknown") return refuse(503, "opener_unavailable");
+		const access = browserWorkspaceAccess(id, fields.conversationId, effective);
+		const controller = new AbortController();
+		const disconnected = () => controller.abort();
+		reply.raw.once("close", disconnected);
+		try {
+			return await readWorkspaceForBrowser(access.current, requestedPath, Number.MAX_SAFE_INTEGER, fileToolsWait(), access.binding, controller.signal, async (snapshot) => {
+				await snapshot.recheck();
+				const first = await workspaceAssociation(snapshot.real);
+				if (!first) return refuse(403, "association_unverified");
+				const second = await workspaceAssociation(snapshot.real);
+				if (!second || JSON.stringify(first) !== JSON.stringify(second)) return refuse(403, "association_unverified");
+				await snapshot.recheck();
+				const places = await roomWritePlaces();
+				if (connectorStartRefusal({ command: second.executable, args: [], cwd: second.workingDirectory }, places)) return refuse(403, "association_unverified");
+				await snapshot.recheck();
+				const final = await workspaceAssociation(snapshot.real);
+				if (!final || JSON.stringify(second) !== JSON.stringify(final)) return refuse(403, "association_unverified");
+				await snapshot.recheck();
+				const finalPlaces = await roomWritePlaces();
+				if (connectorStartRefusal({ command: final.executable, args: [], cwd: final.workingDirectory }, finalPlaces)) return refuse(403, "association_unverified");
+				await snapshot.recheck();
+				const result = await dispatchWorkspaceAssociation(final, controller.signal);
+				return result === "accepted" ? reply.code(202).send({ accepted: true }) : refuse(result === "open_timeout" ? 504 : result === "opener_unavailable" ? 503 : 500, result);
+			}, true);
+		} finally { reply.raw.removeListener("close", disconnected); }
+	} catch (error) {
+		const code = (error as { code?: string })?.code;
+		if (code === "box_failed") return refuse(503, "box_failed");
+		if (code === "file_changed") return refuse(409, "file_changed");
+		if (code === "file_not_found" || code === "path_not_found") return refuse(404, "file_not_found");
+		if (code === "not_file") return refuse(400, "not_file");
+		return refuse(403, "workspace_read_forbidden");
+	}
 });
 
 function browserWorkspaceAccess(id: string, conversationId: string, initial: ReturnType<typeof resolvePersistentRoomEffectiveWorkspacePolicy>) {
