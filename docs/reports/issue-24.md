@@ -32,7 +32,7 @@ At that earlier checkpoint, no product code or tests had changed. The pre-existi
 
 Architecture impact: level 3, server-owned generation and existing room socket; ADR-0009 and the passing fourth architecture review authorize the specified flow.
 
-- [x] Allocate a fresh answer ID per logical answer, preserving it across retries and detached adoption; publish ordered live invalidation and successful completion only to the leading socket, outside replay.
+- [ ] Allocate a fresh answer ID per logical answer, preserving it across retries and detached adoption; publish ordered live invalidation and successful completion only to the leading socket, outside replay. Automatic retry and adoption are covered; manual continue identity awaits the clarification below.
 - [x] Generate once only after a successful final answer with a leader; suppress failed, stopped, retry-intermediate and unled background answers, and cancel stale work on prompts, starts, deletion and replacement.
 - [x] Select the answering provider's configured absorb model, without provider substitution; use a tool-less fake-tested call with 200 output tokens and a 10-second deadline.
 - [x] Supply at most three completed text-only exchanges within 4,000 string units, excluding other content; account usage as suggestions and do not log content or persist results.
@@ -87,3 +87,16 @@ A further test-first check found that a manually continued failed answer had los
 | Existing assertions retained; fake models and invented data only; no UI slice or end-to-end consumer slice | All assertions in existing suites remain; `chat-reconnect-smoke.ts` and `room-steer-smoke.ts` fake gateways distinguish suggestion calls, and `prompt-overwrite-scheduled-smoke.ts` only adds assertions. No UI consumer was changed. |
 
 Final merge and post-merge targeted reruns remain pending.
+
+## Final developer validation
+
+Code and tests were checked at `f40c3623caa689e2ec1d140b6325715326b6f322` after fetching and merging `origin/main` (already up to date). `npx tsc --noEmit -p apps/web-ui/tsconfig.json && npm run typecheck:scripts` passed. The attributed targeted `npm run test:scripts` gates passed 58/58 for the producer, isolated worker, steering and scheduled cases, and 57/57 for detached turns, reattachment and quick follow-up; TypeScript smoke files require `NODE_OPTIONS='--import tsx'`. The final attributed `chat-reconnect-smoke.ts` browser gate passed.
+
+Assumptions: the accepted producer/socket seam is the test boundary; only provably completed historical pairs are included, as directed by Sascha on 2026-11-27. Graph: no; six tool calls preceded the first task file edit and direct source searches found the touched files; no comparison was measured. No screenshots, full root build, full smokes, paid model calls or real data were used. The pre-existing `package-lock.json` modification remains untouched and uncommitted.
+
+Debt candidate (`tests`, low): a background answer's internal non-serialized ID cannot be observed at the socket because an unled background answer sends no lifecycle frames; the scheduled no-call/no-replay test covers its observable behavior, and the shared allocation is checked by inspection. The Controller will arrange the independent Tester and level-3 conformance review; Slice 2 and Slice 3 remain separate follow-up work.
+
+
+## Remaining answer-identity clarification
+
+The accepted spec says an answer ID stays the same across retries. Automatic retries within a running turn retain the ID and the socket smoke covers their single successful completion, but the app's manual Try again sends `continue` after the failed turn has finished and starts a fresh turn; the current producer allocates a fresh answer ID there. It is unclear whether that manually continued turn is the same logical answer for the accepted ID contract or a new logical answer. The failed ID is deliberately internal and no completion frame is published for the failed attempt, so its equality with the eventual success is not observable at the specified socket seam without a further test seam. The Controller/Architect must clarify manual-continue identity and how to verify it without expanding the approved public interface; Slice 1 remains unfinished pending that answer. The same-producer manual-continue test already proves the successful result uses the original prompt.
