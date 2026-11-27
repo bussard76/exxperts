@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { settleCommits } from "./memory-commit.js";
 import { eraseAgainIfForgotten } from "./forget-erase.js";
 import { recordPersistentRoomLastUsed, type PersistentRoomLastUsed, recordPersistentRoomLastUsedIfAbsent } from "./persistent-room-last-used.js";
@@ -176,6 +177,8 @@ export function beginPersistentAgentTurn(agentIdRaw: string, threadIdRaw: string
 		...(connectionId ? { connectionId } : {}),
 		updatedAt: now,
 	};
+	// Internal answer identity is shared by interactive and background turns, but never serialized with turn status.
+	Object.defineProperty(state, "answerId", { value: randomUUID() });
 	persistentAgentActiveTurns.set(persistentAgentActiveTurnKey(instance.agentId, threadId), state);
 	const memory = conversationItemMemory(instance.agentId, threadId);
 	memory.marker = metadata.key ?? `${UNKEYED_MARKER}${turnId}`;

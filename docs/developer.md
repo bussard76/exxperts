@@ -109,6 +109,13 @@ isolated, tool-less sessions (`persistent-agent-worker-runtime.ts`)
 on the room's Memory model (`room-models.ts`), drawn from the models
 each provider approves (`persistent-agent-ai-profiles.ts`).
 
+The suggestion producer sends up to three provably completed text exchanges
+to the answering provider's configured Memorize model after a successful
+answer with a leading window. It excludes attachments and tool results, keeps
+the result in memory only, and records the model usage as suggestions. The
+provider's retention policy for this call is the same as for ordinary room
+calls to that provider.
+
 ### Room tool boundary
 
 Persistent rooms do not load arbitrary Pi extensions. This is deliberate: the

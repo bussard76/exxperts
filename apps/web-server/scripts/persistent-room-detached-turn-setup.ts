@@ -81,6 +81,8 @@ export function assert(condition: unknown, message: string): asserts condition {
 // ---------------------------------------------------------------------------
 export type GatewayRequest = {
 	model: string;
+	suggestion?: boolean;
+	request?: { messages: any[]; maxTokens: number; tools: unknown };
 	/** The away-limits case it played (`QUIET_STREAM_MARKER:a`), and when it came and was aborted (epoch ms). */
 	played?: string;
 	/** The model call after a tool's result. */
@@ -100,6 +102,10 @@ export type GatewayRequest = {
 	fail: () => void;
 };
 export const gatewayRequests: GatewayRequest[] = [];
+export let suggestionResponse: string | undefined;
+export function setSuggestionResponse(value: string): void { suggestionResponse = value; }
+export let holdSuggestionResponse = false;
+export function setHoldSuggestionResponse(value: boolean): void { holdSuggestionResponse = value; }
 
 /** Lets every held stream run to its end. */
 export function releaseHeldStreams(): void {
@@ -123,14 +129,15 @@ export const gateway = http.createServer((req, res) => {
 		const model = String(parsed?.model ?? "");
 		const messages: any[] = Array.isArray(parsed?.messages) ? parsed.messages : [];
 		const roles = messages.map((message) => String(message?.role ?? ""));
-		if (playAwayLimitCase(model, messages, roles, res)) return;
+		const suggestion = suggestionResponse !== undefined && messages.some((message) => textOf(message.content).includes("Generate next prompt suggestions"));
+		if (!suggestion && playAwayLimitCase(model, messages, roles, res)) return;
 		const slow = body.includes(SLOW_MARKER);
 		const hang = body.includes(HANG_MARKER);
 		const big = body.includes(BIG_MARKER);
-		const chunks = hang ? HANG_ANSWER_CHUNKS : big ? BIG_ANSWER_CHUNKS : slow ? SLOW_ANSWER_CHUNKS : FAST_ANSWER_CHUNKS;
-		let allowed = slow || hang || big ? 1 : chunks.length;
+		const chunks = suggestion ? [suggestionResponse!] : hang ? HANG_ANSWER_CHUNKS : big ? BIG_ANSWER_CHUNKS : slow ? SLOW_ANSWER_CHUNKS : FAST_ANSWER_CHUNKS;
+		let allowed = suggestion && holdSuggestionResponse ? 0 : slow || hang || big ? 1 : chunks.length;
 		const record: GatewayRequest = {
-			model, roles, startedAt: Date.now(), slow: slow || big, hang, aborted: false, finished: false, sent: 0,
+			model, roles, ...(suggestion ? { suggestion: true, request: { messages, maxTokens: parsed.max_completion_tokens ?? parsed.max_tokens, tools: parsed.tools } } : {}), startedAt: Date.now(), slow: slow || big, hang, aborted: false, finished: false, sent: 0,
 			release: (count) => {
 				allowed = count === undefined ? chunks.length : Math.min(chunks.length, allowed + count);
 				writeNext();
@@ -407,7 +414,7 @@ export const serverOutput: string[] = [];
 export const expectedText = SLOW_ANSWER_CHUNKS.join("").trim();
 
 /** Starts the gateway and the server on the smoke's own home, with the away limits' test overrides. */
-export async function startDetachedServer(limits: AwayLimitOverrides = { silenceMs: DETACHED_SILENCE_OVERRIDE_MS, limitMs: DETACHED_LIMIT_OVERRIDE_MS }): Promise<void> {
+export async function startDetachedServer(limits: AwayLimitOverrides = { silenceMs: DETACHED_SILENCE_OVERRIDE_MS, limitMs: DETACHED_LIMIT_OVERRIDE_MS }, maintenanceModel = "room-model"): Promise<void> {
 	await new Promise<void>((resolve) => gateway.listen(0, "127.0.0.1", resolve));
 	const gatewayPort = (gateway.address() as AddressInfo).port;
 
@@ -423,6 +430,7 @@ export async function startDetachedServer(limits: AwayLimitOverrides = { silence
 					api: "openai-completions",
 					models: [
 						{ id: "room-model", name: "Room Model", contextWindow: 128000, maxTokens: 16384 },
+						{ id: "suggest-model", name: "Suggestion Model", contextWindow: 128000, maxTokens: 16384 },
 					],
 				},
 			},
@@ -441,7 +449,7 @@ export async function startDetachedServer(limits: AwayLimitOverrides = { silence
 			providerId: "openai-compatible",
 			label: "Synthetic SSE Gateway",
 			roomModels: [{ modelId: "room-model", label: "Room Model" }],
-			maintenanceModel: "room-model",
+			maintenanceModel,
 		}, null, 2),
 		{ mode: 0o600 },
 	);

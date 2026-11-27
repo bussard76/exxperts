@@ -11,7 +11,7 @@ import { AuthStorage } from "@exxeta/exxperts-runtime";
 import { productAppStatePath, productAppStateRoot } from "../../../pi-package/product-state-paths.js";
 
 export type UsageAuthType = "oauth" | "api_key";
-export type UsageKind = "chat" | "upkeep" | "scheduled" | "hivemind" | "cli" | "consult" | "task";
+export type UsageKind = "chat" | "upkeep" | "scheduled" | "hivemind" | "cli" | "consult" | "task" | "suggestions";
 
 export interface UsageRow {
 	ts: number;

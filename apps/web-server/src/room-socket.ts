@@ -133,6 +133,7 @@
  *                        by a newer connection for the same room)
  */
 
+import { randomUUID } from "node:crypto";
 import { estimateTokens, estimateTokensFromChars } from "./token-estimate.js";
 import { createAgentSession, getAgentDir, DefaultResourceLoader, SessionManager } from "@exxeta/exxperts-runtime";
 import { createWebUiContext } from "./web-ui-context.js";
@@ -211,6 +212,8 @@ import { applyRoomEffortToSession, contextHealthForSession, getWebChatModelRegis
 import { CONSULT_TRIGGER_PROMPT, consultModelWindow, resolveConsultModel, resolvePersistentAgentBindModel, roomMemoryModelSelection } from "./ai-profile-models.js";
 import { resolveExecutableSkillFiles, resolveLibrarySkillManifest, skillLibraryFingerprint } from "./skills-library.js";
 import { logProviderCallFailed, recordUsage, recordWorkerUsage, safeConversationId } from "./usage-recording.js";
+import { getAvailablePersistentAgentAiProfiles } from "./persistent-agent-ai-profiles.js";
+import { stripProviderSearchFromModel } from "../../../pi-package/extensions/web-search/native-provider-search.js";
 
 // Rooms that were written before the current constitution template keep the
 // words they were scaffolded with until something re-renders them, and the only
@@ -226,6 +229,8 @@ import { logProviderCallFailed, recordUsage, recordWorkerUsage, safeConversation
 // unreadable is opened exactly as it is and catches up at a later open, and the
 // reason is said once per room per process rather than on every connect.
 const constitutionUpgradeOnOpenSaidFor = new Set<string>();
+const suggestionRuns = new Map<string, { answerId: string; leader: string; controller: AbortController }>();
+const suggestionVersions = new Map<string, object>();
 
 // Read once, when the server starts: an update restarts it.
 const PERSISTENT_ROOM_INSTALLATION_SECTION = persistentAgentInstallationSection({
@@ -605,6 +610,11 @@ app.get("/ws", { websocket: true, exposeHeadRoute: false }, async (socket, req) 
 	type PersistentWebTurnTerminalReason = "completed" | "cancelled" | "failed" | "disconnect_cancelled";
 	type ActivePersistentWebTurn = {
 		turnId: string;
+		answerId: string;
+		suggestionVersion: object;
+		answerCompleted?: boolean;
+		suggestionPrompt: string;
+		suggestionAnswer: string;
 		/** When the turn began (epoch ms), from the active-turn record. */
 		startedAt?: number;
 		terminalReason?: PersistentWebTurnTerminalReason;
@@ -1379,6 +1389,7 @@ app.get("/ws", { websocket: true, exposeHeadRoute: false }, async (socket, req) 
 		// closure; quiescing this session must stop that turn too, or Memento
 		// would dispose an idle session while the room keeps cooking.
 		quiesceForBoundary: async () => {
+			cancelSuggestions();
 			const cooking = claimedCookingTurn;
 			if (cooking && !cooking.settled) { try { await cooking.stop(connectionId); } catch {} }
 			await disposeSessionAfterAbortIfNeeded("cancelled");
@@ -1426,6 +1437,8 @@ app.get("/ws", { websocket: true, exposeHeadRoute: false }, async (socket, req) 
 	};
 	persistentRoomLiveSessions.set(persistentAgentIdForSession, liveSessionHandle);
 	socket.on("close", () => {
+		if (suggestionRuns.get(answerNoteKey())?.leader === connectionId) cancelSuggestions();
+		if (!turnKeepsCookingOnClose() && persistentRoomLiveSessions.get(persistentAgentIdForSession)?.connectionId === connectionId) suggestionVersions.delete(answerNoteKey());
 		// A detached cooking turn keeps its handle registered so Memento can
 		// still quiesce it; the prompt handler unregisters after landing.
 		if (turnKeepsCookingOnClose()) return;
@@ -1642,6 +1655,90 @@ app.get("/ws", { websocket: true, exposeHeadRoute: false }, async (socket, req) 
 			return;
 		}
 		send(msg);
+	};
+	const sendAnswerLifecycle = (phase: "invalidate" | "complete", answerId?: string) => {
+		const leader = detachedFromClient ? detachedCookingHandle?.adopterConnectionId : connectionId;
+		if (!leader || (detachedFromClient ? !cookingTurnSink : socket.readyState !== socket.OPEN) || persistentRoomLiveSessions.get(persistentAgentIdForSession)?.connectionId !== leader) return;
+		sendToWatcher({ type: "answer_lifecycle", roomId: persistentAgentIdForSession, threadId: persistentConversationId, phase, ...(answerId ? { answerId } : {}) });
+	};
+	const cancelSuggestions = () => {
+		const key = answerNoteKey();
+		suggestionRuns.get(key)?.controller.abort();
+		suggestionRuns.delete(key);
+	};
+	const generateSuggestions = (answerId: string, provider: string, prompt: string, answer: string) => {
+		try {
+			const leader = detachedFromClient ? detachedCookingHandle?.adopterConnectionId : connectionId;
+			if (!leader || (detachedFromClient ? !cookingTurnSink : socket.readyState !== socket.OPEN) || persistentRoomLiveSessions.get(persistentAgentIdForSession)?.connectionId !== leader) return;
+			const profile = getAvailablePersistentAgentAiProfiles().find((entry) => entry.providerId === provider);
+			const modelLock = profile?.processes.absorb;
+			if (!modelLock || modelLock.provider !== provider) return;
+			const registry = getWebChatModelRegistry();
+			const model = registry.find(modelLock.provider, modelLock.model);
+			if (!model || !registry.hasConfiguredAuth(model)) return;
+			cancelSuggestions();
+			const controller = new AbortController();
+			const key = answerNoteKey();
+			const sink = detachedFromClient ? cookingTurnSink : sendSerialised;
+			const transcript = getPersistentAgentThread(persistentAgentIdForSession, persistentConversationId)?.items ?? [];
+			const knownPrompts = transcript.filter((item: any) => item?.kind === "user" && typeof item.text === "string").map((item: any) => item.text as string);
+			const history: Array<{ prompt: string; answer: string }> = [];
+			let previous: { prompt: string; answer: string; completed: boolean } | undefined;
+			for (const message of session?.messages ?? []) {
+				if (message.role === "user") {
+					if (previous?.completed && previous.answer) history.push(previous);
+					const text = textFromParts(message.content);
+					previous = knownPrompts.filter((item) => item === text).length === 1 ? { prompt: text, answer: "", completed: false } : undefined;
+				} else if (message.role === "assistant" && previous) {
+					if (message.stopReason === "error" || message.stopReason === "aborted") previous = undefined;
+					else {
+						previous.answer = [previous.answer, textFromParts(message.content)].filter(Boolean).join("\n\n");
+						previous.completed = message.stopReason === "stop" || message.stopReason === "length";
+					}
+				}
+			}
+			const exchanges = [...history.slice(-2), { prompt, answer }];
+			const render = () => exchanges.map((entry) => `User: ${entry.prompt}\nAssistant: ${entry.answer}`).join("\n\n");
+			while (exchanges.length > 1 && render().length > 4000) exchanges.shift();
+			let context = render();
+			if (context.length > 4000) context = context.slice(-4000);
+			suggestionRuns.set(key, { answerId, leader, controller });
+			const startedAt = Date.now();
+			let resultCode = "error";
+			let tokens: { input?: number; output?: number } | undefined;
+			void runIsolatedPersistentAgentWorker({
+				workerSystemPrompt: "Generate next prompt suggestions. Return a JSON array of up to three short strings.",
+				triggerPrompt: context,
+				modelLock,
+				resolveExpectedModel: () => stripProviderSearchFromModel(model),
+				emptyTextError: "empty suggestions",
+				cwd: REPO_ROOT,
+				agentDir: getAgentDir(),
+				modelRegistry: registry,
+				signal: controller.signal,
+				timeoutMs: 10_000,
+				maxTokens: 200,
+			}).then((result) => {
+				resultCode = "completed";
+				tokens = result.usage;
+				recordWorkerUsage(persistentAgentIdForSession, "suggestions", modelLock, result.usage);
+				if (controller.signal.aborted || suggestionRuns.get(key)?.answerId !== answerId || persistentRoomLiveSessions.get(persistentAgentIdForSession)?.connectionId !== leader || !sink) return;
+				let items: string[] = [];
+				try {
+					const parsed: unknown = JSON.parse(result.text);
+					if (!result.truncated && Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) items = [...new Set(parsed.map((item: string) => item.trim().replace(/[\r\n]+/g, " ").slice(0, 200)).filter(Boolean))].slice(0, 3);
+				} catch {}
+				sink(JSON.stringify({ type: "suggestions", roomId: persistentAgentIdForSession, threadId: persistentConversationId, answerId, items }));
+			}).catch((error) => {
+				const usage = (error as { usage?: Parameters<typeof recordWorkerUsage>[3] })?.usage;
+				tokens = usage;
+				if (controller.signal.aborted) resultCode = "cancelled";
+				if (usage) recordWorkerUsage(persistentAgentIdForSession, "suggestions", modelLock, usage);
+			}).finally(() => {
+				app.log.info({ roomId: persistentAgentIdForSession, durationMs: Date.now() - startedAt, resultCode, inputTokens: tokens?.input, outputTokens: tokens?.output }, "suggestion generation finished");
+				if (suggestionRuns.get(key)?.answerId === answerId) suggestionRuns.delete(key);
+			});
+		} catch {}
 	};
 	// Turn-scoped frames (the event family, usage, the turn's error
 	// frame) go through sendTurnFrame, which merges small ones, and then here
@@ -2226,6 +2323,11 @@ ${lines.join("\n")}`;
 				const taken = turnPromptMessageSeen ? pendingSteers.shift() : undefined;
 				turnPromptMessageSeen = true;
 				if (taken) {
+					activePersistentWebTurn.answerId = randomUUID();
+					activePersistentWebTurn.suggestionVersion = suggestionVersions.get(answerNoteKey()) ?? {};
+					activePersistentWebTurn.suggestionPrompt = userAuthoredPromptText(taken.text);
+					activePersistentWebTurn.suggestionAnswer = "";
+					sendAnswerLifecycle("invalidate");
 					turnSteps.tookMessage(bubbleIdOf(taken.id), taken.text);
 					takenSteers.set(answerNoteKey(), [...(takenSteers.get(answerNoteKey()) ?? []), { id: taken.id }].slice(-TAKEN_STEERS_KEPT));
 					sendTurnFrame({ type: "steer_taken", id: taken.id, text: taken.text });
@@ -2273,6 +2375,11 @@ ${lines.join("\n")}`;
 			const keyedEnd = keyedSteps && event?.type === "message_end" && (event as any).message?.role === "assistant" ? keyedSteps.note((event as any).message, { retrying, shownAtStop: activePersistentWebTurn?.shownAtStop }) : {};
 			const projected = withFrameIds(projectAgentEventForWebClient(event), frameIds, keyedEnd.echoOf);
 			sendTurnFrame({ type: "event", event: credentialKey || failure || retryModel || retrying || endedBy ? { ...projected, ...(credentialKey ? { credentialKey } : {}), ...(failure ? { failure } : {}), ...(retryModel ? { model: retryModel } : {}), ...(failure === "quota" ? { quotaWay: quotaWayOf(String(ended?.provider ?? ""), String(ended?.errorMessage ?? "")) } : {}), ...(retrying ? { retrying: true } : {}), ...(endedBy ? { endedBy } : {}) } : projected });
+			if (event.type === "agent_end" && !retrying && lastAttempt?.role === "assistant" && lastAttempt.stopReason !== "error" && lastAttempt.stopReason !== "aborted" && activePersistentWebTurn && !activePersistentWebTurn.terminalReason && !activePersistentWebTurn.answerCompleted && suggestionVersions.get(answerNoteKey()) === activePersistentWebTurn.suggestionVersion) {
+				activePersistentWebTurn.answerCompleted = true;
+				sendAnswerLifecycle("complete", activePersistentWebTurn.answerId);
+				generateSuggestions(activePersistentWebTurn.answerId, lastAttempt.provider, activePersistentWebTurn.suggestionPrompt, activePersistentWebTurn.suggestionAnswer);
+			}
 			// A failed auto-compaction used to vanish here: the client ignores the
 			// event, nothing was logged, and the room quietly paid for the same
 			// summary again on every later turn. Say it once per attempt. This is
@@ -2326,6 +2433,10 @@ ${lines.join("\n")}`;
 			}
 			if (event.type === "message_end" && (event as any).message?.role === "assistant") {
 				const msg = (event as any).message;
+				if (activePersistentWebTurn) {
+					if (msg.stopReason === "error" || msg.stopReason === "aborted") activePersistentWebTurn.suggestionAnswer = "";
+					else activePersistentWebTurn.suggestionAnswer = [activePersistentWebTurn.suggestionAnswer, textFromParts(msg.content)].filter(Boolean).join("\n\n");
+				}
 				if (!keyedSteps) turnSteps.note(msg);
 				// A cut or Stop keeps only the words the page had shown of the message it stopped: a landing never brings back what Stop threw away.
 				const shownAtStop = msg.stopReason === "aborted" ? activePersistentWebTurn?.shownAtStop : undefined;
@@ -2690,6 +2801,13 @@ ${lines.join("\n")}`;
 		// not a frame-type allowlist, so a future frame type cannot slip
 		// through it.
 		if (remoteReadOnlySession) return;
+		let incomingSuggestionVersion: object | undefined;
+		if (msg.type === "prompt" || msg.type === "continue" || msg.type === "steer") {
+			cancelSuggestions();
+			incomingSuggestionVersion = {};
+			suggestionVersions.set(answerNoteKey(), incomingSuggestionVersion);
+			if (msg.type !== "continue") sendAnswerLifecycle("invalidate");
+		}
 		// A message's start anchor is the file's last item as it arrives,
 		// before any rebind is awaited: the page saves the message itself about
 		// half a second later, and a save that landed first would make the
@@ -2945,7 +3063,8 @@ ${lines.join("\n")}`;
 				persistentTurnId = startedTurn.turnId;
 				// Out of the saved conversation now, and out of every later write, however late an older copy of the page's arrives.
 				if (editedAwayIds.length) try { removeEditedAwayItems(persistentAgentIdForSession, persistentConversationId, editedAwayIds); } catch {}
-				activePersistentWebTurn = { turnId: persistentTurnId, promptSettled: false, ...(typeof startedTurn.startedAt === "number" ? { startedAt: startedTurn.startedAt } : {}) };
+				activePersistentWebTurn = { turnId: persistentTurnId, answerId: (startedTurn as typeof startedTurn & { answerId: string }).answerId, suggestionVersion: incomingSuggestionVersion!, suggestionPrompt: readShownPrompt(msg.shown)?.text ?? userAuthoredPromptText(String(msg.text ?? "")), suggestionAnswer: "", promptSettled: false, ...(typeof startedTurn.startedAt === "number" ? { startedAt: startedTurn.startedAt } : {}) };
+				sendAnswerLifecycle("invalidate");
 				turnProgress.toolsRunning.clear();
 				// The last turn's Stop answered its questions; this turn asks again.
 				uiContext.reopen();
@@ -3013,7 +3132,7 @@ ${lines.join("\n")}`;
 				const userText = continuing ? "" : String(msg.text ?? "");
 				// Only what the person typed lands: never the model-written handoff
 				// blocks or app-written attachment notes the client prepends.
-				currentTurnUserTextForLanding = userAuthoredPromptText(userText);
+				currentTurnUserTextForLanding = readShownPrompt(msg.shown)?.text ?? userAuthoredPromptText(userText);
 				// Consult MR-5 hardening: this prompt has consumed any queued handoff
 				// blocks (the client prepended them to userText). Clear the persisted
 				// queue now, atomically with the consume, so a crash or a reordered

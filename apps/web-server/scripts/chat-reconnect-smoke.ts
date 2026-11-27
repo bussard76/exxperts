@@ -81,6 +81,11 @@ const endpoint = http.createServer((req, res) => {
 		sse(res, "message_start", { type: "message_start", message: { id: "msg_smoke", type: "message", role: "assistant", model: body.model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 100, output_tokens: 1 } } });
 		sse(res, "content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
 		const lastUser = JSON.stringify((body.messages ?? []).filter((m: { role?: string }) => m.role === "user").at(-1) ?? "");
+		if (JSON.stringify(body.system ?? "").includes("Generate next prompt suggestions")) {
+			sse(res, "content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "[]" } });
+			end(res);
+			return;
+		}
 		if (lastUser.includes(GATED)) {
 			open = { res, sent: 0 };
 			return;
