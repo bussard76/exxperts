@@ -144,6 +144,8 @@ Regeln, die das sicher machen:
 
 In einem frischen Tester- oder Wave-Checkout gehören die Ergebnisse von `npm ci` zum Gate-Nachweis. Prüfe im Installationslog den MCP-Postinstall und vor Browser-Tests die Verfügbarkeit von Chromium. Halte Installationslog und Gate-Commit zusammen fest. [Vollständiger Setup-Nachweis](coordinator.md#gate-setup-evidence)
 
+In einem Upstream-Checkout ohne Projektkonfiguration wähle den Gate-Runner über `FACTORY_CONFIG="$HOME/controller-exxperts/factory.config.json"`. Halte den geprüften Commit, bei Vergleichsläufen auch die Basis-SHA und die Projektzuordnung im Nachweis fest. [Gate-Setup und Zuordnung](coordinator.md#gate-setup-evidence)
+
 Bei einem zusätzlichen Provider-Aufruf prüfe Smoke-Tests, die Anfragen zählen, ihre Reihenfolge oder Kosten prüfen oder Antworten gezielt offenhalten. Halte Aufrufe im Fake unterscheidbar und erhalte die bestehenden Verhaltensprüfungen. [Provider-Aufrufe in Smokes](coordinator.md#smokes-that-record-provider-requests)
 
 **Volle Gates** laufen auf workhorse2: eines gleichzeitig auf dem Host, darin laufen die Smokes parallel mit dem Standard des Runners (dort sechs gleichzeitig). Aufruf: `GATE_SLOTS=1 gate bash -c 'npm run build && npm run smokes'`. Jeder im parallelen Lauf gescheiterte Smoke wird auf demselben Commit allein wiederholt; beide Ergebnisse werden berichtet, während andere Arbeit weiterläuft. Reine Dokumentationsänderungen erhalten kein volles Gate (decided by Sascha, 2026-11-06: „Weiter auf workhorse2“ und „inwieweit es möglich ist, die Tests zu parallelisieren und nicht seriell hintereinander auszuführen ... Wenn die Testausführung so lange dauert, ist das negativ“).
