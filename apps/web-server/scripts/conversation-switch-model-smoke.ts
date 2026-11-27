@@ -82,6 +82,7 @@ const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwA
 
 type Request = { api: "anthropic" | "openai"; body: any; raw: string; aborted: boolean };
 const requests: Request[] = [];
+const suggestionRequests: Request[] = [];
 let hangRemember = false;
 /** The next room turn hangs mid-stream (the text stays in the history, so a flag, not a marker). */
 let hangTurn = false;
@@ -97,12 +98,14 @@ const providers = http.createServer((req, res) => {
 		const body = JSON.parse(raw || "{}");
 		const api = String(req.url ?? "").includes("/messages") ? "anthropic" : "openai";
 		const record: Request = { api, body, raw, aborted: false };
-		requests.push(record);
+		const suggestion = JSON.stringify(body.system ?? "").includes("Generate next prompt suggestions") || (body.messages ?? []).some((message: any) => message.role === "system" && JSON.stringify(message.content).includes("Generate next prompt suggestions"));
+		if (suggestion) suggestionRequests.push(record);
+		else requests.push(record);
 		res.on("close", () => { if (!res.writableFinished) record.aborted = true; });
 		res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
 		const remember = raw.includes("Checkpoint Compression Constitution");
-		const hang = remember ? hangRemember : hangTurn;
-		const text = remember ? "TITLE:\nSwitch\n\nSESSION_ARC:\nMoved models.\n\nBODY:\n- Moved.\n\nPARKED:\nNone\n" : `Answer from ${body.model}.`;
+		const hang = !suggestion && (remember ? hangRemember : hangTurn);
+		const text = suggestion ? '["Ask another question"]' : remember ? "TITLE:\nSwitch\n\nSESSION_ARC:\nMoved models.\n\nBODY:\n- Moved.\n\nPARKED:\nNone\n" : `Answer from ${body.model}.`;
 		if (api === "anthropic") {
 			sse(res, "message_start", { type: "message_start", message: { id: `msg_${requests.length}`, type: "message", role: "assistant", model: body.model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 100, output_tokens: 1 } } });
 			sse(res, "content_block_start", { type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } });
@@ -222,6 +225,8 @@ try {
 	await connect(agentId, conversationId);
 	assert(frames.find((frame) => frame.type === "ready")?.model?.model === CLAUDE.model, "the conversation binds on Claude");
 	const claudeFirst = await turn(agentId, "First question on Claude.");
+	await waitUntil(() => suggestionRequests.length > 0, "the suggestion request arrives");
+	assert(!requests.includes(suggestionRequests[0]), "suggestions are separate from conversation and Remember requests");
 	assert(claudeFirst.api === "anthropic" && (claudeFirst.raw.match(/"type":"image"/g) ?? []).length === 2 && claudeFirst.raw.includes("tool_use") && claudeFirst.raw.includes("tool_result"), "Claude gets the images and the tool pair in its own shape");
 	pass("the seeded conversation (two images, signed thinking, a tool pair) runs on Claude");
 
