@@ -122,6 +122,12 @@ try {
 	fs.writeFileSync(path.join(workspaceRoot, "invented.txt"), "invented content");
 	const invalidListing = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-files?conversationId=demo-thread&path=${encodeURIComponent("../secret")}`);
 	assert(invalidListing.status === 400 && invalidListing.body.code === "invalid_path", "workspace listing rejects traversal paths");
+	for (const invalidPath of [".hidden", "nested//file", "/absolute", "drive:folder", "nested/.", "file\0name"]) {
+		const response = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-files?conversationId=demo-thread&path=${encodeURIComponent(invalidPath)}`);
+		assert(response.status === 400 && response.body.code === "invalid_path", `workspace listing rejects invalid path ${JSON.stringify(invalidPath)}`);
+	}
+	const missingConversation = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-files?conversationId=missing-thread`);
+	assert(missingConversation.status === 404 && missingConversation.body.code === "conversation_not_found", "workspace listing rejects a missing conversation");
 	const listing = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-files?conversationId=demo-thread`);
 	assert(listing.status === 200 && listing.body.entries.some((entry: { name: string }) => entry.name === "invented.txt"), "workspace listing exposes an allowed file through the public route");
 	assert(putDefault.body?.storage?.kind === "persistent-agent-runtime-default", "PUT should report room-default storage kind");
