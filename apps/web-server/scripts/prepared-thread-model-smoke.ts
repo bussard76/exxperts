@@ -48,6 +48,7 @@ fs.mkdirSync(agentDir, { recursive: true, mode: 0o700 });
 
 type GatewayRequest = { model: string; remember: boolean; maxTokens?: number };
 const gatewayRequests: GatewayRequest[] = [];
+const suggestionRequests: GatewayRequest[] = [];
 
 function sseChunk(payload: unknown): string {
 	return `data: ${JSON.stringify(payload)}\n\n`;
@@ -59,10 +60,13 @@ const gateway = http.createServer((req, res) => {
 	req.on("end", () => {
 		const parsed = JSON.parse(body || "{}");
 		const remember = body.includes("Checkpoint Compression Constitution");
-		gatewayRequests.push({ model: String(parsed.model ?? ""), remember, maxTokens: parsed.max_completion_tokens ?? parsed.max_tokens });
+		const request = { model: String(parsed.model ?? ""), remember, maxTokens: parsed.max_completion_tokens ?? parsed.max_tokens };
+		const suggestion = (parsed.messages ?? []).some((message: any) => message.role === "system" && String(message.content).includes("Generate next prompt suggestions"));
+		if (suggestion) suggestionRequests.push(request);
+		else gatewayRequests.push(request);
 		res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
 		const base = { id: `cmpl_${gatewayRequests.length}`, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: parsed.model };
-		res.write(sseChunk({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: "Answer." }, finish_reason: null }] }));
+		res.write(sseChunk({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: suggestion ? '["Ask another question"]' : "Answer." }, finish_reason: null }] }));
 		res.write(sseChunk({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 } }));
 		res.write("data: [DONE]\n\n");
 		res.end();
@@ -131,6 +135,8 @@ try {
 	const conversationId = `smokeconv_prepared_${Date.now().toString(36)}`;
 	await api(`/api/persistent-agents/${agentId}/threads/${conversationId}`, { method: "PUT", body: JSON.stringify({ state: "active", origin: "launcher", items: [] }) });
 	await bindAndSend(agentId, conversationId, "A first conversation.");
+	await waitUntil(() => suggestionRequests.length > 0, "the suggestion request arrives");
+	assert(!gatewayRequests.includes(suggestionRequests[0]), "suggestion requests are captured separately from conversation and Remember requests");
 
 	// Forget prepares the next conversation on the room's model of this moment.
 	const forget = await api(`/api/persistent-agents/${agentId}/memento`, { method: "POST", body: JSON.stringify({ conversationId }) });
