@@ -14,9 +14,9 @@ Level 3: server-owned automatic post-answer model generation and correlated room
 - [x] Specify trigger/deduplication; existing provider Memorize model; bounded plain-text context; logging, usage and output limits; deadline/cancellation; socket fields/lifetime; JSON validation; composer precedence and keys.
 - [x] Record the approved exception to a dedicated design export, fixture-gallery fake requirement, Mermaid logic flow and exact socket interface.
 - [x] Preserve Q14's order: Slice 1 server; Slice 2 UI after Q07 message format is fixed; Slice 3 real producer-to-consumer integration with fake model source.
-- [ ] Obtain a fresh independent Architect spec review that passes before Slice 1 implementation.
+- [x] Obtain a fresh independent Architect spec review that passes before Slice 1 implementation (`T24-SUGGESTIONS-REVIEW-4-architecture-spec.md`).
 
-## Decision and remaining step
+## Historical decision and next step at the spec checkpoint
 
 Q01–Q14 are no longer open. No new provider, model table, cross-room delivery or data retention behavior is introduced. The precise next step is a fresh independent Worker Architect review of the reconciled level-3 spec; do not begin implementation until it passes. Afterward, start Slice 1 test-first, and hold Slice 2 until the Slice 1 Q07 format is fixed; Slice 3 follows both.
 
@@ -26,7 +26,7 @@ Q01–Q14 are no longer open. No new provider, model table, cross-room delivery 
 - `docs/adr/0009-server-owned-prompt-suggestions.md`: records the 2026-11-26 answer confirmation and implementation consequences without altering ADR-0009's accepted status/date/decider.
 - `docs/reports/issue-24.md`: this decision/review checklist.
 
-No product code or tests changed. The pre-existing `package-lock.json` change remains untouched and uncommitted.
+At that earlier checkpoint, no product code or tests had changed. The pre-existing `package-lock.json` change remains untouched and uncommitted.
 
 ## Slice 1 developer checklist
 
@@ -63,7 +63,7 @@ The fake-model socket smoke now covers normalized and invalid results, length an
 
 Checks before the red privacy assertion: UI and script typechecks passed; the attributed targeted gate passed 58/58 with `NODE_OPTIONS='--import tsx'`, including the producer, worker, steering and scheduled suites; detached-turn, reattach and quick-follow-up suites passed 57/57. The bare `npm run test:scripts` invocation with TypeScript smoke files failed to resolve their `.js` imports (54/56); loading `tsx` made the same suite pass. The reconnect browser smoke initially timed out twice because its synthetic gateway held suggestion requests containing its chat marker; adapting the fake gateway without changing assertions made the attributed browser gate pass. The room-steer fake needed the same distinction; its existing assertions then passed. A mistaken `gate --help` discovery call omitted attribution and failed immediately with ENOENT; it did not run a suite. No full root build or smokes were run. Foreign-host network-failure reruns: 0. No screenshots were captured.
 
-Files changed so far: `apps/web-server/src/room-socket.ts`, `persistent-agent-turns.ts`, `persistent-agent-worker-runtime.ts`, `usage-log.ts`; `apps/web-server/scripts/suggestions-producer-smoke.ts`, `lifecycle-worker-session-smoke.ts`, `persistent-room-detached-turn-setup.ts`, `chat-reconnect-smoke.ts`, `room-steer-smoke.ts`, `prompt-overwrite-scheduled-smoke.ts`; `docs/developer.md` and this report. All model and room data in the tests is synthetic. The pre-existing `package-lock.json` modification remains untouched. Graph: no; direct source searches identified the relevant code. Debt candidates: trace/replay fidelity requires the decision above; no other debt was assessed. Slice 2, Slice 3, independent review/conformance, final merge and final checks remain outstanding.
+Files changed so far: `apps/web-server/src/room-socket.ts`, `persistent-agent-turns.ts`, `persistent-agent-worker-runtime.ts`, `usage-log.ts`; `apps/web-server/scripts/suggestions-producer-smoke.ts`, `lifecycle-worker-session-smoke.ts`, `persistent-room-detached-turn-setup.ts`, `chat-reconnect-smoke.ts`, `room-steer-smoke.ts`, `prompt-overwrite-scheduled-smoke.ts`; `docs/developer.md` and this report. All model and room data in the tests is synthetic. The pre-existing `package-lock.json` modification remains untouched. Graph: no; six tool calls preceded the first task file edit, and direct source searches identified the relevant code. Debt candidates: trace/replay fidelity requires the decision above; no other debt was assessed. Slice 2, Slice 3, independent review/conformance, final merge and final checks remain outstanding.
 
 
 ## Trace decision and assertion change (2026-11-27)

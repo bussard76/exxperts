@@ -3150,7 +3150,7 @@ ${lines.join("\n")}`;
 				const userText = continuing ? "" : String(msg.text ?? "");
 				// Only what the person typed lands: never the model-written handoff
 				// blocks or app-written attachment notes the client prepends.
-				currentTurnUserTextForLanding = readShownPrompt(msg.shown)?.text ?? userAuthoredPromptText(userText);
+				currentTurnUserTextForLanding = userAuthoredPromptText(userText);
 				// Consult MR-5 hardening: this prompt has consumed any queued handoff
 				// blocks (the client prepended them to userText). Clear the persisted
 				// queue now, atomically with the consume, so a crash or a reordered
