@@ -163,3 +163,9 @@ See [`packaging-local.md`](packaging-local.md) for packaging validation commands
 - [`provider-setup.md`](provider-setup.md): provider setup, and which model a room uses.
 - [`mcp.md`](mcp.md)
 - Historical extension and collaboration notes live in the development repository's archive and are not part of public releases.
+
+## Thinking Sweep lab
+
+The controlled fake-provider smoke (`npx tsx apps/web-server/scripts/thinking-levels-sweep-smoke.ts`) starts its own loopback server and private temporary state, suppresses suggestion workers there, and removes the state afterward. Run it in an isolated test session with no other clients and invented data. The marker and token catch accidental misconfiguration; they do not exclude another process running as the same user. The existing `--run` attachment does not establish that isolation.
+
+Sweep cost and budget figures are observed socket totals, not a complete bill: failed or aborted calls and missing usage can have unknown cost, and recorder completion is not a departure barrier. The recorder covers only its configured hosts and transports and may retain provider error text; use synthetic data and errors.

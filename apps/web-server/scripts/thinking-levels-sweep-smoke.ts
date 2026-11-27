@@ -1,11 +1,12 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs";
+import { randomBytes } from "node:crypto";
 import http from "node:http";
 import net, { type AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { SMOKE_AUTH_TOKEN, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, freePort, smokeHomeEnv, stopSmokeServer, waitForServer } from "./smoke-server-process.js";
+import { SMOKE_SERVER_SPAWN_TREE_OPTIONS, freePort, smokeHomeEnv, stopSmokeServer, waitForServer } from "./smoke-server-process.js";
 import { runSweep, type SweepRow } from "./thinking-levels-sweep.js";
 
 // The live thinking-level sweep, proved offline: a real server with the
@@ -41,6 +42,9 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const webServerDir = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(webServerDir, "..", "..");
 const agentDir = path.join(tempHome, ".exxperts", "agent");
+const marker = path.join(tempHome, "lab-marker");
+const markerValue = randomBytes(32).toString("hex");
+const authToken = randomBytes(32).toString("hex");
 const recorderLog = path.join(tempHome, "recorder.jsonl");
 const tsvOut = path.join(tempHome, "sweep-fake.tsv");
 const recorderUrl = pathToFileURL(path.join(scriptDir, "thinking-levels-sweep-recorder.mjs")).href;
@@ -54,6 +58,7 @@ function assert(condition: unknown, message: string): asserts condition {
 // What the fake provider received, in arrival order: the model and the
 // reasoning_effort field (null when the request had none).
 const received: Array<{ model: string; reasoningEffort: string | null }> = [];
+let suggestionRequests = 0;
 const FLAKY_FAILURES = 3;
 const TOOL_STEP_REASONING = 5;
 let flakyFailures = 0;
@@ -64,6 +69,7 @@ const SOCKET_DELAY_MS = 600;
 // armed once slow-model's answer hangs.
 let statusTraps: Array<"cut" | "stall"> = [];
 let statusTrapsSprung = 0;
+let socketFrames = "";
 
 function sse(payload: unknown): string {
 	return `data: ${JSON.stringify(payload)}\n\n`;
@@ -79,6 +85,7 @@ const fakeProvider = http.createServer((req, res) => {
 	req.on("end", () => {
 		const parsed = JSON.parse(body || "{}");
 		const model = String(parsed.model ?? "");
+		if (JSON.stringify(parsed.messages ?? []).includes("Generate next prompt suggestions")) suggestionRequests++;
 		const effort = typeof parsed.reasoning_effort === "string" ? parsed.reasoning_effort : null;
 		received.push({ model, reasoningEffort: effort });
 		if (model === "flaky-model" && flakyFailures < FLAKY_FAILURES) {
@@ -145,7 +152,10 @@ const proxy = net.createServer((client) => {
 		}
 		upstream.write(chunk);
 	});
-	upstream.on("data", (chunk) => toClient(() => { if (!client.destroyed) client.write(chunk); }));
+	upstream.on("data", (chunk) => {
+		if (socketConnection) socketFrames += chunk.toString("utf8");
+		toClient(() => { if (!client.destroyed) client.write(chunk); });
+	});
 	upstream.on("end", () => toClient(() => client.end()));
 	upstream.on("error", () => client.destroy());
 	client.on("error", () => upstream.destroy());
@@ -154,6 +164,18 @@ const proxy = net.createServer((client) => {
 
 let server: ChildProcessWithoutNullStreams | null = null;
 const serverOutput: string[] = [];
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+	process.once(signal, () => {
+		void (async () => {
+			if (server) await stopSmokeServer(server);
+			proxy.close();
+			fakeProvider.closeAllConnections();
+			fakeProvider.close();
+			fs.rmSync(tempHome, { recursive: true, force: true });
+			process.exit(signal === "SIGINT" ? 130 : 143);
+		})();
+	});
+}
 let passes = 0;
 function pass(label: string): void {
 	passes += 1;
@@ -169,7 +191,7 @@ try {
 	const fakePort = (fakeProvider.address() as AddressInfo).port;
 
 	fs.mkdirSync(agentDir, { recursive: true, mode: 0o700 });
-	fs.mkdirSync(path.join(tempHome, ".exxperts", "app"), { recursive: true, mode: 0o700 });
+	fs.mkdirSync(path.join(tempHome, ".exxperts", "app", "personalized-agents"), { recursive: true, mode: 0o700 });
 	const dial = { off: "none", minimal: null, medium: null };
 	fs.writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({
 		providers: {
@@ -200,24 +222,52 @@ try {
 	}), { mode: 0o600 });
 	fs.writeFileSync(path.join(tempHome, ".exxperts", "app", "persistent-agent-ai-profile.json"), JSON.stringify({ profileId: "openai-compatible" }), { mode: 0o600 });
 
-	server = spawn("npx", ["tsx", "src/index.ts"], {
-		shell: process.platform === "win32",
-		...SMOKE_SERVER_SPAWN_TREE_OPTIONS,
-		cwd: webServerDir,
-		env: smokeHomeEnv(tempHome, {
-			...SMOKE_SERVER_AUTH_ENV,
+	fs.writeFileSync(marker, markerValue, { mode: 0o600 });
+	fs.writeFileSync(recorderLog, "", { mode: 0o600 });
+	const serverEnv = smokeHomeEnv(tempHome, {
+			EXXPERTS_AUTH_TOKEN: authToken,
+			THINKING_SWEEP_LAB: "1",
+			THINKING_SWEEP_MARKER: marker,
+			THINKING_SWEEP_MARKER_VALUE: markerValue,
 			PORT: String(port),
 			EXXETA_HOME: repoRoot,
 			EXXPERTS_CODING_AGENT_DIR: agentDir,
 			// An inherited room store would take the fake rooms; they belong in the temp home.
 			EXXETA_PERSISTENT_AGENTS_ROOT: path.join(tempHome, ".exxperts", "app", "personalized-agents"),
+			EXXPERTS_REAL_HOME: undefined,
 			OPENAI_API_KEY: undefined,
 			ANTHROPIC_API_KEY: undefined,
 			NODE_OPTIONS: `--import ${JSON.stringify(recorderUrl)}`,
 			THINKING_SWEEP_LOG: recorderLog,
 			THINKING_SWEEP_HOSTS: `127.0.0.1:${fakePort}`,
-		}) as NodeJS.ProcessEnv,
+		}) as NodeJS.ProcessEnv;
+	const launch = (env: NodeJS.ProcessEnv) => spawn("npx", ["tsx", "src/index.ts"], {
+		shell: process.platform === "win32",
+		...SMOKE_SERVER_SPAWN_TREE_OPTIONS, cwd: webServerDir, env,
 	}) as ChildProcessWithoutNullStreams;
+	for (const [label, overrides] of Object.entries({
+		"switch alone": { THINKING_SWEEP_MARKER: undefined, THINKING_SWEEP_MARKER_VALUE: undefined, NODE_OPTIONS: undefined, THINKING_SWEEP_HOSTS: undefined, THINKING_SWEEP_LOG: undefined },
+		"missing marker": { THINKING_SWEEP_MARKER: undefined },
+		"mismatched marker": { THINKING_SWEEP_MARKER_VALUE: "wrong" },
+		"marker outside home": { THINKING_SWEEP_MARKER: path.join(scriptDir, "thinking-levels-sweep-recorder.mjs") },
+		"malformed switch": { THINKING_SWEEP_LAB: "0" },
+		"missing preload": { NODE_OPTIONS: undefined },
+		"unrelated node option": { NODE_OPTIONS: "--no-warnings" },
+		"missing hosts": { THINKING_SWEEP_HOSTS: undefined },
+		"unwritable log": { THINKING_SWEEP_LOG: path.join(tempHome, "missing-folder", "log") },
+	})) {
+		const before = received.length;
+		const child = launch({ ...serverEnv, ...overrides });
+		server = child;
+		child.stdout.resume(); child.stderr.resume();
+		let started = false;
+		try { await waitForServer(child, base, 30_000); started = true; } catch {}
+		await stopSmokeServer(child);
+		server = null;
+		assert(!started && child.exitCode !== null && received.length === before, `${label} must fail startup before provider traffic`);
+	}
+	pass("partial lab configuration fails before provider traffic");
+	server = launch(serverEnv);
 	server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
 	server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
 	await waitForServer(server, base, 30_000);
@@ -256,13 +306,18 @@ console.log(JSON.stringify({ outcome, got }));`;
 	assert(keptLog.outcome === "sent" && keptLog.got === 1, `a call the recorder can log should leave: ${JSON.stringify(keptLog)}`);
 	pass("a call the recorder can no longer log is refused before it leaves, and one it can log is sent");
 
-	const sweepOptions = { base: proxyBase, token: SMOKE_AUTH_TOKEN, provider: "openai-compatible", route: "fake", log: recorderLog, out: tsvOut, maxUsd: 1 };
+	const profile = JSON.parse(fs.readFileSync(path.join(tempHome, ".exxperts", "app", "persistent-agent-ai-profile.json"), "utf8"));
+	const models = JSON.parse(fs.readFileSync(path.join(agentDir, "models.json"), "utf8"));
+	assert(profile.profileId === "openai-compatible" && models.providers[profile.profileId].baseUrl === `http://127.0.0.1:${fakePort}/v1` && server.exitCode === null, "the owned child must use the selected fake profile and endpoint");
+	const sweepOptions = { base: proxyBase, token: authToken, provider: "openai-compatible", route: "fake", log: recorderLog, out: tsvOut, maxUsd: 1 };
 	let badBudget = "";
 	await runSweep({ ...sweepOptions, maxUsd: Number.NaN }).catch((error: Error) => { badBudget = error.message; });
 	assert(/max-usd/.test(badBudget), `a budget that is not a number should be refused, got ${JSON.stringify(badBudget)}`);
 	pass("a budget that is not a number is refused before anything is sent");
 
 	const result = await runSweep({ ...sweepOptions, models: ["honest-model", "silent-model", "stubborn-model", "flaky-model", "tooler-model"] });
+
+	assert(suggestionRequests === 0, `lab must not launch suggestions, received ${suggestionRequests} suggestion requests`);
 
 	// --- The recorder reads the request as it left ---------------------------
 	const recorded = fs.readFileSync(recorderLog, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)).filter((line) => line.kind === "request");
@@ -333,6 +388,12 @@ console.log(JSON.stringify({ outcome, got }));`;
 	assert(broken.rows.length === 3 && broken.rows.every((row) => row.flags.some((flag) => flag.startsWith("timed out"))), `every broken-model rung should be stopped at its timeout: ${JSON.stringify(broken.rows.map((row) => row.flags))}`);
 	pass("a turn stopped while the room retries settles, is flagged, and the sweep goes on");
 
+	const allRecorded = fs.readFileSync(recorderLog, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)).filter((line) => line.kind === "request");
+	assert(allRecorded.length === received.length && allRecorded.every((request, index) => request.model === received[index].model && (request.sent.reasoning_effort ?? null) === received[index].reasoningEffort), "all fake provider receipts must match recorder requests through the final rung");
+	assert(suggestionRequests === 0 && !socketFrames.includes('"type":"suggestions"'), "lab must not send suggestion requests or frames, including after the final rung");
+	const usagePath = path.join(tempHome, ".exxperts", "app", "usage.jsonl");
+	assert(!fs.existsSync(usagePath) || !fs.readFileSync(usagePath, "utf8").includes('"suggestions"'), "lab must not record suggestion usage");
+	pass("the lab emits no suggestion requests, frames or usage");
 	console.log(`thinking-levels-sweep-smoke: ${passes} checks passed`);
 } catch (error) {
 	console.error(`thinking-levels-sweep-smoke FAILED: ${(error as Error).message}`);
@@ -342,5 +403,6 @@ console.log(JSON.stringify({ outcome, got }));`;
 	if (server) await stopSmokeServer(server);
 	proxy.close();
 	await new Promise<void>((resolve) => fakeProvider.close(() => resolve()));
-	try { fs.rmSync(tempHome, { recursive: true, force: true }); } catch {}
+	fs.rmSync(tempHome, { recursive: true, force: true });
+	assert(!fs.existsSync(tempHome), "temporary lab state must be removed");
 }

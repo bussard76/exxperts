@@ -196,6 +196,7 @@ import { STOP_CUT_ANSWER_SENTENCE, trackLiveConnection, STOP_QUESTIONS_SENTENCE,
 import { REPO_ROOT, roomLock, roomLockBusyInstruction, roomLockBusyStatus } from "./server-install-root.js";
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { readAppVersion } from "./whats-new.js";
 import { persistentAgentInstallationSection } from "./persistent-agent-constitution.js";
 import { DETACHED_TURN_LIMIT_MS, DETACHED_TURN_SILENCE_MS, detachedCookingRooms, type DetachedCookingTurnHandle, detachedCookingTurnHandles, OVERFLOW_RECOVERY_CEILING_MS, type PersistentRoomLiveSession, persistentRoomLiveSessions, REATTACH_REPLAY_CAP_BYTES, reattachBufferProbe, SWITCH_WHILE_ANSWERING_MESSAGE, TEST_INTROSPECTION_ENABLED } from "./room-live-sessions.js";
@@ -214,6 +215,22 @@ import { resolveExecutableSkillFiles, resolveLibrarySkillManifest, skillLibraryF
 import { logProviderCallFailed, recordUsage, recordWorkerUsage, safeConversationId } from "./usage-recording.js";
 import { getAvailablePersistentAgentAiProfiles } from "./persistent-agent-ai-profiles.js";
 import { stripProviderSearchFromModel } from "../../../pi-package/extensions/web-search/native-provider-search.js";
+
+const thinkingSweepLab = (() => {
+	const { THINKING_SWEEP_LAB: enabled, THINKING_SWEEP_MARKER: marker, THINKING_SWEEP_MARKER_VALUE: value, THINKING_SWEEP_LOG: log, THINKING_SWEEP_HOSTS: hosts, NODE_OPTIONS: options, HOME: home } = process.env;
+	if (enabled === undefined && marker === undefined && value === undefined) return false;
+	try {
+		const recorder = pathToFileURL(path.join(REPO_ROOT, "apps/web-server/scripts/thinking-levels-sweep-recorder.mjs")).href;
+		const preload = `--import ${JSON.stringify(recorder)}`;
+		if (enabled !== "1" || !home || !marker || !path.isAbsolute(marker) || !value || !log || !hosts?.split(",").some((host) => host.trim()) || !options?.split(/\s+(?=--)/).includes(preload)) throw new Error();
+		const relative = path.relative(fs.realpathSync(home), fs.realpathSync(marker));
+		if (!relative || relative.startsWith(`..${path.sep}`) || relative === ".." || path.isAbsolute(relative) || fs.readFileSync(marker, "utf8") !== value) throw new Error();
+		fs.closeSync(fs.openSync(log, "a"));
+		return true;
+	} catch {
+		throw new Error("invalid thinking sweep lab configuration");
+	}
+})();
 
 // Rooms that were written before the current constitution template keep the
 // words they were scaffolded with until something re-renders them, and the only
@@ -2387,7 +2404,7 @@ ${lines.join("\n")}`;
 			if (event.type === "agent_end" && !retrying && lastAttempt?.role === "assistant" && lastAttempt.stopReason !== "error" && lastAttempt.stopReason !== "aborted" && !emptyAnswer(lastAttempt) && activePersistentWebTurn && !activePersistentWebTurn.terminalReason && !activePersistentWebTurn.answerCompleted && suggestionVersions.get(answerNoteKey()) === activePersistentWebTurn.suggestionVersion) {
 				activePersistentWebTurn.answerCompleted = true;
 				sendAnswerLifecycle("complete", activePersistentWebTurn.answerId);
-				generateSuggestions(activePersistentWebTurn.answerId, lastAttempt.provider, activePersistentWebTurn.suggestionPrompt, activePersistentWebTurn.suggestionAnswer);
+				if (!thinkingSweepLab) generateSuggestions(activePersistentWebTurn.answerId, lastAttempt.provider, activePersistentWebTurn.suggestionPrompt, activePersistentWebTurn.suggestionAnswer);
 			}
 			// A failed auto-compaction used to vanish here: the client ignores the
 			// event, nothing was logged, and the room quietly paid for the same
