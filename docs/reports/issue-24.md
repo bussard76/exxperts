@@ -32,7 +32,7 @@ At that earlier checkpoint, no product code or tests had changed. The pre-existi
 
 Architecture impact: level 3, server-owned generation and existing room socket; ADR-0009 and the passing fourth architecture review authorize the specified flow.
 
-- [ ] Allocate a fresh answer ID per logical answer, preserving it across retries and detached adoption; publish ordered live invalidation and successful completion only to the leading socket, outside replay. Automatic retry and adoption are covered; manual continue identity awaits the clarification below.
+- [x] Allocate a fresh answer ID per logical answer, preserving it across retries and detached adoption; publish ordered live invalidation and successful completion only to the leading socket, outside replay. Front clarified manual continue is a new logical answer, as recorded below.
 - [x] Generate once only after a successful final answer with a leader; suppress failed, stopped, retry-intermediate and unled background answers, and cancel stale work on prompts, starts, deletion and replacement.
 - [x] Select the answering provider's configured absorb model, without provider substitution; use a tool-less fake-tested call with 200 output tokens and a 10-second deadline.
 - [x] Supply at most three completed text-only exchanges within 4,000 string units, excluding other content; account usage as suggestions and do not log content or persist results.
@@ -97,6 +97,13 @@ Assumptions: the accepted producer/socket seam is the test boundary; only provab
 Debt candidate (`tests`, low): a background answer's internal non-serialized ID cannot be observed at the socket because an unled background answer sends no lifecycle frames; the scheduled no-call/no-replay test covers its observable behavior, and the shared allocation is checked by inspection. The Controller will arrange the independent Tester and level-3 conformance review; Slice 2 and Slice 3 remain separate follow-up work.
 
 
-## Remaining answer-identity clarification
+## Historical answer-identity question (resolved 2026-11-27)
 
 The accepted spec says an answer ID stays the same across retries. Automatic retries within a running turn retain the ID and the socket smoke covers their single successful completion, but the app's manual Try again sends `continue` after the failed turn has finished and starts a fresh turn; the current producer allocates a fresh answer ID there. It is unclear whether that manually continued turn is the same logical answer for the accepted ID contract or a new logical answer. The failed ID is deliberately internal and no completion frame is published for the failed attempt, so its equality with the eventual success is not observable at the specified socket seam without a further test seam. The Controller/Architect must clarify manual-continue identity and how to verify it without expanding the approved public interface; Slice 1 remains unfinished pending that answer. The same-producer manual-continue test already proves the successful result uses the original prompt.
+
+
+## Manual continue decision and verification
+
+Front decided on 2026-11-27, implementing Sascha's Q01 and the approved identity contract: manual Try again/continue after a fully ended failed turn starts a new logical answer with a fresh private answer ID. Automatic retries inside a turn and detached adoption retain the original ID. No implementation change or new public seam, frame, persistence or diagnostic content was needed.
+
+`suggestions-producer-smoke.ts` checks that the failed attempt produces neither a successful completion nor suggestions, and that manual continue yields exactly one live completion before its matching suggestion, with the original proven user prompt. The failed ID is deliberately unpublished, so its allocation and the fresh allocation at manual continue are verified by inspection of `beginPersistentAgentTurn` and the socket's continue path; they cannot be compared through the existing socket contract. This is the observability limit accepted by Front, not a claim of direct socket proof.

@@ -228,6 +228,8 @@ try {
 		for (const entry of gatewayRequests.slice(failedBefore)) if (entry.slow && !entry.finished && !entry.aborted) entry.fail();
 		return (await getStatus(continuedRoom)).activeThread?.inFlight === false;
 	}, "failed answer settles", 90000);
+	assert(!continued.frames.some((frame) => frame.type === "answer_lifecycle" && frame.phase === "complete"), "the failed attempt publishes no successful completion");
+	assert(!continued.frames.some((frame) => frame.type === "suggestions") && !gatewayRequests.slice(failedBefore).some((entry) => entry.suggestion), "the failed attempt produces no suggestions");
 	await putThread(continuedRoom, continuedThread, [{ kind: "user", id: "continue-user", text: continuedPrompt }, { kind: "assistant", id: "continue-partial", text: "slow part 1." }]);
 	const continueFrom = continued.frames.length;
 	const continueBefore = gatewayRequests.length;
@@ -235,7 +237,8 @@ try {
 	await waitUntil(() => gatewayRequests.slice(continueBefore).some((entry) => entry.slow && !entry.suggestion), "continued model request", 30000);
 	gatewayRequests.slice(continueBefore).find((entry) => entry.slow && !entry.suggestion)!.release();
 	const continuedComplete = await continued.waitFor((frame) => frame.type === "answer_lifecycle" && frame.phase === "complete", "continued completion", continueFrom, 30000);
-	await continued.waitFor((frame) => frame.type === "suggestions", "continued suggestions", continuedComplete);
+	const continuedResult = await continued.waitFor((frame) => frame.type === "suggestions", "continued suggestions", continuedComplete);
+	assert(continued.frames[continuedResult].answerId === continued.frames[continuedComplete].answerId && continued.frames.filter((frame) => frame.type === "answer_lifecycle" && frame.phase === "complete").length === 1, "the manual retry publishes one live completion before its matching result");
 	const continuedContext = JSON.stringify(gatewayRequests.slice(continueBefore).find((entry) => entry.suggestion)?.request?.messages);
 	assert(continuedContext.includes(continuedPrompt), "a successful continued answer uses the original user prompt in suggestion context");
 
