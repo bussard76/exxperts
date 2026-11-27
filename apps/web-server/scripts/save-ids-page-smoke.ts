@@ -168,16 +168,24 @@ const splitRetryAwayAttempts = new Map<string, number>();
 
 // The open gated answer: the smoke sends its parts with release() and ends it with modelDone() or modelStep().
 let open: { res: http.ServerResponse; sent: number; model: string } | null = null;
+let suggestionCalls = 0;
 const endpoint = http.createServer((req, res) => {
 	let raw = "";
 	req.on("data", (chunk) => { raw += chunk; });
 	req.on("end", () => {
 		const body = JSON.parse(raw || "{}");
+		const suggestion = JSON.stringify(body.system ?? "").includes("Generate next prompt suggestions");
+		if (suggestion) suggestionCalls += 1;
 		const model = String(body.model ?? "");
 		res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
 		const messages: any[] = Array.isArray(body.messages) ? body.messages : [];
 		const last = messages.at(-1);
 		startMessage(res, model);
+		if (suggestion) {
+			sse(res, "content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: '["Ask another question"]' } });
+			end(res);
+			return;
+		}
 		// The step's result is back: the answer goes on below it.
 		if (Array.isArray(last?.content) && last.content.some((part: any) => part?.type === "tool_result")) {
 			sse(res, "content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: AFTER_STEP } });
@@ -527,6 +535,8 @@ try {
 			release(2);
 			modelDone();
 			await turnOver(page);
+			await waitUntil(() => suggestionCalls > 0, "the suggestion request arrives");
+			if (open !== null) throw new Error("the suggestion must not occupy the held chat response");
 			await waitUntil(() => lineShown(page, 4), "the whole first answer is on screen");
 			await type(page, `Next question ${GATED}`);
 			await waitUntil(() => open !== null, "the next answer has begun");
