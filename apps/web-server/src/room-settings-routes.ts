@@ -126,7 +126,8 @@ async function workspaceAssociation(file: string): Promise<WorkspaceAssociation 
 		}
 		if (fields.Type !== "Application" || (fields.Terminal && fields.Terminal !== "false") || (fields.DBusActivatable && fields.DBusActivatable !== "false") || (fields.Hidden && fields.Hidden !== "false") || fields.TryExec || fields.OnlyShowIn || fields.NotShowIn || !fields.MimeType?.split(";").includes(mime) || !fields.Exec || !fields.Path || !path.isAbsolute(fields.Path) || /[\\%]/.test(fields.Path)) return null;
 		const parts = fields.Exec.split(/ +/);
-		if (parts.length !== 2 || !path.isAbsolute(parts[0]) || !["%f", "%u"].includes(parts[1]) || !/^[A-Za-z0-9_./+:-]+$/.test(parts[0])) return null;
+		const placeholders = parts.slice(1).filter((part) => part === "%f" || part === "%u");
+		if (parts.length < 2 || placeholders.length !== 1 || !path.isAbsolute(parts[0]) || !/^[A-Za-z0-9_./+:-]+$/.test(parts[0]) || parts.slice(1).some((part) => !["%f", "%u"].includes(part) && !/^[A-Za-z0-9_./+:-]+$/.test(part))) return null;
 		const executable = fs.realpathSync(parts[0]), workingDirectory = fs.realpathSync(fields.Path);
 		const executableStat = fs.statSync(executable, { bigint: true }), cwdStat = fs.statSync(workingDirectory, { bigint: true });
 		if (!executableStat.isFile() || !cwdStat.isDirectory()) return null;
@@ -139,9 +140,10 @@ async function workspaceAssociation(file: string): Promise<WorkspaceAssociation 
 			const opened = fs.fstatSync(fd, { bigint: true });
 			if (opened.dev !== executableStat.dev || opened.ino !== executableStat.ino || opened.size !== executableStat.size || opened.mtimeNs !== executableStat.mtimeNs || opened.ctimeNs !== executableStat.ctimeNs || fs.readSync(fd, magic, 0, 4, 0) !== 4 || !magic.equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) return null;
 		} finally { fs.closeSync(fd); }
-		if (connectorStartRefusal({ command: executable, args: [], cwd: workingDirectory }, places)) return null;
+		const argument = placeholders[0] === "%u" ? pathToFileURL(file).href : file;
+		const args = parts.slice(1).map((part) => part === "%f" || part === "%u" ? argument : part);
+		if (args.filter((part) => part === argument || part === file).length !== 1 || connectorStartRefusal({ command: executable, args, cwd: workingDirectory }, places)) return null;
 		const stamp = (stat: fs.BigIntStats) => [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].map(String);
-		const args = [parts[1] === "%u" ? pathToFileURL(file).href : file];
 		return { executable, workingDirectory, args, identity: JSON.stringify({ mime, id, desktop, source, desktopStat: stamp(desktopStat), executableStat: stamp(executableStat), cwdStat: stamp(cwdStat) }) };
 	} catch { return null; }
 }
@@ -820,13 +822,13 @@ app.post("/api/persistent-agents/:id/workspace-open", async (req, reply) => {
 				if (!second || JSON.stringify(first) !== JSON.stringify(second)) return refuse(403, "association_unverified");
 				await snapshot.recheck();
 				const places = await roomWritePlaces();
-				if (connectorStartRefusal({ command: second.executable, args: [], cwd: second.workingDirectory }, places)) return refuse(403, "association_unverified");
+				if (connectorStartRefusal({ command: second.executable, args: second.args, cwd: second.workingDirectory }, places)) return refuse(403, "association_unverified");
 				await snapshot.recheck();
 				const final = await workspaceAssociation(snapshot.real);
 				if (!final || JSON.stringify(second) !== JSON.stringify(final)) return refuse(403, "association_unverified");
 				await snapshot.recheck();
 				const finalPlaces = await roomWritePlaces();
-				if (connectorStartRefusal({ command: final.executable, args: [], cwd: final.workingDirectory }, finalPlaces)) return refuse(403, "association_unverified");
+				if (connectorStartRefusal({ command: final.executable, args: final.args, cwd: final.workingDirectory }, finalPlaces)) return refuse(403, "association_unverified");
 				await snapshot.recheck();
 				const result = await dispatchWorkspaceAssociation(final, controller.signal);
 				return result === "accepted" ? reply.code(202).send({ accepted: true }) : refuse(result === "open_timeout" ? 504 : result === "opener_unavailable" ? 503 : 500, result);

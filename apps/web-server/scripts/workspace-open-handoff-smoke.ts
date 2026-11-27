@@ -90,6 +90,10 @@ try {
 	fs.writeFileSync(desktop, `[Desktop Entry]\nType=Application\nName=Invented\nMimeType=text/plain;\nExec=${binary} %u\nPath=${cwd}\n`);
 	const uriOpen = await request();
 	if (uriOpen.statusCode !== 202 || Number(dispatches) !== 3 || launched?.args.length !== 1 || launched.args[0] !== pathToFileURL(fs.realpathSync(path.join(folder, "invented.txt"))).href) throw new Error("URI placeholder must name exactly the authorized local file");
+	queries = 0;
+	fs.writeFileSync(desktop, `[Desktop Entry]\nType=Application\nName=Invented\nMimeType=text/plain;\nExec=${binary} --invented-mode %f\nPath=${cwd}\n`);
+	const literalArgument = await request();
+	if (literalArgument.statusCode !== 202 || Number(dispatches) !== 4 || Number(launched?.args.length) !== 2 || launched?.args[0] !== "--invented-mode" || launched.args[1] !== fs.realpathSync(path.join(folder, "invented.txt"))) throw new Error("unambiguous literal arguments must be bound and preserved");
 	console.log("workspace checked open handoff smoke passed");
 } finally {
 	childProcess.execFile = originalExecFile; childProcess.spawn = originalSpawn; syncBuiltinESMExports();
