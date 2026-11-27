@@ -83,6 +83,7 @@ function lastUserText(body: any): string {
 
 // Every user message each request carried, in order.
 export const requestUserTexts: string[][] = [];
+export const suggestionUserTexts: string[][] = [];
 function allUserTexts(body: any): string[] {
 	const messages = Array.isArray(body?.messages) ? body.messages : [];
 	return messages.filter((message: any) => message?.role === "user").map((message: any) => (typeof message.content === "string" ? message.content : Array.isArray(message.content) ? message.content.map((part: any) => (typeof part?.text === "string" ? part.text : "")).join("") : ""));
@@ -104,9 +105,11 @@ const endpoint = http.createServer((req, res) => {
 	req.on("data", (chunk) => { raw += chunk; });
 	req.on("end", async () => {
 		const body = JSON.parse(raw || "{}");
-		requestUserTexts.push(allUserTexts(body));
-		const answer = scripted(lastUserText(body));
-		if (heldAnswers && /while I step out/i.test(lastUserText(body))) {
+		const suggestion = JSON.stringify(body.system ?? "").includes("Generate next prompt suggestions");
+		if (suggestion) suggestionUserTexts.push(allUserTexts(body));
+		else requestUserTexts.push(allUserTexts(body));
+		const answer = suggestion ? "text" : scripted(lastUserText(body));
+		if (!suggestion && heldAnswers && /while I step out/i.test(lastUserText(body))) {
 			await heldAnswers;
 			if (res.destroyed) return;
 		}
@@ -143,7 +146,7 @@ const endpoint = http.createServer((req, res) => {
 		res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
 		sse(res, "message_start", { type: "message_start", message: { id: "msg_smoke", type: "message", role: "assistant", model: body.model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 100, output_tokens: 1 } } });
 		sse(res, "content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
-		sse(res, "content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: `Answer from ${body.model}.` } });
+		sse(res, "content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: suggestion ? '["Ask another question"]' : `Answer from ${body.model}.` } });
 		sse(res, "content_block_stop", { type: "content_block_stop", index: 0 });
 		sse(res, "message_delta", { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 20 } });
 		sse(res, "message_stop", { type: "message_stop" });

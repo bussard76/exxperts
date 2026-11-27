@@ -24,7 +24,7 @@
 //   no step and no question; one that stays above (a file note) still lands
 //   its steps.
 import { authedFetch } from "./smoke-server-process.js";
-import { answerNow, assert, closeFailureRoom, MODEL_NAME, ON_KEY, openFailureRoom, requestUserTexts, SECOND, waitUntil } from "./room-failed-message-returns-setup.js";
+import { answerNow, assert, closeFailureRoom, MODEL_NAME, ON_KEY, openFailureRoom, requestUserTexts, SECOND, suggestionUserTexts, waitUntil } from "./room-failed-message-returns-setup.js";
 
 const { page, composer, agentId, baseUrl, retryWaits, sendToPage, continueAnswer, holdAnswers, open, stepOut, errorTexts, causes, answerBelowNewestLine, bubbles, status, settled, send, ask, isReturned, retryNotes, returnedSaved } = await openFailureRoom();
 try {
@@ -35,6 +35,8 @@ try {
 	await send("And now a fine question.");
 	await page.getByText("Answer from claude-haiku-5-5.").first().waitFor({ timeout: 20000 });
 	await settled();
+	await waitUntil(() => suggestionUserTexts.length > 0, "the suggestion request arrives");
+	assert(!requestUserTexts.some((texts) => texts === suggestionUserTexts[0] || JSON.stringify(texts) === JSON.stringify(suggestionUserTexts[0])), "suggestion requests must be captured separately from chat requests");
 	const fineRequest = requestUserTexts.at(-1) ?? [];
 	assert(fineRequest.some((text) => text.includes("And now a fine question.")) && !fineRequest.some((text) => text.includes("odd request")), `the next request no longer carries the failed message, got ${JSON.stringify(fineRequest)}`);
 	console.log("  ok  a failed message goes back in the box, and the next request no longer carries it");
