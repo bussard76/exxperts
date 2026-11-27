@@ -83,6 +83,7 @@ const MID = { provider: "fake-gpt", model: "mid-fake" };
 const GATEWAY_MODEL_NAME = "Finance \u2014 EU";
 const COMPRESSION_MARK = "Checkpoint Compression Constitution";
 const requests: Array<{ model: string; raw: string; asked: string }> = [];
+const suggestionRequests: Array<{ model: string; raw: string; asked: string }> = [];
 // The text of the last user message a request carries: what that answer answers.
 function lastUserText(body: any): string {
 	const messages = Array.isArray(body?.messages) ? body.messages : [];
@@ -119,10 +120,13 @@ const providers = http.createServer((req, res) => {
 	req.on("data", (chunk) => { raw += chunk; });
 	req.on("end", async () => {
 		const body = JSON.parse(raw || "{}");
-		requests.push({ model: String(body.model), raw, asked: lastUserText(body) });
+		const request = { model: String(body.model), raw, asked: lastUserText(body) };
+		const suggestion = JSON.stringify(body.system ?? "").includes("Generate next prompt suggestions") || (body.messages ?? []).some((message: any) => (message.role === "system" || message.role === "developer") && JSON.stringify(message.content).includes("Generate next prompt suggestions"));
+		if (suggestion) suggestionRequests.push(request);
+		else requests.push(request);
 		const remembering = raw.includes(COMPRESSION_MARK);
-		const text = remembering ? "TITLE:\nPicked a model\n\nSESSION_ARC:\nTalked, then picked a model.\n\nBODY:\n- Picked.\n\nPARKED:\nNone\n" : `Answer from ${body.model}.`;
-		const held = remembering ? null : gate;
+		const text = suggestion ? '["Ask another question"]' : remembering ? "TITLE:\nPicked a model\n\nSESSION_ARC:\nTalked, then picked a model.\n\nBODY:\n- Picked.\n\nPARKED:\nNone\n" : `Answer from ${body.model}.`;
+		const held = remembering || suggestion ? null : gate;
 		if (remembering && rememberGate) await rememberGate.opened;
 		if (remembering && refuseRemember) {
 			res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: { message: "Synthetic refusal of this read.", type: "invalid_request_error" } }));
@@ -913,6 +917,8 @@ try {
 		await composer.press("Enter");
 	}
 	await page.getByText("Answer from gpt-fake.").waitFor({ timeout: 20000 });
+	await waitUntil(() => suggestionRequests.length > 0, "the suggestion request arrives");
+	assert(!suggestionRequests.some((request) => requests.includes(request)), "suggestions are separate from model-selection requests");
 	const held = requests.filter((request) => request.asked.includes("Second question, held"));
 	const third = requests.filter((request) => request.asked.includes("Third question, sent as the answer ends"));
 	assert(held.length > 0 && held.every((request) => request.model === CLAUDE.model), `the held answer ran on Claude, got ${JSON.stringify(held.map((r) => r.model))}`);
