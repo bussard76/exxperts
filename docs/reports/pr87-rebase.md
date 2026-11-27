@@ -20,6 +20,8 @@ A second synthetic identity test first failed when the executable changed after 
 
 The same public route test simulates macOS Launch Services and Windows association APIs using fake native calls. Each case first failed because its platform lookup was absent; the Mac case now queries the default application and bundle executable behind a fake current RoomBox, and the Windows case queries the open command and executable. Both return `association_unverified` with zero handoffs because this implementation cannot verify the actual launch working directory. These are synthetic Linux-hosted API checks, not native platform measurements or valid platform handoff evidence.
 
+The concrete remaining boundary is the launch working directory. The pinned Windows source passes `lpDirectory: null` to `ShellExecuteExW`, while the reviewed spec refuses implicit working-directory forms; `AssocQueryStringW` supplies the command and executable but this implementation has no verified source for an explicit actual `lpDirectory`. The pinned Mac source invokes `/usr/bin/open` without a bound application working directory; the Launch Services application URL and bundle executable do not by themselves establish that directory. No native direct handoff can be claimed until a reviewed, verifiable method establishes the actual directory and binds it to direct dispatch, or Front resolves whether refusing these implicit cases satisfies the intended platform behavior. Both paths currently refuse safely.
+
 The target bundle originally omitted the approved on-demand `koffi` package, `docx-preview` and `exceljs`; new package-retention tests failed before the payload inventory was corrected. The original test rejecting an unconditional `koffi` import remains intact, and the native dependency stays on demand. A targeted `node scripts/bundle-server.mjs --out apps/web-server/dist-t87` then passed (17.3 MB, 4,275 input files); its generated folder was removed. This is a server bundle check, not the full build or the desktop payload-size and platform checks.
 
 The guarded route test initially failed for an invented Linux filename with a colon that is not a URI. The four route validators now retain POSIX names of that form while rejecting URI schemes and Windows colon paths; the public listing, text, image and fake-handoff cases pass, along with URI refusals and a simulated Windows refusal before association lookup. The affected script run passed 106/106.
@@ -47,6 +49,8 @@ The bounded read also retains the target's `openedFile` closed-file checks for l
 On an isolated Mac test account, check out the final reviewed contribution candidate at its reported SHA, verify it is based on v0.16.2 `b898e851813b4da0211e6a049e9537160391091f`, and use no personal workspace or real provider credentials. Install only with `EXXETA_SKIP_BROWSER_INSTALL=1 npm ci` and normal lifecycle scripts; use an already available Chromium and the project's normal sandbox prerequisites. Run `GATE_TASK='T87-REBASE-IMPLEMENTATION' GATE_WORKER='t87-rebase-implementation' GATE_ROLE='Developer' GATE_AGENT='codex' GATE_MODEL='gpt-6.1-terra' gate npx tsx apps/web-server/scripts/workspace-local-real-app-ui-smoke.ts`. That smoke creates a disposable HOME, invented room, workbook and fake provider endpoint; it must exercise a real owning RoomBox and the denial after clearing the grant. Record the exact SHA, macOS version, filesystem/provider, test output and sandbox availability; if the box or browser is unavailable, report the case unmeasured. Do not commit screenshots or binaries; any captures stay under `.build/screenshots/`. Native Mac results are not asserted by the Linux simulated-box checks.
 
 Source PR head `5fcffe1036b2d6f867d6583b29822c4985d36fba`; upstream target `b898e851813b4da0211e6a049e9537160391091f`. The implementation branch starts at that target and contains no fork ancestry. The reviewed spec is at `ba39775b9fe55b2d47075d250fb4783298946317`; the binding amendment review is at `7ff65c77c1a4037ae2d747d87a21c1ca8344992d`. These documents remain on separate local evidence branches.
+
+At checkpoint `d31087a`, `git merge-base --is-ancestor b898e851813b4da0211e6a049e9537160391091f HEAD` succeeded. The target-relative diff excluding the two fork evidence reports contained 69 files; the only changed `docs/` files were those two reports. This demonstrates ancestry and the evidence-file boundary at that checkpoint, not a completed clean contribution replay.
 
 ## Architecture impact
 
@@ -410,19 +414,25 @@ The coordinator reconciled review precision 1 with pinned source `openWorkspaceF
 
 ## Interim acceptance audit
 
-This is a working audit, not the final self-review: unchecked server and platform obligations must be implemented and rechecked before a contribution is ready.
+This is a working audit, not the final self-review. Earlier checkpoints are historical; the current state and remaining gaps are recorded here and at the start of this report.
+
+The nine affected route and ownership script files, together with the fixed script-runner suites, passed 111/111 on Linux after the latest route and packaging changes. The attributed real Linux app XLSX browser check also passed again. These results do not close the native and final-audit gaps below.
+
+The spreadsheet, PDF, Word, snapshot-validation and shared-preview-race scripts, together with the fixed script-runner suites, passed 107/107 on Linux after the package-retention change.
 
 | Reviewed obligation | Current evidence and gap |
 | --- | --- |
 | Source and target pins, clean ancestry | Pins last rechecked as recorded above; recheck before publication, exclude evidence files from the contribution, and show final target-relative diff and ancestry. |
-| Workspace listing, policies, paths, root identity and current owner | `persistent-room-workspace-default-api-smoke.ts`, `workspace-listing-box-refusal-smoke.ts` and `workspace-listing-box-race-smoke.ts` contain public-route evidence; configured-root positive case is currently red and the pre-request root replacement decision is pending. Rewire only after that decision and rerun all cases, including refusal and race assertions. |
-| Bounded protected bytes, current policy and identity | Not complete; no working image, preview or open route may fall back to host reads. Reauthorization and read races remain to be proven through public routes. |
-| Spreadsheet, PDF and Word private workers | `workspace-spreadsheet-snapshot-smoke.ts`, `workspace-pdf-snapshot-smoke.ts`, `workspace-word-snapshot-smoke.ts` and `workspace-snapshot-validation-smoke.ts` exercise invented snapshots, limits, parser validation and cleanup. Real guarded-route acceptance remains outstanding. |
-| UI formats, tree, tabs, stale responses and sandbox | `workspace-spreadsheet-component-ui-smoke.ts`, `workspace-document-components-ui-smoke.ts`, `workspace-text-html-components-ui-smoke.ts`, `workspace-image-component-ui-smoke.ts`, `workspace-pptx-component-ui-smoke.ts`, `workspace-file-browser-ui-smoke.ts` and `workspace-file-tabs-ui-smoke.ts` pass with intercepted invented inputs; actual server-backed format and PPTX frame checks remain outstanding. |
-| App selection and local-only control | `workspace-app-integration-ui-smoke.ts` and `workspace-local-action-context-ui-smoke.ts` pass with invented intercepted inputs. Direct unsupported-preview behavior, real authorization and handoff remain outstanding. |
-| Explicit open and protected direct dispatch | Not implemented; host, origin, proxy, remote and shared refusals, association and cwd binding, repeat authorization, zero-dispatch refusals and a fake verified handoff remain required. |
+| Grant parity and aliases | `workspace-grant-parity-api-smoke.ts` exercises a real settings selection, an older path-only grant, unknown fields, eligible alias, listing, image and preview. Persistent identity, APFS qualification and between-request same-path replacement remain deferred to #25; earlier contrary checkpoints are superseded. |
+| Listing, policy, paths and current owner | `persistent-room-workspace-default-api-smoke.ts`, `workspace-listing-box-refusal-smoke.ts`, `workspace-listing-box-race-smoke.ts` and `workspace-shared-listing-smoke.ts` exercise guarded listing, empty state, path restrictions, fake box ownership, invalidation, replacement and revocation. Native box execution is not established by the fakes. |
+| Bounded bytes, current policy and identity | `workspace-box-preview-smoke.ts`, `workspace-preview-folder-wait-smoke.ts` and `workspace-shared-preview-race-smoke.ts` cover fake box ownership, waits, read/parser invalidation, policy and file races; `workspace-local-real-app-ui-smoke.ts` exercises a real Linux guarded XLSX route. Native Mac/Windows paths are unmeasured. |
+| Format and worker bounds | `workspace-spreadsheet-snapshot-smoke.ts`, `workspace-pdf-snapshot-smoke.ts`, `workspace-word-snapshot-smoke.ts` and `workspace-snapshot-validation-smoke.ts` exercise invented snapshots, parser validation, limits and cleanup; `workspace-shared-listing-smoke.ts` covers text, HTML, image and presentation routes. A final case-by-case check of the complete reviewed format/error matrix is still required. |
+| UI formats, tree, tabs, frames and stale responses | `workspace-spreadsheet-component-ui-smoke.ts`, `workspace-document-components-ui-smoke.ts`, `workspace-text-html-components-ui-smoke.ts`, `workspace-image-component-ui-smoke.ts`, `workspace-pptx-component-ui-smoke.ts`, `workspace-file-browser-ui-smoke.ts` and `workspace-file-tabs-ui-smoke.ts` use invented inputs. `workspace-shared-frame-ui-smoke.ts` covers the real Linux Chromium presentation frame transfer and render. |
+| Actual browser-to-worker path | `workspace-local-real-app-ui-smoke.ts` selected and rendered an invented XLSX through the actual Linux app, guarded route and ExcelJS worker, and checked revocation. The corresponding native Mac RoomBox path is not yet measured; the exact safe Front task is above. |
+| App selection and local-only control | `workspace-app-integration-ui-smoke.ts` and `workspace-local-action-context-ui-smoke.ts` exercise selection, unsupported tabs and context visibility with invented inputs; the Linux actual app check also exercises authorization. |
+| Explicit open and protected direct dispatch | `workspace-open-refusal-smoke.ts` and `workspace-open-handoff-smoke.ts` cover route refusals, Linux fake verified handoff, changed policy/file/association, unsafe executable/cwd, placeholders, unavailable/error/timeout and zero extra handoffs. Fake native lookups refuse because Mac and Windows launch working directories are not bound; valid native direct handoff remains open. |
 | Dependency closure and audit | Reconciled approved feature closure and lock-only audit are recorded above; repeat after any dependency changes and include the identified engine and audit debt in final review. |
-| Developer checks and independent stages | UI/scripts typechecks and the targeted checks reported above passed on Linux; rerun affected suites and actual browser acceptance after implementation. Mac/Windows, independent Tester, conformance, CI and Front draft update remain outstanding; no full gate or cross-platform result is claimed. |
+| Developer checks and independent stages | UI/scripts typechecks, targeted script runs and actual browser acceptance reported above passed on Linux. Final affected checks, native Mac/Windows, independent Tester, conformance, CI and Front draft update remain outstanding; no full gate or cross-platform result is claimed. |
 
 ## Grant identity amendment: refusal checkpoint
 
@@ -455,3 +465,112 @@ Attributed `workspace-shared-real-app-ui-smoke.ts` now runs the actual app again
 The public grant refusal smoke now restarts the disposable server and checks that an unqualified stored identity remains unchanged and refused, with no identity fields in the view or captured server logs. This is restart refusal evidence; it does not establish a working selected grant or device stability across restart/remount.
 
 The attributed folder-location recovery browser test also checks a failed read after a lost typed save: the pane reports that it cannot load and offers retry instead of declaring success.
+
+## Checkpoint file inventory
+
+At implementation checkpoint d31087a, the target-relative paths below are changed; the two report paths are fork evidence and are excluded from the intended contribution replay.
+
+- `apps/web-server/package.json`
+- `apps/web-server/scripts/persistent-room-workspace-default-api-smoke.ts`
+- `apps/web-server/scripts/workspace-app-integration-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-box-preview-smoke.ts`
+- `apps/web-server/scripts/workspace-composer-drop-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-document-components-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-file-browser-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-file-tabs-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-grant-parity-api-smoke.ts`
+- `apps/web-server/scripts/workspace-image-component-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-listing-box-race-smoke.ts`
+- `apps/web-server/scripts/workspace-listing-box-refusal-smoke.ts`
+- `apps/web-server/scripts/workspace-local-action-context-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-local-real-app-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-location-recovery-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-open-handoff-smoke.ts`
+- `apps/web-server/scripts/workspace-open-refusal-smoke.ts`
+- `apps/web-server/scripts/workspace-pdf-snapshot-smoke.ts`
+- `apps/web-server/scripts/workspace-pptx-component-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-preview-folder-wait-smoke.ts`
+- `apps/web-server/scripts/workspace-shared-frame-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-shared-listing-smoke.ts`
+- `apps/web-server/scripts/workspace-shared-preview-race-smoke.ts`
+- `apps/web-server/scripts/workspace-shared-real-app-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-sidebar-resize-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-sidebar-slot-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-snapshot-validation-smoke.ts`
+- `apps/web-server/scripts/workspace-spreadsheet-component-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-spreadsheet-snapshot-smoke.ts`
+- `apps/web-server/scripts/workspace-text-html-components-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-word-snapshot-smoke.ts`
+- `apps/web-server/src/persistent-room-shelf-reading.ts`
+- `apps/web-server/src/persistent-room-workspace-tools.ts`
+- `apps/web-server/src/remote-route-policy.ts`
+- `apps/web-server/src/room-box/box-files.ts`
+- `apps/web-server/src/room-box/file-worker.mjs`
+- `apps/web-server/src/room-live-sessions.ts`
+- `apps/web-server/src/room-settings-routes.ts`
+- `apps/web-server/src/room-socket.ts`
+- `apps/web-server/src/shelf-parse-worker.mjs`
+- `apps/web-ui/package.json`
+- `apps/web-ui/public/pptx-notices/LICENSE`
+- `apps/web-ui/public/pptx-notices/THIRD_PARTY_NOTICES.md`
+- `apps/web-ui/public/pptx-notices/licenses/ECMA-text-copyright-notice.txt`
+- `apps/web-ui/public/pptx-notices/licenses/mtx-decompressor-MPL-2.0.txt`
+- `apps/web-ui/src/App.tsx`
+- `apps/web-ui/src/components/Sidebar.tsx`
+- `apps/web-ui/src/components/WorkspaceFileBrowser.tsx`
+- `apps/web-ui/src/components/WorkspaceFileTabs.tsx`
+- `apps/web-ui/src/components/WorkspaceFramedPreview.tsx`
+- `apps/web-ui/src/components/WorkspaceHtmlPreview.tsx`
+- `apps/web-ui/src/components/WorkspaceImagePreview.tsx`
+- `apps/web-ui/src/components/WorkspacePdfPreview.tsx`
+- `apps/web-ui/src/components/WorkspaceSpreadsheetPreview.tsx`
+- `apps/web-ui/src/components/WorkspaceTextPreview.tsx`
+- `apps/web-ui/src/components/WorkspaceWordPreview.tsx`
+- `apps/web-ui/src/components/in-room-chat.tsx`
+- `apps/web-ui/src/components/workspace-hover-tooltip.tsx`
+- `apps/web-ui/src/composer-text-insertion.ts`
+- `apps/web-ui/src/pptx-frame-entry.ts`
+- `apps/web-ui/src/remote-client-context.ts`
+- `apps/web-ui/src/styles.css`
+- `apps/web-ui/src/styles/43-room-workspace.css`
+- `apps/web-ui/src/workspace-files-api.ts`
+- `docs/reports/issue-docs/tasks/T87-REBASE.md.md`
+- `docs/reports/pr87-rebase.md`
+- `package-lock.json`
+- `package.json`
+- `scripts/bundle-server.mjs`
+- `scripts/bundle-server.test.mjs`
+- `scripts/pptx-notice.test.mjs`
+
+Added test files at that checkpoint:
+
+- `apps/web-server/scripts/workspace-app-integration-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-box-preview-smoke.ts`
+- `apps/web-server/scripts/workspace-composer-drop-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-document-components-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-file-browser-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-file-tabs-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-grant-parity-api-smoke.ts`
+- `apps/web-server/scripts/workspace-image-component-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-listing-box-race-smoke.ts`
+- `apps/web-server/scripts/workspace-listing-box-refusal-smoke.ts`
+- `apps/web-server/scripts/workspace-local-action-context-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-local-real-app-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-location-recovery-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-open-handoff-smoke.ts`
+- `apps/web-server/scripts/workspace-open-refusal-smoke.ts`
+- `apps/web-server/scripts/workspace-pdf-snapshot-smoke.ts`
+- `apps/web-server/scripts/workspace-pptx-component-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-preview-folder-wait-smoke.ts`
+- `apps/web-server/scripts/workspace-shared-frame-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-shared-listing-smoke.ts`
+- `apps/web-server/scripts/workspace-shared-preview-race-smoke.ts`
+- `apps/web-server/scripts/workspace-shared-real-app-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-sidebar-resize-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-sidebar-slot-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-snapshot-validation-smoke.ts`
+- `apps/web-server/scripts/workspace-spreadsheet-component-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-spreadsheet-snapshot-smoke.ts`
+- `apps/web-server/scripts/workspace-text-html-components-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-word-snapshot-smoke.ts`
+- `scripts/pptx-notice.test.mjs`
