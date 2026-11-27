@@ -60,6 +60,14 @@ New features go from the outside in. Nothing is built until Sascha has signed of
 - Documentation-only changes get no full gate.
 - Every full gate runs through the project-aware `~/.local/bin/gate` shim (fair slots, pooled by unit and browser), as `GATE_SLOTS=1 GATE_E2E_SLOTS=1 gate bash -c '<command>'` because `gate` starts a program without a shell. In this project the shim selects `~/controller-exxperts/gate.mjs` from `factory.config.json`; other projects keep their configured routing (decided by Sascha, 2026-11-07: “yes, this project only”).
 
+### Gate setup evidence
+
+For a full gate in a fresh Tester or integration checkout, run `npm ci` with lifecycle scripts and keep the install log for that checkout. Before starting the gate, confirm the MCP adapter postinstall succeeded and the Chromium executable is available when the gate includes browser checks. Cite the gate revision and setup evidence together. If setup is incomplete, record the setup failure, repair it, and run the gate with verified setup. Keep any earlier failed run in the report.
+
+### Smokes that record provider requests
+
+When a change adds a provider call, identify affected smokes that assert request counts, order, cost or held responses. In each fake provider, distinguish the new call from chat and specialist calls before routing responses. Keep the existing behavior assertions and cover the new call where its behavior matters. For a smoke that accounts for every request or cost, retain the new call in that accounting.
+
 ## Capacity by measurement (decided by Sascha, 2026-11-04)
 
 The Controller runs `node capacity.mjs` before every start and follows its verdict (pressure stall information, available memory, gate queue, foreign load, quotas). Starting values: at most 8 suite workers and 6 read-only workers; gate slots 3 unit and 2 browser, adapted to pressure. Under pressure: critical path, nearly finished tasks, waves, new development, debt. Every worker gets a memory and process limit where the runner supports it.

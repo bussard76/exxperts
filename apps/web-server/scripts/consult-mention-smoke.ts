@@ -317,6 +317,56 @@ try {
 		const shows = () => `box ${JSON.stringify(box().value)}, Send ${send().disabled ? "greyed" : "active"} "${send().title}", sent ${JSON.stringify(sent)}, asked ${JSON.stringify(asked)}`;
 		const WAIT = "Type your question after the name";
 		try {
+			// History keys leave the mention picker in charge and do not stop an answer on Escape.
+			let stops = 0;
+			const history = [{ kind: "user", id: "h1", text: "earlier prompt" }];
+			await mount({ items: [{ kind: "user", id: "a1", text: "alpha" }, { kind: "assistant", id: "r1", text: "reply" }, { kind: "user", id: "a2", text: "alpha" }, { kind: "user", id: "b", text: "beta" }, { kind: "user", id: "a3", text: "alpha" }, { kind: "user", id: "file", text: "" }] });
+			for (const value of ["alpha", "beta", "alpha", "alpha"]) {
+				await press("ArrowUp");
+				assert(box().value === value, `only consecutive eligible exact duplicates collapse: ${value}`);
+			}
+			await mount({ items: history, onEscapeStop: () => { stops++; return true; } });
+			await type("@eu");
+			await press("ArrowDown");
+			assert(container!.querySelector('[role="option"][aria-selected="true"]')?.textContent?.includes("Eugene"), "Down selects the next mention");
+			await press("ArrowUp");
+			assert(container!.querySelector('[role="option"][aria-selected="true"]')?.textContent?.includes("euler"), "Up selects the previous mention");
+			assert(box().value === "@eu" && container!.querySelector(".mention-pop"), "mention arrows keep the picker and draft instead of recalling history");
+			await press("Escape");
+			assert(box().value === "@eu" && !container!.querySelector(".mention-pop") && stops === 0, "mention Escape dismisses the picker without stopping");
+			await type("saved draft");
+			await press("ArrowUp");
+			await press("Escape");
+			assert(box().value === "saved draft" && stops === 0, "history Escape restores the draft without stopping");
+			await press("ArrowUp");
+			const overlay = dom.window.document.createElement("div");
+			overlay.setAttribute("aria-modal", "true");
+			dom.window.document.body.append(overlay);
+			await press("Escape");
+			assert(box().value === "earlier prompt" && stops === 0, "an overlay owns Escape while browsing history");
+			overlay.remove();
+			await press("Escape");
+			assert(box().value === "saved draft", "draft remains available after the overlay closes");
+			let declines = 0;
+			await mount({ items: history, keyboardApproval: { approve: () => {}, decline: () => { declines++; } } });
+			await press("ArrowUp");
+			await type("");
+			await press("Escape");
+			assert(declines === 1 && box().value === "", "an approval owns Escape with an empty composer while browsing");
+			await mount({ items: history, onSend: () => false });
+			await type("saved draft");
+			await press("ArrowUp");
+			await press("Enter");
+			assert(box().value === "earlier prompt", "a refused send keeps the recalled draft");
+			await press("Escape");
+			assert(box().value === "saved draft", "a refused send keeps the browsing draft");
+			await mount({ items: history });
+			await type("saved draft");
+			await press("ArrowUp");
+			await press("Enter");
+			await press("Escape");
+			assert(box().value === "" && sent.join("|") === "earlier prompt", "an accepted send clears browsing and cannot restore the old draft");
+			await mount();
 			// Picked from the picker: "@euler " greys Send, and neither Enter nor Send sends.
 			await mount();
 			await type("@eu");
@@ -529,6 +579,10 @@ async function checkMessageBox(chromium: BrowserType): Promise<void> {
 				const ctx = await browser.newContext({ viewport: { width, height: phone ? 844 : 900 }, colorScheme: theme, deviceScaleFactor: phone ? 3 : 2, ...(phone ? { isMobile: true, hasTouch: true } : {}) });
 				try {
 					const page = await ctx.newPage();
+					let roomReady = false;
+					page.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => {
+						if (typeof payload === "string" && JSON.parse(payload).type === "ready") roomReady = true;
+					}));
 					await page.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
 					await page.waitForLoadState("networkidle");
 					const dismiss = page.locator(".whats-new-close");
@@ -538,6 +592,80 @@ async function checkMessageBox(chromium: BrowserType): Promise<void> {
 					await composer.waitFor({ timeout: 20_000 });
 					assert(await page.evaluate(() => document.documentElement.dataset.theme) === theme, `${label}: the page shows the ${theme} theme`);
 					await composer.click();
+					if (width === 1280 && theme === "light") {
+						await composer.fill("no history yet");
+						await composer.press("ArrowUp");
+						assert(await composer.inputValue() === "no history yet", "empty history leaves the draft intact");
+						await waitUntil(() => roomReady, "room WebSocket ready");
+						await composer.fill("   ");
+						await composer.press("Enter");
+						assert(await page.locator(".bubble-row.user:not(.queued)").count() === 0, "whitespace-only input creates no prompt");
+						for (const [index, prompt] of ["alpha", "beta", "gamma", "gamma"].entries()) {
+							await composer.fill(prompt);
+							await waitUntil(async () => await page.locator("button.send-btn").isEnabled(), `ready to send ${prompt}`);
+							await composer.press("Enter");
+							await waitUntil(async () => (await composer.inputValue()) === "", `sent ${prompt}`);
+							await waitUntil(async () => await page.locator(".bubble-row.user:not(.queued)").count() >= index + 1, `${prompt} reached the transcript`);
+						}
+						await composer.fill("original draft");
+						for (const [key, value] of [["ArrowUp", "gamma"], ["ArrowUp", "beta"], ["ArrowUp", "alpha"], ["ArrowUp", "alpha"], ["ArrowDown", "beta"], ["ArrowDown", "gamma"], ["ArrowDown", "original draft"]]) {
+							await composer.press(key);
+							assert(await composer.inputValue() === value, `${key} recalls ${value}`);
+						}
+						await composer.press("ArrowUp");
+						assert(await composer.evaluate((node: HTMLTextAreaElement) => node.selectionStart === node.value.length && node.selectionEnd === node.value.length), "recall places the caret at the end");
+						await composer.fill("edited recall");
+						await composer.press("Escape");
+						assert(await composer.inputValue() === "original draft", "Escape restores the draft after editing recall");
+						await composer.fill("gamma");
+						await composer.press("ArrowUp");
+						await composer.press("Escape");
+						await composer.press("End");
+						await composer.press("x");
+						assert(await composer.evaluate((node: HTMLTextAreaElement) => node.selectionStart === node.value.length), "editing after restoring identical text keeps the caret at the end");
+						await composer.fill("first line\nsecond line");
+						await composer.evaluate((node: HTMLTextAreaElement) => node.setSelectionRange(node.value.length, node.value.length));
+						await composer.press("ArrowUp");
+						assert(await composer.inputValue() === "first line\nsecond line", "Up on line two retains the multiline draft");
+						assert(await page.locator(".bubble-row.user:not(.queued)").count() === 4, "recall alone does not send");
+						await composer.fill("alpha");
+						await waitUntil(async () => await page.locator("button.send-btn").isEnabled(), "ready to repeat alpha");
+						await composer.press("Enter");
+						await waitUntil(async () => await page.locator(".bubble-row.user:not(.queued)").count() === 5, "repeated alpha reached the transcript");
+						for (const value of ["alpha", "gamma", "beta", "alpha"]) {
+							await composer.press("ArrowUp");
+							assert(await composer.inputValue() === value, `history retains separated repeat ${value}`);
+						}
+						await composer.press("Escape");
+						await composer.fill("draft for IME");
+						const intercepted = await composer.evaluate((node: HTMLTextAreaElement) => !node.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true, isComposing: true })));
+						assert(!intercepted && await composer.inputValue() === "draft for IME", "IME Up remains with the input method");
+						await composer.fill("first room draft");
+						await composer.press("ArrowUp");
+						assert(await composer.inputValue() === "alpha", "browsing before switching rooms");
+						await page.goBack();
+						await page.locator(".persistent-agent-card").filter({ hasText: "Client Contracts" }).getByRole("button", { name: "Enter" }).click();
+						await composer.waitFor({ timeout: 20_000 });
+						assert(await composer.inputValue() === "", "switching rooms does not carry the draft");
+						await composer.press("ArrowUp");
+						assert(await composer.inputValue() === "", "switching rooms does not carry history");
+						await page.goBack();
+						await page.locator(".persistent-agent-card").filter({ hasText: desk }).getByRole("button", { name: /^(Enter|Resume)$/ }).click();
+						await composer.waitFor({ timeout: 20_000 });
+						await page.reload({ waitUntil: "networkidle" });
+						await composer.waitFor({ timeout: 20_000 });
+						await waitUntil(async () => await page.locator(".bubble-row.user:not(.queued)").count() === 5, "saved transcript restored after reload");
+						await composer.press("ArrowUp");
+						assert(await composer.inputValue() === "alpha", "restored room transcript supplies history after reload");
+						await composer.fill("");
+						await page.locator(".composer input.composer-attach-input").first().setInputFiles({ name: "invented-note.txt", mimeType: "text/plain", buffer: Buffer.from("invented attachment content") });
+						await waitUntil(async () => await page.locator("button.send-btn").isEnabled(), "attachment-only send is ready");
+						await composer.press("Enter");
+						await waitUntil(async () => await page.locator(".bubble-row.user:not(.queued)").count() === 6, "attachment-only send reached transcript");
+						await composer.press("ArrowUp");
+						assert(await composer.inputValue() === "alpha", "attachment-only send and its wire text are excluded from history");
+						await composer.press("Escape");
+					}
 
 					// The list after "@cl": no dot before its row.
 					await page.keyboard.type("@cl");
@@ -632,6 +760,18 @@ async function checkMessageBox(chromium: BrowserType): Promise<void> {
 					await waitUntil(async () => (await composer.inputValue()) === "", `${label}: Enter sends the consult`);
 					await page.locator(".consult-card").first().waitFor({ timeout: 10_000 });
 					assert(await page.locator(".composer-mirror").count() === 0, `${label}: the empty box has no layer`);
+					if (width === 1280 && theme === "light") {
+						await composer.press("ArrowUp");
+						assert(await composer.inputValue() === "alpha", "accepted consult to another room is excluded from history");
+						await composer.press("Escape");
+						await page.getByRole("button", { name: "Add to this conversation" }).click({ timeout: 20_000 });
+						await composer.fill("prompt after transfer");
+						await waitUntil(async () => await page.locator("button.send-btn").isEnabled(), "prompt after transfer is ready");
+						await composer.press("Enter");
+						await waitUntil(async () => await page.locator(".bubble-row.user:not(.queued)").count() === 7, "prompt after transfer reached transcript");
+						await composer.press("ArrowUp");
+						assert(await composer.inputValue() === "prompt after transfer", "handoff wire text is excluded from recalled prompt");
+					}
 				} finally {
 					await ctx.close();
 				}
