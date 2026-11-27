@@ -1,6 +1,6 @@
 import type { FastifyRequest } from "fastify";
 import { listWorkspaceForBrowser, readWorkspaceForBrowser } from "./persistent-room-workspace-tools.js";
-import { runWorkspaceSpreadsheetSnapshot } from "./persistent-room-shelf-reading.js";
+import { runWorkspacePdfSnapshot, runWorkspaceSpreadsheetSnapshot, runWorkspaceWordSnapshot } from "./persistent-room-shelf-reading.js";
 import { MAINTENANCE_DIAGNOSTICS_KEEP, MAINTENANCE_DIAGNOSTICS_DEFAULT_LIMIT, listMaintenanceDiagnostics, exportMaintenanceDiagnostics } from "./maintenance-diagnostics.js";
 import { createPersistentAgentInstance, getPersistentAgentThread, saveWithOpenConversationCheck, getPersistentRoomInstructionsView, savePersistentRoomGlobalInstructionsEnabled, savePersistentRoomInstructions } from "./persistent-agents.js";
 import { normalizePersistentRoomWorkspaceToolSelectionInput } from "./persistent-room-tool-policy.js";
@@ -680,17 +680,19 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 			return policy.policy;
 		};
 		if (/\.doc$/i.test(requestedPath)) return reply.code(415).send({ code: "legacy_doc", error: "Save this file as .docx to preview it here." });
-		if (/\.(html?|pdf|docx|pptx)$/i.test(requestedPath)) return reply.code(503).send({ code: "renderer_unavailable", error: "Preview is unavailable." });
+		if (/\.(html?|pptx)$/i.test(requestedPath)) return reply.code(503).send({ code: "renderer_unavailable", error: "Preview is unavailable." });
 		const spreadsheet = /\.xlsx$/i.test(requestedPath);
-		if (!spreadsheet && !/\.(txt|json|md)$/i.test(requestedPath)) return reply.code(415).send({ code: "unsupported_file_type", error: "This file type cannot be previewed here." });
+		const pdf = /\.pdf$/i.test(requestedPath);
+		const word = /\.docx$/i.test(requestedPath);
+		if (!spreadsheet && !pdf && !word && !/\.(txt|json|md)$/i.test(requestedPath)) return reply.code(415).send({ code: "unsupported_file_type", error: "This file type cannot be previewed here." });
 		const controller = new AbortController();
 		const disconnected = () => controller.abort();
 		reply.raw.once("close", disconnected);
 		try {
-			const snapshot = await readWorkspaceForBrowser(current, requestedPath, spreadsheet ? 26_214_400 : 16_777_216, controller.signal);
+			const snapshot = await readWorkspaceForBrowser(current, requestedPath, spreadsheet || pdf || word ? 26_214_400 : 16_777_216, controller.signal);
 			snapshot.recheck();
-			if (spreadsheet) {
-				const result = await runWorkspaceSpreadsheetSnapshot(snapshot.bytes, controller.signal);
+			if (spreadsheet || pdf || word) {
+				const result = spreadsheet ? await runWorkspaceSpreadsheetSnapshot(snapshot.bytes, controller.signal) : pdf ? await runWorkspacePdfSnapshot(snapshot.bytes, controller.signal) : await runWorkspaceWordSnapshot(snapshot.bytes, controller.signal);
 				snapshot.recheck();
 				if (!result.ok || !result.result) {
 					const code = result.code ?? "preview_failed";
