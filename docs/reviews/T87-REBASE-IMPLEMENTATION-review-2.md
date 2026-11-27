@@ -2,11 +2,12 @@
 
 Verdict: pass
 Reviewed commit: a3ad7b91c9573efe0d3b7e9e22c6f6c5bcfe89bd
+Reviewed base: upstream v0.16.2 `b898e851813b4da0211e6a049e9537160391091f`
 Functional verdict: pass for the exercised PR 87 flows; native acceptance remains unmeasured. Full Linux gate: fail (exit 1, 518/526). This functional verdict does not turn the gate green or establish the cause of unrelated smoke failures.
 
 What this change does: It restores workspace browsing and previews on the pinned v0.16.2 base, using the current room protections. The round-two repairs expose supported POSIX colon names, restore stylesheet order, describe restart holders, and install the existing Windows folder-wait factory through server composition.
 
-Ponytail review: Applied the project's review questions to the scoped repairs and connected code, assuming the product's single-user local-room scale. I did not complete a line-by-line independent review of all 864 paths in the origin/main merge-base diff; the main-relative merge base is `461e6485bf932f5cba85ac3dde8e0104e47d5dec`, which includes substantial fork history outside the 75 target-relative paths. The exact dispatch prohibits merging fork main. This limits the completeness of this independent review; round one's wider review is evidence, not a substitute for my own full-diff review. No exploit development, load test or native-platform check was performed.
+Ponytail review: Complete for all 75 paths in the exact target-relative contribution, at the product's single-user local-room scale. I inspected the nine changed server source paths, 33 server script paths, 19 UI source paths, UI auth smoke, four notice files, three root packaging/test scripts, four manifest/lock paths, and both fork reports; I traced the routes through the guarded file and parser paths and the browser consumers. The lock comparison found added feature closure without changes to existing package versions or resolved locations. The clarified dispatch sets the upstream target as the review base and excludes unrelated fork history; no fork-main merge was performed. No exploit development, load test, native-platform check, or additional test was performed during this review completion.
 
 ## Scope and evidence
 
@@ -20,6 +21,8 @@ Ponytail review: Applied the project's review questions to the scoped repairs an
 | Mac and shared behavior | Owner/generation checks and no-host-fallback are retained; boxed listing race/refusal, boxed preview, shared listing/race and shared-frame smokes passed. | Pass in simulation; native Mac unmeasured |
 | Producer-to-consumer and isolation | Real local XLSX browser-to-parser rendered-cell and revocation smoke, real shared PPTX frame transfer, snapshot format and component smokes passed. HTML and presentation use opaque sandboxed frames; text is rendered as text. Open refusal and fake-dispatch handoff smokes passed. No real app launch, paid call, production data or Docker was used by this review. | Pass on Linux; native dispatch unmeasured |
 | Assertions | Compared the two previously existing base test files against base: additions preserve their existing assertions. Compared all three round-two changed smoke files against round one: the parity fixture adds parent listing assertions, the wait test is setup-only, and the composition test is new. Existing client and Windows inventory assertions are unchanged. The public route assertions would fail if their corresponding listing or wait behavior were absent. | Pass within these comparisons |
+
+The base assertions in the two modified existing test files were retained; the additional checks cover listing and package retention. Compared with the superseded identity checkpoint, same-path replacement and policy-ID recovery cases were removed under the explicit upstream grant-parity decision, while the unrelated no-sidecar, empty-list, redaction and failed-read/retry assertions remain. The source itself refuses selection of unsupported extensions before opening a tab; the test preserves that actual source behavior and the public route retains its unsupported response.
 
 The approved Level-2 folder-wait amendment and the earlier RoomBox and upstream grant-parity reviews remain binding. This review found no new functional defect in the exercised PR 87 paths. It does not establish the native browser-to-owning-RoomBox acceptance path, actual Windows behavior, desktop handoffs, or cross-platform CI. Sascha's preview acceptance should include native Mac boxed XLSX/revocation and native Windows wait behavior.
 
@@ -46,11 +49,12 @@ These are observations, not a claim that the candidate caused them; no base reru
 
 ## Findings and debt candidates
 
-No functional finding was established in the exercised PR 87 flows. Review completeness is limited as stated above.
+No functional defect was established in the target-relative contribution. The full target-relative review is complete; native acceptance and the failed gate remain separate outstanding evidence.
 
 | Category | Severity | Where | Proposal |
 | --- | --- | --- | --- |
-| tests | medium | Full-diff review | Complete independent Ponytail and architecture review of all origin/main merge-base paths before relying on this report as full-diff coverage. |
+| load | medium | `apps/web-ui/src/components/WorkspaceSpreadsheetPreview.tsx:124` | Render a bounded window of rows and columns: a valid 100,000-row, one-column sheet expands to at least 1.2 million table cells because the UI supplies 12 columns, potentially making the preview unresponsive; this is a code-based observation, not a measured load result. |
 | tests | medium | Full gate | Investigate the seven isolated failures and reproduce against the appropriate base; retain the failed full gate until resolved. |
 | tests | medium | Native Mac and Windows | Run the required real boxed browser acceptance and native Windows wait checks on the respective platforms. |
 | security | medium | ExcelJS dependency closure | Track the recorded upstream uuid advisory and remediate under the dependency decision process. |
+| edge-case | minor | Root Node engine declaration and retained jsdom | Align or qualify the existing Node engine floor: retained jsdom 29 requires a newer Node 20 than the declared minimum. |
