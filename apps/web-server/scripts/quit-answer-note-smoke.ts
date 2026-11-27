@@ -103,12 +103,14 @@ const endpoint = http.createServer((req, res) => {
 	req.on("data", (chunk) => { raw += chunk; });
 	req.on("end", () => {
 		const body = JSON.parse(raw || "{}");
+		const suggestion = JSON.stringify(body.system ?? "").includes("Generate next prompt suggestions");
 		// The room-state copy rides after the person's message; the person's message is the last user message before it.
 		const own = (body.messages ?? []).filter((message: any) => message?.role === "user" && !textOf(message?.content).startsWith(ROOM_STATE_HEADING));
 		const message = textOf(own.at(-1)?.content);
-		if (afterRestart) {
-			received.push(message);
-			const reply = replies[received.length - 1] ?? "Done.";
+		if (suggestion || afterRestart) {
+			if (!suggestion) received.push(message);
+			console.log(`  provider request: ${suggestion ? "suggestion" : "chat"}`);
+			const reply = suggestion ? '["Ask another question"]' : replies[received.length - 1] ?? "Done.";
 			if (reply === "refuse") {
 				res.writeHead(400, { "content-type": "application/json" });
 				res.end(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "synthetic refusal of this one call" } }));
