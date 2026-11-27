@@ -4,9 +4,19 @@
 
 Hook environment: this target-based worktree inherited `core.hooksPath=.githooks` from the fork, but the upstream target does not contain that directory, so earlier ordinary Git commits and pushes had no hook files to execute. For the remaining work, untracked local links provide the same project's fork hook directory, guardrail tools and factory configuration without adding them to the contribution. The first full target-relative pre-commit replay correctly flagged eight invented smoke-token assignments; those tests now use the existing shared smoke-auth fixture with the same token and unchanged assertions. The full replay and its result are recorded below; the earlier missing-hook condition cannot be represented as a historical pass.
 
-The same absent local factory configuration meant earlier browser `gate` invocations used the tool's fallback configuration despite the requested attribution environment. Their observed Linux test results remain useful, but their intended project journal attribution is not established; attributed reruns using the local same-project configuration are queued behind live host gate work.
+The same absent local factory configuration meant earlier browser `gate` invocations used the tool's fallback configuration despite the requested attribution environment. Their observed Linux test results remain useful, but their intended project journal attribution is not established. Correctly attributed reruns using the local same-project configuration passed as recorded below.
 
-At the final local audit checkpoint, the shared-frame, app-integration and real XLSX gate processes (PIDs `3180525`, `3191190` and `3196340`) remained queued without starting; the Controller confirmed live T23/T24 work ahead in FIFO order. The app-integration run includes the new POSIX-name, legacy-guidance and image-401 checks. The focused file-browser and image-component browser checks still need attributed gate runs after a slot becomes available. No lock or gate arguments were changed and the queued processes were left intact.
+The Controller confirmed live T23/T24 work ahead in FIFO order; no lock or gate arguments were changed. The correctly attributed Linux Chromium runs below passed on implementation checkpoint `ddee2eea52762d11de356ca7dbc8fc1ac30a1063`: their journal start times follow that commit, the working tree's product files matched replay tree `4ecfc5f61a9aa0391e4eaea53b0f823a60a02c3c`, and only the three untracked hook/config links were present. The gate journal records the branch and attribution, not a commit SHA; the SHA association follows from the worktree state and timestamps.
+
+| Attributed command | Result |
+| --- | --- |
+| `gate npx tsx apps/web-server/scripts/workspace-shared-frame-ui-smoke.ts` | Passed, PID `3180525`; real shared PPTX frame transfer/render. |
+| `gate npx tsx apps/web-server/scripts/workspace-app-integration-ui-smoke.ts` | Passed, PID `3191190`; invented intercepted inputs, including POSIX name, legacy guidance and image 401. |
+| `gate npx tsx apps/web-server/scripts/workspace-local-real-app-ui-smoke.ts` | Passed, PID `3196340`; actual local XLSX path and revoked grant. |
+| `gate npx tsx apps/web-server/scripts/workspace-file-browser-ui-smoke.ts` | Passed; POSIX name, tree validation, empty/error and stale response. |
+| `gate npx tsx apps/web-server/scripts/workspace-image-component-ui-smoke.ts` | Passed; image rendering, stale response, MIME/size refusal and 401 notice. |
+
+Every command used the requested `GATE_TASK`, `GATE_WORKER`, `GATE_ROLE`, `GATE_AGENT` and `GATE_MODEL` assignments. These are Developer-targeted Linux checks, not native Mac/Windows measurements or the full gate.
 
 After commit `867618c`, Git's automatic background packing printed `object 3fbc2b763829fc56b5972d52603241eee2b50ebe is a tag, not a commit`; that object is an existing annotated tag also referenced by `refs/remotes/upstream/v0.15.2` and `refs/tags/v0.15.2`. The commit itself succeeded. Those unrelated refs and repository maintenance settings were not changed.
 
@@ -14,7 +24,7 @@ On 2026-11-27 the read-only upstream PR head and peeled v0.16.2 target again mat
 
 The Linux open route now resolves a deliberately narrow, direct desktop association, canonical executable and explicit working directory, rejects ambiguous or indirect entries, checks current room writable places and rechecks association, guarded file and policy before direct dispatch. `workspace-open-handoff-smoke.ts` uses only invented desktop files, a synthetic executable and fake association lookup/dispatcher: it verifies the checked executable, cwd and argument, and no handoff for changed association, unsafe executable or cwd, ambiguous placeholders and in-flight file changes. The final-lookup change case first failed because a handoff was made, then passed after a post-lookup identity and authorization recheck. A fake unavailable dispatcher first returned 500, then passed with 503 `opener_unavailable`. `workspace-open-refusal-smoke.ts` retains host/origin/proxy/path refusals and instruments the dispatcher to assert zero handoffs; it also fakes the lookup so no real desktop application or association utility is invoked in tests. This is a Linux simulated association and handoff, not an actual desktop application launch.
 
-Linux asks the desktop MIME helper for the file's effective type instead of inferring the association from its extension. A fake-lookup assertion for this first failed while the resolver used a fixed extension map, then passed after the type query; `.drawio` and `.dio` remain on the source allowlist and can proceed only if the effective association meets the same strict checks. macOS and Windows working-directory binding is not implemented and their open requests refuse; neither platform is claimed. The resolver requires further independent security and conformance review. Native boxed browser acceptance, the final item-by-item audit, contribution-only replay and the independent Tester, conformance, CI and Front draft stages remain open. No full gate is claimed.
+Linux asks the desktop MIME helper for the file's effective type instead of inferring the association from its extension. A fake-lookup assertion for this first failed while the resolver used a fixed extension map, then passed after the type query; `.drawio` and `.dio` remain on the source allowlist and can proceed only if the effective association meets the same strict checks. macOS and Windows working-directory binding is not implemented and their open requests refuse; neither platform is claimed. Native boxed browser acceptance and the independent Tester, conformance, CI and Front draft stages remain open. No full gate is claimed.
 
 On Linux, the four affected script suites passed 104/104, both UI and script typechecks passed, and the attributed real-app XLSX and shared PPTX-frame Chromium gates passed. These are targeted Developer checks, not the independent full gate. No screenshots were captured.
 
@@ -34,7 +44,7 @@ The target bundle originally omitted the approved on-demand `koffi` package, `do
 
 The guarded route test initially failed for an invented Linux filename with a colon that is not a URI. The four route validators now retain POSIX names of that form while rejecting URI schemes and Windows colon paths; the public listing, text, image and fake-handoff cases pass, along with URI refusals and a simulated Windows refusal before association lookup. The affected script run passed 106/106.
 
-The client audit found that the listing validator still rejected those server-valid names, and that image preview showed a generic error for 401. `workspace-files-client-smoke.ts` first failed on the valid name and now passes it while still rejecting a URI-shaped entry; `workspace-image-auth-smoke.ts` first displayed the generic error and now passes with the required sign-in notice and no image. The affected script run passed 105/105. Browser checks for these cases are queued through the attributed project gate and are not yet claimed as passed.
+The client audit found that the listing validator still rejected those server-valid names, and that image preview showed a generic error for 401. `workspace-files-client-smoke.ts` first failed on the valid name and now passes it while still rejecting a URI-shaped entry; `workspace-image-auth-smoke.ts` first displayed the generic error and now passes with the required sign-in notice and no image. The affected script run passed 105/105, and the attributed app, file-browser and image-component browser checks passed.
 
 The same public handoff smoke first failed for an unambiguous literal desktop argument and then passed with that argument preserved alongside exactly one file placeholder. Ambiguous field codes and duplicate placeholders remain refused; the actual argument vector is also passed to each room protection check. The four affected script suites passed 104/104, and the attributed local-action-context Chromium check passed on Linux.
 
@@ -66,7 +76,7 @@ At checkpoint `d31087a`, `git merge-base --is-ancestor b898e851813b4da0211e6a049
 
 ## Architecture impact
 
-Level 2: four approved routes and three private seams in the existing room-file, preview and local process flows. Implementation remains incomplete.
+Level 2: four approved routes and three private seams in the existing room-file, preview and local process flows. Developer implementation and targeted Linux checks are complete; native measurements and independent stages remain open.
 
 ## Checkpoint
 
@@ -426,7 +436,7 @@ The coordinator reconciled review precision 1 with pinned source `openWorkspaceF
 
 ## Interim acceptance audit
 
-This is a working audit, not the final self-review. Earlier checkpoints are historical; the current state and remaining gaps are recorded here and at the start of this report.
+This is the Developer self-review. Earlier checkpoints are historical; the current state, evidence and remaining platform and independent-stage gaps are recorded here and at the start of this report.
 
 The nine affected route and ownership script files, together with the fixed script-runner suites, passed 111/111 on Linux after the latest route and packaging changes. The attributed real Linux app XLSX browser check also passed again. These results do not close the native and final-audit gaps below.
 
@@ -461,7 +471,7 @@ The full target-relative source patch at implementation checkpoint `094c9d3165f0
 | App selection and local-only control | `workspace-app-integration-ui-smoke.ts` and `workspace-local-action-context-ui-smoke.ts` exercise selection, unsupported tabs and context visibility with invented inputs; the Linux actual app check also exercises authorization. |
 | Explicit open and protected direct dispatch | `workspace-open-refusal-smoke.ts` and `workspace-open-handoff-smoke.ts` cover route refusals, Linux fake verified handoff, changed policy/file/association, unsafe executable/cwd, placeholders, unavailable/error/timeout and zero extra handoffs. Fake native lookups refuse because Mac and Windows launch working directories are not bound; valid native direct handoff remains open. |
 | Dependency closure and audit | Reconciled approved feature closure and lock-only audit are recorded above; repeat after any dependency changes and include the identified engine and audit debt in final review. |
-| Developer checks and independent stages | UI/scripts typechecks, targeted script runs and actual browser acceptance reported above passed on Linux. Final affected checks, native Mac/Windows, independent Tester, conformance, CI and Front draft update remain outstanding; no full gate or cross-platform result is claimed. |
+| Developer checks and independent stages | UI/scripts typechecks, targeted script runs and all five attributed browser checks reported above passed on Linux. Native Mac/Windows, independent Tester, conformance, CI and Front draft update remain outstanding; no full gate or cross-platform result is claimed. |
 
 ## Grant identity amendment: refusal checkpoint
 
