@@ -1700,10 +1700,10 @@ app.get("/ws", { websocket: true, exposeHeadRoute: false }, async (socket, req) 
 					}
 				}
 			}
-			const exchanges = [...history.slice(-2), { prompt, answer }];
+			const exchanges = [...history, ...(prompt ? [{ prompt, answer }] : [])].slice(-3);
 			const render = () => exchanges.map((entry) => `User: ${entry.prompt}\nAssistant: ${entry.answer}`).join("\n\n");
 			while (exchanges.length > 1 && render().length > 4000) exchanges.shift();
-			let context = render();
+			let context = render() || "[]";
 			if (context.length > 4000) context = context.slice(-4000);
 			suggestionRuns.set(key, { answerId, leader, controller });
 			const startedAt = Date.now();
@@ -1738,7 +1738,9 @@ app.get("/ws", { websocket: true, exposeHeadRoute: false }, async (socket, req) 
 				if (controller.signal.aborted) resultCode = "cancelled";
 				if (usage) recordWorkerUsage(persistentAgentIdForSession, "suggestions", modelLock, usage);
 			}).finally(() => {
-				app.log.info({ roomId: persistentAgentIdForSession, durationMs: Date.now() - startedAt, resultCode, inputTokens: tokens?.input, outputTokens: tokens?.output }, "suggestion generation finished");
+				const metadata = { roomId: persistentAgentIdForSession, durationMs: Date.now() - startedAt, resultCode, inputTokens: tokens?.input, outputTokens: tokens?.output };
+				app.log.info(metadata, "suggestion generation finished");
+				streamTrace.note("suggestion_generation", metadata);
 				if (suggestionRuns.get(key)?.answerId === answerId) suggestionRuns.delete(key);
 			});
 		} catch {}
@@ -3064,9 +3066,18 @@ ${lines.join("\n")}`;
 				const startedTurn = beginPersistentAgentTurn(persistentAgentIdForSession, persistentConversationId, { connectionId, key: turnKey });
 				if (!startedTurn.turnId) throw new Error("persistent-agent turn id was not created");
 				persistentTurnId = startedTurn.turnId;
+				let suggestionPrompt = readShownPrompt(msg.shown)?.text ?? userAuthoredPromptText(String(msg.text ?? ""));
+				if (continuing) {
+					try {
+						const saved = [...(getPersistentAgentThread(persistentAgentIdForSession, persistentConversationId)?.items ?? [])].reverse().find((item: any) => item?.kind === "user") as { text?: unknown } | undefined;
+						const message = [...(session?.messages ?? [])].reverse().find((item) => item.role === "user");
+						const text = message?.role === "user" ? userAuthoredPromptText(textFromParts(message.content)) : "";
+						if (typeof saved?.text === "string" && saved.text === text) suggestionPrompt = text;
+					} catch {}
+				}
 				// Out of the saved conversation now, and out of every later write, however late an older copy of the page's arrives.
 				if (editedAwayIds.length) try { removeEditedAwayItems(persistentAgentIdForSession, persistentConversationId, editedAwayIds); } catch {}
-				activePersistentWebTurn = { turnId: persistentTurnId, answerId: (startedTurn as typeof startedTurn & { answerId: string }).answerId, suggestionVersion: incomingSuggestionVersion!, suggestionPrompt: readShownPrompt(msg.shown)?.text ?? userAuthoredPromptText(String(msg.text ?? "")), suggestionAnswer: "", promptSettled: false, ...(typeof startedTurn.startedAt === "number" ? { startedAt: startedTurn.startedAt } : {}) };
+				activePersistentWebTurn = { turnId: persistentTurnId, answerId: (startedTurn as typeof startedTurn & { answerId: string }).answerId, suggestionVersion: incomingSuggestionVersion!, suggestionPrompt, suggestionAnswer: "", promptSettled: false, ...(typeof startedTurn.startedAt === "number" ? { startedAt: startedTurn.startedAt } : {}) };
 				sendAnswerLifecycle("invalidate");
 				turnProgress.toolsRunning.clear();
 				// The last turn's Stop answered its questions; this turn asks again.

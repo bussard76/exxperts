@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { assert, createRoom, EMPTY_MARKER, endFailingCase, FAILING_MARKER, gatewayRequests, MULTIPART_MARKER, productAppRoot, putThread, reportDetachedFailure, requestJson, serverOutput, setHoldSuggestionResponse, setSuggestionResponse, SLOW_MARKER, startDetachedServer, stopDetachedServer, waitDetached, waitUntil, WsHarness } from "./persistent-room-detached-turn-setup.js";
+import { assert, createRoom, EMPTY_MARKER, endFailingCase, FAILING_MARKER, gatewayRequests, getStatus, MULTIPART_MARKER, productAppRoot, putThread, reportDetachedFailure, requestJson, serverOutput, setHoldSuggestionResponse, setSuggestionResponse, SLOW_MARKER, startDetachedServer, stopDetachedServer, waitDetached, waitUntil, WsHarness } from "./persistent-room-detached-turn-setup.js";
 
 try {
 	process.env.EXXETA_STREAM_TRACE = "1";
@@ -20,13 +20,36 @@ try {
 	const tracePath = path.join(productAppRoot, "stream-traces", room, `${thread}.jsonl`);
 	await waitUntil(() => fs.existsSync(tracePath) && fs.readFileSync(tracePath, "utf8").includes('"frame":"suggestions"'), "suggestion trace recorded", 10000);
 	assert(!fs.readFileSync(tracePath, "utf8").includes("Next question?") && !serverOutput.join("").includes("Next question?"), "suggestion content is absent from traces and server logs");
-	assert(!fs.readFileSync(tracePath, "utf8").includes("What comes") && !fs.readFileSync(tracePath, "utf8").includes("Quick answer"), "the prompt and answer used as suggestion context are absent from traces");
+	await waitUntil(() => fs.readFileSync(tracePath, "utf8").includes('"note":"suggestion_generation"'), "suggestion metadata trace recorded", 10000);
+	const traceEntries = fs.readFileSync(tracePath, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+	const ordinaryPrompt = traceEntries.find((entry) => entry.dir === "in" && entry.frame === "prompt");
+	assert(ordinaryPrompt?.text?.head === "What comes n" && ordinaryPrompt.text.tail === " comes next?", "ordinary chat trace boundaries remain available to replay");
+	const successfulNotes = traceEntries.filter((entry) => entry.note === "suggestion_generation");
+	assert(successfulNotes.some((entry) => entry.resultCode === "completed" && typeof entry.durationMs === "number" && entry.inputTokens === 120 && entry.outputTokens === 30), "the suggestion trace records structured success metadata");
+	assert(!JSON.stringify(successfulNotes).includes("What comes next?") && !JSON.stringify(successfulNotes).includes("Quick answer.") && !JSON.stringify(successfulNotes).includes("Next question?"), "suggestion trace entries omit input context and result text");
 	const request = gatewayRequests.find((entry) => entry.suggestion)?.request;
 	assert(gatewayRequests.find((entry) => entry.suggestion)?.model === "suggest-model", "suggestions use the answering provider's configured Memorize model");
 	assert(request?.maxTokens === 200 && (!request.tools || (Array.isArray(request.tools) && request.tools.length === 0)), "the suggestion call is tool-less and capped at 200 output tokens");
 	assert(JSON.stringify(request?.messages).includes("What comes next?") && JSON.stringify(request?.messages).includes("Quick answer."), "the suggestion call contains the completed exchange");
 	const usage = await requestJson(`/api/usage?agent=${room}`);
 	assert(usage.body.byAgent.some((entry: any) => entry.agent === room && entry.kinds.suggestions?.turns === 1), "suggestion tokens are recorded under the room's suggestions category");
+
+	const errorRoom = await createRoom("Suggestion Error Privacy Room");
+	const errorThread = "suggestion_error_privacy";
+	await putThread(errorRoom, errorThread, []);
+	const errorSocket = await WsHarness.connect(errorRoom, errorThread);
+	await errorSocket.waitFor((frame) => frame.type === "ready", "error privacy ready");
+	setSuggestionResponse("SYNTHETIC_SUGGESTION_FAILURE");
+	errorSocket.send({ type: "prompt", text: "PRIVATE_SUGGESTION_INPUT_CONTEXT" });
+	const errorComplete = await errorSocket.waitFor((frame) => frame.type === "answer_lifecycle" && frame.phase === "complete", "error privacy completion");
+	const errorTracePath = path.join(productAppRoot, "stream-traces", errorRoom, `${errorThread}.jsonl`);
+	await waitUntil(() => fs.existsSync(errorTracePath) && fs.readFileSync(errorTracePath, "utf8").includes('"resultCode":"error"'), "suggestion error metadata traced", 10000);
+	const errorNotes = fs.readFileSync(errorTracePath, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)).filter((entry) => entry.note === "suggestion_generation");
+	const suggestionLogs = serverOutput.join("").split("\n").filter((line) => line.includes("suggestion generation finished"));
+	assert(errorNotes.some((entry) => entry.resultCode === "error" && typeof entry.durationMs === "number"), "suggestion failure is traced with a result code");
+	assert(!JSON.stringify(errorNotes).includes("PRIVATE_SUGGESTION_INPUT_CONTEXT") && !JSON.stringify(errorNotes).includes("PRIVATE_SUGGESTION_PROVIDER_ERROR") && !JSON.stringify(suggestionLogs).includes("PRIVATE_SUGGESTION_INPUT_CONTEXT") && !JSON.stringify(suggestionLogs).includes("Next question?") && !serverOutput.join("").includes("PRIVATE_SUGGESTION_PROVIDER_ERROR"), "suggestion error diagnostics omit input, result and free-text provider errors");
+	assert(!errorSocket.frames.slice(errorComplete + 1).some((frame) => frame.type === "suggestions"), "a failed suggestion call stays silent");
+	setSuggestionResponse('["  Next question?  ", "Another\\nquestion", "Next question?"]');
 	await putThread(room, thread, [
 		{ kind: "user", id: "first-user", text: "What comes next?" },
 		{ kind: "assistant", id: "first-answer", text: "Quick answer." },
@@ -192,6 +215,30 @@ try {
 	assert(retry.frames[retryResult].answerId === retry.frames[retryComplete].answerId, "successful retry publishes one correlated result");
 	assert(retry.frames.filter((frame) => frame.type === "answer_lifecycle" && frame.phase === "complete").length === 1, "only the successful retry completes");
 
+	const continuedRoom = await createRoom("Suggestion Continue Room");
+	const continuedThread = "suggestion_continue";
+	await putThread(continuedRoom, continuedThread, []);
+	const continued = await WsHarness.connect(continuedRoom, continuedThread);
+	await continued.waitFor((frame) => frame.type === "ready", "continue ready");
+	const continuedPrompt = `A question to retry ${SLOW_MARKER}`;
+	const failedBefore = gatewayRequests.length;
+	continued.send({ type: "prompt", text: continuedPrompt });
+	await continued.waitFor((frame) => frame.type === "event" && frame.event?.type === "message_update", "continue partial answer");
+	await waitUntil(async () => {
+		for (const entry of gatewayRequests.slice(failedBefore)) if (entry.slow && !entry.finished && !entry.aborted) entry.fail();
+		return (await getStatus(continuedRoom)).activeThread?.inFlight === false;
+	}, "failed answer settles", 90000);
+	await putThread(continuedRoom, continuedThread, [{ kind: "user", id: "continue-user", text: continuedPrompt }, { kind: "assistant", id: "continue-partial", text: "slow part 1." }]);
+	const continueFrom = continued.frames.length;
+	const continueBefore = gatewayRequests.length;
+	continued.send({ type: "continue" });
+	await waitUntil(() => gatewayRequests.slice(continueBefore).some((entry) => entry.slow && !entry.suggestion), "continued model request", 30000);
+	gatewayRequests.slice(continueBefore).find((entry) => entry.slow && !entry.suggestion)!.release();
+	const continuedComplete = await continued.waitFor((frame) => frame.type === "answer_lifecycle" && frame.phase === "complete", "continued completion", continueFrom, 30000);
+	await continued.waitFor((frame) => frame.type === "suggestions", "continued suggestions", continuedComplete);
+	const continuedContext = JSON.stringify(gatewayRequests.slice(continueBefore).find((entry) => entry.suggestion)?.request?.messages);
+	assert(continuedContext.includes(continuedPrompt), "a successful continued answer uses the original user prompt in suggestion context");
+
 	const multipartRoom = await createRoom("Suggestion Multipart Room");
 	const multipartThread = "suggestion_multipart";
 	await putThread(multipartRoom, multipartThread, []);
@@ -276,6 +323,25 @@ try {
 	const deadlineRequest = gatewayRequests.slice(deadlineBefore).find((entry) => entry.suggestion)!;
 	await waitUntil(() => deadlineRequest.aborted, "suggestion deadline abort", 15000);
 	assert(!deadline.frames.slice(deadlineComplete + 1).some((frame) => frame.type === "suggestions"), "a timed out suggestion call is silent");
+	setHoldSuggestionResponse(false);
+
+	const deletedRoom = await createRoom("Suggestion Deleted Room");
+	const deletedThread = "suggestion_deleted";
+	await putThread(deletedRoom, deletedThread, []);
+	const deleted = await WsHarness.connect(deletedRoom, deletedThread);
+	await deleted.waitFor((frame) => frame.type === "ready", "deleted room ready");
+	setHoldSuggestionResponse(true);
+	const deletedBefore = gatewayRequests.length;
+	deleted.send({ type: "prompt", text: "Delete this synthetic room" });
+	await deleted.waitFor((frame) => frame.type === "answer_lifecycle" && frame.phase === "complete", "deleted room completion");
+	await waitUntil(() => gatewayRequests.slice(deletedBefore).some((entry) => entry.suggestion), "deleted room suggestion starts", 10000);
+	const deletedRequest = gatewayRequests.slice(deletedBefore).find((entry) => entry.suggestion)!;
+	deleted.close();
+	await waitUntil(() => deletedRequest.aborted, "deleted room suggestion aborts", 10000);
+	await waitUntil(async () => !(await getStatus(deletedRoom)).activeLock, "deleted room lock released", 10000);
+	const purged = await requestJson(`/api/persistent-agents/${deletedRoom}/purge`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmation: `DELETE ${deletedRoom} FOREVER` }) });
+	assert(purged.status === 200, "the synthetic room can be deleted after its suggestion is aborted");
+	assert(!deleted.frames.some((frame) => frame.type === "suggestions"), "room deletion does not deliver the cancelled suggestion");
 	setHoldSuggestionResponse(false);
 
 	const unavailableRoom = await createRoom("Suggestion Unavailable Room");

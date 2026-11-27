@@ -32,12 +32,12 @@ No product code or tests changed. The pre-existing `package-lock.json` change re
 
 Architecture impact: level 3, server-owned generation and existing room socket; ADR-0009 and the passing fourth architecture review authorize the specified flow.
 
-- [ ] Allocate a fresh answer ID per logical answer, preserving it across retries and detached adoption; publish ordered live invalidation and successful completion only to the leading socket, outside replay.
-- [ ] Generate once only after a successful final answer with a leader; suppress failed, stopped, retry-intermediate and unled background answers, and cancel stale work on prompts, starts, deletion and replacement.
-- [ ] Select the answering provider's configured absorb model, without provider substitution; use a tool-less fake-tested call with 200 output tokens and a 10-second deadline.
-- [ ] Supply at most three completed text-only exchanges within 4,000 string units, excluding other content; account usage as suggestions and do not log content or persist results.
+- [x] Allocate a fresh answer ID per logical answer, preserving it across retries and detached adoption; publish ordered live invalidation and successful completion only to the leading socket, outside replay.
+- [x] Generate once only after a successful final answer with a leader; suppress failed, stopped, retry-intermediate and unled background answers, and cancel stale work on prompts, starts, deletion and replacement.
+- [x] Select the answering provider's configured absorb model, without provider substitution; use a tool-less fake-tested call with 200 output tokens and a 10-second deadline.
+- [x] Supply at most three completed text-only exchanges within 4,000 string units, excluding other content; account usage as suggestions and do not log content or persist results.
 - [x] Parse a JSON array into at most three trimmed, single-line, 200-character unique nonempty strings; handle invalid responses silently (`suggestions-producer-smoke.ts`: normalized, bounded and invalid JSON cases).
-- [ ] Send exactly the Q07 payload to the same leading connection only after its live completion, while current; verify displaced owners, adoption, cancellation and no replay.
+- [x] Send exactly the Q07 payload to the same leading connection only after its live completion, while current; verify displaced owners, adoption, cancellation and no replay.
 - [ ] Run targeted typechecks, affected suites and relevant browser specs through the attributed gate; merge current main and rerun affected suites.
 - [ ] Complete item-by-item self-review, record tests, assumptions and debt, and push the branch.
 
@@ -64,3 +64,26 @@ The fake-model socket smoke now covers normalized and invalid results, length an
 Checks before the red privacy assertion: UI and script typechecks passed; the attributed targeted gate passed 58/58 with `NODE_OPTIONS='--import tsx'`, including the producer, worker, steering and scheduled suites; detached-turn, reattach and quick-follow-up suites passed 57/57. The bare `npm run test:scripts` invocation with TypeScript smoke files failed to resolve their `.js` imports (54/56); loading `tsx` made the same suite pass. The reconnect browser smoke initially timed out twice because its synthetic gateway held suggestion requests containing its chat marker; adapting the fake gateway without changing assertions made the attributed browser gate pass. The room-steer fake needed the same distinction; its existing assertions then passed. A mistaken `gate --help` discovery call omitted attribution and failed immediately with ENOENT; it did not run a suite. No full root build or smokes were run. Foreign-host network-failure reruns: 0. No screenshots were captured.
 
 Files changed so far: `apps/web-server/src/room-socket.ts`, `persistent-agent-turns.ts`, `persistent-agent-worker-runtime.ts`, `usage-log.ts`; `apps/web-server/scripts/suggestions-producer-smoke.ts`, `lifecycle-worker-session-smoke.ts`, `persistent-room-detached-turn-setup.ts`, `chat-reconnect-smoke.ts`, `room-steer-smoke.ts`, `prompt-overwrite-scheduled-smoke.ts`; `docs/developer.md` and this report. All model and room data in the tests is synthetic. The pre-existing `package-lock.json` modification remains untouched. Graph: no; direct source searches identified the relevant code. Debt candidates: trace/replay fidelity requires the decision above; no other debt was assessed. Slice 2, Slice 3, independent review/conformance, final merge and final checks remain outstanding.
+
+
+## Trace decision and assertion change (2026-11-27)
+
+Front approved suggestion-only trace privacy under Sascha's Q04: ordinary chat trace boundaries and replay stay unchanged. Suggestion trace entries carry only room ID, duration, result code and token counts; the suggestion request, response and free-text provider error are excluded. The pre-existing assertion that suggestion output is absent from the mixed trace and server logs remains unchanged. The one newly added assertion that searched the entire mixed ordinary-chat trace for `What comes` and `Quick answer` was replaced with assertions scoped to `suggestion_generation` entries: a successful call must record metadata and omit its input and result; an error call uses distinct synthetic input and provider-error markers, must record an `error` code, remain silent on the socket, and omit those markers from suggestion trace and server logs. The test also checks that ordinary prompt boundary fields remain available for replay. No global trace format or replay code changed.
+
+A further test-first check found that a manually continued failed answer had lost its original prompt in the suggestion context. The producer now uses the original text only when the session's user message matches the saved user item; otherwise it omits that unverified pair. `suggestions-producer-smoke.ts` exercises this continuation and the fail-closed restored-history case.
+
+## Slice 1 self-review
+
+| Binding item | Evidence |
+| --- | --- |
+| Fresh answer identity before execution, retained across retry and adoption; queued identities are distinct | `suggestions-producer-smoke.ts`: retry, multipart, adoption, re-adoption and queued cases. Interactive and scheduled execution both allocate their private non-serialized identity in `beginPersistentAgentTurn`; a background identity has no external recipient, so its allocation is additionally verified by code inspection. |
+| Successful answer only; no retry-intermediate, failed, stopped, empty, unled detached or unled scheduled generation | `suggestions-producer-smoke.ts`: retry, empty, stopped and unled cases; `prompt-overwrite-scheduled-smoke.ts`: scheduled no-call and no-replay assertions. |
+| Same-provider configured Memorize model, including gateway and custom; unavailable model has no fallback | `suggestions-producer-smoke.ts`: gateway `suggest-model`, custom `custom-suggest` and unavailable-model cases. |
+| Tool-less model call, 200 output tokens, 10-second deadline; cancellation on new prompt, start, owner loss and deletion | `suggestions-producer-smoke.ts`: request cap/tools, held deadline, superseding prompt, post-completion takeover and synthetic room deletion; `lifecycle-worker-session-smoke.ts`: pre-start cancellation. |
+| Last three proven completed exchanges, 4,000 JavaScript units, oldest dropped first, unknown history omitted; no tools, attachments or other context | `suggestions-producer-smoke.ts`: history, long context, restored unknown history, multipart tool result and continuation cases. The text-only input is assembled from user and assistant text; attachment-only text is excluded by the shown-prompt/stripper boundary. |
+| Usage under `suggestions`; no content in suggestion logs or traces; no suggestion persistence | `suggestions-producer-smoke.ts`: usage API, success and error trace/log checks and reconnect/no-replay. The producer keeps only active run state in memory. Ordinary chat trace behavior remains as separately approved above. |
+| JSON parsing, trim, line breaks, 200-character cap, empty and duplicate removal, maximum three and invalid JSON | `suggestions-producer-smoke.ts`: normalization, bounded response and invalid JSON cases. |
+| Exact Q07 result and lifecycle fields; completion before result; same live owner only; no replay or stale delivery | `suggestions-producer-smoke.ts`: exact payload, reconnect, displaced adopter, re-adoption, takeover after completion, new prompt and unled cases. |
+| Existing assertions retained; fake models and invented data only; no UI slice or end-to-end consumer slice | All assertions in existing suites remain; `chat-reconnect-smoke.ts` and `room-steer-smoke.ts` fake gateways distinguish suggestion calls, and `prompt-overwrite-scheduled-smoke.ts` only adds assertions. No UI consumer was changed. |
+
+Final merge and post-merge targeted reruns remain pending.

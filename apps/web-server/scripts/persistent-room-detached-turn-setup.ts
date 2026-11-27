@@ -150,6 +150,11 @@ export const gateway = http.createServer((req, res) => {
 		};
 		gatewayRequests.push(record);
 		res.on("close", () => { if (!res.writableFinished) { record.aborted = true; record.abortedAt = Date.now(); } });
+		if (suggestion && suggestionResponse === "SYNTHETIC_SUGGESTION_FAILURE") {
+			record.finished = true;
+			res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: { type: "synthetic_failure", message: "PRIVATE_SUGGESTION_PROVIDER_ERROR" } }));
+			return;
+		}
 
 		res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
 		const base = { id: `cmpl_${gatewayRequests.length}`, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model };
