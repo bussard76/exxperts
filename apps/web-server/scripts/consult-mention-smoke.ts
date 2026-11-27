@@ -579,6 +579,10 @@ async function checkMessageBox(chromium: BrowserType): Promise<void> {
 				const ctx = await browser.newContext({ viewport: { width, height: phone ? 844 : 900 }, colorScheme: theme, deviceScaleFactor: phone ? 3 : 2, ...(phone ? { isMobile: true, hasTouch: true } : {}) });
 				try {
 					const page = await ctx.newPage();
+					let roomReady = false;
+					page.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => {
+						if (typeof payload === "string" && JSON.parse(payload).type === "ready") roomReady = true;
+					}));
 					await page.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
 					await page.waitForLoadState("networkidle");
 					const dismiss = page.locator(".whats-new-close");
@@ -592,6 +596,7 @@ async function checkMessageBox(chromium: BrowserType): Promise<void> {
 						await composer.fill("no history yet");
 						await composer.press("ArrowUp");
 						assert(await composer.inputValue() === "no history yet", "empty history leaves the draft intact");
+						await waitUntil(() => roomReady, "room WebSocket ready");
 						await composer.fill("   ");
 						await composer.press("Enter");
 						assert(await page.locator(".bubble-row.user:not(.queued)").count() === 0, "whitespace-only input creates no prompt");
