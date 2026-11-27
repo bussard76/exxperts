@@ -73,20 +73,23 @@ function sse(res: http.ServerResponse, event: string, payload: unknown): void {
 
 // The open gated answer: the smoke sends its parts with pump() and ends it with finish().
 let open: { res: http.ServerResponse; sent: number } | null = null;
+let suggestionCalls = 0;
 const endpoint = http.createServer((req, res) => {
 	let raw = "";
 	req.on("data", (chunk) => { raw += chunk; });
 	req.on("end", () => {
 		const body = JSON.parse(raw || "{}");
+		const suggestion = JSON.stringify(body.system ?? "").includes("Generate next prompt suggestions");
+		if (suggestion) suggestionCalls += 1;
 		res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
 		sse(res, "message_start", { type: "message_start", message: { id: "msg_smoke", type: "message", role: "assistant", model: body.model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 100, output_tokens: 1 } } });
 		sse(res, "content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
 		const lastUser = JSON.stringify((body.messages ?? []).filter((m: { role?: string }) => m.role === "user").at(-1) ?? "");
-		if (lastUser.includes(GATED)) {
+		if (!suggestion && lastUser.includes(GATED)) {
 			open = { res, sent: 0 };
 			return;
 		}
-		sse(res, "content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "OK." } });
+		sse(res, "content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: suggestion ? '["Ask another question"]' : "OK." } });
 		end(res);
 	});
 });
@@ -288,6 +291,8 @@ try {
 		await send(stay.page, `Warm-up question ${GATED}`);
 		await pump(stay.page, 12);
 		await finish(stay.page);
+		await waitUntil(() => suggestionCalls > 0, "the suggestion request arrives");
+		if (open !== null) throw new Error("the suggestion must not occupy the held chat response");
 
 		await row("after Send the view stays still while the answer grows below; the ↓ pill shows; scrolling down to the end attaches", async () => {
 			const { page } = stay;
