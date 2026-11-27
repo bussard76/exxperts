@@ -77,6 +77,7 @@ process.env.EXXETA_PERSISTENT_AGENTS_ROOT = agentsRoot;
 
 const CLAUDE = { provider: "fake-claude", model: "claude-fake" };
 const requests: Array<{ model: string; userTexts: string[] }> = [];
+const suggestionRequests: Array<{ model: string; userTexts: string[] }> = [];
 // The one key the OpenAI-style provider takes; changing it retires the stored one.
 let acceptedGptKey = "synthetic-gpt";
 
@@ -96,9 +97,12 @@ const providers = http.createServer((req, res) => {
 			return;
 		}
 		const userTexts = (Array.isArray(body.messages) ? body.messages : []).filter((message: any) => message?.role === "user").map((message: any) => typeof message.content === "string" ? message.content : JSON.stringify(message.content));
-		requests.push({ model: String(body.model), userTexts });
+		const request = { model: String(body.model), userTexts };
+		const suggestion = JSON.stringify(body.system ?? "").includes("Generate next prompt suggestions") || (body.messages ?? []).some((message: any) => (message.role === "system" || message.role === "developer") && JSON.stringify(message.content).includes("Generate next prompt suggestions"));
+		if (suggestion) suggestionRequests.push(request);
+		else requests.push(request);
 		res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
-		const text = `Answer from ${body.model}.`;
+		const text = suggestion ? '["Ask another question"]' : `Answer from ${body.model}.`;
 		if (String(req.url ?? "").includes("/messages")) {
 			sse(res, "message_start", { type: "message_start", message: { id: `msg_${requests.length}`, type: "message", role: "assistant", model: body.model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 100, output_tokens: 1 } } });
 			sse(res, "content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
@@ -237,6 +241,8 @@ try {
 		await composer.fill("Back on GPT.");
 		await composer.press("Enter");
 		await page.getByText("Answer from gpt-fake.").waitFor({ timeout: 20000 });
+		await waitUntil(() => suggestionRequests.length > 0, "the suggestion request arrives");
+		assert(!suggestionRequests.some((request) => requests.includes(request)), "suggestions are separate from sign-in conversation requests");
 		assert(requests[requests.length - 1]?.model === "gpt-fake", "the conversation continues on its provider");
 
 		// The key stops working while the catalog still counts it: the provider
