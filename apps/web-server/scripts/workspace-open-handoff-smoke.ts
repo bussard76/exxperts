@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { SMOKE_AUTH_HEADERS } from "./smoke-server-process.js";
+import { SMOKE_AUTH_HEADERS, SMOKE_SERVER_AUTH_ENV } from "./smoke-server-process.js";
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "workspace-box-race-"));
 const folder = path.join(home, "invented-folder");
@@ -15,7 +15,7 @@ fs.writeFileSync(path.join(folder, "invented.txt"), "example");
 process.env.HOME = home;
 process.env.USERPROFILE = home;
 process.env.EXXETA_PERSISTENT_AGENTS_ROOT = path.join(home, "agents");
-process.env.EXXPERTS_AUTH_TOKEN = "exxperts-smoke-pinned-auth-token";
+Object.assign(process.env, SMOKE_SERVER_AUTH_ENV);
 const appDir = path.join(home, ".exxperts", "app");
 fs.mkdirSync(appDir, { recursive: true });
 fs.writeFileSync(path.join(appDir, "openai-compatible-ai-profile.json"), JSON.stringify({ profileId: "openai-compatible", providerId: "openai-compatible", label: "Synthetic Gateway", roomModels: [{ modelId: "invented" }], maintenanceModel: "invented" }));
