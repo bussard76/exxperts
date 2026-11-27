@@ -1,0 +1,106 @@
+// Exercise the real room composer with synthetic frames on its existing socket.
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import http from "node:http";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { chromium } from "playwright";
+import { SMOKE_AUTH_TOKEN, SMOKE_SERVER_AUTH_ENV, SMOKE_SERVER_SPAWN_TREE_OPTIONS, smokeHomeEnv, stopSmokeServer, freePort, waitForServer } from "./smoke-server-process.js";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const webServerDir = path.join(root, "apps/web-server");
+const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "suggestions-consumer-"));
+const home = path.join(temporary, "home");
+const agentDir = path.join(home, ".exxperts/agent");
+const roomsDir = path.join(home, ".exxperts/app/personalized-agents");
+fs.mkdirSync(agentDir, { recursive: true });
+fs.mkdirSync(roomsDir, { recursive: true });
+process.env.HOME = home;
+process.env.USERPROFILE = home;
+process.env.EXXPERTS_CODING_AGENT_DIR = agentDir;
+process.env.EXXETA_PERSISTENT_AGENTS_ROOT = roomsDir;
+const gateway = http.createServer((req, res) => { req.resume(); res.writeHead(200, { "content-type": "application/json" }).end("{}"); });
+const gatewayPort = await freePort();
+await new Promise<void>((resolve) => gateway.listen(gatewayPort, "127.0.0.1", resolve));
+fs.writeFileSync(path.join(agentDir, "models.json"), JSON.stringify({ providers: { "fake-gpt": { name: "Fake GPT", baseUrl: `http://127.0.0.1:${gatewayPort}/v1`, api: "openai-completions", models: [{ id: "gpt-fake", name: "GPT Fake", reasoning: true, input: ["text"], contextWindow: 128000, maxTokens: 16000 }] } } }));
+fs.writeFileSync(path.join(agentDir, "auth.json"), JSON.stringify({ "fake-gpt": { type: "api_key", key: "synthetic-consumer-test" } }));
+const appDir = path.join(home, ".exxperts/app");
+fs.writeFileSync(path.join(appDir, "custom-ai-profiles.json"), JSON.stringify({ version: 1, profiles: [{ id: "custom-fake-gpt", providerId: "fake-gpt", label: "Fake GPT", roomModels: ["gpt-fake"], learnModel: "gpt-fake", reviewMemoryModel: "gpt-fake" }] }));
+fs.writeFileSync(path.join(appDir, "persistent-agent-ai-profile.json"), JSON.stringify({ profileId: "custom-fake-gpt" }));
+const agents = await import("../src/persistent-agents.js");
+const room = agents.createPersistentAgentFromScaffoldInput({ displayName: "Example Room", userName: "Example User", preferredUserAddress: "Example User" }).agent.agentId;
+const roomModels = await import("../src/room-models.js");
+roomModels.writeRoomModels(room, { conversation: { provider: "fake-gpt", model: "gpt-fake" } });
+const port = await freePort();
+const base = `http://127.0.0.1:${port}`;
+const server = spawn("npx", ["tsx", "src/index.ts"], {
+ cwd: webServerDir, ...SMOKE_SERVER_SPAWN_TREE_OPTIONS,
+ env: smokeHomeEnv(home, { PORT: String(port), ...SMOKE_SERVER_AUTH_ENV, EXXETA_HOME: root, EXXPERTS_CODING_AGENT_DIR: agentDir, EXXETA_PERSISTENT_AGENTS_ROOT: roomsDir }) as NodeJS.ProcessEnv,
+});
+try {
+ await waitForServer(server, base, 30_000);
+ const browser = await chromium.launch();
+ try {
+  const page = await browser.newPage();
+  await page.addInitScript({ content: `
+   const Original = window.WebSocket;
+   window.WebSocket = class extends Original {
+    constructor(url, protocols) {
+     super(url, protocols);
+     this.addEventListener("message", (event) => {
+      const frame = JSON.parse(event.data);
+      if (frame.type === "ready" && frame.persistentAgentId) Object.assign(window, { testRoomSocket: this, testRoom: frame.persistentAgentId, testThread: frame.conversationId });
+     });
+    }
+   };
+  ` });
+  await page.goto(`${base}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
+  await page.waitForLoadState("networkidle");
+  const dismiss = page.locator(".whats-new-close");
+  if (await dismiss.count()) await dismiss.click();
+  await page.locator(".persistent-agent-card").filter({ hasText: "Example Room" }).getByRole("button", { name: "Enter" }).click();
+  const box = page.locator(".composer textarea").first();
+  await box.waitFor();
+  await page.waitForFunction(() => Boolean((window as any).testThread), null, { timeout: 8000 });
+  const frame = async (payload: Record<string, unknown>) => page.evaluate((value) => {
+   const w = window as any;
+   w.testRoomSocket.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({ roomId: w.testRoom, threadId: w.testThread, ...value }) }));
+  }, payload);
+  const placeholder = () => box.getAttribute("placeholder");
+  const ordinary = await placeholder();
+  await frame({ type: "suggestions", answerId: "answer-one", items: ["Alpha", "Beta", "Gamma"] });
+  assert.equal(await placeholder(), ordinary, "suggestions without a live completion are rejected");
+  await frame({ type: "answer_lifecycle", phase: "complete", answerId: "answer-one" });
+  await frame({ type: "suggestions", answerId: "old-answer", items: ["Stale"] });
+  assert.equal(await placeholder(), ordinary, "a different answer is rejected");
+  await frame({ type: "suggestions", answerId: "answer-one", items: ["Alpha", "Beta", "Gamma"] });
+  await page.waitForFunction(() => document.querySelector(".composer textarea")?.getAttribute("placeholder") === "Alpha");
+  assert.match(await box.getAttribute("aria-describedby") ?? "", /.+/, "suggestion has an accessible hint");
+  await box.focus();
+  await box.press("Tab");
+  assert.equal(await placeholder(), "Beta");
+  await box.press("ArrowRight");
+  assert.equal(await box.inputValue(), "Beta");
+  await box.fill("");
+  assert.equal(await placeholder(), "Gamma");
+  await box.press("Tab");
+  assert.equal(await placeholder(), "Alpha");
+  await box.press("Shift+Tab");
+  assert.equal(await placeholder(), "Gamma");
+  await box.press("ArrowRight");
+  await box.fill("");
+  assert.equal(await placeholder(), "Alpha");
+  await box.press("ArrowRight");
+  await box.fill("");
+  assert.equal(await placeholder(), ordinary);
+  await frame({ type: "answer_lifecycle", phase: "invalidate" });
+  await frame({ type: "suggestions", answerId: "answer-one", items: ["Stale"] });
+  assert.equal(await placeholder(), ordinary, "invalidation rejects late results");
+ } finally { await browser.close(); }
+} finally {
+ await stopSmokeServer(server);
+ await new Promise<void>((resolve) => gateway.close(() => resolve()));
+ fs.rmSync(temporary, { recursive: true, force: true });
+}

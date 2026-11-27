@@ -19,3 +19,7 @@ Pending.
 ## Files, assumptions and debt
 
 Pending. No screenshots captured.
+
+## Red consumer checkpoint
+
+`suggestions-consumer-smoke.ts` drives the existing composer and its live room socket using invented frames. The attributed browser gate reached the matching live completion/result case and failed waiting for `Alpha` to appear as the placeholder, as expected before implementation; 54 other script tests passed. Two earlier setup attempts failed before the consumer assertions: one lacked a configured fake provider and one used a serialized initializer that did not install the socket wrapper. The fake provider and initializer were corrected; neither was a product failure. This first red test is not yet complete coverage of the checklist.
