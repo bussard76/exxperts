@@ -77,6 +77,52 @@ async function dispatchWorkspaceAssociation(association: WorkspaceAssociation, s
 
 /** Only unambiguous, direct Linux desktop entries can be bound to a spawn. */
 async function workspaceAssociation(file: string): Promise<WorkspaceAssociation | null> {
+	if (process.platform === "darwin") {
+		try {
+			const koffi = (await import("koffi")).default;
+			const core = koffi.load("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation");
+			const services = koffi.load("/System/Library/Frameworks/CoreServices.framework/CoreServices");
+			const urlForPath = core.func("void *CFURLCreateFromFileSystemRepresentation(void *allocator, const uint8_t *bytes, intptr_t length, uint8_t isDirectory)");
+			const defaultApp = services.func("void *LSCopyDefaultApplicationURLForURL(void *url, uint32_t roles, void *error)");
+			const bundleForUrl = core.func("void *CFBundleCreate(void *allocator, void *url)");
+			const bundleExecutable = core.func("void *CFBundleCopyExecutableURL(void *bundle)");
+			const pathForUrl = core.func("uint8_t CFURLGetFileSystemRepresentation(void *url, uint8_t resolve, _Out_ uint8_t *buffer, intptr_t length)");
+			const release = core.func("void CFRelease(void *value)");
+			const bytes = Buffer.from(file), url = urlForPath(null, bytes, bytes.length, 0);
+			if (!url) return null;
+			let app: unknown, bundle: unknown, executable: unknown;
+			try {
+				app = defaultApp(url, 0xffffffff, null); if (!app) return null;
+				bundle = bundleForUrl(null, app); if (!bundle) return null;
+				executable = bundleExecutable(bundle); if (!executable) return null;
+				const resolved = Buffer.alloc(4096);
+				if (!pathForUrl(executable, 1, resolved, resolved.length)) return null;
+				// shortcut: the Launch Services working directory is unbound; refuse until it can be verified.
+				return null;
+			} finally { if (executable) release(executable); if (bundle) release(bundle); if (app) release(app); release(url); }
+		} catch { return null; }
+	}
+	if (process.platform === "win32") {
+		try {
+			const koffi = (await import("koffi")).default;
+			const kernel = koffi.load("kernel32.dll");
+			const systemDirectory = kernel.func("uint32_t __stdcall GetSystemDirectoryW(_Out_ char16_t *buffer, uint32_t size)");
+			const directoryBuffer = Buffer.alloc(65_536), directoryLength = systemDirectory(directoryBuffer, 32_768);
+			if (!Number.isInteger(directoryLength) || directoryLength < 1 || directoryLength >= 32_768) return null;
+			const directory = directoryBuffer.toString("utf16le", 0, directoryLength * 2);
+			if (!/^[A-Za-z]:\\/.test(directory) || !path.win32.isAbsolute(directory)) return null;
+			const library = koffi.load(path.win32.join(directory, "shlwapi.dll"));
+			const association = library.func("int32_t __stdcall AssocQueryStringW(uint32_t flags, uint32_t kind, const char16_t *assoc, const char16_t *extra, _Out_ char16_t *out, _Inout_ uint32_t *length)");
+			const extension = path.win32.extname(file);
+			if (!extension) return null;
+			for (const kind of [1, 2]) {
+				const output = Buffer.alloc(65_536), length = [32_768];
+				if (association(0, kind, extension, "open", output, length) !== 0 || !Number.isInteger(length[0]) || length[0] < 2 || length[0] > 32_768 || output.readUInt16LE((length[0] - 1) * 2) !== 0) return null;
+			}
+			// shortcut: the effective association does not bind lpDirectory here; refuse until it can be verified.
+			return null;
+		} catch { return null; }
+	}
 	if (process.platform !== "linux") return null;
 	try {
 		const helper = fs.realpathSync("/usr/bin/xdg-mime");

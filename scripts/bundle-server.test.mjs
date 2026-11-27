@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 
 import * as esbuild from "esbuild";
 
-import { bundleServer, checkServerFiles, EXTERNAL_PACKAGES, FILE_PACKAGES, REVIEWED_DYNAMIC_LOADS, REVIEWED_OWN_LOCATION_READS } from "./bundle-server.mjs";
+import { bundleServer, checkServerFiles, EXTERNAL_PACKAGES, FILE_PACKAGES, REVIEWED_DYNAMIC_LOADS, REVIEWED_OWN_LOCATION_READS, shippedPackageDirs } from "./bundle-server.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -317,6 +317,21 @@ test("an external that does not ship may not be imported at the top of the bundl
 		"node_modules/koffi/package.json": JSON.stringify({ name: "koffi", version: "2.9.0", license: "MIT" }),
 	});
 	await assert.rejects(bundleServer({ root: dir, log: () => {} }), /koffi/);
+});
+
+test("the optional native association resolver ships its runtime package", () => {
+	const dir = fixtureTree({ "node_modules/koffi/package.json": JSON.stringify({ name: "koffi", version: "2.16.2", license: "MIT" }) });
+	const result = shippedPackageDirs(dir);
+	assert.ok(result.dirs.has(path.join(dir, "node_modules/koffi")), "the bundled server must retain koffi for its on-demand native association lookup");
+});
+
+test("the document preview worker ships its parser packages", () => {
+	const dir = fixtureTree({
+		"node_modules/docx-preview/package.json": JSON.stringify({ name: "docx-preview", version: "0.4.1", license: "Apache-2.0" }),
+		"node_modules/exceljs/package.json": JSON.stringify({ name: "exceljs", version: "4.4.0", license: "MIT" }),
+	});
+	const result = shippedPackageDirs(dir);
+	for (const name of ["docx-preview", "exceljs"]) assert.ok(result.dirs.has(path.join(dir, "node_modules", name)), `${name} must be retained for the worker`);
 });
 
 test("the shelf worker may import only packages that ship as files", async () => {

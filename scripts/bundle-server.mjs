@@ -47,7 +47,7 @@ export const EXTERNAL_PACKAGES = [
 	{ name: "recheck", ships: true, reason: "the MCP adapter checks regex search queries with checkSync, which starts ./synckit-worker and the native checker from recheck's own folder" },
 	{ name: "esbuild", ships: false, reason: "only tsx uses it, and the bundled server never runs tsx" },
 	{ name: "tsx", ships: false, reason: "the TypeScript loader the bundle replaces" },
-	{ name: "koffi", ships: false, reason: "only the CLI's native clipboard reaches it" },
+	{ name: "koffi", ships: true, reason: "the optional native workspace association lookup loads it on demand" },
 	{ name: "@mariozechner/clipboard", ships: false, reason: "only the CLI's terminal clipboard reaches it" },
 	{ name: "fsevents", ships: false, reason: "optional macOS file watcher, never reached by the server" },
 	{ name: "bufferutil", ships: false, reason: "optional native speedup for ws, never installed" },
@@ -59,6 +59,8 @@ export const EXTERNAL_PACKAGES = [
 export const FILE_PACKAGES = [
 	{ name: "qrcode-terminal", reason: "remote-qr.ts loads it through createRequire, which esbuild cannot follow" },
 	{ name: "jszip", reason: "the shelf worker, a separate forked file, opens docx and xlsx with it" },
+	{ name: "docx-preview", reason: "the shelf worker renders bounded Word previews with it" },
+	{ name: "exceljs", reason: "the shelf worker reads bounded spreadsheet previews with it" },
 	{ name: "@anthropic-ai/sandbox-runtime", reason: "the box worker, a separate forked file, holds the library's proxy and log monitor; the win-x64 desktop payload leaves it out (DESKTOP_TARGET_DROP in apps/desktop/scripts/prune-payload.mjs)" },
 	{ name: "@microsoft/mxc-sdk", reason: "the Windows box worker, a bundle of its own, imports it, and it finds its native library from its own folder; only the win-x64 archive and its desktop payload carry it (ARCHIVE_TARGET_DROP in scripts/bundle-release-prune.mjs)" },
 ];
@@ -487,8 +489,8 @@ async function bundleProblems(root, text, metafile, packages, out) {
 	for (const imp of output.imports) {
 		if (!imp.external || isBuiltin(imp.path)) continue;
 		const entry = EXTERNAL_PACKAGES.find((pkg) => pkg.name === packageName(imp.path));
-		if (entry && !entry.ships && imp.kind === "import-statement") {
-			problems.push(`the bundle imports ${imp.path} at its top, but ${entry.name} does not ship, so the server would not start without it`);
+		if (entry && (!entry.ships || entry.name === "koffi") && imp.kind === "import-statement") {
+			problems.push(`the bundle imports ${imp.path} at its top, but ${entry.name} is optional or does not ship, so the server would not start without it`);
 		}
 	}
 

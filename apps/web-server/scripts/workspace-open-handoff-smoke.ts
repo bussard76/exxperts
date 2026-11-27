@@ -1,10 +1,11 @@
 import childProcess from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { SMOKE_AUTH_HEADERS } from "./smoke-server-process.js";
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "workspace-box-race-"));
@@ -51,6 +52,8 @@ const { app, PORT } = await import("../src/server-app.js");
 await import("../src/room-settings-routes.js");
 const { createPersistentAgentFromScaffoldInput, writePersistentAgentThread } = await import("../src/persistent-agents.js");
 const { createPersistentRoomDefaultCapabilityPolicy, writePersistentRoomDefaultCapabilityPolicy } = await import("../src/persistent-room-workspace-policy.js");
+const { setRoomBoxForTests } = await import("../src/room-box/box-available.js");
+const { persistentRoomLiveSessions, registerWorkspaceBox } = await import("../src/room-live-sessions.js");
 try {
 	const room = createPersistentAgentFromScaffoldInput({ displayName: "Invented Open Room", userName: "Example", preferredUserAddress: "Example" }).agent.id;
 	writePersistentAgentThread(room, "invented-thread", { state: "standby", origin: "home", model: { provider: "openai-compatible", model: "invented", label: "Invented" }, items: [] });
@@ -136,6 +139,41 @@ try {
 		const lateChange = await request();
 		if (!executableChangedLate || lateChange.statusCode !== 403 || lateChange.json().code !== "association_unverified" || Number(dispatches) !== beforeLateChange) throw new Error("an executable changed after association lookup must not dispatch");
 	} finally { fs.promises.lstat = originalLstat; }
+	const koffi = (await import("koffi")).default, originalLoad = koffi.load;
+	const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+	let launchServicesQueries = 0, bundleQueries = 0, windowsQueries = 0;
+	koffi.load = ((_library: string) => ({ func: (signature: string) => {
+		if (signature.includes("LSCopyDefaultApplicationURLForURL")) return () => { launchServicesQueries++; return 2; };
+		if (signature.includes("CFURLCreateFromFileSystemRepresentation")) return () => 1;
+		if (signature.includes("CFBundleCreate")) return () => 3;
+		if (signature.includes("CFBundleCopyExecutableURL")) return () => { bundleQueries++; return 4; };
+		if (signature.includes("CFURLGetFileSystemRepresentation")) return (_url: unknown, _resolve: unknown, buffer: Buffer) => { buffer.write("/invented/Viewer.app/Contents/MacOS/Viewer\0"); return 1; };
+		if (signature.includes("CFRelease")) return () => {};
+		if (signature.includes("GetSystemDirectoryW")) return (buffer: Buffer) => { const value = "C:\\Windows\\System32"; buffer.write(value, "utf16le"); return value.length; };
+		if (signature.includes("AssocQueryStringW")) return (_flags: number, kind: number, _assoc: string, _verb: string, buffer: Buffer, length: number[]) => { windowsQueries++; const value = kind === 1 ? '"C:\\Invented\\Viewer.exe" "%1"' : "C:\\Invented\\Viewer.exe"; buffer.write(`${value}\0`, "utf16le"); length[0] = value.length + 1; return 0; };
+		throw new Error(`unexpected synthetic native function: ${signature}`);
+	} })) as typeof koffi.load;
+	const owner = { connectionId: "native-owner", conversationId: "invented-thread" } as any;
+	const box = { spills: () => [], ownTemp: () => undefined, runFileProgram: async (call: { request: string }) => {
+		const worker = fileURLToPath(new URL("../src/room-box/file-worker.mjs", import.meta.url));
+		const result = spawnSync(process.execPath, [worker], { input: call.request });
+		if (result.status !== 0) throw new Error("synthetic boxed file worker failed");
+		return { output: result.stdout, ended: "exit code 0", errorOutput: result.stderr };
+	} } as any;
+	try {
+		Object.defineProperty(process, "platform", { ...platform, value: "darwin" });
+		setRoomBoxForTests({ platform: "darwin", windows: null });
+		persistentRoomLiveSessions.set(room, owner);
+		const release = registerWorkspaceBox(room, "invented-thread", box, owner);
+		try {
+			const native = await request();
+			if (native.statusCode !== 403 || native.json().code !== "association_unverified" || launchServicesQueries !== 1 || bundleQueries !== 1 || Number(dispatches) !== beforeLateChange) throw new Error("Mac must query Launch Services, resolve its bundle executable and refuse an unbindable launch directory without dispatch");
+		} finally { release(); persistentRoomLiveSessions.delete(room); }
+		Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+		setRoomBoxForTests({ platform: "win32", windows: "off" });
+		const windows = await request();
+		if (windows.statusCode !== 403 || windows.json().code !== "association_unverified" || windowsQueries !== 2 || Number(dispatches) !== beforeLateChange) throw new Error("Windows must query its effective open command and executable and refuse an implicit working directory without dispatch");
+	} finally { koffi.load = originalLoad; setRoomBoxForTests(null); Object.defineProperty(process, "platform", platform); }
 	console.log("workspace checked open handoff smoke passed");
 } finally {
 	childProcess.execFile = originalExecFile; childProcess.spawn = originalSpawn; syncBuiltinESMExports();
