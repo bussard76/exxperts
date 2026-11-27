@@ -68,6 +68,7 @@ const REMOVED_IDS = ["claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "c
 const REMOVED = { provider: "anthropic", model: "claude-opus-4-8" };
 const CURRENT = { provider: "anthropic", model: "claude-opus-5-5" };
 const requests: string[] = [];
+const suggestionRequests: string[] = [];
 
 function sse(res: http.ServerResponse, event: string, payload: unknown): void {
 	res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
@@ -80,11 +81,13 @@ const provider = http.createServer((req, res) => {
 	req.on("data", (chunk) => { raw += chunk; });
 	req.on("end", () => {
 		const body = JSON.parse(raw || "{}");
-		requests.push(String(body.model));
+		const suggestion = JSON.stringify(body.system ?? "").includes("Generate next prompt suggestions");
+		if (suggestion) suggestionRequests.push(String(body.model));
+		else requests.push(String(body.model));
 		res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
 		sse(res, "message_start", { type: "message_start", message: { id: `msg_${requests.length}`, type: "message", role: "assistant", model: body.model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 100, output_tokens: 1 } } });
 		sse(res, "content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
-		sse(res, "content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: `Answer from ${body.model}.` } });
+		sse(res, "content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: suggestion ? '["Ask another question"]' : `Answer from ${body.model}.` } });
 		sse(res, "content_block_stop", { type: "content_block_stop", index: 0 });
 		sse(res, "message_delta", { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 20 } });
 		sse(res, "message_stop", { type: "message_stop" });
@@ -248,6 +251,8 @@ try {
 		await composer.fill("Still there?");
 		await composer.press("Enter");
 		await page.getByText("Answer from claude-opus-4-8.").waitFor({ timeout: 20000 });
+		await waitUntil(() => suggestionRequests.length > 0, "the suggestion request arrives");
+		assert(requests.length === 1, `the suggestion must be separate from chat requests, got ${JSON.stringify(requests)}`);
 		assert(requests[requests.length - 1] === REMOVED.model, `the turn ran on the conversation's own lock, got ${JSON.stringify(requests)}`);
 		assert((await page.locator(".room-model-notice").count()) === 0, "a started conversation shows no notice");
 		assert((await page.getByText("Earlier answer.").count()) === 1, "the earlier turn is still there");
@@ -339,7 +344,7 @@ try {
 
 	console.log("room-removed-claude-model smoke: ok");
 } catch (error) {
-	console.error(serverOutput.join("").split("\n").filter((line) => !line.includes("token=")).join("\n").slice(-6000));
+	console.error(serverOutput.join("").split("\n").filter((line) => !/token=/.test(line)).join("\n").slice(-6000));
 	throw error;
 } finally {
 	try { (provider as any).closeAllConnections?.(); } catch {}
