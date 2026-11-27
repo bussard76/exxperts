@@ -55,7 +55,7 @@ const POINTER_TRIGGER = "use memory_recall to read them";
 /** Lives only in the archive: no note in memory and no summary ever said it. */
 const ARCHIVED_WORDS = "Die Überweisung über den Rabatt ging am 11.07.2026 raus.";
 /** Rides the question, so a captured request can be tied to the turn that caused it. */
-const TURN_TOKEN = "TURN_TOKEN_POINTER_RECALL";
+const TURN_MARKER = "TURN_TOKEN_POINTER_RECALL";
 const QUESTION = "What do you still have about the Rabatt?";
 /** The hand-run variant that proves this smoke goes red when the pointer is not followed. */
 const IGNORE_POINTER = process.env.EXXPERTS_POINTER_RECALL_SMOKE_IGNORE_POINTER === "1";
@@ -68,6 +68,7 @@ interface RecallCall {
 }
 const recallCalls: RecallCall[] = [];
 const legs: Array<{ pointerSeen: boolean; toolOffered: boolean; calledRecall: boolean; systemPrompt: string }> = [];
+let suggestionCalls = 0;
 
 function sseChunk(payload: unknown): string {
 	return `data: ${JSON.stringify(payload)}\n\n`;
@@ -92,6 +93,8 @@ const gateway = http.createServer((req, res) => {
 		const messages: any[] = Array.isArray(parsed?.messages) ? parsed.messages : [];
 		const toolMessages = messages.filter((message) => message?.role === "tool");
 		const systemPrompt = messages[0]?.role === "system" ? messageText(messages[0].content) : "";
+		const suggestion = systemPrompt.includes("Generate next prompt suggestions");
+		if (suggestion) suggestionCalls += 1;
 		const toolNames: string[] = (parsed?.tools ?? []).map((tool: any) => String(tool?.function?.name ?? tool?.name ?? ""));
 		const pointerSeen = !IGNORE_POINTER && systemPrompt.includes(POINTER_TRIGGER);
 		const toolOffered = toolNames.includes("memory_recall");
@@ -99,7 +102,10 @@ const gateway = http.createServer((req, res) => {
 		const question = messages.filter((message) => message?.role === "user").map((message) => messageText(message.content)).filter((text) => !text.startsWith(ROOM_STATE_HEADING)).pop() ?? "";
 		const base = { id: `cmpl_${legs.length + 1}`, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: String(parsed?.model ?? "room-model") };
 		res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
-		if (toolMessages.length === 0) {
+		if (suggestion) {
+			res.write(sseChunk({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: '["Ask another question"]' }, finish_reason: null }] }));
+			res.write(sseChunk({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 100, completion_tokens: 5, total_tokens: 105 } }));
+		} else if (toolMessages.length === 0) {
 			// First leg. The room is only looked up when the room said where to look
 			// and handed over the means; otherwise this is a model with no memory.
 			const calledRecall = pointerSeen && toolOffered;
@@ -107,7 +113,7 @@ const gateway = http.createServer((req, res) => {
 			if (calledRecall) {
 				// The question's own words go into the query — nothing the gateway
 				// knows about this room's archive is smuggled in.
-				const args = JSON.stringify({ query: question.replace(TURN_TOKEN, "").trim() });
+				const args = JSON.stringify({ query: question.replace(TURN_MARKER, "").trim() });
 				recallCalls.push({ arguments: args });
 				res.write(sseChunk({ ...base, choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{ index: 0, id: `call_recall_${recallCalls.length}`, type: "function", function: { name: "memory_recall", arguments: "" } }] }, finish_reason: null }] }));
 				res.write(sseChunk({ ...base, choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: args } }] }, finish_reason: null }] }));
@@ -311,8 +317,10 @@ try {
 
 	ws = await WsHarness.connect(roomId, conversationId);
 	await ws.waitFor((frame) => frame.type === "ready", "the room's ready frame");
-	ws.send({ type: "prompt", text: `${QUESTION} ${TURN_TOKEN}` });
+	ws.send({ type: "prompt", text: `${QUESTION} ${TURN_MARKER}` });
 	await ws.waitFor((frame) => frame.type === "event" && frame.event?.type === "agent_end", "the turn to end", 30_000);
+	await ws.waitFor((frame) => frame.type === "suggestions", "the suggestion result", 30_000);
+	assert(suggestionCalls === 1 && legs.length === 2, "the suggestion call is separate from the two recall legs");
 	const answer = ws.answer();
 
 	// --- 1. The room was told where to look, and given the means -------------
@@ -332,7 +340,7 @@ try {
 	assert(recallCalls.length === 1, `the room should call memory_recall exactly once for one question, got ${recallCalls.length}`);
 	const args = JSON.parse(recallCalls[0].arguments);
 	assert(String(args.query ?? "").includes("Rabatt"), `the call should carry the question's own words, got ${recallCalls[0].arguments}`);
-	assert(!String(args.query ?? "").includes(TURN_TOKEN), "the question's words, not the harness's marker");
+	assert(!String(args.query ?? "").includes(TURN_MARKER), "the question's words, not the harness's marker");
 	assert(legs.length === 2, `one question with one lookup is two legs, got ${legs.length}`);
 	pass("the room called memory_recall once, with the words of the question");
 
