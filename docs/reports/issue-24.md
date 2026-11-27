@@ -38,8 +38,8 @@ Architecture impact: level 3, server-owned generation and existing room socket; 
 - [x] Supply at most three completed text-only exchanges within 4,000 string units, excluding other content; account usage as suggestions and do not log content or persist results.
 - [x] Parse a JSON array into at most three trimmed, single-line, 200-character unique nonempty strings; handle invalid responses silently (`suggestions-producer-smoke.ts`: normalized, bounded and invalid JSON cases).
 - [x] Send exactly the Q07 payload to the same leading connection only after its live completion, while current; verify displaced owners, adoption, cancellation and no replay.
-- [ ] Run targeted typechecks, affected suites and relevant browser specs through the attributed gate; merge current main and rerun affected suites.
-- [ ] Complete item-by-item self-review, record tests, assumptions and debt, and push the branch.
+- [x] Run targeted typechecks, affected suites and relevant browser specs through the attributed gate; merge current main and rerun affected suites.
+- [x] Complete item-by-item self-review, record tests, assumptions and debt, and push the branch.
 
 Slice 2 UI and Slice 3 producer-to-consumer integration are excluded from this task. The pre-existing package-lock modification remains untouched.
 
@@ -86,11 +86,11 @@ A further test-first check found that a manually continued failed answer had los
 | Exact Q07 result and lifecycle fields; completion before result; same live owner only; no replay or stale delivery | `suggestions-producer-smoke.ts`: exact payload, reconnect, displaced adopter, re-adoption, takeover after completion, new prompt and unled cases. |
 | Existing assertions retained; fake models and invented data only; no UI slice or end-to-end consumer slice | All assertions in existing suites remain; `chat-reconnect-smoke.ts` and `room-steer-smoke.ts` fake gateways distinguish suggestion calls, and `prompt-overwrite-scheduled-smoke.ts` only adds assertions. No UI consumer was changed. |
 
-Final merge and post-merge targeted reruns remain pending.
+The final merge and targeted reruns are recorded below.
 
 ## Final developer validation
 
-Code and tests were checked at `f40c3623caa689e2ec1d140b6325715326b6f322` after fetching and merging `origin/main` (already up to date). `npx tsc --noEmit -p apps/web-ui/tsconfig.json && npm run typecheck:scripts` passed. The attributed targeted `npm run test:scripts` gates passed 58/58 for the producer, isolated worker, steering and scheduled cases, and 57/57 for detached turns, reattachment and quick follow-up; TypeScript smoke files require `NODE_OPTIONS='--import tsx'`. The final attributed `chat-reconnect-smoke.ts` browser gate passed.
+Code and tests were checked at `f40c3623caa689e2ec1d140b6325715326b6f322` after fetching and merging `origin/main` (already up to date). `npx tsc --noEmit -p apps/web-ui/tsconfig.json && npm run typecheck:scripts` passed. The attributed targeted `npm run test:scripts` gates passed 58/58 for the producer, isolated worker, steering and scheduled cases, and 57/57 for detached turns, reattachment and quick follow-up; TypeScript smoke files require `NODE_OPTIONS='--import tsx'`. The final attributed `chat-reconnect-smoke.ts` browser gate passed on that same product code. After the manual-continue clarification, `origin/main` was fetched and merged again (already up to date), both typechecks passed, and the strengthened producer suite passed 55/55 at `c25aca6`.
 
 Assumptions: the accepted producer/socket seam is the test boundary; only provably completed historical pairs are included, as directed by Sascha on 2026-11-27. Graph: no; six tool calls preceded the first task file edit and direct source searches found the touched files; no comparison was measured. No screenshots, full root build, full smokes, paid model calls or real data were used. The pre-existing `package-lock.json` modification remains untouched and uncommitted.
 
