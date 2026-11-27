@@ -143,3 +143,15 @@ Wallet question: `apps/web-server/scripts/cache-write-cost-smoke.ts:155` require
 Thinking Sweep hold: the original `/tmp/t24-isolated-thinking-levels-sweep-smoke.ts.log` shows a suggestion call added to the actual lab recorder's rung calls. The recorder must continue capturing every call and budget accounting must include suggestion costs. The Controller has held changes to the real recorder and sweep pending a Front decision because their interface is not authorized by the current T24 contract. The Wallet fixture and thinking sweep remain unresolved; the other 21 rows above have targeted green evidence.
 
 The UI and scripts typechecks passed. The pre-existing `package-lock.json` change remains uncommitted. Graph: no; direct source and log searches found the first edited file after nine tool calls. No full build or full smoke gate was run; independent Tester owns those. Foreign-host network-failure reruns: zero.
+
+## Slice 2 consumer checklist (in progress)
+
+Architecture impact: level 3 within ADR-0009 and the accepted producer/socket contract; this slice changes the existing composer consumer only.
+
+- [ ] Supply a fixture-gallery fake before implementation and red consumer coverage through the live socket and composer.
+- [ ] Accept suggestions only for the current room, thread and live completed answer ID; reject stale or out-of-order frames and clear on invalidation, send, navigation, disconnect and reconnect, with no replay.
+- [ ] Show text-only suggestions as the empty composer's placeholder beneath connection, active-answer, approval, read-only and locked hints; suppress them for the mention popup.
+- [ ] Tab and Shift+Tab cycle only with two or more; Right Arrow accepts without sending and consumes the selected item, selecting its cyclic successor; preserve native focus behavior otherwise.
+- [ ] Typing and clearing restore the selected unconsumed item; Escape hides until the next answer; ignore these keys during IME composition and preserve mention and T23 history keyboard behavior.
+- [ ] Expose the suggestion with aria-describedby and the required keyboard hint.
+- [ ] Run both typechecks, affected scripts and attributed browser gates; document red/green evidence, files, assumptions and debt in the Slice 2 report, then push.
