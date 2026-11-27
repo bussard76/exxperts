@@ -64,6 +64,8 @@ New features go from the outside in. Nothing is built until Sascha has signed of
 
 For a full gate in a fresh Tester or integration checkout, run `npm ci` with lifecycle scripts and keep the install log for that checkout. Before starting the gate, confirm the MCP adapter postinstall succeeded and the Chromium executable is available when the gate includes browser checks. Cite the gate revision and setup evidence together. If setup is incomplete, record the setup failure, repair it, and run the gate with verified setup. Keep any earlier failed run in the report.
 
+For a gate in an upstream-based checkout without the project `factory.config.json`, prefix the normal gate command with `FACTORY_CONFIG="$HOME/controller-exxperts/factory.config.json"` on workhorse2. Run the command from the checkout under review. Record the tested SHA, the comparison base SHA when applicable, and the project attribution alongside the raw result. If the attribution is missing, keep the result and record the gap.
+
 ### Smokes that record provider requests
 
 When a change adds a provider call, identify affected smokes that assert request counts, order, cost or held responses. In each fake provider, distinguish the new call from chat and specialist calls before routing responses. Keep the existing behavior assertions and cover the new call where its behavior matters. For a smoke that accounts for every request or cost, retain the new call in that accounting.
