@@ -27,3 +27,18 @@ Q01–Q14 are no longer open. No new provider, model table, cross-room delivery 
 - `docs/reports/issue-24.md`: this decision/review checklist.
 
 No product code or tests changed. The pre-existing `package-lock.json` change remains untouched and uncommitted.
+
+## Slice 1 developer checklist
+
+Architecture impact: level 3, server-owned generation and existing room socket; ADR-0009 and the passing fourth architecture review authorize the specified flow.
+
+- [ ] Allocate a fresh answer ID per logical answer, preserving it across retries and detached adoption; publish ordered live invalidation and successful completion only to the leading socket, outside replay.
+- [ ] Generate once only after a successful final answer with a leader; suppress failed, stopped, retry-intermediate and unled background answers, and cancel stale work on prompts, starts, deletion and replacement.
+- [ ] Select the answering provider's configured absorb model, without provider substitution; use a tool-less fake-tested call with 200 output tokens and a 10-second deadline.
+- [ ] Supply at most three completed text-only exchanges within 4,000 string units, excluding other content; account usage as suggestions and do not log content or persist results.
+- [ ] Parse a JSON array into at most three trimmed, single-line, 200-character unique nonempty strings; handle invalid responses silently.
+- [ ] Send exactly the Q07 payload to the same leading connection only after its live completion, while current; verify displaced owners, adoption, cancellation and no replay.
+- [ ] Run targeted typechecks, affected suites and relevant browser specs through the attributed gate; merge current main and rerun affected suites.
+- [ ] Complete item-by-item self-review, record tests, assumptions and debt, and push the branch.
+
+Slice 2 UI and Slice 3 producer-to-consumer integration are excluded from this task. The pre-existing package-lock modification remains untouched.
