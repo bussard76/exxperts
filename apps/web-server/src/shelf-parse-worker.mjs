@@ -13,6 +13,16 @@
 // network, no state access: the worker receives one absolute path plus caps
 // as its single JSON argv, extracts text, and posts the result over IPC.
 import fs from "node:fs";
+import { inflateRawSync } from "node:zlib";
+import http from "node:http";
+import https from "node:https";
+import net from "node:net";
+import tls from "node:tls";
+import dns from "node:dns";
+import dgram from "node:dgram";
+import http2 from "node:http2";
+import { syncBuiltinESMExports } from "node:module";
+
 
 const post = (message) => {
 	if (typeof process.send !== "function") {
@@ -248,6 +258,316 @@ async function rasterizePdf(buffer, { firstPage, pageCount, targetWidth, maxPixe
 	return { pages, totalPages };
 }
 
+function previewError(code) {
+	const error = new Error(code);
+	error.previewCode = code;
+	return error;
+}
+
+function readPreviewSnapshot(request) {
+	const fd = fs.openSync(request.absolutePath, "r");
+	try {
+		// Not ctime: it moves on metadata alone (seen on files whose content was a day old), and the content is what must not change.
+		const matches = (stat) => stat.isFile() && String(stat.dev) === request.expected.dev && String(stat.ino) === request.expected.ino
+			&& stat.size === request.expected.size && stat.mtimeMs === request.expected.mtimeMs && stat.ctimeMs === request.expected.ctimeMs;
+		const before = fs.fstatSync(fd);
+		if (!matches(before)) throw previewError("file_changed");
+		if (before.size > 26_214_400) throw previewError("file_too_large");
+		const buffer = Buffer.alloc(before.size);
+		let offset = 0;
+		while (offset < buffer.length) {
+			const count = fs.readSync(fd, buffer, offset, buffer.length - offset, offset);
+			if (count === 0) throw previewError("file_changed");
+			offset += count;
+		}
+		if (!matches(fs.fstatSync(fd))) throw previewError("file_changed");
+		return buffer;
+	} finally {
+		fs.closeSync(fd);
+	}
+}
+
+const crcTable = Uint32Array.from({ length: 256 }, (_, index) => {
+	let value = index;
+	for (let bit = 0; bit < 8; bit++) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+	return value >>> 0;
+});
+
+function crc32(buffer) {
+	let value = 0xffffffff;
+	for (const byte of buffer) value = crcTable[(value ^ byte) & 255] ^ (value >>> 8);
+	return (value ^ 0xffffffff) >>> 0;
+}
+
+function previewZipEntries(buffer) {
+	const fits = (offset, length) => Number.isSafeInteger(offset) && Number.isSafeInteger(length) && offset >= 0 && length >= 0 && offset <= buffer.length && length <= buffer.length - offset;
+	let end = -1;
+	for (let offset = buffer.length - 22, lower = Math.max(0, buffer.length - 65_557); offset >= lower; offset--) {
+		if (buffer.readUInt32LE(offset) === 0x06054b50 && fits(offset, 22) && offset + 22 + buffer.readUInt16LE(offset + 20) === buffer.length) { end = offset; break; }
+	}
+	if (end < 0) throw previewError("damaged_file");
+	let disk = buffer.readUInt16LE(end + 4), centralDisk = buffer.readUInt16LE(end + 6);
+	let count = buffer.readUInt16LE(end + 10), countOnDisk = buffer.readUInt16LE(end + 8);
+	let size = buffer.readUInt32LE(end + 12), start = buffer.readUInt32LE(end + 16);
+	if (disk || centralDisk || count !== countOnDisk) throw previewError("unsupported_document_feature");
+	if (count === 0xffff || size === 0xffffffff || start === 0xffffffff) {
+		const locator = end - 20;
+		if (!fits(locator, 20) || buffer.readUInt32LE(locator) !== 0x07064b50 || buffer.readUInt32LE(locator + 4) !== 0 || buffer.readUInt32LE(locator + 16) !== 1) throw previewError("damaged_file");
+		const offsetBig = buffer.readBigUInt64LE(locator + 8);
+		if (offsetBig > BigInt(buffer.length)) throw previewError("damaged_file");
+		const offset = Number(offsetBig);
+		if (!fits(offset, 56) || buffer.readUInt32LE(offset) !== 0x06064b50 || buffer.readUInt32LE(offset + 16) || buffer.readUInt32LE(offset + 20)) throw previewError("damaged_file");
+		const diskCount = buffer.readBigUInt64LE(offset + 24), total = buffer.readBigUInt64LE(offset + 32);
+		const sizeBig = buffer.readBigUInt64LE(offset + 40), startBig = buffer.readBigUInt64LE(offset + 48);
+		if (diskCount !== total || total > 10_000n) throw previewError(total > 10_000n ? "preview_too_complex" : "damaged_file");
+		if (sizeBig > BigInt(buffer.length) || startBig > BigInt(buffer.length)) throw previewError("damaged_file");
+		count = Number(total); size = Number(sizeBig); start = Number(startBig);
+	}
+	if (count > 10_000) throw previewError("preview_too_complex");
+	if (!fits(start, size) || start + size > end) throw previewError("damaged_file");
+	const names = new Set(), entries = [], spans = [];
+	let offset = start, totalInflated = 0;
+	for (let index = 0; index < count; index++) {
+		if (!fits(offset, 46) || buffer.readUInt32LE(offset) !== 0x02014b50) throw previewError("damaged_file");
+		const flags = buffer.readUInt16LE(offset + 8), method = buffer.readUInt16LE(offset + 10), checksum = buffer.readUInt32LE(offset + 16);
+		let compressed = buffer.readUInt32LE(offset + 20), expanded = buffer.readUInt32LE(offset + 24), local = buffer.readUInt32LE(offset + 42);
+		const zip64Sizes = compressed === 0xffffffff || expanded === 0xffffffff;
+		const nameLength = buffer.readUInt16LE(offset + 28), extraLength = buffer.readUInt16LE(offset + 30), commentLength = buffer.readUInt16LE(offset + 32);
+		const entryLength = 46 + nameLength + extraLength + commentLength;
+		if (!fits(offset, entryLength) || offset + entryLength > start + size || buffer.readUInt16LE(offset + 34)) throw previewError("damaged_file");
+		if (flags & (1 | 0x40 | 0x2000)) throw previewError("encrypted_file");
+		if (method !== 0 && method !== 8) throw previewError("unsupported_document_feature");
+		const nameBytes = buffer.subarray(offset + 46, offset + 46 + nameLength);
+		const name = nameBytes.toString("utf8");
+		if (Buffer.from(name, "utf8").compare(nameBytes) !== 0 || !name || name.includes("\\") || name.startsWith("/") || name.includes("\0") || name.split("/").some((part, i, all) => part === "." || part === ".." || (!part && i !== all.length - 1)) || names.has(name)) throw previewError("damaged_file");
+		names.add(name);
+		if (compressed === 0xffffffff || expanded === 0xffffffff || local === 0xffffffff) {
+			let at = offset + 46 + nameLength, zip64 = null, endExtra = at + extraLength;
+			while (at + 4 <= endExtra) {
+				const tag = buffer.readUInt16LE(at), length = buffer.readUInt16LE(at + 2); at += 4;
+				if (length > endExtra - at) throw previewError("damaged_file");
+				if (tag === 1) zip64 = { at, end: at + length };
+				at += length;
+			}
+			if (!zip64) throw previewError("damaged_file");
+			const next = () => { if (zip64.at + 8 > zip64.end) throw previewError("damaged_file"); const value = buffer.readBigUInt64LE(zip64.at); zip64.at += 8; if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw previewError("preview_too_complex"); return Number(value); };
+			if (expanded === 0xffffffff) expanded = next();
+			if (compressed === 0xffffffff) compressed = next();
+			if (local === 0xffffffff) local = next();
+		}
+		if (expanded > 33_554_432 || (expanded > 0 && (compressed === 0 || expanded > compressed * 200))) throw previewError("expanded_content_too_large");
+		totalInflated += expanded;
+		if (totalInflated > 134_217_728) throw previewError("expanded_content_too_large");
+		if (!fits(local, 30) || buffer.readUInt32LE(local) !== 0x04034b50 || buffer.readUInt16LE(local + 6) !== flags || buffer.readUInt16LE(local + 8) !== method) throw previewError("damaged_file");
+		const localNameLength = buffer.readUInt16LE(local + 26), localExtraLength = buffer.readUInt16LE(local + 28);
+		const dataOffset = local + 30 + localNameLength + localExtraLength;
+		if (!fits(local + 30, localNameLength + localExtraLength) || !buffer.subarray(local + 30, local + 30 + localNameLength).equals(nameBytes) || !fits(dataOffset, compressed) || dataOffset + compressed > start) throw previewError("damaged_file");
+		let localCompressed = buffer.readUInt32LE(local + 18), localExpanded = buffer.readUInt32LE(local + 22);
+		const localChecksum = buffer.readUInt32LE(local + 14);
+		if (!(flags & 8) && (localCompressed === 0xffffffff || localExpanded === 0xffffffff)) {
+			let at = local + 30 + localNameLength, zip64 = null, endExtra = at + localExtraLength;
+			while (at + 4 <= endExtra) {
+				const tag = buffer.readUInt16LE(at), length = buffer.readUInt16LE(at + 2); at += 4;
+				if (length > endExtra - at) throw previewError("damaged_file");
+				if (tag === 1) zip64 = { at, end: at + length };
+				at += length;
+			}
+			if (!zip64) throw previewError("damaged_file");
+			const next = () => { if (zip64.at + 8 > zip64.end) throw previewError("damaged_file"); const value = buffer.readBigUInt64LE(zip64.at); zip64.at += 8; if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw previewError("preview_too_complex"); return Number(value); };
+			if (localExpanded === 0xffffffff) localExpanded = next();
+			if (localCompressed === 0xffffffff) localCompressed = next();
+		}
+		let recordEnd = dataOffset + compressed;
+		if (!(flags & 8)) {
+			if (localChecksum !== checksum || localCompressed !== compressed || localExpanded !== expanded) throw previewError("damaged_file");
+		} else {
+			if ((localChecksum !== 0 && localChecksum !== checksum) || (localCompressed !== 0 && localCompressed !== 0xffffffff && localCompressed !== compressed) || (localExpanded !== 0 && localExpanded !== 0xffffffff && localExpanded !== expanded)) throw previewError("damaged_file");
+			const positions = fits(recordEnd, 4) && buffer.readUInt32LE(recordEnd) === 0x08074b50 ? [recordEnd + 4, recordEnd] : [recordEnd];
+			const widths = zip64Sizes || localCompressed === 0xffffffff || localExpanded === 0xffffffff ? [20, 12] : [12, 20];
+			let matchedEnd = -1;
+			for (const position of positions) {
+				for (const descriptorBytes of widths) {
+					if (!fits(position, descriptorBytes) || position + descriptorBytes > start || buffer.readUInt32LE(position) !== checksum) continue;
+					const descriptorCompressed = descriptorBytes === 20 ? buffer.readBigUInt64LE(position + 4) : BigInt(buffer.readUInt32LE(position + 4));
+					const descriptorExpanded = descriptorBytes === 20 ? buffer.readBigUInt64LE(position + 12) : BigInt(buffer.readUInt32LE(position + 8));
+					if (descriptorCompressed === BigInt(compressed) && descriptorExpanded === BigInt(expanded)) { matchedEnd = position + descriptorBytes; break; }
+				}
+				if (matchedEnd >= 0) break;
+			}
+			if (matchedEnd < 0) throw previewError("damaged_file");
+			recordEnd = matchedEnd;
+		}
+		spans.push({ start: local, end: recordEnd });
+		entries.push({ name, method, checksum, compressed, expanded, dataOffset });
+		offset += entryLength;
+	}
+	if (offset !== start + size) throw previewError("damaged_file");
+	spans.sort((a, b) => a.start - b.start);
+	for (let i = 1; i < spans.length; i++) if (spans[i].start < spans[i - 1].end) throw previewError("damaged_file");
+	return entries;
+}
+
+
+function inflatePreviewEntry(buffer, entry) {
+	let output;
+	try {
+		const compressed = buffer.subarray(entry.dataOffset, entry.dataOffset + entry.compressed);
+		output = entry.method === 0 ? compressed : inflateRawSync(compressed, { maxOutputLength: Math.max(1, entry.expanded) });
+	} catch { throw previewError("damaged_file"); }
+	if (output.length !== entry.expanded || crc32(output) !== entry.checksum) throw previewError("damaged_file");
+	return output;
+}
+
+
+function denyPreviewNetwork() {
+	const deny = () => { throw previewError("unsupported_document_feature"); };
+	globalThis.fetch = deny;
+	globalThis.WebSocket = deny;
+	globalThis.EventSource = deny;
+	http.request = http.get = https.request = https.get = deny;
+	net.connect = net.createConnection = tls.connect = dgram.createSocket = http2.connect = deny;
+	net.Socket.prototype.connect = deny;
+	for (const name of ["lookup", "lookupService", "resolve", "resolve4", "resolve6", "resolveAny", "resolveCaa", "resolveCname", "resolveMx", "resolveNaptr", "resolveNs", "resolvePtr", "resolveSoa", "resolveSrv", "resolveTxt", "reverse"]) {
+		if (name in dns) dns[name] = deny;
+		if (name in dns.promises) dns.promises[name] = deny;
+		if (name in dns.Resolver.prototype) dns.Resolver.prototype[name] = deny;
+		if (name in dns.promises.Resolver.prototype) dns.promises.Resolver.prototype[name] = deny;
+	}
+	syncBuiltinESMExports();
+}
+
+
+const EXCEL_DEFAULT_THEME = ["FFFFFF", "000000", "E7E6E6", "44546A", "4472C4", "ED7D31", "A5A5A5", "FFC000", "5B9BD5", "70AD47", "0563C1", "954F72"];
+const EXCEL_INDEXED = "000000 FFFFFF FF0000 00FF00 0000FF FFFF00 FF00FF 00FFFF 000000 FFFFFF FF0000 00FF00 0000FF FFFF00 FF00FF 00FFFF 800000 008000 000080 808000 800080 008080 C0C0C0 808080 9999FF 993366 FFFFCC CCFFFF 660066 FF8080 0066CC CCCCFF 000080 FF00FF FFFF00 00FFFF 800080 800000 008080 0000FF 00CCFF CCFFFF CCFFCC FFFF99 99CCFF FF99CC CC99FF FFCC99 3366FF 33CCCC 99CC00 FFCC00 FF9900 FF6600 666699 969696 003366 339966 003300 333300 993300 993366 333399 333333".split(" ");
+
+// Excel numbers theme colours light before dark, the theme file lists dark first.
+function excelThemePalette(workbook) {
+	const xml = Object.values(workbook.model?.themes ?? {}).find((item) => typeof item === "string") ?? "";
+	const scheme = /<a:clrScheme\b[^]*?<\/a:clrScheme>/.exec(xml)?.[0];
+	if (!scheme) return EXCEL_DEFAULT_THEME;
+	const read = (name, fallback) => {
+		const entry = new RegExp(`<a:${name}>([^]*?)</a:${name}>`).exec(scheme)?.[1] ?? "";
+		return (/lastClr="([0-9a-f]{6})"/i.exec(entry) ?? /srgbClr val="([0-9a-f]{6})"/i.exec(entry))?.[1].toUpperCase() ?? fallback;
+	};
+	return ["lt1", "dk1", "lt2", "dk2", "accent1", "accent2", "accent3", "accent4", "accent5", "accent6", "hlink", "folHlink"].map((name, index) => read(name, EXCEL_DEFAULT_THEME[index]));
+}
+
+function excelTint(hex, tint) {
+	const [r, g, b] = [0, 2, 4].map((at) => parseInt(hex.slice(at, at + 2), 16) / 255);
+	const max = Math.max(r, g, b), min = Math.min(r, g, b), delta = max - min;
+	let l = (max + min) / 2;
+	const s = delta === 0 ? 0 : delta / (1 - Math.abs(2 * l - 1));
+	const h = delta === 0 ? 0 : max === r ? ((g - b) / delta + 6) % 6 : max === g ? (b - r) / delta + 2 : (r - g) / delta + 4;
+	l = tint < 0 ? l * (1 + tint) : l * (1 - tint) + tint;
+	const c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs(h % 2 - 1)), m = l - c / 2;
+	const rgb = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][Math.floor(h) % 6];
+	return rgb.map((part) => Math.round(Math.min(1, Math.max(0, part + m)) * 255).toString(16).padStart(2, "0")).join("").toUpperCase();
+}
+
+function excelColor(value, palette) {
+	if (/^[0-9a-f]{8}$/i.test(value?.argb ?? "")) return `#${value.argb.slice(2).toUpperCase()}`;
+	const base = Number.isInteger(value?.theme) ? palette[value.theme] : Number.isInteger(value?.indexed) ? EXCEL_INDEXED[value.indexed] : undefined;
+	if (!base) return null;
+	const tint = Number(value.tint);
+	return `#${tint ? excelTint(base, Math.max(-1, Math.min(1, tint))) : base}`;
+}
+
+// shortcut: the number and date formats people commonly use, in en-US digits; use a compatible formatter when broader fidelity is approved.
+const excelLiteral = (part) => part.replace(/\[\$([^\]-]*)(?:-[^\]]*)?\]/g, "$1").replace(/\[[^\]]*\]/g, "").replace(/"([^"]*)"/g, "$1").replace(/\\(.)/g, "$1").replace(/_./g, " ").replace(/\*./g, "");
+
+function excelNumberText(value, numFmt) {
+	const sections = numFmt.split(";");
+	const section = value < 0 && sections[1] !== undefined ? sections[1] : value === 0 && sections[2] !== undefined ? sections[2] : sections[0];
+	const signed = value < 0 && sections[1] === undefined;
+	const literal = excelLiteral(section);
+	const core = /[#0?][#0?,]*(?:\.[#0?]*)?|\.[#0?]+/.exec(literal);
+	if (!core) return literal;
+	const percent = literal.includes("%");
+	const digits = Math.min(core[0].split(".")[1]?.length ?? 0, 20);
+	const number = Math.abs(percent ? value * 100 : value).toLocaleString("en-US", { useGrouping: core[0].includes(","), minimumFractionDigits: digits, maximumFractionDigits: digits });
+	return (signed ? "-" : "") + literal.slice(0, core.index) + number + literal.slice(core.index + core[0].length);
+}
+
+function excelDateText(date, numFmt) {
+	const pad = (n, width = 2) => String(n).padStart(width, "0");
+	const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+	const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+	const midnight = date.getUTCHours() === 0 && date.getUTCMinutes() === 0 && date.getUTCSeconds() === 0;
+	const format = excelLiteral((numFmt || (midnight ? "yyyy-mm-dd" : "yyyy-mm-dd hh:mm")).split(";")[0]);
+	const tokens = format.match(/y+|m+|d+|h+|s+|am\/pm|a\/p|[^ymdhs]/gi) ?? [];
+	const twelveHour = tokens.some((token) => /^a/i.test(token) && token.includes("/"));
+	const hours = twelveHour ? date.getUTCHours() % 12 || 12 : date.getUTCHours();
+	return tokens.map((token, index) => {
+		const lower = token.toLowerCase(), size = token.length;
+		if (lower.includes("/") && lower.startsWith("a")) return date.getUTCHours() < 12 ? "AM" : "PM";
+		if (lower[0] === "y") return size <= 2 ? pad(date.getUTCFullYear() % 100) : String(date.getUTCFullYear());
+		if (lower[0] === "d") return size >= 4 ? days[date.getUTCDay()] : size === 3 ? days[date.getUTCDay()].slice(0, 3) : size === 2 ? pad(date.getUTCDate()) : String(date.getUTCDate());
+		if (lower[0] === "h") return size >= 2 ? pad(hours) : String(hours);
+		if (lower[0] === "s") return size >= 2 ? pad(date.getUTCSeconds()) : String(date.getUTCSeconds());
+		if (lower[0] === "m") {
+			// "m" means minutes right after hours or right before seconds, otherwise month.
+			const isField = (item) => /^[ymdhs]/i.test(item);
+			const before = tokens.slice(0, index).findLast(isField), after = tokens.slice(index + 1).find(isField);
+			if (size <= 2 && (/^h/i.test(before ?? "") || /^s/i.test(after ?? ""))) return size === 2 ? pad(date.getUTCMinutes()) : String(date.getUTCMinutes());
+			return size >= 4 ? months[date.getUTCMonth()] : size === 3 ? months[date.getUTCMonth()].slice(0, 3) : size === 2 ? pad(date.getUTCMonth() + 1) : String(date.getUTCMonth() + 1);
+		}
+		return token;
+	}).join("");
+}
+
+function previewSpreadsheet(workbook) {
+	let slots = 0, cellCount = 0;
+	for (const sheet of workbook.worksheets) {
+		if (sheet.rowCount > 100_000 || sheet.columnCount > 16_384 || (slots += sheet.rowCount * sheet.columnCount) > 200_000) throw previewError("preview_too_complex");
+	}
+	const palette = excelThemePalette(workbook);
+	const color = (value, fallback) => excelColor(value, palette) ?? fallback;
+	const styles = [];
+	const styleIds = new Map();
+	const addStyle = (source = {}, generalAlign = "left") => {
+		const font = source.font ?? {}, alignment = source.alignment ?? {}, borders = source.border ?? {};
+		const side = (item) => item?.style ? { style: item.style, color: color(item.color, "#000000") } : null;
+		const style = { fill: source.fill?.type === "pattern" && source.fill.pattern === "solid" ? color(source.fill.fgColor, null) : null,
+			font: { family: font.name || "Arial", sizePt: font.size || 11, color: color(font.color, "#000000"), bold: !!font.bold, italic: !!font.italic, underline: font.underline === "double" ? "double" : font.underline ? "single" : "none", strike: !!font.strike },
+			borders: { top: side(borders.top), right: side(borders.right), bottom: side(borders.bottom), left: side(borders.left) },
+			align: { horizontal: ["left", "center", "right"].includes(alignment.horizontal) ? alignment.horizontal : generalAlign, vertical: ["top", "middle", "bottom"].includes(alignment.vertical) ? alignment.vertical : "bottom", wrap: !!alignment.wrapText } };
+		const key = JSON.stringify(style);
+		if (!styleIds.has(key)) { styleIds.set(key, styles.length); styles.push(style); }
+		return styleIds.get(key);
+	};
+	addStyle();
+	const sheets = workbook.worksheets.map((sheet, index) => {
+		const merges = Object.values(sheet.model.merges ?? {}).map((range) => {
+			const match = /^([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(range);
+			const column = (name) => [...name].reduce((n, char) => n * 26 + char.charCodeAt(0) - 64, 0);
+			return { top: Number(match[2]), left: column(match[1]), bottom: Number(match[4]), right: column(match[3]) };
+		});
+		const rowCount = sheet.rowCount, columnCount = sheet.columnCount;
+		const cells = [], rows = [], columns = [];
+		sheet.eachRow((row, rowNumber) => {
+			if (row.height) rows.push({ index: rowNumber, heightPx: row.height * 4 / 3 });
+			row.eachCell((cell, columnNumber) => {
+				if (merges.some((merge) => rowNumber >= merge.top && rowNumber <= merge.bottom && columnNumber >= merge.left && columnNumber <= merge.right && (rowNumber !== merge.top || columnNumber !== merge.left))) return;
+				if (++cellCount > 100_000) throw previewError("preview_too_complex");
+				let value = cell.value, valueKind = "text";
+				if (value && typeof value === "object" && !(value instanceof Date) && ("formula" in value || "sharedFormula" in value)) { value = value.result; valueKind = value == null ? "formula-result-unavailable" : "formula-result"; }
+				else if (value instanceof Date) valueKind = "date";
+				else if (typeof value === "number") valueKind = "number";
+				else if (typeof value === "boolean") valueKind = "boolean";
+				else if (value?.error) valueKind = "error";
+				let text = value == null ? "" : value instanceof Date ? excelDateText(value, cell.numFmt) : value?.error ?? value?.text ?? (value?.richText ? value.richText.map((run) => run.text).join("") : String(value));
+				if (typeof value === "number" && cell.numFmt && /[0#]/.test(cell.numFmt)) text = excelNumberText(value, cell.numFmt);
+				if (typeof text !== "string" || text.length > 32_767) throw previewError("preview_too_complex");
+				cells.push({ row: rowNumber, column: columnNumber, text, style: addStyle(cell.style, typeof value === "number" || value instanceof Date ? "right" : typeof value === "boolean" || value?.error ? "center" : "left"), runs: null, valueKind });
+			});
+		});
+		for (let i = 1; i <= columnCount; i++) { const width = sheet.getColumn(i).width; if (width) columns.push({ index: i, widthPx: Math.round(width * 7 + 5) }); }
+		return { id: String(index + 1), name: sheet.name, visibility: sheet.state, showGridLines: sheet.views?.[0]?.showGridLines !== false, rowCount, columnCount, defaultRowHeightPx: (sheet.properties.defaultRowHeight || 15) * 4 / 3, defaultColumnWidthPx: Math.round((sheet.properties.defaultColWidth || 8.43) * 7 + 5), rows, columns, cells, merges };
+	});
+	return { ok: true, schemaVersion: 1, notices: [], result: { kind: "spreadsheet", workbook: { dateSystem: workbook.properties.date1904 ? "1904" : "1900", styles, sheets } } };
+}
+
+
 async function parseDocx(buffer) {
 	const { default: JSZip } = await import("jszip");
 	const zip = await JSZip.loadAsync(buffer);
@@ -261,6 +581,17 @@ async function parseDocx(buffer) {
 	try {
 		const request = JSON.parse(process.argv[2] ?? "");
 		const { absolutePath, kind, maxPages, maxChars } = request;
+		if (request.mode === "workspace-preview-v1" && kind === "spreadsheet") {
+			const buffer = readPreviewSnapshot(request);
+			for (const entry of previewZipEntries(buffer)) inflatePreviewEntry(buffer, entry);
+			let ExcelJS;
+			try { ({ default: ExcelJS } = await import("exceljs")); } catch { throw previewError("renderer_unavailable"); }
+			denyPreviewNetwork();
+			let workbook;
+			try { workbook = await new ExcelJS.Workbook().xlsx.load(buffer); } catch (error) { if (error?.previewCode) throw error; throw previewError("damaged_file"); }
+			post(previewSpreadsheet(workbook));
+			return;
+		}
 		const buffer = fs.readFileSync(absolutePath);
 		if (kind === "image") {
 			const image = await prepareImage(buffer, request.image);
@@ -284,6 +615,9 @@ async function parseDocx(buffer) {
 		}
 		post({ ok: true, text, pages: parsed.pages, truncated });
 	} catch (error) {
-		post({ ok: false, error: error instanceof Error ? error.message : String(error) });
+		let preview = false;
+		try { preview = JSON.parse(process.argv[2] ?? "").mode === "workspace-preview-v1"; } catch {}
+		if (preview) post({ ok: false, schemaVersion: 1, code: error?.previewCode ?? "preview_failed" });
+		else post({ ok: false, error: error instanceof Error ? error.message : String(error) });
 	}
 })();
