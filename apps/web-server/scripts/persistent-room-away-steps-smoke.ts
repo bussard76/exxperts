@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { generateKeyPairSync } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -30,7 +31,8 @@ const home = path.join(tempRoot, "home");
 const workspaceRoot = path.join(tempRoot, "workspace");
 fs.mkdirSync(workspaceRoot, { recursive: true, mode: 0o700 });
 fs.writeFileSync(path.join(workspaceRoot, "notes.txt"), "NOTES-NEEDLE: the export runs on Fridays.\n", { mode: 0o600 });
-fs.writeFileSync(path.join(workspaceRoot, "server.key"), "-----BEGIN PRIVATE KEY-----\nnot a real key\n", { mode: 0o600 });
+const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 1024, privateKeyEncoding: { type: "pkcs8", format: "pem" }, publicKeyEncoding: { type: "spki", format: "pem" } });
+fs.writeFileSync(path.join(workspaceRoot, "server.key"), privateKey, { mode: 0o600 });
 const agentDir = path.join(home, ".exxperts", "agent");
 const appRoot = path.join(home, ".exxperts", "app");
 const agentsRoot = path.join(appRoot, "personalized-agents");
@@ -98,6 +100,7 @@ interface ScriptedCall { name: string; args: Record<string, unknown>; before?: (
 let script: ScriptedCall[] = [];
 // What the gateway answered, leg by leg, for a timeout's message.
 const gatewayLog: string[] = [];
+let suggestionCalls = 0;
 // The newest tool result the room sent back to the model.
 let lastToolResult = "";
 // A before hook's error: the row's waits throw it, so the row fails with it
@@ -135,6 +138,15 @@ const gateway = http.createServer((req, res) => {
 		let parsed: any = {};
 		try { parsed = JSON.parse(body); } catch {}
 		const messages: any[] = Array.isArray(parsed?.messages) ? parsed.messages : [];
+		if (messages.some((message) => message?.role === "system" && String(message.content).includes("Generate next prompt suggestions"))) {
+			suggestionCalls += 1;
+			res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+			const base = { id: "suggestion", object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: String(parsed?.model ?? "room-model") };
+			res.write(sseChunk({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: '["Ask another question"]' }, finish_reason: null }] }));
+			res.write(sseChunk({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 100, completion_tokens: 5, total_tokens: 105 } }));
+			res.end("data: [DONE]\n\n");
+			return;
+		}
 		const toolMessages = messages.filter((m) => m?.role === "tool");
 		const newestTool = toolMessages.at(-1)?.content;
 		lastToolResult = typeof newestTool === "string" ? newestTool : Array.isArray(newestTool) ? newestTool.map((part: any) => String(part?.text ?? "")).join("") : "";
@@ -372,6 +384,8 @@ try {
 	returned!.ws.send(JSON.stringify({ type: "ui_response", id: returnedCard.id, value: false }));
 	takeover.ws.send(JSON.stringify({ type: "ui_response", id: movedCard.id, value: true }));
 	await takeover.waitFor((frame) => frame.type === "event" && frame.event?.type === "agent_end", "the turn ended in the tab that answered");
+	await takeover.waitFor((frame) => frame.type === "suggestions", "the suggestion result");
+	assert(suggestionCalls > 0 && !gatewayLog.includes("suggestion"), "suggestion calls must not enter the scripted tool log");
 	assert(gatewayLog.slice(-3).join(",") === "read,bash,text" && lastToolResult.includes("notes.txt"), `the approved command ran (the displaced window's decline did not count), got ${gatewayLog.join(",")} with ${JSON.stringify(lastToolResult.slice(0, 200))}`);
 	returned!.ws.close();
 	takeover.ws.close();
