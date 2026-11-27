@@ -8,13 +8,14 @@
 //
 // - the usage row carries the one-hour count and the cost Anthropic bills
 //   (a one-hour write at twice the input price, not the five-minute rate);
-// - the Wallet shows that total;
+// - the Wallet shows that total plus the separately charged suggestion;
 // - the same row stored at zero, as a turn priced later is, reprices to the
 //   same total;
 // - an older row without the one-hour count still prices every write at the
 //   five-minute rate, as before.
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -51,7 +52,7 @@ process.env.USERPROFILE = tempHome;
 process.env.EXXPERTS_CODING_AGENT_DIR = agentDir;
 process.env.EXXETA_PERSISTENT_AGENTS_ROOT = agentsRoot;
 
-const SIGN_IN = { type: "oauth", access: "sk-ant-oat01-synthetic-sign-in", refresh: "synthetic-refresh", expires: Date.now() + 365 * 24 * 3600 * 1000 };
+const SIGN_IN = { type: "oauth", access: `sk-ant-oat${randomUUID()}`, refresh: "synthetic-refresh", expires: Date.now() + 365 * 24 * 3600 * 1000 };
 const ON_OPUS = { provider: "anthropic", model: "claude-opus-5-5" };
 // Claude Opus 5.5 per million tokens: $4 in, $20 out, $5 for a five-minute write; a one-hour write is twice the input price.
 const INPUT = 3;
@@ -95,13 +96,13 @@ const usageFile = path.join(appDir, "usage.jsonl");
 const usageRows = (): any[] => (fs.existsSync(usageFile) ? fs.readFileSync(usageFile, "utf-8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : []);
 
 /** Each row's cost and how it was priced, as the Wallet's export gives them, in ledger order. */
-async function walletRows(): Promise<Array<{ cost: number; pricedAt: string }>> {
+async function walletRows(): Promise<Array<{ ts: number; kind: string; cost: number; pricedAt: string }>> {
 	const csv = await api("/api/usage/export.csv");
 	assert(csv.status === 200, `the Wallet export answers, got ${csv.status}`);
 	// The last three columns are cost, how it was priced and the tools (space-separated, no commas).
 	return csv.text.trim().split("\n").slice(1).map((line) => {
 		const cells = line.split(",");
-		return { cost: Number(cells[cells.length - 3]), pricedAt: cells[cells.length - 2] };
+		return { ts: Number(cells[0]), kind: cells[4], cost: Number(cells[cells.length - 3]), pricedAt: cells[cells.length - 2] };
 	});
 }
 
@@ -143,22 +144,32 @@ try {
 	socket.send(JSON.stringify({ type: "prompt", text: "A question that fills the cache." }));
 	await waitUntil(() => usageRows().some((row) => row.agent === room && row.kind === "chat"), "the turn's usage row is written");
 	await waitUntil(async () => (await api(`/api/persistent-agents/${room}/status`)).body?.activeThread?.inFlight === false, "the turn settled");
+	await waitUntil(() => usageRows().some((row) => row.agent === room && row.kind === "suggestions"), "the suggestion usage row is written");
 	socket.close();
 
 	const row = usageRows().find((candidate) => candidate.agent === room && candidate.kind === "chat")!;
 	assert(row.cacheWrite === WRITTEN_FOR_AN_HOUR && row.cacheWrite1h === WRITTEN_FOR_AN_HOUR && row.output === OUTPUT, `the row carries the written tokens and how many were written for an hour, got ${JSON.stringify(row)}`);
 	assert(Math.abs(row.cost - BILLED) < 1e-9, `the row's cost prices a one-hour write at twice the input price: expected ${BILLED}, got ${row.cost} (the five-minute rate would be ${AT_FIVE_MINUTE_RATE})`);
 	pass(`the usage row carries the one-hour writes and costs $${BILLED.toFixed(4)}, not $${AT_FIVE_MINUTE_RATE.toFixed(4)}`);
+	const suggestion = usageRows().find((candidate) => candidate.agent === room && candidate.kind === "suggestions")!;
+	assert(Math.abs(suggestion.cost - BILLED) < 1e-9, `the suggestion has the known nonzero cost, got ${suggestion.cost}`);
 
 	const wallet = await api("/api/usage");
 	const shown = wallet.body.totals.cost.billed + wallet.body.totals.cost.plan + wallet.body.totals.cost.unattributed;
-	assert(Math.abs(shown - BILLED) < 1e-9 && wallet.body.totals.estimatedTurns === 0, `the Wallet shows the turn's own cost, got ${JSON.stringify(wallet.body.totals)}`);
-	pass("the Wallet shows the same total");
+	assert(Math.abs(shown - 2 * BILLED) < 1e-9 && wallet.body.totals.estimatedTurns === 0, `the Wallet shows the chat and suggestion costs, got ${JSON.stringify(wallet.body.totals)}`);
+	pass("the Wallet shows the chat and suggestion total");
 
 	// The same row stored at zero, and an older row that predates the one-hour count.
 	const { cacheWrite1h: _oneHour, ...olderRow } = row;
 	fs.appendFileSync(usageFile, JSON.stringify({ ...row, ts: row.ts + 1, cost: 0 }) + "\n" + JSON.stringify({ ...olderRow, ts: row.ts + 2, cost: 0 }) + "\n");
-	const [live, repriced, older] = await walletRows();
+	const rows = await walletRows();
+	assert(rows.length === 4, `the Wallet exports exactly four rows, got ${rows.length}`);
+	const live = rows.find((entry) => entry.kind === "chat" && entry.ts === row.ts);
+	const suggestionExport = rows.find((entry) => entry.kind === "suggestions" && entry.ts === suggestion.ts);
+	const repriced = rows.find((entry) => entry.kind === "chat" && entry.ts === row.ts + 1);
+	const older = rows.find((entry) => entry.kind === "chat" && entry.ts === row.ts + 2);
+	assert(live && suggestionExport && repriced && older, `the export identifies the live, suggestion, repriced and older rows, got ${JSON.stringify(rows)}`);
+	assert(suggestionExport.pricedAt === "turn" && Math.abs(suggestionExport.cost - BILLED) < 1e-9, `the suggestion row keeps its own cost, got ${JSON.stringify(suggestionExport)}`);
 	assert(live.pricedAt === "turn" && Math.abs(live.cost - BILLED) < 1e-9, `the live row keeps its own cost, got ${JSON.stringify(live)}`);
 	assert(repriced.pricedAt === "today" && Math.abs(repriced.cost - BILLED) < 1e-9, `a row stored at zero reprices to the turn's total, got ${JSON.stringify(repriced)}`);
 	assert(older.pricedAt === "today" && Math.abs(older.cost - AT_FIVE_MINUTE_RATE) < 1e-9, `a row without the one-hour count prices as before, got ${JSON.stringify(older)}`);
