@@ -161,6 +161,17 @@ try {
   await page.locator(".persistent-agent-card").filter({ hasText: "Other Room" }).getByRole("button", { name: "Enter" }).click();
   await box.waitFor();
   assert.notEqual(await placeholder(), "Send clears me", "changing rooms clears suggestions");
+  await page.waitForFunction(() => (window as any).testRoom === "other-room");
+  await frame({ type: "answer_lifecycle", phase: "complete", answerId: "other-answer" });
+  await frame({ type: "suggestions", answerId: "other-answer", items: ["Old thread suggestion"] });
+  await page.waitForFunction(() => document.querySelector(".composer textarea")?.getAttribute("placeholder") === "Old thread suggestion");
+  const oldThread = await page.evaluate(() => (window as any).testThread);
+  await page.getByRole("button", { name: "Forget", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Forget", exact: true }).click();
+  await page.waitForFunction((previous) => (window as any).testThread !== previous, oldThread);
+  assert.notEqual(await placeholder(), "Old thread suggestion", "changing threads clears suggestions");
+  await frame({ type: "suggestions", answerId: "other-answer", items: ["Late old thread"] });
+  assert.notEqual(await placeholder(), "Late old thread", "old-thread completion cannot authorize a new thread");
  } finally { await browser.close(); }
 } finally {
  await stopSmokeServer(server);

@@ -29,3 +29,5 @@ The expanded red checkpoint adds wrong-room/thread, newer-completion, typing/cle
 The red browser specification also names the accessibility hint, mention picker Tab ownership, immediate send clearing and reload/no-persistence behavior. Room/thread switches, replay injection, locked-state priority and real disconnect timing need further checks.
 
 The browser specification now also injects replay frames and enters a second invented room. Thread navigation and all priority states remain to be exercised with the corresponding existing controls.
+
+A synthetic Forget flow now specifies same-room thread replacement and rejection of the old completion. Priority and IME edge checks remain subject to the green browser run.
