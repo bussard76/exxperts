@@ -220,7 +220,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { readAppVersion } from "./whats-new.js";
 import { persistentAgentInstallationSection } from "./persistent-agent-constitution.js";
-import { answersFor, askedByOf, askerOf, type Asker, authorOfPerson, createRoomSocket, itemsShownTo, DETACHED_TURN_LIMIT_MS, DETACHED_TURN_SILENCE_MS, detachedCookingRooms, type DetachedCookingTurnHandle, detachedCookingTurnHandles, OVERFLOW_RECOVERY_CEILING_MS, type PageFrame, pagePerson, type PersistentRoomLiveSession, persistentRoomLiveSessions, questionFor, REATTACH_REPLAY_CAP_BYTES, reattachBufferProbe, ROOM_HOST_ENDED, roomQuietSpell, SWITCH_WHILE_ANSWERING_MESSAGE, TEST_INTROSPECTION_ENABLED, roomHosts, type RoomHost, type RoomPage, type RoomPerson, type RoomSocket, type ScheduledAnswer, type ScheduledAsk, sendersFrame } from "./room-live-sessions.js";
+import { answersFor, askedByOf, askerOf, type Asker, authorOfPerson, createRoomSocket, itemsShownTo, DETACHED_TURN_LIMIT_MS, DETACHED_TURN_SILENCE_MS, detachedCookingRooms, type DetachedCookingTurnHandle, detachedCookingTurnHandles, OVERFLOW_RECOVERY_CEILING_MS, type PageFrame, pagePerson, type PersistentRoomLiveSession, persistentRoomLiveSessions, registerWorkspaceBox, questionFor, REATTACH_REPLAY_CAP_BYTES, reattachBufferProbe, ROOM_HOST_ENDED, roomQuietSpell, SWITCH_WHILE_ANSWERING_MESSAGE, TEST_INTROSPECTION_ENABLED, roomHosts, type RoomHost, type RoomPage, type RoomPerson, type RoomSocket, type ScheduledAnswer, type ScheduledAsk, sendersFrame } from "./room-live-sessions.js";
 import { app } from "./server-app.js";
 import { isLocalPromptDiagnosticsRequest, isPromptDiagnosticsEnabled, remoteRoomExposure } from "./request-checks.js";
 import { recordPersistentRoomPromptDiagnostics, safeDiagnosticIdPart } from "./room-prompt-diagnostics.js";
@@ -2082,6 +2082,8 @@ app.get("/ws", { websocket: true, exposeHeadRoute: false }, async (socket, req) 
 		sites: runningAnswerSites,
 		free: runningAnswerFree,
 	}) : null;
+	const releaseWorkspaceBox = roomBox ? registerWorkspaceBox(persistentAgentIdForSession, persistentConversationId, roomBox, liveSessionHandle) : () => {};
+	socket.on("close", releaseWorkspaceBox);
 	let windowsBox: WindowsRoomBox | null = null;
 	/** The box a bind gives the room's commands where protection is on: the Mac's, or Windows' where its check didn't say off (broken runs nothing). */
 	const commandBoxForBind = (): RoomBox | WindowsRoomBox | null => {

@@ -136,6 +136,9 @@ export interface ListedEntry {
 	deck?: boolean;
 }
 
+export type PreviewIdentity = { dev: number; ino: number; size: number; mtimeMs: number; ctimeMs: number };
+export type PreviewListedEntry = ListedEntry & PreviewIdentity;
+
 export interface WalkedEntry {
 	/** Below the folder walked, with `/` between parts. */
 	rel: string;
@@ -256,6 +259,8 @@ function refusal(code: string, target: FencedPath, raw: string): RoomFilesError 
 			return new RoomFilesError("no_space", notEnoughSpace(target.shown));
 		case "ETOOBIG":
 			return new RoomFilesError("file_too_large", tooLargeForTool(target.shown));
+		case "ECHANGED":
+			return new RoomFilesError("file_changed", "The folder changed while it was being listed.");
 		case "EPATTERN":
 			return new RoomFilesError("invalid_pattern", "Grep pattern is not a valid JavaScript regular expression.");
 		case "EPERM":
@@ -337,6 +342,15 @@ export class BoxFiles {
 
 	async list(target: FencedPath, raw: string, signal?: AbortSignal): Promise<ListedEntry[]> {
 		return (await this.call("list", { path: target.real, decks: this.decks(target) }, target, raw, { writes: false, signal })).header.entries;
+	}
+
+	async previewList(target: FencedPath, raw: string, signal?: AbortSignal): Promise<{ identity: PreviewIdentity; entries: PreviewListedEntry[] }> {
+		const { header } = await this.call("preview-list", { path: target.real, decks: this.decks(target) }, target, raw, { writes: false, signal });
+		const validIdentity = (value: any) => value && [value.dev, value.ino, value.size, value.mtimeMs, value.ctimeMs].every((item) => typeof item === "number" && Number.isFinite(item) && item >= 0);
+		if (!validIdentity(header.identity) || !Array.isArray(header.entries) || !header.entries.every((entry: any) => validIdentity(entry) && typeof entry.name === "string" && ["file", "dir", "link", "other"].includes(entry.kind) && (entry.deck === undefined || typeof entry.deck === "boolean"))) {
+			throw new RoomFilesError("box_failed", FILES_STOPPED_LINE);
+		}
+		return { identity: header.identity, entries: header.entries };
 	}
 
 	async walk(target: FencedPath, raw: string, walk: { skips: string[]; maxFolders: number }, signal?: AbortSignal): Promise<WalkAnswer> {

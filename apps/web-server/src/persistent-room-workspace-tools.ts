@@ -14,7 +14,7 @@ import { IN_FLIGHT_TEMPORARY_MARK, roomFilesAreTheFolder } from "./room-files-fo
 import { PERSISTENT_ROOM_APP_SIBLING_GLOBS, PERSISTENT_ROOM_APP_STATE_SEGMENTS, PERSISTENT_ROOM_SECRET_FILENAME_TEMPLATES, PERSISTENT_ROOM_ZIP_OPENS_FILENAME_GLOBS } from "./persistent-room-workspace-policy.js";
 import { BeyondNotHeld, type ClosedKeys, closedRefusal, type DataRead, type FenceAccess, type FencedPath, type FenceRoot, fencePath, foldPart, globToRegExp, linkRefused, matchesGlob, normalizeSlashes, RoomFilesError, roomFence as fenceWith, type RoomFence, roomFilesFence, showPath } from "./room-files.js";
 import { BoundedPattern, oneSearchAtATime, SearchTooSlow } from "./room-files-search.js";
-import { BoxFiles, boxedCommandSinceStart, FILES_STOPPED_LINE, notEnoughSpace, READ_LIMIT_BYTES, type SearchMatch, tooLargeForTool } from "./room-box/box-files.js";
+import { BoxFiles, boxedCommandSinceStart, FILES_STOPPED_LINE, notEnoughSpace, READ_LIMIT_BYTES, type PreviewIdentity, type PreviewListedEntry, type SearchMatch, tooLargeForTool } from "./room-box/box-files.js";
 import { BoxFault } from "./room-box/box-process.js";
 import type { RoomBox } from "./room-box/box-session.js";
 import { readOnlyNextLine, type ReadOnlyNext } from "./room-box/card-text.js";
@@ -306,7 +306,7 @@ async function executeWorkspaceLs(policy: PersistentRoomCapabilityPolicy, input:
 
 type Listed = { name: string; kind: "file" | "dir" | "link" | "other"; deck?: boolean };
 
-function kindOf(entry: fs.Dirent): Listed["kind"] {
+function kindOf(entry: Pick<fs.Dirent, "isSymbolicLink" | "isDirectory" | "isFile">): Listed["kind"] {
 	if (entry.isSymbolicLink()) return "link";
 	if (entry.isDirectory()) return "dir";
 	return entry.isFile() ? "file" : "other";
@@ -1776,6 +1776,88 @@ function namedFolders(policy: PersistentRoomCapabilityPolicy, answer: AnswerFold
 	const room = policy.roots[0];
 	const listed = readAlsoAllowed(policy.agentId).folders;
 	return [...(room ? [room.realpath, room.path] : []), ...(answer?.over(listed) ?? listed).map((entry) => entry.path), ...roomSkillFolders(policy.agentId).map((skill) => skill.skillDir)];
+}
+
+/** The file browser's bounded view, through the same fence and folder hold as file tools. */
+export async function listWorkspaceForBrowser(
+	policyNow: () => PersistentRoomCapabilityPolicy,
+	raw: string,
+	wait: FolderWait | undefined,
+	binding: () => { box: RoomBox; current: () => boolean } | undefined,
+	signal?: AbortSignal,
+): Promise<Array<{ name: string; relativePath: string; kind: "file" | "directory"; bytes: number | null; modifiedAt: string; extension: string }>> {
+	const stopped = () => new RoomFilesError("aborted", "Listing stopped.");
+	const same = (a: PreviewIdentity, b: PreviewIdentity) => a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs;
+	const identity = (stat: fs.Stats): PreviewIdentity => ({ dev: stat.dev, ino: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs });
+	let folders = namedFolders(policyNow(), undefined);
+	for (;;) {
+		const holding = folders;
+		const held: Held | undefined = wait ? (folder) => holding.some((each) => wait.inside(folder, each)) : undefined;
+		const run = async (): Promise<{ more: string[] } | { entries: Array<{ name: string; relativePath: string; kind: "file" | "directory"; bytes: number | null; modifiedAt: string; extension: string }> }> => {
+			if (signal?.aborted) throw stopped();
+			const policy = policyNow();
+			const now = namedFolders(policy, undefined);
+			if (held && !now.every(held)) return { more: now };
+			const selected = binding();
+			const check = () => { if (signal?.aborted) throw stopped(); policyNow(); if (selected && !selected.current()) throw new RoomFilesError("box_failed", FILES_STOPPED_LINE); };
+			check();
+			return inTheBox(selected?.box, async (box) => {
+				check();
+				const { fence, files } = callFence(policy, box, undefined, { held });
+				const target = guard(fence, raw || ".", "list", files);
+				if (!target.root.room || !fence.room || target.root.path !== fence.room.path) throw new RoomFilesError("outside_workspace", "Outside this room's folder.");
+				if (!target.stat.isDirectory()) throw new RoomFilesError("not_directory", "Not a folder.");
+				const rootSeen = identity(await fs.promises.lstat(fence.room.path));
+				const actualFiles = filesFor(target, files);
+				const snapshot = async (): Promise<{ identity: PreviewIdentity; entries: PreviewListedEntry[] }> => {
+					if (actualFiles) return actualFiles.previewList(target, raw || ".", signal);
+					const handle = await fs.promises.open(target.real, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+					try {
+						const before = identity(await handle.stat());
+						const entries: PreviewListedEntry[] = [];
+						const directory = await fs.promises.opendir(target.real);
+						for await (const entry of directory) {
+							if (signal?.aborted) throw stopped();
+							if (entries.length >= 100_000) throw new RoomFilesError("file_too_large", "The folder is too large to list.");
+							const stat = await fs.promises.lstat(path.join(target.real, entry.name));
+							entries.push({ name: entry.name, kind: kindOf(stat), ...identity(stat) });
+						}
+						const after = identity(await handle.stat());
+						if (!same(before, after) || !same(after, identity(await fs.promises.lstat(target.real)))) throw new RoomFilesError("file_changed", "The folder changed while it was being listed.");
+						return { identity: after, entries };
+					} finally { await handle.close(); }
+				};
+				const first = await snapshot();
+				check();
+				const freshFence = callFence(policyNow(), box, undefined, { held }).fence;
+				const freshTarget = guard(freshFence, raw || ".", "list", actualFiles);
+				if (!freshFence.room || freshTarget.real !== target.real || freshTarget.root.path !== target.root.path || !same(rootSeen, identity(await fs.promises.lstat(freshFence.room.path)))) throw new RoomFilesError("file_changed", "The folder changed while it was being listed.");
+				const second = await snapshot();
+				const sort = (entries: PreviewListedEntry[]) => entries.sort((a, b) => a.name.localeCompare(b.name));
+				if (!same(first.identity, second.identity) || JSON.stringify(sort(first.entries)) !== JSON.stringify(sort(second.entries))) throw new RoomFilesError("file_changed", "The folder changed while it was being listed.");
+				check();
+				const finalFence = callFence(policyNow(), box, undefined, { held }).fence;
+				const finalTarget = guard(finalFence, raw || ".", "list", actualFiles);
+				if (!finalFence.room || finalTarget.real !== target.real || finalTarget.root.path !== target.root.path || !same(rootSeen, identity(await fs.promises.lstat(finalFence.room.path))) || !same(second.identity, identity(finalTarget.stat))) throw new RoomFilesError("file_changed", "The folder changed while it was being listed.");
+				const entries = second.entries.flatMap((entry) => {
+					if (typeof entry.name !== "string" || ![entry.dev, entry.ino, entry.size, entry.mtimeMs, entry.ctimeMs].every(Number.isFinite)) throw new RoomFilesError("box_failed", FILES_STOPPED_LINE);
+					if (!entry.name || entry.name.startsWith(".") || /[\\/:\0]/.test(entry.name) || !["file", "dir"].includes(entry.kind)) return [];
+					const relativePath = raw ? `${raw}/${entry.name}` : entry.name;
+					try {
+						const checked = fencePath(finalFence, relativePath, "read", { decksInBox: !!actualFiles });
+						if (checked.root.path !== finalFence.room?.path || checked.real !== path.join(target.real, entry.name) || finalFence.refusal(checked.real, checked.root, "read", entry.deck)) return [];
+					} catch { return []; }
+					return [{ name: entry.name, relativePath, kind: entry.kind === "dir" ? "directory" as const : "file" as const, bytes: entry.kind === "dir" ? null : entry.size, modifiedAt: new Date(entry.mtimeMs).toISOString(), extension: entry.kind === "dir" ? "" : path.extname(entry.name).toLowerCase() }];
+				});
+				entries.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }) : a.kind === "directory" ? -1 : 1));
+				check();
+				return { entries };
+			});
+		};
+		const result = wait ? await wait.hold("file", holding, signal, run, stopped) : await run();
+		if ("entries" in result) return result.entries;
+		folders = [...new Set([...holding, ...result.more])];
+	}
 }
 
 /**

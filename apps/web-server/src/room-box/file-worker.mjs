@@ -100,6 +100,28 @@ const ops = {
 		return { header: { entries } };
 	},
 
+	"preview-list"({ path: target, decks }) {
+		return withOpen(target, O_RDONLY | O_NOFOLLOW, (fd) => {
+			const identity = (stat) => ({ dev: stat.dev, ino: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs });
+			const before = fs.fstatSync(fd);
+			if (!before.isDirectory()) throw new Refused("ENOTDIR");
+			if (JSON.stringify(identity(before)) !== JSON.stringify(identity(fs.lstatSync(target)))) throw new Refused("ECHANGED");
+			const entries = [];
+			const directory = fs.opendirSync(target);
+			try {
+				for (let entry; (entry = directory.readSync()) !== null;) {
+					if (entries.length >= WALK_ENTRIES_LIMIT) throw new Refused("ETOOBIG");
+					const stat = fs.lstatSync(path.join(target, entry.name));
+					const kind = kindOf(stat);
+					entries.push({ name: entry.name, kind, ...identity(stat), ...(kind === "file" && deckNamed(entry.name, decks) ? { deck: isDeckFile(path.join(target, entry.name)) } : {}) });
+				}
+			} finally { directory.closeSync(); }
+			const after = fs.fstatSync(fd);
+			if (JSON.stringify(identity(before)) !== JSON.stringify(identity(after)) || JSON.stringify(identity(after)) !== JSON.stringify(identity(fs.lstatSync(target)))) throw new Refused("ECHANGED");
+			return { header: { identity: identity(after), entries } };
+		});
+	},
+
 	/**
 	 * Files and folders below a folder, depth first, each folder's entries by name
 	 * as the server's own walk orders them. Links aren't followed; folders named in
