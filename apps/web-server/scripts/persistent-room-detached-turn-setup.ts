@@ -24,6 +24,8 @@ export const productAppRoot = path.join(tempHome, ".exxperts", "app");
 export const SLOW_MARKER = "SLOW_STREAM_MARKER";
 export const HANG_MARKER = "HANG_STREAM_MARKER";
 export const BIG_MARKER = "BIG_STREAM_MARKER";
+export const MULTIPART_MARKER = "MULTIPART_SUGGESTION_MARKER";
+export const EMPTY_MARKER = "EMPTY_SUGGESTION_MARKER";
 // A slow, big or hanging stream sends its first chunk and then each later one
 // only when the smoke releases it (GatewayRequest.release), so a section
 // holds the turn mid-cook exactly as long as it binds, replays and leaves.
@@ -134,7 +136,9 @@ export const gateway = http.createServer((req, res) => {
 		const slow = body.includes(SLOW_MARKER);
 		const hang = body.includes(HANG_MARKER);
 		const big = body.includes(BIG_MARKER);
-		const chunks = suggestion ? [suggestionResponse!] : hang ? HANG_ANSWER_CHUNKS : big ? BIG_ANSWER_CHUNKS : slow ? SLOW_ANSWER_CHUNKS : FAST_ANSWER_CHUNKS;
+		const multipart = !suggestion && body.includes(MULTIPART_MARKER);
+		const empty = !suggestion && body.includes(EMPTY_MARKER);
+		const chunks = suggestion ? [suggestionResponse!] : empty ? [""] : multipart ? ["After the tool."] : hang ? HANG_ANSWER_CHUNKS : big ? BIG_ANSWER_CHUNKS : slow ? SLOW_ANSWER_CHUNKS : FAST_ANSWER_CHUNKS;
 		let allowed = suggestion && holdSuggestionResponse ? 0 : slow || hang || big ? 1 : chunks.length;
 		const record: GatewayRequest = {
 			model, roles, ...(suggestion ? { suggestion: true, request: { messages, maxTokens: parsed.max_completion_tokens ?? parsed.max_tokens, tools: parsed.tools } } : {}), startedAt: Date.now(), slow: slow || big, hang, aborted: false, finished: false, sent: 0,
@@ -150,6 +154,15 @@ export const gateway = http.createServer((req, res) => {
 		res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
 		const base = { id: `cmpl_${gatewayRequests.length}`, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model };
 		res.write(sseChunk({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null }] }));
+		if (multipart && !roles.includes("tool")) {
+			res.write(sseChunk({ ...base, choices: [{ index: 0, delta: { content: "Before the tool. " }, finish_reason: null }] }));
+			res.write(sseChunk({ ...base, choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: "call_multipart", type: "function", function: { name: "bash", arguments: JSON.stringify({ command: "printf synthetic-tool-output" }) } }] }, finish_reason: null }] }));
+			res.write(sseChunk({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] }));
+			res.write("data: [DONE]\n\n");
+			record.finished = true;
+			res.end();
+			return;
+		}
 		let index = 0;
 		function writeNext(): void {
 			if (record.aborted || record.finished || res.destroyed) return;
@@ -163,7 +176,7 @@ export const gateway = http.createServer((req, res) => {
 			res.write(sseChunk({
 				...base,
 				choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-				usage: { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 },
+				usage: { prompt_tokens: 120, completion_tokens: empty ? 0 : 30, total_tokens: empty ? 120 : 150 },
 			}));
 			res.write("data: [DONE]\n\n");
 			record.finished = true;
@@ -329,11 +342,11 @@ export class WsHarness {
 		});
 	}
 
-	static async connect(persistentAgentId: string, conversationId: string, options: { reattach?: boolean; extraParams?: string } = {}): Promise<WsHarness> {
+	static async connect(persistentAgentId: string, conversationId: string, options: { reattach?: boolean; extraParams?: string; modelProvider?: string; model?: string } = {}): Promise<WsHarness> {
 		// The reattach capability rides every connect by default, like the real
 		// client; `reattach: false` impersonates an older bundle.
 		const reattachParam = options.reattach === false ? "" : "&reattach=1";
-		const socket = new WebSocketImpl(`ws://127.0.0.1:${port}/ws?persistentAgentId=${persistentAgentId}&conversationId=${conversationId}&modelProvider=openai-compatible&model=room-model${reattachParam}${options.extraParams ?? ""}`, { headers: { ...SMOKE_AUTH_HEADERS } });
+		const socket = new WebSocketImpl(`ws://127.0.0.1:${port}/ws?persistentAgentId=${persistentAgentId}&conversationId=${conversationId}&modelProvider=${options.modelProvider ?? "openai-compatible"}&model=${options.model ?? "room-model"}${reattachParam}${options.extraParams ?? ""}`, { headers: { ...SMOKE_AUTH_HEADERS } });
 		const harness = new WsHarness(socket);
 		openedSockets.push(harness);
 		await new Promise<void>((resolve, reject) => {
@@ -414,7 +427,7 @@ export const serverOutput: string[] = [];
 export const expectedText = SLOW_ANSWER_CHUNKS.join("").trim();
 
 /** Starts the gateway and the server on the smoke's own home, with the away limits' test overrides. */
-export async function startDetachedServer(limits: AwayLimitOverrides = { silenceMs: DETACHED_SILENCE_OVERRIDE_MS, limitMs: DETACHED_LIMIT_OVERRIDE_MS }, maintenanceModel = "room-model"): Promise<void> {
+export async function startDetachedServer(limits: AwayLimitOverrides = { silenceMs: DETACHED_SILENCE_OVERRIDE_MS, limitMs: DETACHED_LIMIT_OVERRIDE_MS }, maintenanceModel = "room-model", customProvider = false): Promise<void> {
 	await new Promise<void>((resolve) => gateway.listen(0, "127.0.0.1", resolve));
 	const gatewayPort = (gateway.address() as AddressInfo).port;
 
@@ -433,13 +446,14 @@ export async function startDetachedServer(limits: AwayLimitOverrides = { silence
 						{ id: "suggest-model", name: "Suggestion Model", contextWindow: 128000, maxTokens: 16384 },
 					],
 				},
+				...(customProvider ? { "synthetic-custom": { name: "Synthetic Custom", baseUrl: `http://127.0.0.1:${gatewayPort}/v1`, api: "openai-completions", models: [{ id: "custom-chat", name: "Custom Chat", contextWindow: 128000, maxTokens: 16384 }, { id: "custom-suggest", name: "Custom Suggestion", contextWindow: 128000, maxTokens: 16384 }] } } : {}),
 			},
 		}, null, 2),
 		{ mode: 0o600 },
 	);
 	fs.writeFileSync(
 		path.join(agentDir, "auth.json"),
-		JSON.stringify({ "openai-compatible": { type: "api_key", key: "synthetic-detached-turn-key" } }, null, 2),
+		JSON.stringify({ "openai-compatible": { type: "api_key", key: "synthetic-detached-turn-key" }, ...(customProvider ? { "synthetic-custom": { type: "api_key", key: "synthetic-custom-key" } } : {}) }, null, 2),
 		{ mode: 0o600 },
 	);
 	fs.writeFileSync(
@@ -454,6 +468,7 @@ export async function startDetachedServer(limits: AwayLimitOverrides = { silence
 		{ mode: 0o600 },
 	);
 	fs.writeFileSync(path.join(productAppRoot, "persistent-agent-ai-profile.json"), JSON.stringify({ profileId: "openai-compatible" }, null, 2), { mode: 0o600 });
+	if (customProvider) fs.writeFileSync(path.join(productAppRoot, "custom-ai-profiles.json"), JSON.stringify({ version: 1, profiles: [{ id: "custom-synthetic-custom", providerId: "synthetic-custom", label: "Synthetic Custom", roomModels: ["custom-chat"], learnModel: "custom-suggest", reviewMemoryModel: "custom-suggest" }] }), { mode: 0o600 });
 
 	server = spawn("npx", ["tsx", "src/index.ts"], {
 		shell: process.platform === "win32",

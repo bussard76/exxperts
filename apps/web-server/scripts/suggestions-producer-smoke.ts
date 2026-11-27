@@ -1,7 +1,10 @@
-import { assert, createRoom, endFailingCase, FAILING_MARKER, gatewayRequests, putThread, reportDetachedFailure, requestJson, setHoldSuggestionResponse, setSuggestionResponse, SLOW_MARKER, startDetachedServer, stopDetachedServer, waitDetached, waitUntil, WsHarness } from "./persistent-room-detached-turn-setup.js";
+import fs from "node:fs";
+import path from "node:path";
+import { assert, createRoom, EMPTY_MARKER, endFailingCase, FAILING_MARKER, gatewayRequests, MULTIPART_MARKER, productAppRoot, putThread, reportDetachedFailure, requestJson, serverOutput, setHoldSuggestionResponse, setSuggestionResponse, SLOW_MARKER, startDetachedServer, stopDetachedServer, waitDetached, waitUntil, WsHarness } from "./persistent-room-detached-turn-setup.js";
 
 try {
-	await startDetachedServer(undefined, "suggest-model");
+	process.env.EXXETA_STREAM_TRACE = "1";
+	await startDetachedServer(undefined, "suggest-model", true);
 	setSuggestionResponse('["  Next question?  ", "Another\\nquestion", "Next question?"]');
 	const room = await createRoom("Suggestion Room");
 	const thread = "suggestion_thread";
@@ -14,6 +17,10 @@ try {
 	assert(socket.frames[complete].roomId === room && socket.frames[complete].threadId === thread && typeof socket.frames[complete].answerId === "string", "completion carries its room, thread and answer identity");
 	const result = await socket.waitFor((frame) => frame.type === "suggestions", "suggestions", complete, 5000);
 	assert(JSON.stringify(socket.frames[result]) === JSON.stringify({ type: "suggestions", roomId: room, threadId: thread, answerId: socket.frames[complete].answerId, items: ["Next question?", "Another question"] }), "suggestions carry the matching identity and normalized items");
+	const tracePath = path.join(productAppRoot, "stream-traces", room, `${thread}.jsonl`);
+	await waitUntil(() => fs.existsSync(tracePath) && fs.readFileSync(tracePath, "utf8").includes('"frame":"suggestions"'), "suggestion trace recorded", 10000);
+	assert(!fs.readFileSync(tracePath, "utf8").includes("Next question?") && !serverOutput.join("").includes("Next question?"), "suggestion content is absent from traces and server logs");
+	assert(!fs.readFileSync(tracePath, "utf8").includes("What comes") && !fs.readFileSync(tracePath, "utf8").includes("Quick answer"), "the prompt and answer used as suggestion context are absent from traces");
 	const request = gatewayRequests.find((entry) => entry.suggestion)?.request;
 	assert(gatewayRequests.find((entry) => entry.suggestion)?.model === "suggest-model", "suggestions use the answering provider's configured Memorize model");
 	assert(request?.maxTokens === 200 && (!request.tools || (Array.isArray(request.tools) && request.tools.length === 0)), "the suggestion call is tool-less and capped at 200 output tokens");
@@ -82,6 +89,28 @@ try {
 	assert(!second.frames.slice(before).some((frame) => frame.type === "answer_lifecycle" || frame.type === "suggestions"), "displaced adopter receives no lifecycle or suggestion frames");
 	third.close();
 
+	const readoptRoom = await createRoom("Suggestion Readoption Room");
+	const readoptThread = "suggestion_readoption";
+	await putThread(readoptRoom, readoptThread, []);
+	const departed = await WsHarness.connect(readoptRoom, readoptThread);
+	await departed.waitFor((frame) => frame.type === "ready", "readoption owner ready");
+	const readoptBefore = gatewayRequests.length;
+	departed.send({ type: "prompt", text: `Readopt this answer ${SLOW_MARKER}` });
+	await departed.waitFor((frame) => frame.type === "event" && frame.event?.type === "message_update", "readoption first chunk");
+	departed.close();
+	await waitDetached(readoptRoom, "readoption first departure");
+	const temporary = await WsHarness.connect(readoptRoom, readoptThread);
+	await temporary.waitFor((frame) => frame.type === "turn_reattach", "temporary adopter");
+	temporary.close();
+	await waitDetached(readoptRoom, "readoption second departure");
+	const finalAdopter = await WsHarness.connect(readoptRoom, readoptThread);
+	await finalAdopter.waitFor((frame) => frame.type === "turn_reattach", "final adopter");
+	gatewayRequests.slice(readoptBefore).find((entry) => entry.slow)!.release();
+	const readoptComplete = await finalAdopter.waitFor((frame) => frame.type === "answer_lifecycle" && frame.phase === "complete", "readopted completion");
+	const readoptResult = await finalAdopter.waitFor((frame) => frame.type === "suggestions", "readopted suggestion", readoptComplete);
+	assert(finalAdopter.frames[readoptResult].answerId === finalAdopter.frames[readoptComplete].answerId, "readoption keeps the answer identity until completion");
+	finalAdopter.close();
+
 	const staleRoom = await createRoom("Suggestion Cancellation Room");
 	const staleThread = "suggestion_cancellation";
 	await putThread(staleRoom, staleThread, []);
@@ -134,6 +163,18 @@ try {
 	assert(!stopped.frames.some((frame) => frame.type === "answer_lifecycle" && frame.phase === "complete"), "a stopped answer publishes no completion");
 	assert(!gatewayRequests.slice(stoppedBefore).some((request) => request.suggestion), "a stopped answer makes no suggestion call");
 
+	const emptyRoom = await createRoom("Suggestion Empty Answer Room");
+	const emptyThread = "suggestion_empty";
+	await putThread(emptyRoom, emptyThread, []);
+	const empty = await WsHarness.connect(emptyRoom, emptyThread);
+	await empty.waitFor((frame) => frame.type === "ready", "empty answer ready");
+	const emptyBefore = gatewayRequests.length;
+	empty.send({ type: "prompt", text: `Return nothing ${EMPTY_MARKER}` });
+	await empty.waitFor((frame) => frame.type === "event" && frame.event?.type === "agent_end", "empty answer end");
+	await new Promise((resolve) => setTimeout(resolve, 250));
+	assert(!empty.frames.some((frame) => frame.type === "answer_lifecycle" && frame.phase === "complete"), "an empty failed answer publishes no completion");
+	assert(!gatewayRequests.slice(emptyBefore).some((entry) => entry.suggestion), "an empty failed answer makes no suggestion call");
+
 	const retryRoom = await createRoom("Suggestion Retry Room");
 	const retryThread = "suggestion_retry";
 	await putThread(retryRoom, retryThread, []);
@@ -150,6 +191,20 @@ try {
 	const retryResult = await retry.waitFor((frame) => frame.type === "suggestions", "successful retry result", retryComplete);
 	assert(retry.frames[retryResult].answerId === retry.frames[retryComplete].answerId, "successful retry publishes one correlated result");
 	assert(retry.frames.filter((frame) => frame.type === "answer_lifecycle" && frame.phase === "complete").length === 1, "only the successful retry completes");
+
+	const multipartRoom = await createRoom("Suggestion Multipart Room");
+	const multipartThread = "suggestion_multipart";
+	await putThread(multipartRoom, multipartThread, []);
+	const multipart = await WsHarness.connect(multipartRoom, multipartThread);
+	await multipart.waitFor((frame) => frame.type === "ready", "multipart ready");
+	const multipartBefore = gatewayRequests.length;
+	multipart.send({ type: "prompt", text: `Answer in parts ${MULTIPART_MARKER}` });
+	const multipartComplete = await multipart.waitFor((frame) => frame.type === "answer_lifecycle" && frame.phase === "complete", "multipart completion", 0, 30000);
+	const multipartResult = await multipart.waitFor((frame) => frame.type === "suggestions", "multipart suggestions", multipartComplete);
+	const multipartRequest = gatewayRequests.slice(multipartBefore).find((entry) => entry.suggestion)?.request;
+	const multipartContext = JSON.stringify(multipartRequest?.messages);
+	assert(multipart.frames[multipartResult].answerId === multipart.frames[multipartComplete].answerId, "all answer parts share the completion identity");
+	assert(multipartContext.includes("Before the tool.") && multipartContext.includes("After the tool.") && !multipartContext.includes("synthetic-tool-output"), "all assistant text parts, but no tool result, enter suggestion context");
 
 	const overlapRoom = await createRoom("Suggestion Overlap Room");
 	const overlapThread = "suggestion_overlap";
@@ -222,6 +277,75 @@ try {
 	await waitUntil(() => deadlineRequest.aborted, "suggestion deadline abort", 15000);
 	assert(!deadline.frames.slice(deadlineComplete + 1).some((frame) => frame.type === "suggestions"), "a timed out suggestion call is silent");
 	setHoldSuggestionResponse(false);
+
+	const unavailableRoom = await createRoom("Suggestion Unavailable Room");
+	const unavailableThread = "suggestion_unavailable";
+	await putThread(unavailableRoom, unavailableThread, [
+		{ kind: "user", id: "u-previous", text: "A previous question" },
+		{ kind: "assistant", id: "a-previous", text: "A previous answer" },
+	]);
+	const unavailable = await WsHarness.connect(unavailableRoom, unavailableThread);
+	await unavailable.waitFor((frame) => frame.type === "ready", "unavailable ready");
+	const profilePath = path.join(productAppRoot, "openai-compatible-ai-profile.json");
+	const profileText = fs.readFileSync(profilePath, "utf8");
+	const profile = JSON.parse(profileText);
+	profile.maintenanceModel = "missing-synthetic-model";
+	fs.writeFileSync(profilePath, JSON.stringify(profile));
+	const unavailableBefore = gatewayRequests.length;
+	unavailable.send({ type: "prompt", text: "Answer without a suggestion model" });
+	await unavailable.waitFor((frame) => frame.type === "event" && frame.event?.type === "agent_end", "unavailable answer end");
+	fs.writeFileSync(profilePath, profileText);
+	await new Promise((resolve) => setTimeout(resolve, 250));
+	assert(!gatewayRequests.slice(unavailableBefore).some((entry) => entry.suggestion), "an unavailable Memorize model causes no fallback call");
+
+	const historyRoom = await createRoom("Suggestion History Room");
+	const historyThread = "suggestion_history";
+	await putThread(historyRoom, historyThread, []);
+	const historySocket = await WsHarness.connect(historyRoom, historyThread);
+	await historySocket.waitFor((frame) => frame.type === "ready", "history ready");
+	const transcript: any[] = [];
+	let historyFrom = 0;
+	let lastHistoryRequest: (typeof gatewayRequests)[number] | undefined;
+	for (let index = 1; index <= 4; index++) {
+		const question = `History question ${index}`;
+		const requestStart = gatewayRequests.length;
+		historySocket.send({ type: "prompt", text: question });
+		const historyComplete = await historySocket.waitFor((frame) => frame.type === "answer_lifecycle" && frame.phase === "complete", `history completion ${index}`, historyFrom);
+		historyFrom = (await historySocket.waitFor((frame) => frame.type === "suggestions", `history result ${index}`, historyComplete)) + 1;
+		lastHistoryRequest = gatewayRequests.slice(requestStart).find((entry) => entry.suggestion);
+		transcript.push({ kind: "user", id: `history-u-${index}`, text: question }, { kind: "assistant", id: `history-a-${index}`, text: "Quick answer." });
+		await putThread(historyRoom, historyThread, transcript);
+	}
+	const historyContext = JSON.stringify(lastHistoryRequest?.request?.messages);
+	assert(!historyContext.includes("History question 1") && [2, 3, 4].every((index) => historyContext.includes(`History question ${index}`)), "the model receives only the last three provably completed exchanges");
+
+	const unknownRoom = await createRoom("Suggestion Unknown History Room");
+	const unknownThread = "suggestion_unknown_history";
+	await putThread(unknownRoom, unknownThread, [
+		{ kind: "user", id: "unknown-user", text: "An unverified historical question" },
+		{ kind: "assistant", id: "unknown-answer", text: "An unverified historical fragment" },
+	]);
+	const unknown = await WsHarness.connect(unknownRoom, unknownThread);
+	await unknown.waitFor((frame) => frame.type === "ready", "unknown history ready");
+	const unknownBefore = gatewayRequests.length;
+	unknown.send({ type: "prompt", text: "A new verified question" });
+	const unknownComplete = await unknown.waitFor((frame) => frame.type === "answer_lifecycle" && frame.phase === "complete", "unknown history completion");
+	await unknown.waitFor((frame) => frame.type === "suggestions", "unknown history result", unknownComplete);
+	const unknownContext = JSON.stringify(gatewayRequests.slice(unknownBefore).find((entry) => entry.suggestion)?.request?.messages);
+	assert(unknownContext.includes("A new verified question") && !unknownContext.includes("An unverified historical"), "unknown restored pairs are omitted fail-closed");
+
+	const customRoom = await createRoom("Suggestion Custom Provider Room");
+	const customThread = "suggestion_custom";
+	await putThread(customRoom, customThread, []);
+	const picked = await requestJson(`/api/persistent-agents/${customRoom}/models`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversation: { provider: "synthetic-custom", model: "custom-chat" } }) });
+	assert(picked.status === 200, "custom conversation model is selected");
+	const custom = await WsHarness.connect(customRoom, customThread, { modelProvider: "synthetic-custom", model: "custom-chat" });
+	await custom.waitFor((frame) => frame.type === "ready", "custom provider ready");
+	const customBefore = gatewayRequests.length;
+	custom.send({ type: "prompt", text: "A custom provider question" });
+	const customComplete = await custom.waitFor((frame) => frame.type === "answer_lifecycle" && frame.phase === "complete", "custom provider completion");
+	await custom.waitFor((frame) => frame.type === "suggestions", "custom provider suggestions", customComplete);
+	assert(gatewayRequests.slice(customBefore).find((entry) => entry.suggestion)?.model === "custom-suggest", "custom provider uses its own Memorize model");
 } catch (error) {
 	reportDetachedFailure(error);
 } finally {

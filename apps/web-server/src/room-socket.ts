@@ -1053,7 +1053,7 @@ app.get("/ws", { websocket: true, exposeHeadRoute: false }, async (socket, req) 
 	};
 	// Messages the person sent into the running answer, oldest first: the
 	// runtime takes all of them at its next check, in the order they came.
-	let pendingSteers: { id: string; text: string }[] = [];
+	let pendingSteers: { id: string; text: string; answerId: string; suggestionVersion: object }[] = [];
 	// The provider's own tools (its web search) running inside the message being written: a message sent meanwhile waits for them as for a step.
 	const providerToolsRunning = new Set<string>();
 	// A turn's own message reaches the session as its first user message;
@@ -1074,9 +1074,9 @@ app.get("/ws", { websocket: true, exposeHeadRoute: false }, async (socket, req) 
 		return run;
 	};
 	// Into the runtime's queue, outside the order below: callers go through steerInOrder, or already hold its turn.
-	const steerActiveTurn = async (id: string, text: string): Promise<boolean> => {
+	const steerActiveTurn = async (id: string, text: string, identity?: { answerId: string; suggestionVersion: object }): Promise<boolean> => {
 		if (!id || !text.trim() || !turnTakesSteers() || pendingSteers.length >= MAX_WAITING_STEERS) return false;
-		pendingSteers.push({ id, text });
+		pendingSteers.push({ id, text, answerId: identity?.answerId ?? randomUUID(), suggestionVersion: identity?.suggestionVersion ?? suggestionVersions.get(answerNoteKey()) ?? {} });
 		try {
 			// prompt, not steer(): it carries the registry's options, so a shared server's "/" text reaches the model as written.
 			await session!.prompt(text, { streamingBehavior: "steer", ...serverHooks().promptOptions?.() });
@@ -1115,7 +1115,7 @@ app.get("/ws", { websocket: true, exposeHeadRoute: false }, async (socket, req) 
 			app.log.warn({ err: error }, "clearing the runtime's message queue failed");
 		}
 		const returned: Array<{ id: string; text: string }> = [];
-		for (const steer of rest) if (!(await steerActiveTurn(steer.id, steer.text))) returned.push(steer);
+		for (const steer of rest) if (!(await steerActiveTurn(steer.id, steer.text, steer))) returned.push({ id: steer.id, text: steer.text });
 		if (returned.length) sendTurnFrame({ type: "steer_returned", messages: returned });
 		return true;
 	});
@@ -1126,7 +1126,7 @@ app.get("/ws", { websocket: true, exposeHeadRoute: false }, async (socket, req) 
 	// the turn settles, so none rides silently into a later message.
 	const returnUntakenSteers = (): void => {
 		if (!session) return;
-		const returned = pendingSteers;
+		const returned = pendingSteers.map(({ id, text }) => ({ id, text }));
 		pendingSteers = [];
 		try { session.clearQueue(); } catch (error) { app.log.warn({ err: error }, "clearing the runtime's message queue failed"); }
 		if (returned.length === 0) return;
@@ -1690,7 +1690,10 @@ app.get("/ws", { websocket: true, exposeHeadRoute: false }, async (socket, req) 
 					const text = textFromParts(message.content);
 					previous = knownPrompts.filter((item) => item === text).length === 1 ? { prompt: text, answer: "", completed: false } : undefined;
 				} else if (message.role === "assistant" && previous) {
-					if (message.stopReason === "error" || message.stopReason === "aborted") previous = undefined;
+					if (message.stopReason === "error" || message.stopReason === "aborted") {
+						previous.answer = "";
+						previous.completed = false;
+					}
 					else {
 						previous.answer = [previous.answer, textFromParts(message.content)].filter(Boolean).join("\n\n");
 						previous.completed = message.stopReason === "stop" || message.stopReason === "length";
@@ -2323,8 +2326,8 @@ ${lines.join("\n")}`;
 				const taken = turnPromptMessageSeen ? pendingSteers.shift() : undefined;
 				turnPromptMessageSeen = true;
 				if (taken) {
-					activePersistentWebTurn.answerId = randomUUID();
-					activePersistentWebTurn.suggestionVersion = suggestionVersions.get(answerNoteKey()) ?? {};
+					activePersistentWebTurn.answerId = taken.answerId;
+					activePersistentWebTurn.suggestionVersion = taken.suggestionVersion;
 					activePersistentWebTurn.suggestionPrompt = userAuthoredPromptText(taken.text);
 					activePersistentWebTurn.suggestionAnswer = "";
 					sendAnswerLifecycle("invalidate");
@@ -2375,7 +2378,7 @@ ${lines.join("\n")}`;
 			const keyedEnd = keyedSteps && event?.type === "message_end" && (event as any).message?.role === "assistant" ? keyedSteps.note((event as any).message, { retrying, shownAtStop: activePersistentWebTurn?.shownAtStop }) : {};
 			const projected = withFrameIds(projectAgentEventForWebClient(event), frameIds, keyedEnd.echoOf);
 			sendTurnFrame({ type: "event", event: credentialKey || failure || retryModel || retrying || endedBy ? { ...projected, ...(credentialKey ? { credentialKey } : {}), ...(failure ? { failure } : {}), ...(retryModel ? { model: retryModel } : {}), ...(failure === "quota" ? { quotaWay: quotaWayOf(String(ended?.provider ?? ""), String(ended?.errorMessage ?? "")) } : {}), ...(retrying ? { retrying: true } : {}), ...(endedBy ? { endedBy } : {}) } : projected });
-			if (event.type === "agent_end" && !retrying && lastAttempt?.role === "assistant" && lastAttempt.stopReason !== "error" && lastAttempt.stopReason !== "aborted" && activePersistentWebTurn && !activePersistentWebTurn.terminalReason && !activePersistentWebTurn.answerCompleted && suggestionVersions.get(answerNoteKey()) === activePersistentWebTurn.suggestionVersion) {
+			if (event.type === "agent_end" && !retrying && lastAttempt?.role === "assistant" && lastAttempt.stopReason !== "error" && lastAttempt.stopReason !== "aborted" && !emptyAnswer(lastAttempt) && activePersistentWebTurn && !activePersistentWebTurn.terminalReason && !activePersistentWebTurn.answerCompleted && suggestionVersions.get(answerNoteKey()) === activePersistentWebTurn.suggestionVersion) {
 				activePersistentWebTurn.answerCompleted = true;
 				sendAnswerLifecycle("complete", activePersistentWebTurn.answerId);
 				generateSuggestions(activePersistentWebTurn.answerId, lastAttempt.provider, activePersistentWebTurn.suggestionPrompt, activePersistentWebTurn.suggestionAnswer);

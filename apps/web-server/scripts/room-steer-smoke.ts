@@ -70,7 +70,7 @@ const holdNextLeg = () => { held = new Promise<void>((resolve) => { release = re
 const SEARCH = { provider: "anthropic-api-key", model: "claude-haiku-5-5" };
 let releaseSearch = () => {};
 let searchHeld: Promise<void> = Promise.resolve();
-// Every model call: its user messages and its tool results, in order.
+// Conversation model calls: user messages and tool results, in order.
 const calls: { userTexts: string[]; toolTexts: string[]; roles: string[] }[] = [];
 const sseChunk = (payload: unknown): string => `data: ${JSON.stringify(payload)}\n\n`;
 const textOf = (content: unknown): string => typeof content === "string" ? content : Array.isArray(content) ? content.map((part: any) => (typeof part?.text === "string" ? part.text : "")).join("") : "";
@@ -103,6 +103,18 @@ const gateway = http.createServer((req, res) => {
 			let parsed: any = {};
 			try { parsed = JSON.parse(body); } catch {}
 			const messages: any[] = Array.isArray(parsed?.messages) ? parsed.messages : [];
+			if (JSON.stringify(parsed.system ?? "").includes("Generate next prompt suggestions")) {
+				res.writeHead(200, { "content-type": "text/event-stream" });
+				const send = (event: Record<string, unknown>) => res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+				send({ type: "message_start", message: { id: "msg_suggestion", type: "message", role: "assistant", model: SEARCH.model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } } });
+				send({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
+				send({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "[]" } });
+				send({ type: "content_block_stop", index: 0 });
+				send({ type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 1 } });
+				send({ type: "message_stop" });
+				res.end();
+				return;
+			}
 			calls.push({ userTexts: messages.filter((m) => m?.role === "user").map((m) => textOf(m.content)), toolTexts: [], roles: messages.map((m) => String(m?.role)) });
 			const asked = messages.at(-1)?.role === "user" ? textOf(messages.at(-1).content) : "";
 			// The first call searches; the one that reads the person's message just answers.
@@ -129,6 +141,14 @@ const gateway = http.createServer((req, res) => {
 		let parsed: any = {};
 		try { parsed = JSON.parse(body); } catch {}
 		const messages: any[] = Array.isArray(parsed?.messages) ? parsed.messages : [];
+		if (messages.some((m) => m?.role === "system" && textOf(m.content).includes("Generate next prompt suggestions"))) {
+			res.writeHead(200, { "content-type": "text/event-stream" });
+			const base = { id: "cmpl_suggestion", object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: String(parsed?.model ?? "room-model") };
+			res.write(sseChunk({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: "[]" }, finish_reason: null }] }));
+			res.write(sseChunk({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }));
+			res.end("data: [DONE]\n\n");
+			return;
+		}
 		calls.push({ userTexts: messages.filter((m) => m?.role === "user").map((m) => textOf(m.content)), toolTexts: messages.filter((m) => m?.role === "tool").map((m) => textOf(m.content)), roles: messages.map((m) => String(m?.role)) });
 		const leg = legs.shift() ?? { text: "Done." };
 		if (leg.refused) {

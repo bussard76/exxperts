@@ -52,6 +52,7 @@ async function scheduledCopy(name: string, folder?: Folder): Promise<{ copy: str
 	}, `the scheduled run in ${name} ended`, 90_000);
 	const request = requests.find((sent) => personsNewest(sent).includes(prompt));
 	assert(request, "the run reached the model");
+	assert(!requests.some((sent) => sent.system.includes("Generate next prompt suggestions") && personsNewest(sent).includes(prompt)), "an unled scheduled answer starts no suggestion generation");
 	const [copy] = copiesIn(request);
 	assert(copy, "the run sends a room-state copy");
 	return { copy, roomId, threadId };
@@ -102,6 +103,7 @@ try {
 	}
 
 	const room = await RoomSocket.connect(written.roomId, written.threadId);
+	assert(!room.frames.some((frame) => frame.type === "answer_lifecycle" || frame.type === "suggestions"), "the unled scheduled answer has no lifecycle or suggestion replay");
 	const [request] = await room.prompt("Thanks, and now?");
 	await room.close();
 	// The run's copy stays in the history; the newest one replaces it.
