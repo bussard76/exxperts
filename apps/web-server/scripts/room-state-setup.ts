@@ -56,6 +56,7 @@ export const copiesIn = (request: SentRequest) => request.messages.filter(isCopy
 export const personsNewest = (request: SentRequest) => [...request.messages].reverse().find((message) => message.role === "user" && !isCopy(message))?.text ?? "";
 
 export const requests: SentRequest[] = [];
+export const suggestionRequests: SentRequest[] = [];
 const refusedOnce = new Set<string>();
 
 function sseChunk(payload: unknown): string {
@@ -76,9 +77,11 @@ const gateway = http.createServer((req, res) => {
 		// The summary a compaction asks for wraps the conversation in <conversation> tags; it is not a turn.
 		const isSummary = all.some((message) => message.role === "user" && message.text.includes("<conversation>"));
 		const request: SentRequest = { system: all[0]?.role === "system" ? all[0].text : "", messages: all[0]?.role === "system" ? all.slice(1) : all };
-		if (!isSummary) requests.push(request);
+		const isSuggestion = request.system.includes("Generate next prompt suggestions");
+		if (isSuggestion) suggestionRequests.push(request);
+		else if (!isSummary) requests.push(request);
 		const newest = personsNewest(request);
-		const refuse = !isSummary && (["FAIL ONCE", "OVERFLOW ONCE"].find((marker) => newest.includes(marker) && !refusedOnce.has(newest)));
+		const refuse = !isSummary && !isSuggestion && (["FAIL ONCE", "OVERFLOW ONCE"].find((marker) => newest.includes(marker) && !refusedOnce.has(newest)));
 		if (refuse) {
 			refusedOnce.add(newest);
 			const error = refuse === "OVERFLOW ONCE"
@@ -89,7 +92,7 @@ const gateway = http.createServer((req, res) => {
 		}
 		const base = { id: `cmpl_${requests.length}`, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: String(body.model ?? MODEL.model) };
 		res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
-		res.write(sseChunk({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: isSummary ? "# Goal\nShort answers." : "Noted." }, finish_reason: null }] }));
+		res.write(sseChunk({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: isSuggestion ? '["Ask another question"]' : isSummary ? "# Goal\nShort answers." : "Noted." }, finish_reason: null }] }));
 		res.write(sseChunk({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 900, completion_tokens: 10, total_tokens: 910 } }));
 		res.write("data: [DONE]\n\n");
 		res.end();

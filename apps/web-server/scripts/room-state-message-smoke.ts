@@ -24,7 +24,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { ROOM_STATE_CUSTOM_TYPE } from "@exxeta/exxperts-runtime";
 import { nextRoomStateMessage, roomStateMessageFor, type RoomStateParts } from "../src/room-state-message.js";
-import { assert, copiesIn, openRoom, personsNewest, rename, requestJson, ROOM_STATE_HEADING, RoomSocket, setInstructions, startRoomStateServer, stopRoomStateServer, tempHome, type SentRequest } from "./room-state-setup.js";
+import { assert, copiesIn, openRoom, personsNewest, rename, requestJson, requests, ROOM_STATE_HEADING, RoomSocket, setInstructions, startRoomStateServer, stopRoomStateServer, suggestionRequests, tempHome, waitUntil, type SentRequest } from "./room-state-setup.js";
 
 const LIVE_HEADINGS = ["## Current identity", "## Current instructions", "## Current workspace", "## Enabled skills", "## Attachments in this room"];
 let passes = 0;
@@ -87,7 +87,10 @@ try {
 	await scenario("every kind of change, then a reconnect", async () => {
 		let room = await RoomSocket.connect(roomId, conversationId);
 		sockets.push(room);
-		const first = only(await room.prompt("Hello one."), "Hello one.");
+		const sent = await room.prompt("Hello one.");
+		await waitUntil(() => suggestionRequests.length > 0, "the suggestion request arrives");
+		assert(!requests.includes(suggestionRequests[0]), "suggestion requests are captured separately from room-state chat requests");
+		const first = only(sent, "Hello one.");
 		const system = first.system;
 		assert(system.length > 0 && system.includes("\n\n## Room tools\n\n"), "the system prompt carries the room-tools stanza");
 		for (const heading of LIVE_HEADINGS) assert(!system.includes(heading), `the system prompt must not carry "${heading}", the live state rides the copy`);
