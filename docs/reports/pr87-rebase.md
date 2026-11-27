@@ -56,7 +56,7 @@ The bounded read also retains the target's `openedFile` closed-file checks for l
 
 ### Safe native Mac task for Front
 
-On an isolated Mac test account, check out the final reviewed contribution candidate at its reported SHA, verify it is based on v0.16.2 `b898e851813b4da0211e6a049e9537160391091f`, and use no personal workspace or real provider credentials. Install only with `EXXETA_SKIP_BROWSER_INSTALL=1 npm ci` and normal lifecycle scripts; use an already available Chromium and the project's normal sandbox prerequisites. Run `GATE_TASK='T87-REBASE-IMPLEMENTATION' GATE_WORKER='t87-rebase-implementation' GATE_ROLE='Developer' GATE_AGENT='codex' GATE_MODEL='gpt-6.1-terra' gate npx tsx apps/web-server/scripts/workspace-local-real-app-ui-smoke.ts`. That smoke creates a disposable HOME, invented room, workbook and fake provider endpoint; it must exercise a real owning RoomBox and the denial after clearing the grant. Record the exact SHA, macOS version, filesystem/provider, test output and sandbox availability; if the box or browser is unavailable, report the case unmeasured. Do not commit screenshots or binaries; any captures stay under `.build/screenshots/`. Native Mac results are not asserted by the Linux simulated-box checks.
+On an isolated Mac test account, check out the final reviewed contribution candidate at its reported SHA, verify it is based on v0.16.2 `b898e851813b4da0211e6a049e9537160391091f`, and use no personal workspace or real provider credentials. Install only with `EXXETA_SKIP_BROWSER_INSTALL=1 npm ci` and normal lifecycle scripts; use an already available Chromium and the project's normal sandbox prerequisites. Because the target tree has no factory configuration, set `FACTORY_CONFIG` in that shell to the same project's fork `factory.config.json` so the gate records the project correctly. Run `GATE_TASK='T87-REBASE-IMPLEMENTATION' GATE_WORKER='t87-rebase-implementation' GATE_ROLE='Developer' GATE_AGENT='codex' GATE_MODEL='gpt-6.1-terra' gate npx tsx apps/web-server/scripts/workspace-local-real-app-ui-smoke.ts`. That smoke creates a disposable HOME, invented room, workbook and fake provider endpoint; it must exercise a real owning RoomBox and the denial after clearing the grant. Record the exact SHA, macOS version, filesystem/provider, test output and sandbox availability; if the box or browser is unavailable, report the case unmeasured. Do not commit screenshots or binaries; any captures stay under `.build/screenshots/`. Native Mac results are not asserted by the Linux simulated-box checks.
 
 Source PR head `5fcffe1036b2d6f867d6583b29822c4985d36fba`; upstream target `b898e851813b4da0211e6a049e9537160391091f`. The implementation branch starts at that target and contains no fork ancestry. The reviewed spec is at `ba39775b9fe55b2d47075d250fb4783298946317`; the binding amendment review is at `7ff65c77c1a4037ae2d747d87a21c1ca8344992d`. These documents remain on separate local evidence branches.
 
@@ -445,7 +445,7 @@ The Controller confirmed that the reviewed contract requires `association_unveri
 | ZIP, grid, image, PDF, JSON and worker bounds | Constants and checks were compared item by item in `shelf-parse-worker.mjs`, `persistent-room-shelf-reading.ts` and `WorkspaceFramedPreview.tsx` against the reviewed limits. `workspace-spreadsheet-snapshot-smoke.ts`, `workspace-word-snapshot-smoke.ts`, `workspace-pdf-snapshot-smoke.ts` and `workspace-snapshot-validation-smoke.ts` exercise representative over-limit, malformed, busy, timeout and abort cases; not every numerical boundary has a separate measured fixture. |
 | Request, authorization and error handling | `persistent-room-workspace-default-api-smoke.ts`, `workspace-grant-parity-api-smoke.ts`, `workspace-shared-listing-smoke.ts`, `workspace-box-preview-smoke.ts`, `workspace-shared-preview-race-smoke.ts`, `workspace-open-refusal-smoke.ts` and `workspace-open-handoff-smoke.ts` cover the stated route guards, no-data refusals, observed races and key error families. The independent Tester must check the complete error matrix and platform-specific behavior. |
 
-The full target-relative source patch at implementation checkpoint `c846d5d` applied cleanly with `git apply --index` to the pinned target. It contained 69 paths and no `docs/` files, and produced tree `a508658319afef5f6ab92f92e10fec3aa2fefe17`; comparing that tree to the implementation checkpoint outside the two evidence reports showed no differences. With the same-project fork hook files available locally, the configured pre-commit test-count, staged-safety and typechecks passed over the entire staged replay. No contribution commit or upstream push was made; the replay tree must be regenerated if later product files change.
+The full target-relative source patch at implementation checkpoint `094c9d3165f0418994340a70e9186b37e09de795` applied cleanly with `git apply --index` to the pinned target. It contained 71 paths and no `docs/` files, and produced tree `4ecfc5f61a9aa0391e4eaea53b0f823a60a02c3c`; comparing that tree to the implementation checkpoint outside the two evidence reports showed no differences. With the same-project fork hook files available locally, the configured pre-commit test-count, staged-safety and typechecks passed over the entire staged replay. No contribution commit or upstream push was made; the replay tree must be regenerated if later product files change.
 
 | Reviewed obligation | Current evidence and gap |
 | --- | --- |
@@ -453,7 +453,7 @@ The full target-relative source patch at implementation checkpoint `c846d5d` app
 | Grant parity and aliases | `workspace-grant-parity-api-smoke.ts` exercises a real settings selection, an older path-only grant, unknown fields, eligible alias, listing, image and preview. Persistent identity, APFS qualification and between-request same-path replacement remain deferred to #25; earlier contrary checkpoints are superseded. |
 | Listing, policy, paths and current owner | `persistent-room-workspace-default-api-smoke.ts`, `workspace-listing-box-refusal-smoke.ts`, `workspace-listing-box-race-smoke.ts` and `workspace-shared-listing-smoke.ts` exercise guarded listing, empty state, path restrictions, fake box ownership, invalidation, replacement and revocation. Native box execution is not established by the fakes. |
 | Bounded bytes, current policy and identity | `workspace-box-preview-smoke.ts`, `workspace-preview-folder-wait-smoke.ts` and `workspace-shared-preview-race-smoke.ts` cover fake box ownership, waits, read/parser invalidation, policy and file races; `workspace-local-real-app-ui-smoke.ts` exercises a real Linux guarded XLSX route. Native Mac/Windows paths are unmeasured. |
-| Format and worker bounds | `workspace-spreadsheet-snapshot-smoke.ts`, `workspace-pdf-snapshot-smoke.ts`, `workspace-word-snapshot-smoke.ts` and `workspace-snapshot-validation-smoke.ts` exercise invented snapshots, parser validation, limits and cleanup; `workspace-shared-listing-smoke.ts` covers text, HTML, image and presentation routes. A final case-by-case check of the complete reviewed format/error matrix is still required. |
+| Format and worker bounds | `workspace-spreadsheet-snapshot-smoke.ts`, `workspace-pdf-snapshot-smoke.ts`, `workspace-word-snapshot-smoke.ts` and `workspace-snapshot-validation-smoke.ts` exercise invented snapshots, parser validation, limits and cleanup; `workspace-shared-listing-smoke.ts` covers the format routes and per-format input limits. The item-by-item matrix above distinguishes measured cases from limits checked in code. |
 | UI formats, tree, tabs, frames and stale responses | `workspace-spreadsheet-component-ui-smoke.ts`, `workspace-document-components-ui-smoke.ts`, `workspace-text-html-components-ui-smoke.ts`, `workspace-image-component-ui-smoke.ts`, `workspace-pptx-component-ui-smoke.ts`, `workspace-file-browser-ui-smoke.ts` and `workspace-file-tabs-ui-smoke.ts` use invented inputs. `workspace-shared-frame-ui-smoke.ts` covers the real Linux Chromium presentation frame transfer and render. |
 | Actual browser-to-worker path | `workspace-local-real-app-ui-smoke.ts` selected and rendered an invented XLSX through the actual Linux app, guarded route and ExcelJS worker, and checked revocation. The corresponding native Mac RoomBox path is not yet measured; the exact safe Front task is above. |
 | App selection and local-only control | `workspace-app-integration-ui-smoke.ts` and `workspace-local-action-context-ui-smoke.ts` exercise selection, unsupported tabs and context visibility with invented inputs; the Linux actual app check also exercises authorization. |
@@ -495,7 +495,7 @@ The attributed folder-location recovery browser test also checks a failed read a
 
 ## Checkpoint file inventory
 
-At implementation checkpoint d31087a, the target-relative paths below are changed; the two report paths are fork evidence and are excluded from the intended contribution replay.
+At implementation checkpoint 094c9d3165f0418994340a70e9186b37e09de795, the target-relative paths below are changed; the two report paths are fork evidence and are excluded from the intended contribution replay.
 
 - `apps/web-server/package.json`
 - `apps/web-server/scripts/persistent-room-workspace-default-api-smoke.ts`
@@ -505,6 +505,7 @@ At implementation checkpoint d31087a, the target-relative paths below are change
 - `apps/web-server/scripts/workspace-document-components-ui-smoke.ts`
 - `apps/web-server/scripts/workspace-file-browser-ui-smoke.ts`
 - `apps/web-server/scripts/workspace-file-tabs-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-files-client-smoke.ts`
 - `apps/web-server/scripts/workspace-grant-parity-api-smoke.ts`
 - `apps/web-server/scripts/workspace-image-component-ui-smoke.ts`
 - `apps/web-server/scripts/workspace-listing-box-race-smoke.ts`
@@ -542,6 +543,7 @@ At implementation checkpoint d31087a, the target-relative paths below are change
 - `apps/web-ui/public/pptx-notices/THIRD_PARTY_NOTICES.md`
 - `apps/web-ui/public/pptx-notices/licenses/ECMA-text-copyright-notice.txt`
 - `apps/web-ui/public/pptx-notices/licenses/mtx-decompressor-MPL-2.0.txt`
+- `apps/web-ui/scripts/workspace-image-auth-smoke.ts`
 - `apps/web-ui/src/App.tsx`
 - `apps/web-ui/src/components/Sidebar.tsx`
 - `apps/web-ui/src/components/WorkspaceFileBrowser.tsx`
@@ -577,6 +579,7 @@ Added test files at that checkpoint:
 - `apps/web-server/scripts/workspace-document-components-ui-smoke.ts`
 - `apps/web-server/scripts/workspace-file-browser-ui-smoke.ts`
 - `apps/web-server/scripts/workspace-file-tabs-ui-smoke.ts`
+- `apps/web-server/scripts/workspace-files-client-smoke.ts`
 - `apps/web-server/scripts/workspace-grant-parity-api-smoke.ts`
 - `apps/web-server/scripts/workspace-image-component-ui-smoke.ts`
 - `apps/web-server/scripts/workspace-listing-box-race-smoke.ts`
@@ -600,4 +603,5 @@ Added test files at that checkpoint:
 - `apps/web-server/scripts/workspace-spreadsheet-snapshot-smoke.ts`
 - `apps/web-server/scripts/workspace-text-html-components-ui-smoke.ts`
 - `apps/web-server/scripts/workspace-word-snapshot-smoke.ts`
+- `apps/web-ui/scripts/workspace-image-auth-smoke.ts`
 - `scripts/pptx-notice.test.mjs`
