@@ -53,3 +53,9 @@ Additional independent parser evidence: the XLSX smoke now checks the 1904 date 
 Worker-response validation checks now exercise the private snapshot entry points with fabricated child replies: invalid workbook shape, malformed JPEG, unsafe Word HTML and unexpected error fields all fail closed. The XLSX smoke also verifies the encrypted ZIP refusal. The targeted run covering these checks passed 102/102 and `npm run typecheck:scripts` passed.
 
 A `gate --help` discovery command was inadvertently run without the required attribution variables; the shim attempted to execute `--help` as a program and returned ENOENT, so it ran no test. All subsequent gate invocations must carry the exact required task/worker/role/agent/model assignments.
+
+## Isolated spreadsheet consumer
+
+Restored the source spreadsheet preview component with its exact workbook, notice and response-identity validation. A direct component browser test feeds it a workbook from the real snapshot worker through an intercepted invented API response; it verifies rendering, wrong-room and malformed-schema refusal, empty-sheet behavior, and that the old file is hidden while a different path loads. The last check first failed against the pinned source component and now passes after tying displayed state to the current room, conversation and path. The component is not yet wired into the app; styles and the real browser-to-route-to-worker acceptance path remain open.
+
+The attributed targeted browser gate passed after two development failures: the first was a test-harness readiness check incorrectly probing Vite's proxied health route; the second was the expected missing-component red test. A further attributed gate exposed the stale-display assertion before the fix and passed afterward. `npx tsc --noEmit -p apps/web-ui/tsconfig.json` and `npm run typecheck:scripts` passed. No full gate, native platform or screenshot claim is made.
