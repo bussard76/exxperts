@@ -10,6 +10,8 @@ Linux asks the desktop MIME helper for the file's effective type instead of infe
 
 On Linux, the four affected script suites passed 104/104, both UI and script typechecks passed, and the attributed real-app XLSX and shared PPTX-frame Chromium gates passed. These are targeted Developer checks, not the independent full gate. No screenshots were captured.
 
+The focused handoff smoke also passes policy revocation during the final association query with zero additional handoffs, and a `%u` association with exactly one file URL for the authorized local file. These cases use the same fake resolver and dispatcher and do not launch a real application.
+
 ## Upstream grant parity decision
 
 Sascha's 2026-11-27 upstream-parity decision supersedes the persistent-identity amendment; Controller authorized spec `cf976f79548380add5c8099941b3687305260a24` and independent PASS `e057ec8e8088a82064b84beea57a50ebd5d4a11c`. Persistent identity, APFS qualification and between-operation same-path replacement detection are deferred to [fork issue #25](https://github.com/bussard76/exxperts/issues/25). Earlier grant-identity refusal and lost-answer evidence remains in this report and branch history; those superseded-only tests and assertions are not acceptance requirements for this migration. The path-only grant deliberately cannot distinguish a replacement at the same canonical path between requests; operation-local identity, policy and RoomBox checks remain required.

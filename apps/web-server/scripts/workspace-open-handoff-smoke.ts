@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { SMOKE_AUTH_HEADERS } from "./smoke-server-process.js";
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "workspace-box-race-"));
@@ -30,11 +31,12 @@ process.env.XDG_DATA_HOME = path.join(home, ".local", "share");
 process.env.XDG_DATA_DIRS = path.join(home, "other-data");
 let queries = 0, types = 0, dispatches = 0, changed = false, changeFileAt = 0;
 let unavailable = false;
+let revokeAt = 0, revoke = () => {};
 let launched: { executable: string; args: string[]; cwd: string; shell: unknown } | undefined;
 const originalExecFile = childProcess.execFile, originalSpawn = childProcess.spawn;
 childProcess.execFile = ((_file: unknown, args: string[], _options: unknown, callback: any) => {
 	if (args[1] === "filetype") { types++; queueMicrotask(() => callback(null, "text/plain\n", "")); return new EventEmitter(); }
-	queries++; queueMicrotask(() => { if (changeFileAt === queries) fs.writeFileSync(path.join(folder, "invented.txt"), `changed invented file ${queries}`); callback(null, changed && queries % 2 === 0 ? "other.desktop\n" : "invented.desktop\n", ""); });
+	queries++; queueMicrotask(() => { if (changeFileAt === queries) fs.writeFileSync(path.join(folder, "invented.txt"), `changed invented file ${queries}`); if (revokeAt === queries) revoke(); callback(null, changed && queries % 2 === 0 ? "other.desktop\n" : "invented.desktop\n", ""); });
 	return new EventEmitter();
 }) as typeof childProcess.execFile;
 childProcess.spawn = ((executable: string, args: string[], options: any) => {
@@ -50,7 +52,9 @@ const { createPersistentRoomDefaultCapabilityPolicy, writePersistentRoomDefaultC
 try {
 	const room = createPersistentAgentFromScaffoldInput({ displayName: "Invented Open Room", userName: "Example", preferredUserAddress: "Example" }).agent.id;
 	writePersistentAgentThread(room, "invented-thread", { state: "standby", origin: "home", model: { provider: "openai-compatible", model: "invented", label: "Invented" }, items: [] });
-	writePersistentRoomDefaultCapabilityPolicy(createPersistentRoomDefaultCapabilityPolicy({ agentId: room, root: folder, repoRoot: process.cwd() }));
+	const policy = createPersistentRoomDefaultCapabilityPolicy({ agentId: room, root: folder, repoRoot: process.cwd() });
+	writePersistentRoomDefaultCapabilityPolicy(policy);
+	revoke = () => writePersistentRoomDefaultCapabilityPolicy({ ...policy, denySegments: [...policy.denySegments, "invented.txt"] });
 	const headers = { ...SMOKE_AUTH_HEADERS, host: `127.0.0.1:${PORT}`, origin: `http://127.0.0.1:${PORT}`, "x-exxperts-local-action": "open-workspace-file" };
 	const request = () => app.inject({ method: "POST", url: `/api/persistent-agents/${room}/workspace-open`, headers, payload: { conversationId: "invented-thread", path: "invented.txt" } });
 	const success = await request();
@@ -75,9 +79,17 @@ try {
 	queries = 0; changeFileAt = 3;
 	const changedAtFinalLookup = await request();
 	if (changedAtFinalLookup.statusCode !== 409 || changedAtFinalLookup.json().code !== "file_changed" || Number(dispatches) !== 1) throw new Error("file change during final association lookup must not dispatch");
-	queries = 0; changeFileAt = 0; unavailable = true;
+	queries = 0; changeFileAt = 0; revokeAt = 3;
+	const revokedAtFinalLookup = await request();
+	if (revokedAtFinalLookup.statusCode !== 403 || Number(dispatches) !== 1) throw new Error("policy change during final lookup must not dispatch");
+	writePersistentRoomDefaultCapabilityPolicy(policy); revokeAt = 0;
+	queries = 0; unavailable = true;
 	const missingOpener = await request();
 	if (missingOpener.statusCode !== 503 || missingOpener.json().code !== "opener_unavailable") throw new Error("unavailable dispatcher must report opener_unavailable");
+	unavailable = false; queries = 0;
+	fs.writeFileSync(desktop, `[Desktop Entry]\nType=Application\nName=Invented\nMimeType=text/plain;\nExec=${binary} %u\nPath=${cwd}\n`);
+	const uriOpen = await request();
+	if (uriOpen.statusCode !== 202 || Number(dispatches) !== 3 || launched?.args.length !== 1 || launched.args[0] !== pathToFileURL(fs.realpathSync(path.join(folder, "invented.txt"))).href) throw new Error("URI placeholder must name exactly the authorized local file");
 	console.log("workspace checked open handoff smoke passed");
 } finally {
 	childProcess.execFile = originalExecFile; childProcess.spawn = originalSpawn; syncBuiltinESMExports();
