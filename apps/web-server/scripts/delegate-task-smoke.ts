@@ -68,6 +68,7 @@ const MODEL = { provider: "openai-compatible", model: "room-model" };
 type Asked = { tools: string[]; system: string; lastUser: string; messages: any[] };
 const asked: Asked[] = [];
 const specialistCalls: number[] = [];
+let suggestionCalls = 0;
 
 function sseChunk(payload: unknown): string {
 	return `data: ${JSON.stringify(payload)}\n\n`;
@@ -89,6 +90,8 @@ const gateway = http.createServer((req, res) => {
 		let parsed: any = {};
 		try { parsed = JSON.parse(body); } catch {}
 		const messages: any[] = Array.isArray(parsed?.messages) ? parsed.messages : [];
+		const suggestion = messages.some((message) => message?.role === "system" && textOf(message).includes("Generate next prompt suggestions"));
+		if (suggestion) suggestionCalls += 1;
 		const tools: string[] = (parsed?.tools ?? []).map((tool: any) => tool?.function?.name ?? tool?.name);
 		const userAt = messages.map((message) => (message?.role === "user" && textOf(message).startsWith("# Room state") ? "room-state" : message?.role)).lastIndexOf("user");
 		const lastUser = userAt >= 0 ? textOf(messages[userAt]) : "";
@@ -106,6 +109,7 @@ const gateway = http.createServer((req, res) => {
 			res.write(sseChunk({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }], usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 } }));
 			res.end("data: [DONE]\n\n");
 		};
+		if (suggestion) return say('["Ask another question"]');
 		if (!room) {
 			specialistCalls.push(Date.now());
 			return say("Done.");
@@ -264,6 +268,8 @@ try {
 
 	// 1. The person's own words: the model calls delegate_task with them.
 	await sendAndWait(ASK);
+	await until(() => suggestionCalls > 0, "the suggestion request arrives");
+	assert(specialistCalls.length === 0, "suggestion calls are not specialist calls");
 	const firstAsk = asked.find((request) => request.lastUser.includes(ASK));
 	check(firstAsk && !firstAsk.tools.includes("delegate_task"), `the room is offered no delegate_task tool, got ${JSON.stringify(firstAsk?.tools)}`);
 	check(firstAsk && firstAsk.tools.includes("memory_recall") && firstAsk.tools.includes("read_skill"), "the room's other tools are still offered");
