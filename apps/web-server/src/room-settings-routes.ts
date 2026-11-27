@@ -1,5 +1,5 @@
 import type { FastifyRequest } from "fastify";
-import { listWorkspaceForBrowser, readWorkspaceForBrowser } from "./persistent-room-workspace-tools.js";
+import { listWorkspaceForBrowser, readWorkspaceForBrowser, validWorkspaceBrowserPath } from "./persistent-room-workspace-tools.js";
 import { runWorkspacePdfSnapshot, runWorkspaceSpreadsheetSnapshot, runWorkspaceWordSnapshot } from "./persistent-room-shelf-reading.js";
 import { workspaceBoxFor } from "./room-live-sessions.js";
 import { roomBoxComputer } from "./room-box/box-available.js";
@@ -784,7 +784,7 @@ app.get("/api/persistent-agents/:id/workspace-files", async (req, reply) => {
 		return reply.code(400).send({ code: "invalid_request", error: "Invalid workspace request." });
 	}
 	const requestedPath = (query.path as string | undefined ?? "").replace(/\\/g, "/");
-	if (requestedPath && (requestedPath.startsWith("~") || requestedPath.includes("\0") || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(requestedPath) || (process.platform === "win32" && requestedPath.includes(":")) || requestedPath.split("/").some((part) => !part || part.startsWith(".")))) {
+	if (requestedPath && (!validWorkspaceBrowserPath(requestedPath))) {
 		return reply.code(400).send({ code: "invalid_path", error: "Invalid workspace path." });
 	}
 	try {
@@ -852,7 +852,7 @@ app.post("/api/persistent-agents/:id/workspace-open", async (req, reply) => {
 	const fields = body as Record<string, unknown>;
 	if (Object.keys(fields).length !== 2 || typeof fields.conversationId !== "string" || !fields.conversationId || typeof fields.path !== "string" || !fields.path) return refuse(400, "invalid_request");
 	const requestedPath = fields.path.replace(/\\/g, "/");
-	if (requestedPath.startsWith("~") || requestedPath.includes("\0") || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(requestedPath) || (process.platform === "win32" && requestedPath.includes(":")) || requestedPath.split("/").some((part) => !part || part.startsWith("."))) return refuse(400, "invalid_path");
+	if (!validWorkspaceBrowserPath(requestedPath)) return refuse(400, "invalid_path");
 	let id: string;
 	try { id = getUsablePersistentAgentStatusForNormalUse(String((req.params as any).id ?? "").trim()).id; }
 	catch { return refuse(404, "room_not_found"); }
@@ -926,7 +926,7 @@ app.get("/api/persistent-agents/:id/workspace-image", async (req, reply) => {
 	const query = (req.query ?? {}) as Record<string, unknown>;
 	if (typeof query.conversationId !== "string" || !query.conversationId.trim() || typeof query.path !== "string" || !query.path) return reply.code(400).send({ code: "invalid_request", error: "Invalid workspace request." });
 	const requestedPath = query.path.replace(/\\/g, "/");
-	if (requestedPath.startsWith("~") || requestedPath.includes("\0") || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(requestedPath) || (process.platform === "win32" && requestedPath.includes(":")) || requestedPath.split("/").some((part) => !part || part.startsWith("."))) return reply.code(400).send({ code: "invalid_path", error: "Invalid workspace path." });
+	if (!validWorkspaceBrowserPath(requestedPath)) return reply.code(400).send({ code: "invalid_path", error: "Invalid workspace path." });
 	const mime: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml" };
 	const type = mime[path.extname(requestedPath).toLowerCase()];
 	let id: string;
@@ -972,7 +972,7 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 	const query = (req.query ?? {}) as Record<string, unknown>;
 	if (typeof query.conversationId !== "string" || !query.conversationId.trim() || typeof query.path !== "string" || !query.path) return reply.code(400).send({ code: "invalid_request", error: "Invalid workspace request." });
 	const requestedPath = query.path.replace(/\\/g, "/");
-	if (requestedPath.startsWith("~") || requestedPath.includes("\0") || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(requestedPath) || (process.platform === "win32" && requestedPath.includes(":")) || requestedPath.split("/").some((part) => !part || part.startsWith("."))) return reply.code(400).send({ code: "invalid_path", error: "Invalid workspace path." });
+	if (!validWorkspaceBrowserPath(requestedPath)) return reply.code(400).send({ code: "invalid_path", error: "Invalid workspace path." });
 	let id: string;
 	try { id = getUsablePersistentAgentStatusForNormalUse(String((req.params as any).id ?? "").trim()).id; }
 	catch { return reply.code(404).send({ code: "room_not_found", error: "Room not found." }); }

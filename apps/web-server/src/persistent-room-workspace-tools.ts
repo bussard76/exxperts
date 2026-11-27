@@ -24,6 +24,11 @@ import type { FolderWait } from "./room-box/windows/folder-wait.js";
 import { roomSkillFolders } from "./skills-executable.js";
 import { agentSkillsDir } from "./skills-store.js";
 
+/** Browser paths use the same rules for requests and returned entries. */
+export function validWorkspaceBrowserPath(value: string): boolean {
+	return !value.startsWith("~") && !value.includes("\0") && !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(value) && !(process.platform === "win32" && value.includes(":")) && !value.split("/").some((part) => !part || part.startsWith("."));
+}
+
 const DEFAULT_READ_MAX_BYTES = 50 * 1024;
 const DEFAULT_READ_MAX_LINES = 2000;
 const DEFAULT_LS_LIMIT = 500;
@@ -1936,8 +1941,9 @@ export async function listWorkspaceForBrowser(
 				if (!finalFence.room || finalTarget.real !== target.real || finalTarget.root.path !== target.root.path || !same(rootSeen, identity(await fs.promises.lstat(finalFence.room.path))) || !same(second.identity, identity(finalTarget.stat))) throw new RoomFilesError("file_changed", "The folder changed while it was being listed.");
 				const entries = second.entries.flatMap((entry) => {
 					if (typeof entry.name !== "string" || ![entry.dev, entry.ino, entry.size, entry.mtimeMs, entry.ctimeMs].every(Number.isFinite)) throw new RoomFilesError("box_failed", FILES_STOPPED_LINE);
-					if (!entry.name || entry.name.startsWith(".") || /[\\/:\0]/.test(entry.name) || !["file", "dir"].includes(entry.kind)) return [];
+					if (!entry.name || /[\\/\0]/.test(entry.name) || !["file", "dir"].includes(entry.kind)) return [];
 					const relativePath = raw ? `${raw}/${entry.name}` : entry.name;
+					if (!validWorkspaceBrowserPath(relativePath)) return [];
 					try {
 						const checked = fencePath(finalFence, relativePath, "read", { decksInBox: !!actualFiles });
 						if (checked.root.path !== finalFence.room?.path || checked.real !== path.join(target.real, entry.name) || finalFence.refusal(checked.real, checked.root, "read", entry.deck)) return [];

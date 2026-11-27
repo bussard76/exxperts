@@ -126,11 +126,13 @@ try {
 	if (process.platform === "linux") {
 		const name = "lesson 1: draft.txt";
 		fs.writeFileSync(path.join(workspaceRoot, name), "invented colon name");
-		const colonPreview = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=${encodeURIComponent(name)}`);
-		assert(colonPreview.status === 200 && colonPreview.body.text === "invented colon name", "a non-URI POSIX filename containing a colon is readable through the guarded route");
 		const directory = "unit 1: draft";
 		fs.mkdirSync(path.join(workspaceRoot, directory));
 		fs.writeFileSync(path.join(workspaceRoot, directory, "invented.txt"), "invented");
+		const parent = await listing();
+		assert(parent.status === 200 && parent.body.entries.some((entry: { name: string; relativePath: string }) => entry.name === name && entry.relativePath === name) && parent.body.entries.some((entry: { name: string; relativePath: string }) => entry.name === directory && entry.relativePath === directory), "parent listing exposes the colon file and directory");
+		const colonPreview = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=${encodeURIComponent(name)}`);
+		assert(colonPreview.status === 200 && colonPreview.body.text === "invented colon name", "a non-URI POSIX filename containing a colon is readable through the guarded route");
 		const colonListing = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-files?conversationId=demo-thread&path=${encodeURIComponent(directory)}`);
 		assert(colonListing.status === 200 && colonListing.body.entries.some((entry: { name: string }) => entry.name === "invented.txt"), "a non-URI POSIX directory containing a colon is listed through the guarded route");
 		for (const route of ["workspace-files", "workspace-image", "workspace-preview"]) {
