@@ -229,12 +229,14 @@ import { threadItemsCarryAssistantText } from "./room-thread-routes.js";
 import { assertPersistentAgentTurnCanBegin, keepRunningTurn, latestTurnKey, recentTurnKeys, rememberRemovedIds, removedIdsOf } from "./persistent-agent-turns.js";
 import { acceptAnswerCut, removeEditedAwayItems, takePendingTransfersForMessage } from "./persistent-agent-threads.js";
 import { type AwayLimit, awayLimitLine, cutAnswerPart, endsOnAwayLimitStop, declinedNoticeIdPrefix, failureLineId, isAnswerPartId, isEmptyCut, keyOfId, landTurnItems, ofTurn, type MessageAuthor, partialLineId, readMessageAuthor, readShownPrompt, readTurnKey, type ShownPrompt, type ThreadItem, withRunningMessages } from "./thread-items-by-id.js";
-import { requestGetsLocalPaths } from "./room-settings-routes.js";
+import { installWorkspaceFolderWait, requestGetsLocalPaths } from "./room-settings-routes.js";
 import { applyRoomEffortToSession, contextHealthForSession, getWebChatModelRegistry, initialContextHealthForSession, modelContextWindow, modelStatusPayload, recordConversationEffortChoice, roomEffortStatusPayload, roomModelRefusal, webChatModelLabel } from "./ai-models.js";
 import { CONSULT_TRIGGER_PROMPT, consultModelWindow, resolveConsultModel, resolvePersistentAgentBindModel, roomMemoryModelSelection } from "./ai-profile-models.js";
 import { resolveLibrarySkillManifest, skillLibraryFingerprint } from "./skills-library.js";
 import { roomSkillFolders } from "./skills-executable.js";
 import { logProviderCallFailed, recordUsage, recordWorkerUsage, safeConversationId } from "./usage-recording.js";
+
+installWorkspaceFolderWait(fileToolsWait);
 
 // Rooms that were written before the current constitution template keep the
 // words they were scaffolded with until something re-renders them, and the only

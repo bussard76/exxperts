@@ -3,7 +3,7 @@ import { listWorkspaceForBrowser, readWorkspaceForBrowser, validWorkspaceBrowser
 import { runWorkspacePdfSnapshot, runWorkspaceSpreadsheetSnapshot, runWorkspaceWordSnapshot } from "./persistent-room-shelf-reading.js";
 import { workspaceBoxFor } from "./room-live-sessions.js";
 import { roomBoxComputer } from "./room-box/box-available.js";
-import { fileToolsWait } from "./room-box/windows/folder-wait.js";
+import type { FolderWait } from "./room-box/windows/folder-wait.js";
 import { MAINTENANCE_DIAGNOSTICS_KEEP, MAINTENANCE_DIAGNOSTICS_DEFAULT_LIMIT, listMaintenanceDiagnostics, exportMaintenanceDiagnostics } from "./maintenance-diagnostics.js";
 import { createPersistentAgentInstance, getPersistentAgentThread, saveWithOpenConversationCheck, getPersistentRoomInstructionsView, savePersistentRoomGlobalInstructionsEnabled, savePersistentRoomInstructions } from "./persistent-agents.js";
 import { normalizePersistentRoomWorkspaceToolSelectionInput } from "./persistent-room-tool-policy.js";
@@ -49,6 +49,19 @@ import { pathToFileURL } from "node:url";
 import { connectorStartRefusal, roomWritePlaces } from "./connector-start-check.js";
 
 type WorkspaceAssociation = { executable: string; workingDirectory: string; args: string[]; identity: string; current: () => boolean };
+
+// Installed once by the server's socket composition, before accepting requests.
+let workspaceFolderWaitFactory: (() => FolderWait | undefined) | undefined;
+export function installWorkspaceFolderWait(factory: () => FolderWait | undefined): void {
+	if (workspaceFolderWaitFactory) throw new Error("Workspace folder wait already installed.");
+	workspaceFolderWaitFactory = factory;
+}
+
+function workspaceFolderWait(): FolderWait | undefined {
+	const wait = workspaceFolderWaitFactory?.();
+	if (roomBoxComputer() === "windows" && !wait) throw Object.assign(new Error("Workspace unavailable."), { code: "workspace_unavailable" });
+	return wait;
+}
 
 async function dispatchWorkspaceAssociation(association: WorkspaceAssociation, signal: AbortSignal): Promise<"accepted" | "open_failed" | "open_timeout" | "opener_unavailable"> {
 	if (signal.aborted) return "open_failed";
@@ -815,7 +828,7 @@ app.get("/api/persistent-agents/:id/workspace-files", async (req, reply) => {
 			const disconnected = () => controller.abort();
 			reply.raw.once("close", disconnected);
 			try {
-				const entries = await listWorkspaceForBrowser(policyNow, requestedPath, fileToolsWait(), binding, controller.signal);
+				const entries = await listWorkspaceForBrowser(policyNow, requestedPath, workspaceFolderWait(), binding, controller.signal);
 				const root = effectivePolicy.policy.roots[0];
 				return { agentId: id, conversationId, root: { displayLabel: root.displayLabel, basename: root.basename }, path: requestedPath, entries };
 			} finally { reply.raw.removeListener("close", disconnected); }
@@ -869,7 +882,7 @@ app.post("/api/persistent-agents/:id/workspace-open", async (req, reply) => {
 		const disconnected = () => controller.abort();
 		reply.raw.once("close", disconnected);
 		try {
-			return await readWorkspaceForBrowser(access.current, requestedPath, Number.MAX_SAFE_INTEGER, fileToolsWait(), access.binding, controller.signal, async (snapshot) => {
+			return await readWorkspaceForBrowser(access.current, requestedPath, Number.MAX_SAFE_INTEGER, workspaceFolderWait(), access.binding, controller.signal, async (snapshot) => {
 				await snapshot.recheck();
 				const first = await workspaceAssociation(snapshot.real);
 				if (!first) return refuse(403, "association_unverified");
@@ -892,6 +905,7 @@ app.post("/api/persistent-agents/:id/workspace-open", async (req, reply) => {
 		} finally { reply.raw.removeListener("close", disconnected); }
 	} catch (error) {
 		const code = (error as { code?: string })?.code;
+		if (code === "workspace_unavailable") return refuse(503, "opener_unavailable");
 		if (code === "box_failed") return refuse(503, "box_failed");
 		if (code === "file_changed") return refuse(409, "file_changed");
 		if (code === "file_not_found" || code === "path_not_found") return refuse(404, "file_not_found");
@@ -946,7 +960,7 @@ app.get("/api/persistent-agents/:id/workspace-image", async (req, reply) => {
 		const disconnected = () => controller.abort();
 		reply.raw.once("close", disconnected);
 		try {
-			return await readWorkspaceForBrowser(access.current, requestedPath, 20_971_520, fileToolsWait(), access.binding, controller.signal, async (snapshot) => {
+			return await readWorkspaceForBrowser(access.current, requestedPath, 20_971_520, workspaceFolderWait(), access.binding, controller.signal, async (snapshot) => {
 				await snapshot.recheck();
 				return reply.type(type).send(snapshot.bytes);
 			});
@@ -996,7 +1010,7 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 		const disconnected = () => controller.abort();
 		reply.raw.once("close", disconnected);
 		try {
-			return await readWorkspaceForBrowser(access.current, requestedPath, spreadsheet || pdf || word || presentation ? 26_214_400 : 16_777_216, fileToolsWait(), access.binding, controller.signal, async (snapshot) => {
+			return await readWorkspaceForBrowser(access.current, requestedPath, spreadsheet || pdf || word || presentation ? 26_214_400 : 16_777_216, workspaceFolderWait(), access.binding, controller.signal, async (snapshot) => {
 			await snapshot.recheck();
 			if (presentation) {
 				if (query.frame !== "1") return reply.type("application/octet-stream").send(snapshot.bytes);

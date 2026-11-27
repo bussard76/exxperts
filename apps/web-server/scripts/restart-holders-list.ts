@@ -92,6 +92,7 @@ export const RESTART_HOLDERS: RestartHolder[] = [
 	{ holder: "room-live-sessions.ts:roomQuietSpellMs", fate: "rebuilt at start", why: "Five minutes at every start; only a smoke shortens it, by a test switch." },
 	{ holder: "room-live-sessions.ts:reattachBufferProbe", fate: "rebuilt at start", why: "Filled only for smokes, by a test switch." },
 	{ holder: "room-routes.ts:openFolderWindows", fate: "ends by design", told: "The stop closes every folder window still open, and its request ends without a folder. A pick is saved only after its window answers, so nothing chosen is lost, and the person presses Choose folder again." },
+	{ holder: "room-settings-routes.ts:workspaceFolderWaitFactory", fate: "rebuilt at start", why: "The socket module installs the factory once as the server loads, before accepting requests." },
 	{ holder: "room-session-end.ts:endsUnderWay", fate: "ends by design", told: "Nothing to tell: it names the ends of sessions in this process, which a restart ends with everything they held, the provider's connection included." },
 	{ holder: "room-socket.ts:constitutionUpgradeOnOpenSaidFor", fate: "rebuilt at start", why: "A once-per-process log line, said again once." },
 	{ holder: "searxng-setup.ts:current", fate: "ends by design", told: "A web search setup in flight stops; its status reads idle, and the person starts it again." },

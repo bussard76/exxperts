@@ -23,11 +23,12 @@ fs.writeFileSync(path.join(appDir, "persistent-agent-ai-profile.json"), JSON.str
 
 const { app } = await import("../src/server-app.js");
 await import("../src/server-hooks.js");
-await import("../src/room-settings-routes.js");
+const { installWorkspaceFolderWait } = await import("../src/room-settings-routes.js");
 const { createPersistentAgentFromScaffoldInput, writePersistentAgentThread } = await import("../src/persistent-agents.js");
 const { createPersistentRoomDefaultCapabilityPolicy, writePersistentRoomDefaultCapabilityPolicy } = await import("../src/persistent-room-workspace-policy.js");
 const { setRoomBoxForTests } = await import("../src/room-box/box-available.js");
-const { folderWait } = await import("../src/room-box/windows/folder-wait.js");
+const { folderWait, fileToolsWait } = await import("../src/room-box/windows/folder-wait.js");
+installWorkspaceFolderWait(fileToolsWait);
 const { runWorkspaceSpreadsheetSnapshot } = await import("../src/persistent-room-shelf-reading.js");
 const originalFork = childProcess.fork;
 
