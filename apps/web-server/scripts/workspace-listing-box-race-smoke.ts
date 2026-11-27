@@ -24,7 +24,7 @@ await import("../src/room-settings-routes.js");
 const { createPersistentAgentFromScaffoldInput, writePersistentAgentThread } = await import("../src/persistent-agents.js");
 const { createPersistentRoomDefaultCapabilityPolicy, deletePersistentRoomDefaultCapabilityPolicy, writePersistentRoomDefaultCapabilityPolicy } = await import("../src/persistent-room-workspace-policy.js");
 const { setRoomBoxForTests } = await import("../src/room-box/box-available.js");
-const { persistentRoomLiveSessions, registerWorkspaceBox } = await import("../src/room-live-sessions.js");
+const { detachedCookingRooms, persistentRoomLiveSessions, registerWorkspaceBox } = await import("../src/room-live-sessions.js");
 
 try {
 	const created = createPersistentAgentFromScaffoldInput({ displayName: "Invented Room", userName: "Example", preferredUserAddress: "Example" });
@@ -57,9 +57,34 @@ try {
 		},
 	} as any;
 	const request = () => app.inject({ method: "GET", url: `/api/persistent-agents/${id}/workspace-files?conversationId=invented-thread`, headers: SMOKE_AUTH_HEADERS });
-	const removeOld = registerWorkspaceBox(id, "invented-thread", fake, owner);
+	let removeOld = registerWorkspaceBox(id, "invented-thread", fake, owner);
 	const listed = await request();
 	if (listed.statusCode !== 200 || listed.json().entries[0]?.name !== "invented.txt" || calls !== 2) throw new Error("the owning box must produce both listing snapshots");
+	owner.connectionId = "replacement-connection";
+	const changedConnection = await request();
+	if (changedConnection.statusCode !== 503 || changedConnection.json().code !== "box_failed" || calls !== 2) throw new Error("a changed connection identity must invalidate its binding without dispatch");
+	owner.connectionId = "owner";
+	removeOld();
+	removeOld = registerWorkspaceBox(id, "invented-thread", fake, owner);
+	owner.conversationId = "other-thread";
+	const changedIdentity = await request();
+	if (changedIdentity.statusCode !== 503 || changedIdentity.json().code !== "box_failed" || calls !== 2) throw new Error("a changed owner conversation must invalidate its binding without dispatch");
+	owner.conversationId = "invented-thread";
+	const restoredIdentity = await request();
+	if (restoredIdentity.statusCode !== 503 || restoredIdentity.json().code !== "box_failed" || calls !== 2) throw new Error("restoring an identity must not revive an invalidated binding");
+	removeOld();
+	removeOld = registerWorkspaceBox(id, "invented-thread", fake, owner);
+	detachedCookingRooms.add(id);
+	const detached = await request();
+	if (detached.statusCode !== 503 || detached.json().code !== "box_failed" || calls !== 2) throw new Error("a detached owner must not dispatch");
+	detachedCookingRooms.delete(id);
+	const replacementOwner = { connectionId: "replacement", conversationId: "invented-thread" } as any;
+	persistentRoomLiveSessions.set(id, replacementOwner);
+	const reconnected = await request();
+	if (reconnected.statusCode !== 503 || reconnected.json().code !== "box_failed" || calls !== 2) throw new Error("a reconnected owner must not inherit the old binding");
+	persistentRoomLiveSessions.set(id, owner);
+	removeOld();
+	removeOld = registerWorkspaceBox(id, "invented-thread", fake, owner);
 	const removeDuplicate = registerWorkspaceBox(id, "invented-thread", fake, owner);
 	const ambiguous = await request();
 	if (ambiguous.statusCode !== 503 || ambiguous.json().code !== "box_failed" || calls !== 2) throw new Error("ambiguous owners must refuse before dispatch");
@@ -100,6 +125,14 @@ try {
 	const revoked = await revoking;
 	if (revoked.statusCode !== 403 || revoked.json().code !== "grant_changed" || revoked.body.includes("invented.txt")) throw new Error(`revoked policy returned data: ${revoked.statusCode} ${revoked.body}`);
 	removeAgain();
+	writePersistentRoomDefaultCapabilityPolicy(policy);
+	pause = false;
+	persistentRoomLiveSessions.set(id, replacementOwner);
+	const replacementCalls = calls;
+	const removeReconnected = registerWorkspaceBox(id, "invented-thread", fake, replacementOwner);
+	const freshOwner = await request();
+	if (freshOwner.statusCode !== 200 || freshOwner.json().entries[0]?.name !== "invented.txt" || calls !== replacementCalls + 2) throw new Error("a reconnected owner must use its own freshly registered box");
+	removeReconnected();
 	console.log("listing discarded after owner invalidation, folder replacement, and policy revocation");
 } finally {
 	setRoomBoxForTests(null);

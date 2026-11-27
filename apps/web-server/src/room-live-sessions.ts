@@ -38,11 +38,11 @@ type PersistentRoomLiveSession = {
 
 const persistentRoomLiveSessions = new Map<string, PersistentRoomLiveSession>();
 
-type WorkspaceBoxBinding = { room: string; conversation: string; box: RoomBox; owner: PersistentRoomLiveSession };
+type WorkspaceBoxBinding = { room: string; conversation: string; box: RoomBox; owner: PersistentRoomLiveSession; connection: string };
 const workspaceBoxes = new Set<WorkspaceBoxBinding>();
 
 function registerWorkspaceBox(room: string, conversation: string, box: RoomBox, owner: PersistentRoomLiveSession): () => void {
-	const binding = { room, conversation, box, owner };
+	const binding = { room, conversation, box, owner, connection: owner.connectionId };
 	workspaceBoxes.add(binding);
 	return () => { workspaceBoxes.delete(binding); };
 }
@@ -51,7 +51,13 @@ function workspaceBoxFor(room: string, conversation: string): { box: RoomBox; cu
 	const matching = [...workspaceBoxes].filter((item) => item.room === room && item.conversation === conversation);
 	if (matching.length !== 1) return null;
 	const binding = matching[0];
-	const current = () => workspaceBoxes.has(binding) && !detachedCookingRooms.has(room) && persistentRoomLiveSessions.get(room) === binding.owner && [...workspaceBoxes].filter((item) => item.room === room && item.conversation === conversation).length === 1;
+	const current = () => {
+		if (binding.owner.connectionId !== binding.connection || binding.owner.conversationId !== conversation || persistentRoomLiveSessions.get(room) !== binding.owner) {
+			workspaceBoxes.delete(binding);
+			return false;
+		}
+		return workspaceBoxes.has(binding) && !detachedCookingRooms.has(room) && [...workspaceBoxes].filter((item) => item.room === room && item.conversation === conversation).length === 1;
+	};
 	return current() ? { box: binding.box, current } : null;
 }
 
