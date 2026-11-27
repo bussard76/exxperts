@@ -67,3 +67,7 @@ Restored the source PDF and Word preview components and added current room/conve
 ## Isolated text and HTML consumers
 
 Restored the text and HTML preview consumers and added response identity, schema and UTF-8 byte-bound checks; both hide old content during a path change. The attributed Chromium component gate passed JSON formatting, HTML sandbox attribute, wrong-room refusal, stale-content hiding and over-limit multibyte text/HTML refusal using invented intercepted responses. Its expected red runs included missing components, stale text and an over-limit byte-count case; UI and scripts typechecks passed. The harness does not exercise the real server's HTML CSP or the protected route, and app wiring, browser acceptance and native platform checks remain open.
+
+## Isolated image consumer
+
+Restored the source image preview with stale-image hiding and checks for an allowed image MIME type and the 20 MiB limit before creating an object URL. The attributed Chromium component gate passed image decoding, zoom control, path-change hiding, wrong-MIME refusal and oversize refusal with invented intercepted responses; expected red runs covered the missing component and stale image. Both UI and scripts typechecks passed. The component is not wired into the app, and the actual image route, its security headers and real browser-to-route behavior remain untested.
