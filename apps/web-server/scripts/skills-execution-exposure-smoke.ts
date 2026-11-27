@@ -63,6 +63,7 @@ assert(computeSkillFilesDigest(skillDir)?.files.some((f) => f.path === "scripts/
 // in its messages) is captured and answered with plain text.
 // ---------------------------------------------------------------------------
 const capturedToolResults: string[] = [];
+let suggestionCalls = 0;
 
 function sseChunk(payload: unknown): string {
 	return `data: ${JSON.stringify(payload)}\n\n`;
@@ -79,10 +80,15 @@ const gateway = http.createServer((req, res) => {
 		let parsed: any = {};
 		try { parsed = JSON.parse(body); } catch {}
 		const messages: any[] = Array.isArray(parsed?.messages) ? parsed.messages : [];
+		const suggestion = messages.some((message) => message?.role === "system" && String(message.content).includes("Generate next prompt suggestions"));
+		if (suggestion) suggestionCalls += 1;
 		const toolMessages = messages.filter((m) => m?.role === "tool");
 		res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
 		const base = { id: `cmpl_${capturedToolResults.length + 1}`, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: String(parsed?.model ?? "room-model") };
-		if (toolMessages.length === 0) {
+		if (suggestion) {
+			res.write(sseChunk({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: '["Ask another question"]' }, finish_reason: null }] }));
+			res.write(sseChunk({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 100, completion_tokens: 5, total_tokens: 105 } }));
+		} else if (toolMessages.length === 0) {
 			// First leg of the turn: the model "decides" to read the skill.
 			res.write(sseChunk({ ...base, choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{ index: 0, id: "call_read_skill", type: "function", function: { name: "read_skill", arguments: "" } }] }, finish_reason: null }] }));
 			res.write(sseChunk({ ...base, choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: JSON.stringify({ name: skillName }) } }] }, finish_reason: null }] }));
@@ -143,6 +149,8 @@ async function runTurn(agentId: string, conversationId: string): Promise<void> {
 		// one the next conversation needs.
 		if (capturedToolResults.length > before && frames.some((frame) => frame?.type === "event" && frame?.event?.type === "agent_end")) {
 			await waitForTurnSettled(requestJson, agentId, `${conversationId}: the turn has settled before the next seed`);
+			while (!frames.some((frame) => frame?.type === "suggestions") && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 50));
+			assert(suggestionCalls > 0 && frames.some((frame) => frame?.type === "suggestions" && frame.items?.includes("Ask another question")), "the suggestion call returns a suggestion alongside the skill turn");
 			try { socket.close(); } catch {}
 			return;
 		}
