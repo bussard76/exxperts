@@ -30,6 +30,7 @@
 //   never the provider's words.
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -68,7 +69,10 @@ process.env.EXXETA_PERSISTENT_AGENTS_ROOT = agentsRoot;
 
 const KEY_PROVIDER = "anthropic-api-key";
 const SYNTHETIC_KEY = "synthetic-anthropic-key";
-const SIGN_IN = { type: "oauth", access: "sk-ant-oat01-synthetic-sign-in", refresh: "synthetic-refresh", expires: Date.now() + 365 * 24 * 3600 * 1000 };
+const SIGN_IN = { type: "oauth", access: `sk-ant-oat${randomUUID()}`, refresh: "synthetic-refresh", expires: Date.now() + 365 * 24 * 3600 * 1000 };
+const PASTED_SIGN_IN = `sk-ant-oat${randomUUID()}`;
+const ENV_KEY = randomUUID();
+const ENV_TOKEN = randomUUID();
 const ON_SIGN_IN = { provider: "anthropic", model: "claude-sonnet-5-5" };
 const ON_KEY = { provider: KEY_PROVIDER, model: "claude-haiku-5-5" };
 
@@ -76,6 +80,7 @@ const ON_KEY = { provider: KEY_PROVIDER, model: "claude-haiku-5-5" };
 
 type Request = { model: string; apiKey: string | undefined; authorization: string | undefined; raw: string };
 const requests: Request[] = [];
+const suggestionRequests: Request[] = [];
 // How the endpoint answers the key check at save (GET /v1/models), and the keys it was asked about.
 let keyCheck: "ok" | "refused" | "no-workspace" | "down" = "ok";
 const keyChecks: Array<string | undefined> = [];
@@ -100,12 +105,15 @@ const endpoint = http.createServer((req, res) => {
 			return;
 		}
 		const body = JSON.parse(raw || "{}");
-		requests.push({ model: String(body.model), apiKey: req.headers["x-api-key"] as string | undefined, authorization: req.headers.authorization, raw });
-		if (turnAnswer === "region") { res.writeHead(403, { "content-type": "application/json" }); res.end(JSON.stringify({ type: "error", error: { type: "permission_error", message: "Country, region, or territory not supported" }, request_id: "req_smoke_region" })); return; }
-		if (turnAnswer === "odd") { res.writeHead(400, { "content-type": "application/json" }); res.end(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "messages.0.content: text content blocks must be non-empty" }, request_id: "req_smoke_odd" })); return; }
-		if (turnAnswer === "no-workspace") { res.writeHead(400, { "content-type": "application/json" }); res.end(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "This API key is not scoped to a workspace, so this request must include the anthropic-workspace-id header with the ID of the workspace to use. Add the header, or use an API key that is scoped to a workspace." } })); return; }
+		const request = { model: String(body.model), apiKey: req.headers["x-api-key"] as string | undefined, authorization: req.headers.authorization, raw };
+		const suggestion = JSON.stringify(body.system ?? "").includes("Generate next prompt suggestions");
+		if (suggestion) suggestionRequests.push(request);
+		else requests.push(request);
+		if (!suggestion && turnAnswer === "region") { res.writeHead(403, { "content-type": "application/json" }); res.end(JSON.stringify({ type: "error", error: { type: "permission_error", message: "Country, region, or territory not supported" }, request_id: "req_smoke_region" })); return; }
+		if (!suggestion && turnAnswer === "odd") { res.writeHead(400, { "content-type": "application/json" }); res.end(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "messages.0.content: text content blocks must be non-empty" }, request_id: "req_smoke_odd" })); return; }
+		if (!suggestion && turnAnswer === "no-workspace") { res.writeHead(400, { "content-type": "application/json" }); res.end(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "This API key is not scoped to a workspace, so this request must include the anthropic-workspace-id header with the ID of the workspace to use. Add the header, or use an API key that is scoped to a workspace." } })); return; }
 		res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
-		const text = raw.includes("Checkpoint Compression Constitution") ? "TITLE:\nKey\n\nSESSION_ARC:\nA key.\n\nBODY:\n- A key.\n\nPARKED:\nNone\n" : `Answer from ${body.model}.`;
+		const text = suggestion ? '["Ask another question"]' : raw.includes("Checkpoint Compression Constitution") ? "TITLE:\nKey\n\nSESSION_ARC:\nA key.\n\nBODY:\n- A key.\n\nPARKED:\nNone\n" : `Answer from ${body.model}.`;
 		sse(res, "message_start", { type: "message_start", message: { id: `msg_${requests.length}`, type: "message", role: "assistant", model: body.model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 100, output_tokens: 1 } } });
 		sse(res, "content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
 		sse(res, "content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } });
@@ -180,7 +188,7 @@ try {
 		shell: process.platform === "win32",
 		...SMOKE_SERVER_SPAWN_TREE_OPTIONS,
 		cwd: webServerDir,
-		env: smokeHomeEnv(tempHome, { PORT: String(port), ...SMOKE_SERVER_AUTH_ENV, EXXETA_HOME: repoRoot, EXXPERTS_CODING_AGENT_DIR: agentDir, EXXETA_PERSISTENT_AGENTS_ROOT: agentsRoot, ANTHROPIC_API_KEY: "synthetic-environment-key", ANTHROPIC_OAUTH_TOKEN: "synthetic-environment-token" }) as NodeJS.ProcessEnv,
+		env: smokeHomeEnv(tempHome, { PORT: String(port), ...SMOKE_SERVER_AUTH_ENV, EXXETA_HOME: repoRoot, EXXPERTS_CODING_AGENT_DIR: agentDir, EXXETA_PERSISTENT_AGENTS_ROOT: agentsRoot, ANTHROPIC_API_KEY: ENV_KEY, ANTHROPIC_OAUTH_TOKEN: ENV_TOKEN }) as NodeJS.ProcessEnv,
 	});
 	server.stdout.on("data", (chunk) => serverOutput.push(String(chunk)));
 	server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
@@ -210,7 +218,7 @@ try {
 
 	// The environment never sets the key provider up, and a sign-in token is no key.
 	assert(keyEntry.configured === false, "an Anthropic key or token in the environment does not set the key provider up");
-	const token = await api("/api/auth/api-key", { method: "POST", body: JSON.stringify({ provider: KEY_PROVIDER, key: "sk-ant-oat01-synthetic-pasted-token" }) });
+	const token = await api("/api/auth/api-key", { method: "POST", body: JSON.stringify({ provider: KEY_PROVIDER, key: PASTED_SIGN_IN }) });
 	assert(token.status === 400 && token.body?.error === "This looks like a Claude sign-in token, not an API key. Create an API key at console.anthropic.com.", `a pasted sign-in token is refused with its sentence, got ${token.status} ${JSON.stringify(token.body)}`);
 	assert(!readAuth()[KEY_PROVIDER] && JSON.stringify(readAuth().anthropic) === JSON.stringify(SIGN_IN), "the refused token is stored nowhere");
 	pass("the environment never sets the key provider up, and a pasted sign-in token is refused");
@@ -269,6 +277,8 @@ try {
 	assert(sameLock(await roomChoice(signInRoom), ON_SIGN_IN), "the other room keeps its sign-in model");
 
 	const keyTurn = await turnIn(keyRoom, "c_key_0001", "A question on the key.");
+	await waitUntil(() => suggestionRequests.length > 0, "the suggestion request arrives");
+	assert(!requests.includes(suggestionRequests[0]), "suggestion requests are separate from chat and Remember requests");
 	assert(keyTurn.model === ON_KEY.model && keyTurn.apiKey === SYNTHETIC_KEY && !keyTurn.authorization, `the key room's turn goes out with the key, got model ${keyTurn.model}, key ${keyTurn.apiKey ? "set" : "unset"}, bearer ${keyTurn.authorization ? "set" : "unset"}`);
 	const signInTurn = await turnIn(signInRoom, "c_sign_in_0001", "A question on the sign-in.");
 	assert(signInTurn.model === ON_SIGN_IN.model && !signInTurn.apiKey && signInTurn.authorization === `Bearer ${SIGN_IN.access}`, `the sign-in room's turn goes out with the sign-in, got model ${signInTurn.model}, key ${signInTurn.apiKey ? "set" : "unset"}`);
