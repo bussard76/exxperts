@@ -1679,6 +1679,7 @@ app.get("/ws", { websocket: true, exposeHeadRoute: false }, async (socket, req) 
 			cancelSuggestions();
 			const controller = new AbortController();
 			const key = answerNoteKey();
+			const version = suggestionVersions.get(key);
 			const sink = detachedFromClient ? cookingTurnSink : sendSerialised;
 			const transcript = getPersistentAgentThread(persistentAgentIdForSession, persistentConversationId)?.items ?? [];
 			const knownPrompts = transcript.filter((item: any) => item?.kind === "user" && typeof item.text === "string").map((item: any) => item.text as string);
@@ -1741,7 +1742,10 @@ app.get("/ws", { websocket: true, exposeHeadRoute: false }, async (socket, req) 
 				const metadata = { roomId: persistentAgentIdForSession, durationMs: Date.now() - startedAt, resultCode, inputTokens: tokens?.input, outputTokens: tokens?.output };
 				app.log.info(metadata, "suggestion generation finished");
 				streamTrace.note("suggestion_generation", metadata);
-				if (suggestionRuns.get(key)?.answerId === answerId) suggestionRuns.delete(key);
+				if (suggestionRuns.get(key)?.answerId === answerId) {
+					suggestionRuns.delete(key);
+					if (suggestionVersions.get(key) === version) suggestionVersions.delete(key);
+				}
 			});
 		} catch {}
 	};
@@ -3309,7 +3313,10 @@ ${lines.join("\n")}`;
 						if (settledTurnLandingSnapshot && socket.readyState !== socket.OPEN) landSettledTurnIfUnpersisted();
 					}
 					revealCutAtSettle = undefined;
-					if (activePersistentWebTurn?.turnId === persistentTurnId) activePersistentWebTurn = null;
+					if (activePersistentWebTurn?.turnId === persistentTurnId) {
+						if (!suggestionRuns.has(answerNoteKey()) && suggestionVersions.get(answerNoteKey()) === activePersistentWebTurn.suggestionVersion) suggestionVersions.delete(answerNoteKey());
+						activePersistentWebTurn = null;
+					}
 					// Detached settle: this connection's ownership ends here — the
 					// away limits, the cooking flag, this closure's own lock record
 					// (owner-checked, so inert after an adoption takeover) and the

@@ -1,7 +1,7 @@
 # Issue #24: Suggestions decision and specification report
 
 Date: 2026-11-26
-Scope: accepted decisions reconciled; implementation awaits independent architecture spec review.
+Historical scope: accepted decisions reconciled before the fourth architecture review; the Slice 1 developer outcome is recorded below.
 
 ## Architecture impact
 
@@ -43,7 +43,7 @@ Architecture impact: level 3, server-owned generation and existing room socket; 
 
 Slice 2 UI and Slice 3 producer-to-consumer integration are excluded from this task. The pre-existing package-lock modification remains untouched.
 
-## Developer progress and blocker (2026-11-27)
+## Historical developer checkpoint: context blocker (resolved 2026-11-27)
 
 - Passing spec review: `T24-SUGGESTIONS-REVIEW-4-architecture-spec.md` at `62aed38`; Slice 1 remains incomplete.
 - Added `apps/web-server/scripts/suggestions-producer-smoke.ts`: a fake-gateway, real-socket test for ordered invalidation and completion. It is intentionally red: the server sends no `answer_lifecycle` frame yet. No existing assertions were changed.
@@ -55,7 +55,7 @@ Slice 2 UI and Slice 3 producer-to-consumer integration are excluded from this t
 
 Sascha decided on 2026-11-27 that only provably completed exchange pairs may be sent, unknown historical pairs must be omitted fail-closed even when fewer than three remain, and no storage is added. The previous historical-context blocker is resolved.
 
-## Developer checkpoint: trace privacy conflict
+## Historical developer checkpoint: trace privacy conflict (resolved 2026-11-27)
 
 The producer, queued-answer identity and fake-model tests are implemented but the task is not complete. The fourth review requires traces and errors never to record prompt or suggestion content. The existing opt-in `stream-trace.ts` records the first and last 12 characters of ordinary prompt and assistant text; `scripts/replay-stream-trace.ts` requires those fields to reconstruct whitespace at delta boundaries. The new `suggestions-producer-smoke.ts` check for absence of the prompt and answer in traces fails on that existing behavior. Removing those fields would change an existing diagnostic output contract and replay fidelity; the dispatch authorizes no extra contract change and requires escalation if one is needed. A Controller/Architect decision is needed on the privacy requirement and compatible trace/replay behavior before changing that contract. Suggestion frames themselves are traced by type only, and the new worker's success/error logging contains metadata only.
 

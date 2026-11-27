@@ -26,7 +26,7 @@ try {
 	assert(ordinaryPrompt?.text?.head === "What comes n" && ordinaryPrompt.text.tail === " comes next?", "ordinary chat trace boundaries remain available to replay");
 	const successfulNotes = traceEntries.filter((entry) => entry.note === "suggestion_generation");
 	assert(successfulNotes.some((entry) => entry.resultCode === "completed" && typeof entry.durationMs === "number" && entry.inputTokens === 120 && entry.outputTokens === 30), "the suggestion trace records structured success metadata");
-	assert(!JSON.stringify(successfulNotes).includes("What comes next?") && !JSON.stringify(successfulNotes).includes("Quick answer.") && !JSON.stringify(successfulNotes).includes("Next question?"), "suggestion trace entries omit input context and result text");
+	assert(!JSON.stringify(successfulNotes).includes("What comes") && !JSON.stringify(successfulNotes).includes("Quick answer") && !JSON.stringify(successfulNotes).includes("Next question"), "suggestion trace entries omit input context and result text");
 	const request = gatewayRequests.find((entry) => entry.suggestion)?.request;
 	assert(gatewayRequests.find((entry) => entry.suggestion)?.model === "suggest-model", "suggestions use the answering provider's configured Memorize model");
 	assert(request?.maxTokens === 200 && (!request.tools || (Array.isArray(request.tools) && request.tools.length === 0)), "the suggestion call is tool-less and capped at 200 output tokens");
@@ -47,7 +47,7 @@ try {
 	const errorNotes = fs.readFileSync(errorTracePath, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)).filter((entry) => entry.note === "suggestion_generation");
 	const suggestionLogs = serverOutput.join("").split("\n").filter((line) => line.includes("suggestion generation finished"));
 	assert(errorNotes.some((entry) => entry.resultCode === "error" && typeof entry.durationMs === "number"), "suggestion failure is traced with a result code");
-	assert(!JSON.stringify(errorNotes).includes("PRIVATE_SUGGESTION_INPUT_CONTEXT") && !JSON.stringify(errorNotes).includes("PRIVATE_SUGGESTION_PROVIDER_ERROR") && !JSON.stringify(suggestionLogs).includes("PRIVATE_SUGGESTION_INPUT_CONTEXT") && !JSON.stringify(suggestionLogs).includes("Next question?") && !serverOutput.join("").includes("PRIVATE_SUGGESTION_PROVIDER_ERROR"), "suggestion error diagnostics omit input, result and free-text provider errors");
+	assert(!JSON.stringify(errorNotes).includes("PRIVATE_") && !JSON.stringify(suggestionLogs).includes("PRIVATE_") && !JSON.stringify(suggestionLogs).includes("Next question") && !serverOutput.join("").includes("PRIVATE_SUGGESTION_PROVIDER_ERROR"), "suggestion error diagnostics omit input, result and free-text provider errors");
 	assert(!errorSocket.frames.slice(errorComplete + 1).some((frame) => frame.type === "suggestions"), "a failed suggestion call stays silent");
 	setSuggestionResponse('["  Next question?  ", "Another\\nquestion", "Next question?"]');
 	await putThread(room, thread, [
