@@ -48,7 +48,7 @@ import { execFile, spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { connectorStartRefusal, roomWritePlaces } from "./connector-start-check.js";
 
-type WorkspaceAssociation = { executable: string; workingDirectory: string; args: string[]; identity: string };
+type WorkspaceAssociation = { executable: string; workingDirectory: string; args: string[]; identity: string; current: () => boolean };
 
 async function dispatchWorkspaceAssociation(association: WorkspaceAssociation, signal: AbortSignal): Promise<"accepted" | "open_failed" | "open_timeout" | "opener_unavailable"> {
 	if (signal.aborted) return "open_failed";
@@ -146,7 +146,14 @@ async function workspaceAssociation(file: string): Promise<WorkspaceAssociation 
 		const args = parts.slice(1).map((part) => part === "%f" || part === "%u" ? argument : part);
 		if (args.filter((part) => part === argument || part === file).length !== 1 || connectorStartRefusal({ command: executable, args, cwd: workingDirectory }, places)) return null;
 		const stamp = (stat: fs.BigIntStats) => [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].map(String);
-		return { executable, workingDirectory, args, identity: JSON.stringify({ mime, id, desktop, source, desktopStat: stamp(desktopStat), executableStat: stamp(executableStat), cwdStat: stamp(cwdStat) }) };
+		const same = (a: fs.BigIntStats, b: fs.BigIntStats) => JSON.stringify(stamp(a)) === JSON.stringify(stamp(b));
+		const current = () => {
+			try {
+				return fs.realpathSync(candidates[0]) === desktop && fs.realpathSync(parts[0]) === executable && fs.realpathSync(fields.Path) === workingDirectory
+					&& same(fs.statSync(desktop, { bigint: true }), desktopStat) && same(fs.statSync(executable, { bigint: true }), executableStat) && same(fs.statSync(workingDirectory, { bigint: true }), cwdStat);
+			} catch { return false; }
+		};
+		return { executable, workingDirectory, args, current, identity: JSON.stringify({ mime, id, desktop, source, desktopStat: stamp(desktopStat), executableStat: stamp(executableStat), cwdStat: stamp(cwdStat) }) };
 	} catch { return null; }
 }
 
@@ -832,6 +839,7 @@ app.post("/api/persistent-agents/:id/workspace-open", async (req, reply) => {
 				const finalPlaces = await roomWritePlaces();
 				if (connectorStartRefusal({ command: final.executable, args: final.args, cwd: final.workingDirectory }, finalPlaces)) return refuse(403, "association_unverified");
 				await snapshot.recheck();
+				if (!final.current()) return refuse(403, "association_unverified");
 				const result = await dispatchWorkspaceAssociation(final, controller.signal);
 				return result === "accepted" ? reply.code(202).send({ accepted: true }) : refuse(result === "open_timeout" ? 504 : result === "opener_unavailable" ? 503 : 500, result);
 			}, true);

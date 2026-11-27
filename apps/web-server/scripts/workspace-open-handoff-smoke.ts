@@ -121,6 +121,21 @@ try {
 		const changedExecutable = await request();
 		if (!executableChanged || changedExecutable.statusCode !== 403 || changedExecutable.json().code !== "association_unverified" || Number(dispatches) !== beforeExecutableChange) throw new Error("an executable changed while its identity is read must not dispatch");
 	} finally { fs.readSync = originalRead; }
+	queries = 0;
+	const beforeLateChange = dispatches, originalLstat = fs.promises.lstat;
+	let executableChangedLate = false;
+	fs.promises.lstat = (async (...args: any[]) => {
+		const result = await Reflect.apply(originalLstat, fs.promises, args);
+		if (!executableChangedLate && queries === 3 && args[0] === folder) {
+			executableChangedLate = true;
+			fs.writeFileSync(binary, Buffer.from([0x7f, 0x45, 0x4c, 0x46, 9, 8, 7, 6]));
+		}
+		return result;
+	}) as typeof fs.promises.lstat;
+	try {
+		const lateChange = await request();
+		if (!executableChangedLate || lateChange.statusCode !== 403 || lateChange.json().code !== "association_unverified" || Number(dispatches) !== beforeLateChange) throw new Error("an executable changed after association lookup must not dispatch");
+	} finally { fs.promises.lstat = originalLstat; }
 	console.log("workspace checked open handoff smoke passed");
 } finally {
 	childProcess.execFile = originalExecFile; childProcess.spawn = originalSpawn; syncBuiltinESMExports();
