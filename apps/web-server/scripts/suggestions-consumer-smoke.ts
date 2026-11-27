@@ -87,7 +87,7 @@ try {
   await page.waitForFunction(() => document.querySelector(".composer textarea")?.getAttribute("placeholder") === "Alpha");
   const describedBy = await box.getAttribute("aria-describedby");
   assert.ok(describedBy, "suggestion has an accessible hint");
-  assert.match(await page.locator(`[id="${describedBy}"]`).innerText(), /Tab: weiter, →: übernehmen/);
+  assert.match(await page.locator(`[id="${describedBy}"]`).innerText(), /Alpha.*Tab: weiter, →: übernehmen/);
   await box.fill("@other");
   await page.getByRole("listbox").waitFor();
   await box.press("Tab");
@@ -135,6 +135,11 @@ try {
   await frame({ type: "answer_lifecycle", phase: "complete", answerId: "answer-three" });
   await frame({ type: "suggestions", answerId: "answer-three", items: ["Fresh idea"] });
   await page.waitForFunction(() => document.querySelector(".composer textarea")?.getAttribute("placeholder") === "Fresh idea");
+  await frame({ type: "event", event: { type: "agent_start" } });
+  await page.waitForFunction(() => document.querySelector(".composer textarea")?.getAttribute("placeholder") !== "Fresh idea");
+  assert.match(await placeholder() ?? "", /Queue/, "the active answer hint takes priority");
+  await frame({ type: "event", event: { type: "agent_end", messages: [] } });
+  await page.waitForFunction(() => document.querySelector(".composer textarea")?.getAttribute("placeholder") === "Fresh idea");
   await page.evaluate(() => (window as any).testRoomSocket.close());
   await page.waitForFunction(() => document.querySelector(".composer textarea")?.getAttribute("placeholder") !== "Fresh idea");
   await page.waitForFunction(() => (window as any).testRoomSocket.readyState === WebSocket.OPEN);
@@ -167,11 +172,37 @@ try {
   await page.waitForFunction(() => document.querySelector(".composer textarea")?.getAttribute("placeholder") === "Old thread suggestion");
   const oldThread = await page.evaluate(() => (window as any).testThread);
   await page.getByRole("button", { name: "Forget", exact: true }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Forget", exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Forget", exact: true }).click();
   await page.waitForFunction((previous) => (window as any).testThread !== previous, oldThread);
   assert.notEqual(await placeholder(), "Old thread suggestion", "changing threads clears suggestions");
   await frame({ type: "suggestions", answerId: "other-answer", items: ["Late old thread"] });
   assert.notEqual(await placeholder(), "Late old thread", "old-thread completion cannot authorize a new thread");
+  await frame({ type: "answer_lifecycle", phase: "complete", answerId: "consult-answer" });
+  await frame({ type: "suggestions", answerId: "consult-answer", items: ["Before consult"] });
+  await page.waitForFunction(() => document.querySelector(".composer textarea")?.getAttribute("placeholder") === "Before consult");
+  await box.fill("@example-room What next?");
+  await box.press("Enter");
+  await page.waitForFunction(() => (document.querySelector(".composer textarea") as HTMLTextAreaElement)?.value === "");
+  assert.notEqual(await placeholder(), "Before consult", "an accepted consult clears the suggestion");
+  const fixturePort = await freePort();
+  const fixtureBase = `http://127.0.0.1:${fixturePort}`;
+  const preview = spawn("npx", ["vite", "preview", "--host", "127.0.0.1", "--port", String(fixturePort)], { cwd: path.join(root, "apps/web-ui"), ...SMOKE_SERVER_SPAWN_TREE_OPTIONS });
+  try {
+   let fixtureReady = false;
+   for (let attempt = 0; attempt < 100 && !fixtureReady; attempt++) {
+    try { fixtureReady = (await fetch(`${fixtureBase}/fixtures.html`)).ok; } catch {}
+    if (!fixtureReady) await new Promise((resolve) => setTimeout(resolve, 100));
+   }
+   assert.ok(fixtureReady, "fixture preview starts");
+   await page.goto(`${fixtureBase}/fixtures.html`);
+   await page.getByRole("button", { name: "In-room / prompt suggestions" }).click();
+   const fixtureBox = page.locator(".composer textarea").first();
+   await fixtureBox.waitFor();
+   await page.waitForFunction(() => document.querySelector(".composer textarea")?.getAttribute("placeholder") === "Summarize the next steps");
+   await fixtureBox.focus();
+   await fixtureBox.press("Tab");
+   assert.equal(await fixtureBox.getAttribute("placeholder"), "What should we consider?", "the fixture uses the interactive composer with a fake source");
+  } finally { await stopSmokeServer(preview); }
  } finally { await browser.close(); }
 } finally {
  await stopSmokeServer(server);

@@ -90,6 +90,8 @@ export interface InRoomChatShellViewProps {
 	queuedActions?: QueuedBubbleActions;
 	textareaRef?: Ref<HTMLTextAreaElement>;
 	composerPlaceholder: string;
+	composerSuggestions?: string[];
+	composerSuggestionsEnabled?: boolean;
 	sendUnavailable?: boolean;
 	initialDraftValue?: string;
 	draftResetKey?: string | number;
@@ -767,6 +769,8 @@ interface ComposerInputProps {
 	stopLabel?: string;
 	textareaRef?: Ref<HTMLTextAreaElement>;
 	placeholder: string;
+	suggestions?: string[];
+	suggestionsEnabled?: boolean;
 	sendUnavailable?: boolean;
 	/** Tooltip of the Send button (says why it is waiting when it is). */
 	sendTitle?: string;
@@ -833,6 +837,8 @@ export function ComposerInput({
 	stopLabel = "Stop",
 	textareaRef,
 	placeholder,
+	suggestions,
+	suggestionsEnabled = true,
 	sendUnavailable = false,
 	sendTitle = "Send",
 	initialDraftValue,
@@ -851,6 +857,16 @@ export function ComposerInput({
 	onBoxTextChange,
 }: ComposerInputProps) {
 	const [draft, setDraft] = useState(() => initialDraftValue ?? "");
+	const [availableSuggestions, setAvailableSuggestions] = useState<string[]>([]);
+	const [suggestionSource, setSuggestionSource] = useState<string[] | undefined>();
+	const [suggestionIndex, setSuggestionIndex] = useState(0);
+	const [suggestionsHidden, setSuggestionsHidden] = useState(false);
+	useEffect(() => {
+		setAvailableSuggestions(suggestions ?? []);
+		setSuggestionSource(suggestions);
+		setSuggestionIndex(0);
+		setSuggestionsHidden(false);
+	}, [suggestions]);
 	const browsingRef = useRef<{ draft: string; index: number } | null>(null);
 	const boxHasText = draft.trim() !== "";
 	useEffect(() => {
@@ -899,6 +915,7 @@ export function ComposerInput({
 		? filterMentionCandidates(mention.candidates, mentionQuery.query, mention.currentRoomId)
 		: [];
 	const mentionOpen = Boolean(mentionQuery) && mentionMatches.length > 0;
+	const shownSuggestion = suggestionsEnabled && suggestions && suggestions === suggestionSource && !draft && !mentionOpen && !suggestionsHidden ? availableSuggestions[suggestionIndex] : undefined;
 	const mentionBusyActive = Boolean(mention?.busy) && rawTrigger !== null;
 	const activeMentionIndex = mentionMatches.length > 0 ? Math.min(mentionIndex, mentionMatches.length - 1) : 0;
 
@@ -1078,6 +1095,7 @@ export function ComposerInput({
 		// Enter that confirms a Japanese, Chinese or Korean word is the input method's, never a send.
 		if (e.nativeEvent.isComposing || e.keyCode === 229) return;
 		if (mentionOpen) {
+			if (e.key === "ArrowRight") return;
 			// Navigation and selection never submit the message (spec invariant).
 			if (e.key === "ArrowDown") { e.preventDefault(); setMentionIndex((i) => (Math.min(i, mentionMatches.length - 1) + 1) % mentionMatches.length); return; }
 			if (e.key === "ArrowUp") { e.preventDefault(); setMentionIndex((i) => (Math.min(i, mentionMatches.length - 1) - 1 + mentionMatches.length) % mentionMatches.length); return; }
@@ -1095,6 +1113,19 @@ export function ComposerInput({
 			else keyboardApproval.decline();
 			return;
 		}
+		if (shownSuggestion && e.key === "Escape") { e.preventDefault(); setSuggestionsHidden(true); return; }
+		if (shownSuggestion && e.key === "Tab" && availableSuggestions.length > 1 && !e.altKey && !e.ctrlKey && !e.metaKey) {
+			e.preventDefault();
+			setSuggestionIndex((index) => (index + (e.shiftKey ? -1 : 1) + availableSuggestions.length) % availableSuggestions.length);
+			return;
+		}
+		if (shownSuggestion && e.key === "ArrowRight" && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+			e.preventDefault();
+			setDraft(shownSuggestion);
+			setAvailableSuggestions((items) => items.filter((_, index) => index !== suggestionIndex));
+			setSuggestionIndex(suggestionIndex % (availableSuggestions.length - 1 || 1));
+			return;
+		}
 		const browsing = browsingRef.current;
 		if (e.key === "Escape" && browsing) {
 			e.preventDefault();
@@ -1108,6 +1139,7 @@ export function ComposerInput({
 			}
 			return;
 		}
+		if (e.key === "Escape" && availableSuggestions.length && !suggestionsHidden) setSuggestionsHidden(true);
 		if (!e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "ArrowUp" || (e.key === "ArrowDown" && browsing))) {
 			const history: string[] = [];
 			for (const item of items) {
@@ -1208,11 +1240,13 @@ export function ComposerInput({
 					onScroll={(e) => { if (mirrorRef.current) mirrorRef.current.scrollTop = e.currentTarget.scrollTop; }}
 					onCompositionStart={() => setComposing(true)}
 					onCompositionEnd={() => setComposing(false)}
-					placeholder={placeholder}
+					placeholder={shownSuggestion ?? placeholder}
+					aria-describedby={shownSuggestion ? "composer-suggestion-hint" : undefined}
 					rows={2}
 					spellCheck={false}
 				/>
 			</div>
+			{shownSuggestion && <span id="composer-suggestion-hint" className="sr-only">{shownSuggestion}. Tab: weiter, →: übernehmen</span>}
 			<div className="composer-box-bottom">
 				<div className="composer-box-status">{statusSlot}</div>
 				<div className="composer-box-controls">
@@ -1268,6 +1302,8 @@ export function InRoomChatShellView({
 	queuedActions,
 	textareaRef,
 	composerPlaceholder,
+	composerSuggestions,
+	composerSuggestionsEnabled,
 	sendUnavailable,
 	initialDraftValue,
 	draftResetKey,
@@ -1754,6 +1790,8 @@ export function InRoomChatShellView({
 								stopLabel={stopLabel}
 								textareaRef={textareaRef}
 								placeholder={composerPlaceholder}
+								suggestions={composerSuggestions}
+								suggestionsEnabled={composerSuggestionsEnabled}
 								sendUnavailable={sendUnavailable}
 								sendTitle={connected ? "Send" : "Waiting for the connection"}
 								initialDraftValue={initialDraftValue}

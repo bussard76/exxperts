@@ -948,6 +948,12 @@ export function App() {
 	const persistTimerRef = useRef<number | null>(null);
 
 	const wsRef = useRef<WebSocket | null>(null);
+	const suggestionCompletionRef = useRef<string | null>(null);
+	const [suggestions, setSuggestions] = useState<{ roomId: string; threadId: string; items: string[] } | null>(null);
+	function clearSuggestions() {
+		suggestionCompletionRef.current = null;
+		setSuggestions(null);
+	}
 	// Synchronous mirror of roomReconnectState for the WS handlers (the
 	// lock-bounce error frame is judged at event time, not render time).
 	const roomReconnectStateRef = useRef<"idle" | "reconnecting" | "failed">("idle");
@@ -2608,6 +2614,7 @@ export function App() {
 
 	useEffect(() => {
 		// The one place a socket is made: once another person is signed in, none is, whoever asks.
+		clearSuggestions();
 		if (personHasChanged()) return;
 		// Replacing a socket: the old one's timers die with it, the gating flag
 		// tells the truth from this instant (nothing is open), and the chrome is
@@ -2739,6 +2746,7 @@ export function App() {
 			const deliberate = stale || suppressReconnectRef.current;
 			noteConnectionClosed(deliberate);
 			if (stale) return;
+			clearSuggestions();
 			setConnected(false);
 			// A Try again still waiting for its answer dies with the connection.
 			continuedLineRef.current = null;
@@ -2808,6 +2816,17 @@ export function App() {
 			// it settles the health run without waiting out the dwell timer.
 			if (wsRef.current === ws) noteConnectionSettled();
 			const msg = JSON.parse(raw.data);
+			if (msg.type === "answer_lifecycle" || msg.type === "suggestions") {
+				const chat = persistentChatRef.current;
+				if (heldReplay || wsRef.current !== ws || ws.readyState !== WebSocket.OPEN || !chat || msg.roomId !== chat.agentId || msg.threadId !== chat.conversationId) return;
+				if (msg.type === "answer_lifecycle") {
+					clearSuggestions();
+					if (msg.phase === "complete" && typeof msg.answerId === "string") suggestionCompletionRef.current = msg.answerId;
+				} else if (suggestionCompletionRef.current && msg.answerId === suggestionCompletionRef.current && Array.isArray(msg.items) && msg.items.every((item: unknown) => typeof item === "string")) {
+					setSuggestions({ roomId: msg.roomId, threadId: msg.threadId, items: msg.items });
+				}
+				return;
+			}
 			if (msg.type === "turn_reattach" && wsRef.current === ws) {
 				heldReplay = [msg];
 				replaySocket = ws;
@@ -4325,6 +4344,7 @@ export function App() {
 		}
 		dispatchOutgoing({ type: "add", id, text: payload, state: "routing" });
 		const shown = now ? freezeAnswer() : answerShownChars();
+		clearSuggestions();
 		ws.send(JSON.stringify({ type: "steer", id, text: payload, shown, ...(declined.length ? { declines: true } : {}), ...(now ? { now: true } : {}) }));
 		return true;
 	}
@@ -4614,6 +4634,7 @@ export function App() {
 		// is sticky on its own and applies the room's level at bind and before
 		// every turn; the composer's only job is to say when the user CHOOSES,
 		// which the effort frame does.
+		clearSuggestions();
 		ws.send(JSON.stringify({ type: "prompt", text: wireText, id: promptId, shown: { text: payload, files: shownFiles }, ...(edit ? { edit } : {}) }));
 		turnKeyRef.current = promptId;
 		if (edit) {
@@ -8925,6 +8946,8 @@ export function App() {
 			stopDisabled={persistentRoomCancelling || (persistentRoomInFlight && !connected) || catchingUpOnAnswer || turnLink === "reconnecting"}
 			stopLabel="Stop"
 			textareaRef={textareaRef}
+			composerSuggestions={suggestions && persistentChat && suggestions.roomId === persistentChat.agentId && suggestions.threadId === persistentChat.conversationId ? suggestions.items : undefined}
+			composerSuggestionsEnabled={connectedForChrome && !connectionStopped && !closedByFullSave && !roomMovedOn && turnLink === "live" && !switchingToName && !persistentRoomCancelling && !stepAsksNow && !persistentRoomRunning && !modelChangePending && !catchingUpOnAnswer}
 			composerPlaceholder={composerHint({
 				room: activeDisplay,
 				asToday: !!connectionStopped,
@@ -9000,7 +9023,11 @@ export function App() {
 				// While the room answers, "@Room question" waits as a queued message and goes when the answer ends.
 				busy: false,
 				busyTitle: "",
-				onConsultRequest: requestConsult,
+				onConsultRequest: (roomId, question) => {
+					const accepted = requestConsult(roomId, question);
+					if (accepted) clearSuggestions();
+					return accepted;
+				},
 				// §8.3: while a consult card is docked, a composer @-mention is rejected
 				// visibly (the card is the place to follow up) — name the docked room.
 				activeConsultDisplayName: consultState.phase !== "none" ? (consultState.targetDisplayName ?? consultState.targetRoomId) : null,
