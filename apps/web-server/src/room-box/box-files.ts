@@ -340,6 +340,13 @@ export class BoxFiles {
 		return bytes;
 	}
 
+	async previewRead(target: FencedPath, raw: string, maxBytes: number, statOnly: boolean, signal?: AbortSignal): Promise<{ identity: PreviewIdentity; bytes: Buffer }> {
+		const { header, bytes } = await this.call("preview-read", { path: target.real, maxBytes, requireZip: target.needsDeck, statOnly }, target, raw, { writes: false, signal, maxOutputBytes: (statOnly ? 0 : maxBytes) + 4096 });
+		const identity = header.identity;
+		if (!identity || ![identity.dev, identity.ino, identity.size, identity.mtimeMs, identity.ctimeMs].every((item) => typeof item === "number" && Number.isFinite(item) && item >= 0) || header.size !== bytes.length || (!statOnly && bytes.length !== identity.size) || (statOnly && bytes.length !== 0)) throw new RoomFilesError("box_failed", FILES_STOPPED_LINE);
+		return { identity, bytes };
+	}
+
 	async list(target: FencedPath, raw: string, signal?: AbortSignal): Promise<ListedEntry[]> {
 		return (await this.call("list", { path: target.real, decks: this.decks(target) }, target, raw, { writes: false, signal })).header.entries;
 	}

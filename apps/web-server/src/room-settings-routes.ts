@@ -635,13 +635,15 @@ app.get("/api/persistent-agents/:id/workspace-files", async (req, reply) => {
 		const effectivePolicy = resolvePersistentRoomEffectiveWorkspacePolicy(id, conversationId);
 		if (effectivePolicy.source === "none") return { agentId: id, conversationId, root: null, path: requestedPath, entries: [] };
 		if (effectivePolicy.policy && effectivePolicy.workspaceToolsEnabled && effectivePolicy.policy.modes.read && effectivePolicy.allowedToolNames.includes("read")) {
-			const initialRoot = JSON.stringify(effectivePolicy.policy.roots[0]);
+			const initialPolicy = JSON.stringify(effectivePolicy.policy);
 			const policyNow = () => {
-				getUsablePersistentAgentStatusForNormalUse(id);
-				if (!getPersistentAgentThread(id, conversationId)) throw Object.assign(new Error("Conversation unavailable."), { code: "grant_changed" });
-				const current = resolvePersistentRoomEffectiveWorkspacePolicy(id, conversationId);
-				if (current.source !== effectivePolicy.source || !current.policy || !current.workspaceToolsEnabled || !current.policy.modes.read || !current.allowedToolNames.includes("read") || current.fingerprint.value !== effectivePolicy.fingerprint.value || JSON.stringify(current.policy.roots[0]) !== initialRoot) throw Object.assign(new Error("Workspace changed."), { code: "grant_changed" });
-				return current.policy;
+				try {
+					getUsablePersistentAgentStatusForNormalUse(id);
+					if (!getPersistentAgentThread(id, conversationId)) throw new Error("Conversation unavailable.");
+					const current = resolvePersistentRoomEffectiveWorkspacePolicy(id, conversationId);
+					if (current.source !== effectivePolicy.source || !current.policy || !current.workspaceToolsEnabled || !current.policy.modes.read || !current.allowedToolNames.includes("read") || current.fingerprint.value !== effectivePolicy.fingerprint.value || JSON.stringify(current.policy) !== initialPolicy) throw new Error("Workspace changed.");
+					return current.policy;
+				} catch { throw Object.assign(new Error("Workspace changed."), { code: "grant_changed" }); }
 			};
 			const binding = () => {
 				if (effectivePolicy.source === "room-files" || roomBoxComputer() !== "mac") return undefined;
@@ -665,6 +667,8 @@ app.get("/api/persistent-agents/:id/workspace-files", async (req, reply) => {
 		if ((error as { code?: string })?.code === "grant_changed") return reply.code(403).send({ code: "grant_changed", error: "Workspace access changed." });
 		if ((error as { code?: string })?.code === "file_changed") return reply.code(409).send({ code: "file_changed", error: "Workspace changed while it was read." });
 		if ((error as { code?: string })?.code === "box_failed") return reply.code(503).send({ code: "box_failed", error: "Workspace is unavailable." });
+		if (["folder_moved", "not_readable", "not_permitted"].includes((error as { code?: string })?.code ?? "")) return reply.code(503).send({ code: "workspace_unavailable", error: "Workspace is unavailable." });
+		if (["link", "folder_refused", "box_refused"].includes((error as { code?: string })?.code ?? "")) return reply.code(403).send({ code: "blocked_by_policy", error: "Workspace access is forbidden." });
 		if (["outside_workspace", "blocked_by_policy"].includes((error as { code?: string })?.code ?? "")) return reply.code(403).send({ code: (error as { code: string }).code, error: "Workspace access is forbidden." });
 		if (["invalid_name", "not_directory", "file_not_found"].includes((error as { code?: string })?.code ?? "")) return reply.code(400).send({ code: "invalid_path", error: "Invalid workspace path." });
 		return reply.code(404).send({ code: "room_not_found", error: "Room not found." });
@@ -705,6 +709,27 @@ app.post("/api/persistent-agents/:id/workspace-open", async (req, reply) => {
 	} catch { return refuse(403, "workspace_read_forbidden"); }
 });
 
+function browserWorkspaceAccess(id: string, conversationId: string, initial: ReturnType<typeof resolvePersistentRoomEffectiveWorkspacePolicy>) {
+	const originalPolicy = JSON.stringify(initial.policy);
+	return {
+		current: () => {
+			try {
+				getUsablePersistentAgentStatusForNormalUse(id);
+				if (!getPersistentAgentThread(id, conversationId)) throw new Error("Conversation unavailable.");
+				const policy = resolvePersistentRoomEffectiveWorkspacePolicy(id, conversationId);
+				if (policy.source !== initial.source || !policy.policy || !policy.workspaceToolsEnabled || !policy.policy.modes.read || !policy.allowedToolNames.includes("read") || policy.fingerprint.value !== initial.fingerprint.value || JSON.stringify(policy.policy) !== originalPolicy) throw new Error("Workspace changed.");
+				return policy.policy;
+			} catch { throw Object.assign(new Error("Workspace changed."), { code: "grant_changed" }); }
+		},
+		binding: () => {
+			if (initial.source === "room-files" || roomBoxComputer() !== "mac") return undefined;
+			const selected = workspaceBoxFor(id, conversationId);
+			if (!selected) throw Object.assign(new Error("Workspace box unavailable."), { code: "box_failed" });
+			return selected;
+		},
+	};
+}
+
 app.get("/api/persistent-agents/:id/workspace-image", async (req, reply) => {
 	reply.headers({ ...ARTIFACT_SECURITY_HEADERS, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
 	const query = (req.query ?? {}) as Record<string, unknown>;
@@ -721,27 +746,27 @@ app.get("/api/persistent-agents/:id/workspace-image", async (req, reply) => {
 	catch { return reply.code(404).send({ code: "conversation_not_found", error: "Conversation not found." }); }
 	try {
 		const initial = resolvePersistentRoomEffectiveWorkspacePolicy(id, conversationId);
-		if (initial.source !== "room-files" || !initial.policy || !initial.workspaceToolsEnabled) return reply.code(503).send({ code: "workspace_unavailable", error: "Workspace is unavailable." });
-		if (!type) return reply.code(400).send({ code: "unsupported_file_type", error: "Only image files can be shown." });
-		const current = () => {
-			getUsablePersistentAgentStatusForNormalUse(id);
-			if (!getPersistentAgentThread(id, conversationId)) throw Object.assign(new Error("Conversation unavailable."), { code: "grant_changed" });
-			const policy = resolvePersistentRoomEffectiveWorkspacePolicy(id, conversationId);
-			if (policy.source !== "room-files" || !policy.policy || !policy.workspaceToolsEnabled || policy.fingerprint.value !== initial.fingerprint.value) throw Object.assign(new Error("Workspace changed."), { code: "grant_changed" });
-			return policy.policy;
-		};
+		if (!initial.policy) return reply.code(404).send({ code: "workspace_not_found", error: "Workspace is unavailable." });
+		if (!initial.workspaceToolsEnabled || !initial.policy.modes.read || !initial.allowedToolNames.includes("read")) return reply.code(403).send({ code: "workspace_read_forbidden", error: "Workspace access is forbidden." });
+		if (roomBoxComputer() === "unknown") return reply.code(503).send({ code: "workspace_unavailable", error: "Workspace is unavailable." });
+		const access = browserWorkspaceAccess(id, conversationId, initial);
+		if (!type) { access.binding(); return reply.code(400).send({ code: "unsupported_file_type", error: "Only image files can be shown." }); }
 		const controller = new AbortController();
 		const disconnected = () => controller.abort();
 		reply.raw.once("close", disconnected);
 		try {
-			const snapshot = await readWorkspaceForBrowser(current, requestedPath, 20_971_520, controller.signal);
-			snapshot.recheck();
-			return reply.type(type).send(snapshot.bytes);
+			return await readWorkspaceForBrowser(access.current, requestedPath, 20_971_520, fileToolsWait(), access.binding, controller.signal, async (snapshot) => {
+				await snapshot.recheck();
+				return reply.type(type).send(snapshot.bytes);
+			});
 		} finally { reply.raw.removeListener("close", disconnected); }
 	} catch (error) {
 		const code = (error as { code?: string })?.code;
 		if (code === "grant_changed") return reply.code(403).send({ code, error: "Workspace access changed." });
 		if (code === "workspace_unavailable") return reply.code(503).send({ code, error: "Workspace is unavailable." });
+		if (code === "box_failed") return reply.code(503).send({ code, error: "Workspace is unavailable." });
+		if (code === "folder_moved" || code === "not_readable" || code === "not_permitted") return reply.code(503).send({ code: "workspace_unavailable", error: "Workspace is unavailable." });
+		if (code === "link" || code === "folder_refused" || code === "box_refused") return reply.code(403).send({ code: "blocked_by_policy", error: "Workspace access is forbidden." });
 		if (code === "file_changed") return reply.code(409).send({ code, error: "File changed while it was read." });
 		if (code === "file_too_large") return reply.code(413).send({ code, error: "File is too large." });
 		if (code === "file_not_found" || code === "path_not_found") return reply.code(404).send({ code: "file_not_found", error: "File not found." });
@@ -765,39 +790,35 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 	catch { return reply.code(404).send({ code: "conversation_not_found", error: "Conversation not found." }); }
 	try {
 		const initial = resolvePersistentRoomEffectiveWorkspacePolicy(id, conversationId);
-		if (initial.source !== "room-files" || !initial.policy || !initial.workspaceToolsEnabled) return reply.code(503).send({ code: "workspace_unavailable", error: "Workspace is unavailable." });
-		const current = () => {
-			getUsablePersistentAgentStatusForNormalUse(id);
-			if (!getPersistentAgentThread(id, conversationId)) throw Object.assign(new Error("Conversation unavailable."), { code: "grant_changed" });
-			const policy = resolvePersistentRoomEffectiveWorkspacePolicy(id, conversationId);
-			if (policy.source !== "room-files" || !policy.policy || !policy.workspaceToolsEnabled || policy.fingerprint.value !== initial.fingerprint.value) throw Object.assign(new Error("Workspace changed."), { code: "grant_changed" });
-			return policy.policy;
-		};
-		if (/\.doc$/i.test(requestedPath)) return reply.code(415).send({ code: "legacy_doc", error: "Save this file as .docx to preview it here." });
+		if (!initial.policy) return reply.code(404).send({ code: "workspace_not_found", error: "Workspace is unavailable." });
+		if (!initial.workspaceToolsEnabled || !initial.policy.modes.read || !initial.allowedToolNames.includes("read")) return reply.code(403).send({ code: "workspace_read_forbidden", error: "Workspace access is forbidden." });
+		if (roomBoxComputer() === "unknown") return reply.code(503).send({ code: "workspace_unavailable", error: "Workspace is unavailable." });
+		const access = browserWorkspaceAccess(id, conversationId, initial);
+		if (/\.doc$/i.test(requestedPath)) { access.binding(); return reply.code(415).send({ code: "legacy_doc", error: "Save this file as .docx to preview it here." }); }
 		const spreadsheet = /\.xlsx$/i.test(requestedPath);
 		const pdf = /\.pdf$/i.test(requestedPath);
 		const word = /\.docx$/i.test(requestedPath);
 		const html = /\.html?$/i.test(requestedPath);
 		const presentation = /\.pptx$/i.test(requestedPath);
-		if (!spreadsheet && !pdf && !word && !html && !presentation && !/\.(txt|json|md)$/i.test(requestedPath)) return reply.code(415).send({ code: "unsupported_file_type", error: "This file type cannot be previewed here." });
+		if (!spreadsheet && !pdf && !word && !html && !presentation && !/\.(txt|json|md)$/i.test(requestedPath)) { access.binding(); return reply.code(415).send({ code: "unsupported_file_type", error: "This file type cannot be previewed here." }); }
 		const controller = new AbortController();
 		const disconnected = () => controller.abort();
 		reply.raw.once("close", disconnected);
 		try {
-			const snapshot = await readWorkspaceForBrowser(current, requestedPath, spreadsheet || pdf || word || presentation ? 26_214_400 : 16_777_216, controller.signal);
-			snapshot.recheck();
+			return await readWorkspaceForBrowser(access.current, requestedPath, spreadsheet || pdf || word || presentation ? 26_214_400 : 16_777_216, fileToolsWait(), access.binding, controller.signal, async (snapshot) => {
+			await snapshot.recheck();
 			if (presentation) {
 				if (query.frame !== "1") return reply.type("application/octet-stream").send(snapshot.bytes);
 				const assets = path.join(WEB_UI_DIST, "assets");
 				const file = fs.existsSync(assets) ? fs.readdirSync(assets).find((name) => /^pptx-frame-entry-[\w-]+\.js$/.test(name)) : undefined;
 				if (!file) return reply.code(503).send({ code: "renderer_unavailable", error: "Preview is unavailable." });
 				const script = fs.readFileSync(path.join(assets, file), "utf8").replaceAll("</script", "<\\/script");
-				snapshot.recheck();
+				await snapshot.recheck();
 				return reply.header("Content-Security-Policy", "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'").type("text/html; charset=utf-8").send(`<!doctype html><html><head><style>html, body { margin: 0; background: #f3f0ea; } #slides { padding: 16px; box-sizing: border-box; }</style></head><body><div id="slides"></div><script>${script}</script></body></html>`);
 			}
 			if (spreadsheet || pdf || word) {
 				const result = spreadsheet ? await runWorkspaceSpreadsheetSnapshot(snapshot.bytes, controller.signal) : pdf ? await runWorkspacePdfSnapshot(snapshot.bytes, controller.signal) : await runWorkspaceWordSnapshot(snapshot.bytes, controller.signal);
-				snapshot.recheck();
+				await snapshot.recheck();
 				if (!result.ok || !result.result) {
 					const code = result.code ?? "preview_failed";
 					const status = ["file_too_large", "preview_too_complex", "expanded_content_too_large", "decoded_image_too_large"].includes(code) ? 413 : ["damaged_file", "encrypted_file", "unsupported_document_feature"].includes(code) ? 422 : ["renderer_unavailable", "preview_busy"].includes(code) ? 503 : code === "preview_timeout" ? 504 : code === "file_changed" ? 409 : 500;
@@ -811,11 +832,15 @@ app.get("/api/persistent-agents/:id/workspace-preview", async (req, reply) => {
 				return { schemaVersion: 1, agentId: id, conversationId, path: requestedPath, kind: "html", notices: [], html: body };
 			}
 			return { schemaVersion: 1, agentId: id, conversationId, path: requestedPath, kind: "text", notices: [], text: snapshot.bytes.toString("utf8") };
+			});
 		} finally { reply.raw.removeListener("close", disconnected); }
 	} catch (error) {
 		const code = (error as { code?: string })?.code;
 		if (code === "grant_changed") return reply.code(403).send({ code, error: "Workspace access changed." });
 		if (code === "workspace_unavailable") return reply.code(503).send({ code, error: "Workspace is unavailable." });
+		if (code === "box_failed") return reply.code(503).send({ code, error: "Workspace is unavailable." });
+		if (code === "folder_moved" || code === "not_readable" || code === "not_permitted") return reply.code(503).send({ code: "workspace_unavailable", error: "Workspace is unavailable." });
+		if (code === "link" || code === "folder_refused" || code === "box_refused") return reply.code(403).send({ code: "blocked_by_policy", error: "Workspace access is forbidden." });
 		if (code === "file_changed") return reply.code(409).send({ code, error: "File changed while it was read." });
 		if (code === "file_too_large") return reply.code(413).send({ code, error: "File is too large." });
 		if (code === "file_not_found" || code === "path_not_found") return reply.code(404).send({ code: "file_not_found", error: "File not found." });

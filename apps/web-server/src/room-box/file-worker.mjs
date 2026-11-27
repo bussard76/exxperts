@@ -91,6 +91,20 @@ const ops = {
 		});
 	},
 
+	"preview-read"({ path: target, maxBytes, requireZip, statOnly }) {
+		return withOpen(target, O_RDONLY | O_NOFOLLOW, (fd) => {
+			const identity = (stat) => ({ dev: stat.dev, ino: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs });
+			const before = fs.fstatSync(fd);
+			if (!before.isFile()) throw new Refused("ENOTFILE");
+			if (before.size > maxBytes) throw new Refused("ETOOBIG");
+			if (requireZip && !startsAsZip(fd)) throw new Refused("ENOTZIP");
+			const bytes = statOnly ? Buffer.alloc(0) : readAll(fd, before.size);
+			const after = fs.fstatSync(fd);
+			if ((!statOnly && bytes.length !== before.size) || JSON.stringify(identity(before)) !== JSON.stringify(identity(after)) || JSON.stringify(identity(after)) !== JSON.stringify(identity(fs.lstatSync(target)))) throw new Refused("ECHANGED");
+			return { header: { identity: identity(after), size: bytes.length }, bytes };
+		});
+	},
+
 	/** One folder's entries, with which deck names hold a deck. */
 	list({ path: target, decks }) {
 		const entries = fs.readdirSync(target, { withFileTypes: true }).map((entry) => {

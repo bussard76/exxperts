@@ -121,6 +121,12 @@ try {
 	assert(raw.roots[0].pathHash.value === crypto.createHash("sha256").update(fs.realpathSync(workspaceRoot)).digest("hex") && !("identity" in raw.roots[0]), "selection stores the upstream path-only grant");
 	let visible = await listing();
 	assert(visible.status === 200 && visible.body.entries.some((item: { name: string }) => item.name === "invented.txt"), "selected folder lists through the guarded route");
+	const textPreview = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-preview?conversationId=demo-thread&path=invented.txt`);
+	assert(textPreview.status === 200 && textPreview.body.kind === "text" && textPreview.body.text === "invented", "selected path-only grant reads through the guarded preview route");
+	const image = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==", "base64");
+	fs.writeFileSync(path.join(workspaceRoot, "invented.png"), image);
+	const imageResponse = await authedFetch(`${baseUrl}/api/persistent-agents/${encodedAgentId}/workspace-image?conversationId=demo-thread&path=invented.png`);
+	assert(imageResponse.status === 200 && Buffer.from(await imageResponse.arrayBuffer()).equals(image), "selected path-only grant reads the guarded image route");
 	raw.roots[0].unfamiliar = { future: true };
 	fs.writeFileSync(defaultPath, JSON.stringify(raw));
 	const legacy = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-default`);
