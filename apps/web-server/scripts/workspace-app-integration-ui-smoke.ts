@@ -84,13 +84,18 @@ try {
 	try {
 		const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 		const page = await ctx.newPage();
+		let unsupportedRequests = 0;
 		await page.route("**/api/persistent-agents/**/workspace-files?**", async (route) => {
 			const url = new URL(route.request().url()), id = decodeURIComponent(url.pathname.split("/")[3]), conversationId = url.searchParams.get("conversationId");
-			await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ agentId: id, conversationId, root: { displayLabel: "Invented workspace", basename: "invented" }, path: "", entries: [{ name: "invented.xlsx", relativePath: "invented.xlsx", kind: "file", bytes: 42, modifiedAt: "2026-01-01T00:00:00.000Z", extension: ".xlsx" }] }) });
+			const entries = ["invented.xlsx", "notes.txt", "sketch.excalidraw"].map((name) => ({ name, relativePath: name, kind: "file", bytes: 42, modifiedAt: "2026-01-01T00:00:00.000Z", extension: name.slice(name.lastIndexOf(".")) }));
+			await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ agentId: id, conversationId, root: { displayLabel: "Invented workspace", basename: "invented" }, path: "", entries }) });
 		});
 		await page.route("**/api/persistent-agents/**/workspace-preview?**", async (route) => {
 			const url = new URL(route.request().url()), id = decodeURIComponent(url.pathname.split("/")[3]), conversationId = url.searchParams.get("conversationId");
-			await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ schemaVersion: 1, agentId: id, conversationId, path: "invented.xlsx", kind: "spreadsheet", notices: parsed.notices, workbook: parsed.result!.workbook }) });
+			const selected = url.searchParams.get("path");
+			if (selected === "sketch.excalidraw") unsupportedRequests++;
+			const body = selected === "notes.txt" ? { schemaVersion: 1, agentId: id, conversationId, path: selected, kind: "text", notices: [], text: "Invented notes" } : { schemaVersion: 1, agentId: id, conversationId, path: "invented.xlsx", kind: "spreadsheet", notices: parsed.notices, workbook: parsed.result!.workbook };
+			await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
 		});
 		await page.route("**/api/persistent-agents/**/workspace-open", async (route) => { await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ code: "association_unverified", error: "Cannot open." }) }); });
 
@@ -121,6 +126,11 @@ try {
 		const pane = await page.locator(".workspace-pane").boundingBox();
 		assert(pane && pane.x >= 0 && pane.x + pane.width <= 390 && pane.width >= 350, `workspace remains usable on a phone: ${JSON.stringify(pane)}`);
 		await page.getByRole("button", { name: "Close invented.xlsx" }).click();
+		await page.setViewportSize({ width: 1280, height: 900 });
+		await page.getByRole("button", { name: "sketch.excalidraw", exact: true }).click();
+		assert(await page.getByRole("button", { name: "Close sketch.excalidraw" }).count() === 0 && unsupportedRequests === 0, "unsupported selection opens no tab and requests no preview");
+		await page.getByRole("button", { name: "notes.txt", exact: true }).click();
+		await page.getByText("Invented notes", { exact: true }).waitFor({ timeout: 10000 });
 
 		await ctx.close();
 	} finally {
