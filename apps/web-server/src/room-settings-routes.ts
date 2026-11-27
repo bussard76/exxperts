@@ -139,6 +139,8 @@ async function workspaceAssociation(file: string): Promise<WorkspaceAssociation 
 		try {
 			const opened = fs.fstatSync(fd, { bigint: true });
 			if (opened.dev !== executableStat.dev || opened.ino !== executableStat.ino || opened.size !== executableStat.size || opened.mtimeNs !== executableStat.mtimeNs || opened.ctimeNs !== executableStat.ctimeNs || fs.readSync(fd, magic, 0, 4, 0) !== 4 || !magic.equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) return null;
+			const after = fs.fstatSync(fd, { bigint: true });
+			if (opened.dev !== after.dev || opened.ino !== after.ino || opened.size !== after.size || opened.mtimeNs !== after.mtimeNs || opened.ctimeNs !== after.ctimeNs) return null;
 		} finally { fs.closeSync(fd); }
 		const argument = placeholders[0] === "%u" ? pathToFileURL(file).href : file;
 		const args = parts.slice(1).map((part) => part === "%f" || part === "%u" ? argument : part);

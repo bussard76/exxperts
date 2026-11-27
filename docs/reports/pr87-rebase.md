@@ -14,6 +14,8 @@ The focused handoff smoke also passes policy revocation during the final associa
 
 The fake dispatcher additionally verifies 500 `open_failed` on a launch error and 504 `open_timeout` with a stopped child when the launch does not settle; the test shortens only that synthetic timer.
 
+After the required developer skills were made available from the project fork checkout, a public handoff test changed a synthetic executable while its header was being read during the final association lookup. It first failed because the pre-read executable stat was accepted without a post-read stat; the resolver now compares both and refuses the changed association before dispatch. This test uses only a synthetic file and fake dispatcher.
+
 The same public handoff smoke first failed for an unambiguous literal desktop argument and then passed with that argument preserved alongside exactly one file placeholder. Ambiguous field codes and duplicate placeholders remain refused; the actual argument vector is also passed to each room protection check. The four affected script suites passed 104/104, and the attributed local-action-context Chromium check passed on Linux.
 
 `workspace-listing-box-race-smoke.ts` was extended through the public listing route for owner conversation and connection identity changes, detached owners and reconnection. The conversation and connection checks each initially failed because the prior binding remained usable; the binding now records the connection and invalidates itself on an observed owner or conversation change. Restoring an old identity does not revive the invalidated binding, and a replacement owner can use a freshly registered box. These are simulated Mac ownership checks with a fake box dispatcher, not native Mac acceptance.

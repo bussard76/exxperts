@@ -106,6 +106,21 @@ try {
 		const timeout = await request();
 		if (timeout.statusCode !== 504 || timeout.json().code !== "open_timeout" || killed !== 3) throw new Error("timed-out dispatcher must be stopped and report open_timeout");
 	} finally { globalThis.setTimeout = originalTimeout; }
+	queries = 0; launchMode = "success";
+	const beforeExecutableChange = dispatches, executableInode = fs.statSync(binary).ino, originalRead = fs.readSync;
+	let executableChanged = false;
+	fs.readSync = ((...args: any[]) => {
+		const result = Reflect.apply(originalRead, fs, args);
+		if (!executableChanged && queries === 3 && fs.fstatSync(args[0]).ino === executableInode) {
+			executableChanged = true;
+			fs.writeFileSync(binary, Buffer.from([0x7f, 0x45, 0x4c, 0x46, 4, 3, 2, 1]));
+		}
+		return result;
+	}) as typeof fs.readSync;
+	try {
+		const changedExecutable = await request();
+		if (!executableChanged || changedExecutable.statusCode !== 403 || changedExecutable.json().code !== "association_unverified" || Number(dispatches) !== beforeExecutableChange) throw new Error("an executable changed while its identity is read must not dispatch");
+	} finally { fs.readSync = originalRead; }
 	console.log("workspace checked open handoff smoke passed");
 } finally {
 	childProcess.execFile = originalExecFile; childProcess.spawn = originalSpawn; syncBuiltinESMExports();
