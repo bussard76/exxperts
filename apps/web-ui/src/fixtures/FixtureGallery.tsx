@@ -179,7 +179,29 @@ function fixtureActionButtons(actions: InRoomChatActionItem[] | undefined) {
 	});
 }
 
+function SuggestionsFixture() {
+	const [items, setItems] = useState(["Summarize the next steps", "What should we consider?", "Draft a short outline"]);
+	const [index, setIndex] = useState(0);
+	const [draft, setDraft] = useState("");
+	const [hidden, setHidden] = useState(false);
+	const shown = !hidden && !draft ? items[index] : undefined;
+	return (
+		<div className="composer" style={{ padding: 24 }}>
+			<p>Fake suggestion source · no model or network calls</p>
+			<textarea aria-label="Message" aria-describedby={shown ? "fixture-suggestion-hint" : undefined} value={draft} placeholder={shown ?? "Ask Example Room…"} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => {
+				if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+				if (event.key === "Escape" && shown) { event.preventDefault(); setHidden(true); }
+				if (!shown) return;
+				if (event.key === "Tab" && items.length > 1) { event.preventDefault(); setIndex((index + (event.shiftKey ? -1 : 1) + items.length) % items.length); }
+				if (event.key === "ArrowRight") { event.preventDefault(); setDraft(shown); setItems(items.filter((_, i) => i !== index)); setIndex(index % (items.length - 1 || 1)); }
+			}} />
+			{shown && <span id="fixture-suggestion-hint">Tab: weiter, →: übernehmen</span>}
+		</div>
+	);
+}
+
 function InRoomChatFixtureScreen({ fixture, theme }: { fixture: InRoomChatFixtureState; theme: ThemeMode }) {
+	if (fixture.id === "in-room-suggestions") return <SuggestionsFixture />;
 	const composerPlaceholder = fixture.composerPlaceholder ?? (fixture.busy ? "Working… Enter to queue" : `Ask ${fixture.activeDisplay}…`);
 	const onSend = (_text: string) => false;
 	const onResolveApproval = (_requestId: string, _value: any, _label: string) => {};

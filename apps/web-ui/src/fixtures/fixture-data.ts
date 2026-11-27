@@ -806,6 +806,16 @@ const approvalItems: ChatItem[] = [
 
 export const inRoomChatFixtureStates: InRoomChatFixtureState[] = [
 	chatFixture({
+		id: "in-room-suggestions",
+		label: "In-room / prompt suggestions",
+		description: "Interactive composer suggestion preview using invented prompts.",
+		activeDisplay: "Example Room",
+		busy: false,
+		usage: emptyChatUsage,
+		items: [],
+		inputValue: "",
+	}),
+	chatFixture({
 		id: "in-room-empty",
 		label: "In-room / empty persistent room",
 		description: "Full room shell with an empty message canvas and prompt affordance in the composer only.",
