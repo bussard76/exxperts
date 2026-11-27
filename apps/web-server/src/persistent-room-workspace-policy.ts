@@ -297,14 +297,6 @@ function safeBasename(input: string): string {
 	return path.basename(input) || input;
 }
 
-function safeDisplayLabel(input: { displayLabel?: string; basename: string }): string {
-	const fallback = input.basename || "workspace";
-	const label = String(input.displayLabel ?? "").trim();
-	if (!label) return fallback;
-	if (label.includes("/") || label.includes("\\") || label.includes("~")) return fallback;
-	return label.slice(0, 80) || fallback;
-}
-
 interface NormalizedForbiddenRoot {
 	kind: PersistentRoomForbiddenRootKind;
 	path: string;
@@ -944,9 +936,6 @@ function unquotedWorkspaceRoot(root: string): string {
 
 const FULL_PATH_EXAMPLE = process.platform === "win32" ? "C:\\Users\\you\\Projects" : process.platform === "darwin" ? "/Users/you/Projects" : "/home/you/projects";
 
-// No platform/filesystem/provider combination is qualified yet.
-function qualifiedWorkspaceIdentity(_root: string): boolean { return false; }
-
 /** A folder named from the top: on Windows a drive letter or a network share,
  * since "\Projects" alone lands on whatever drive the app runs from. */
 export function isFullWorkspacePath(input: string, platform: NodeJS.Platform = process.platform): boolean {
@@ -988,20 +977,9 @@ export function validatePersistentRoomWorkspaceRoot(root: string, context: Persi
 	}
 	const forbiddenRoots = normalizeForbiddenRoots(context.forbiddenRoots ?? defaultPersistentRoomForbiddenRoots(context));
 	assertAllowedWorkspaceRoot({ rootPath: resolvedPath, rootRealpath, forbiddenRoots });
-	if (!qualifiedWorkspaceIdentity(rootRealpath)) throw Object.assign(new Error("This folder cannot be selected right now."), { statusCode: 400, code: "folder_refused" });
-	const basename = safeBasename(rootRealpath);
-	const pathHash = hashPersistentRoomPath(rootRealpath);
-	const now = (context.now ?? new Date()).toISOString();
-	return {
-		id: `root_${pathHash.value.slice(0, 16)}`,
-		displayLabel: safeDisplayLabel({ displayLabel: context.displayLabel, basename }),
-		path: resolvedPath,
-		realpath: rootRealpath,
-		basename,
-		pathHash,
-		source: context.source ?? "manual",
-		grantedAt: now,
-	};
+	// No platform/filesystem/provider combination has been qualified. Selection
+	// must capture verified identity before any local grant can be returned.
+	throw Object.assign(new Error("This folder cannot be selected right now."), { statusCode: 400, code: "folder_refused" });
 }
 
 export function createPersistentRoomCapabilityPolicy(input: CreatePersistentRoomCapabilityPolicyInput): PersistentRoomCapabilityPolicy {

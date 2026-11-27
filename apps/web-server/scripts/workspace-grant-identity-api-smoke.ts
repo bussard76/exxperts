@@ -119,6 +119,11 @@ try {
 	fs.mkdirSync(path.dirname(defaultPath), { recursive: true });
 	for (const identity of [validIdentity, undefined, null, { ...validIdentity, version: 2 }, { ...validIdentity, ino: "02" }, { ...validIdentity, dev: "18446744073709551616" }, { ...validIdentity, extra: true }]) {
 		fs.writeFileSync(defaultPath, JSON.stringify({ ...fixture, roots: [{ ...root, ...(identity === undefined ? {} : { identity }) }] }));
+		const legacyThreadFile = path.join(agentRoot, "runtime", "workspace-policies", "demo-thread.json");
+		if (identity === validIdentity) {
+			fs.mkdirSync(path.dirname(legacyThreadFile), { recursive: true });
+			fs.writeFileSync(legacyThreadFile, JSON.stringify({ ...fixture, conversationId: "demo-thread" }));
+		}
 		assert(resolvePersistentRoomCapabilityPolicy(agentId, "demo-thread", { persistentAgentsRoot: tempAgentsRoot }).source === "room-default", `fixture resolves from the configured test root: ${resolvePersistentRoomCapabilityPolicy(agentId, "demo-thread", { persistentAgentsRoot: tempAgentsRoot }).source}`);
 		const view = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-default`);
 		assert(view.status === 200 && view.body.policy?.rootCount === 1 && view.body.folderRefused === true, `configured unqualified or malformed identity remains visible and refused: ${JSON.stringify(view)}`);
@@ -132,7 +137,11 @@ try {
 		const rewritten = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-default`, { method: "PUT", body: JSON.stringify({}) });
 		assert(rewritten.status === 200, "settings-only rewrite retains configured policy");
 		const stored = JSON.parse(fs.readFileSync(defaultPath, "utf8"));
-		if (identity === validIdentity) assert(JSON.stringify(stored.roots[0].identity) === JSON.stringify(validIdentity), "valid identity survives rewrite exactly");
+		if (identity === validIdentity) {
+			assert(JSON.stringify(stored.roots[0].identity) === JSON.stringify(validIdentity), "valid identity survives rewrite exactly");
+			const legacy = JSON.parse(fs.readFileSync(legacyThreadFile, "utf8"));
+			assert(legacy.access === "localFiles" && legacy.workspaceAccessMode === "bounded" && JSON.stringify(legacy.roots[0].identity) === JSON.stringify(validIdentity), "older-app conversation rewrite preserves identity exactly");
+		}
 		else assert(stored.roots[0].identity === null, "invalid or absent evidence remains unusable on rewrite");
 		const after = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-default`);
 		assert(after.body.folderRefused === true, "rewrite does not refresh identity or make grant usable");
