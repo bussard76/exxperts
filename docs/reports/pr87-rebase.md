@@ -345,3 +345,7 @@ Closure: 247 lock nodes; unresolved: none.
 | `node_modules/zip-stream/node_modules/minimatch` | 3.1.5 | ISC | `{"node":"*"}` |
 | `node_modules/zrender` | 6.1.0 | BSD-3-Clause | `{}` |
 | `node_modules/zrender/node_modules/tslib` | 2.3.0 | 0BSD | `{}` |
+
+## Composer file-path drop
+
+Restored the source file-tree-to-composer drop behavior. An attributed Chromium component check exercises inserting a relative path at the caret, replacing selected text, restoring the caret and ignoring unrelated drags; the existing attributed `skill-pick-ui-smoke.ts` also passed. UI and scripts typechecks passed. This check uses an invented intercepted listing; the actual file-tree route and app integration are still pending.
