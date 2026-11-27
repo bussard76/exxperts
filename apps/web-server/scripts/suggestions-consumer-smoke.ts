@@ -33,6 +33,8 @@ const agents = await import("../src/persistent-agents.js");
 const room = agents.createPersistentAgentFromScaffoldInput({ displayName: "Example Room", userName: "Example User", preferredUserAddress: "Example User" }).agent.agentId;
 const roomModels = await import("../src/room-models.js");
 roomModels.writeRoomModels(room, { conversation: { provider: "fake-gpt", model: "gpt-fake" } });
+const other = agents.createPersistentAgentFromScaffoldInput({ displayName: "Other Room", userName: "Example User", preferredUserAddress: "Example User" }).agent.agentId;
+roomModels.writeRoomModels(other, { conversation: { provider: "fake-gpt", model: "gpt-fake" } });
 const port = await freePort();
 const base = `http://127.0.0.1:${port}`;
 const server = spawn("npx", ["tsx", "src/index.ts"], {
@@ -83,7 +85,14 @@ try {
   assert.equal(await placeholder(), ordinary, "a different answer is rejected");
   await frame({ type: "suggestions", answerId: "answer-one", items: ["Alpha", "Beta", "Gamma"] });
   await page.waitForFunction(() => document.querySelector(".composer textarea")?.getAttribute("placeholder") === "Alpha");
-  assert.match(await box.getAttribute("aria-describedby") ?? "", /.+/, "suggestion has an accessible hint");
+  const describedBy = await box.getAttribute("aria-describedby");
+  assert.ok(describedBy, "suggestion has an accessible hint");
+  assert.match(await page.locator(`[id="${describedBy}"]`).innerText(), /Tab: weiter, →: übernehmen/);
+  await box.fill("@other");
+  await page.getByRole("listbox").waitFor();
+  await box.press("Tab");
+  assert.match(await box.inputValue(), /@other-room/, "mention picker owns Tab");
+  await box.fill("");
   await box.focus();
   await box.press("Tab");
   assert.equal(await placeholder(), "Beta");
@@ -131,6 +140,17 @@ try {
   await page.waitForFunction(() => (window as any).testRoomSocket.readyState === WebSocket.OPEN);
   await frame({ type: "suggestions", answerId: "answer-three", items: ["Stale after reconnect"] });
   assert.notEqual(await placeholder(), "Stale after reconnect", "reconnect cannot reuse the previous completion");
+  await frame({ type: "answer_lifecycle", phase: "complete", answerId: "answer-four" });
+  await frame({ type: "suggestions", answerId: "answer-four", items: ["Send clears me"] });
+  await page.waitForFunction(() => document.querySelector(".composer textarea")?.getAttribute("placeholder") === "Send clears me");
+  await box.fill("A new prompt");
+  await box.press("Enter");
+  await page.waitForFunction(() => document.querySelector(".composer textarea")?.getAttribute("placeholder") !== "Send clears me");
+  await frame({ type: "suggestions", answerId: "answer-four", items: ["Late after send"] });
+  assert.notEqual(await placeholder(), "Late after send", "sending invalidates immediately");
+  await page.reload();
+  await box.waitFor();
+  assert.notEqual(await placeholder(), "Send clears me", "suggestions are not persisted or replayed after reload");
  } finally { await browser.close(); }
 } finally {
  await stopSmokeServer(server);
