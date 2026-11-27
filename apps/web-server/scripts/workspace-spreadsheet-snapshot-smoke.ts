@@ -35,6 +35,11 @@ assert.equal(formattedResult.result?.workbook.styles[sheet.cells[0].style].font.
 const malformed = await runWorkspaceSpreadsheetSnapshot(Buffer.from("invented invalid workbook"), new AbortController().signal);
 assert.equal(malformed.ok, false);
 assert.equal(malformed.code, "damaged_file");
+const encrypted = Buffer.from(snapshot);
+const end = encrypted.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+const central = encrypted.readUInt32LE(end + 16);
+encrypted.writeUInt16LE(encrypted.readUInt16LE(central + 8) | 1, central + 8);
+assert.equal((await runWorkspaceSpreadsheetSnapshot(encrypted, new AbortController().signal)).code, "encrypted_file");
 const oversized = await runWorkspaceSpreadsheetSnapshot(Buffer.alloc(26_214_401), new AbortController().signal);
 assert.equal(oversized.ok, false);
 assert.equal(oversized.code, "file_too_large");
