@@ -787,6 +787,7 @@ const TranscriptItems = memo(function TranscriptItems({
 });
 
 interface ComposerInputProps {
+	items?: ChatItem[];
 	onSend: (text: string) => boolean;
 	onStop?: () => void;
 	stopVisible?: boolean;
@@ -831,6 +832,7 @@ function otherLayerOpen(): boolean {
 
 /** The room's message box. Exported so a smoke can type into it and press its keys. */
 export function ComposerInput({
+	items = [],
 	onSend,
 	onStop,
 	stopVisible = false,
@@ -865,6 +867,7 @@ export function ComposerInput({
 	// until that answer comes, or after a first read failed.
 	const idsByStart = knownRemoteClientContext() !== null && !mayBeOnSharedServer();
 	const [draft, setDraft] = useState(() => initialDraftValue ?? "");
+	const browsingRef = useRef<{ draft: string; index: number } | null>(null);
 	const boxHasText = draft.trim() !== "";
 	const [caret, setCaret] = useState(0);
 	// The room the message goes to instead of this one, by its id: a label on the box, never a word in the text.
@@ -960,6 +963,7 @@ export function ComposerInput({
 	useEffect(() => {
 		setDraft(initialDraftValue ?? "");
 		setAsking(initialAsking ?? null);
+		browsingRef.current = null;
 		setMentionDismissed(false);
 		setSkillDismissed(false);
 	}, [draftResetKey]);
@@ -1120,6 +1124,7 @@ export function ComposerInput({
 		// typed question would lose it with no feedback; the box stays for a
 		// retry, its label with it.
 		if (mention.onConsultRequest(asking, draft.trim(), now)) {
+			browsingRef.current = null;
 			setDraft("");
 			setAsking(null);
 			setMentionDismissed(false);
@@ -1134,6 +1139,7 @@ export function ComposerInput({
 		}
 		const accepted = onSend(draft);
 		if (accepted) {
+			browsingRef.current = null;
 			setDraft("");
 		}
 	}, [draft, onSend, sendDisabled, asking, askRoom]);
@@ -1144,7 +1150,7 @@ export function ComposerInput({
 		if (!boxHolds) onSendQueuedNow?.();
 		else if (sendUnavailable || askingGone || awaitingQuestion || queueRefused) return;
 		else if (asking) askRoom(true);
-		else if (onSendNow?.(draft)) setDraft("");
+		else if (onSendNow?.(draft)) { browsingRef.current = null; setDraft(""); }
 	}
 	// The same chord pressed on the room's question above the box, when its answer doesn't take it.
 	useBoxChord(sendNowByChord);
@@ -1188,6 +1194,36 @@ export function ComposerInput({
 			e.preventDefault();
 			e.stopPropagation();
 			return;
+		}
+		const browsing = browsingRef.current;
+		if (e.key === "Escape" && browsing) {
+			e.preventDefault();
+			browsingRef.current = null;
+			if (draft === browsing.draft) {
+				e.currentTarget.setSelectionRange(draft.length, draft.length);
+				setCaret(draft.length);
+			} else {
+				pendingCaretRef.current = browsing.draft.length;
+				setDraft(browsing.draft);
+			}
+			return;
+		}
+		if (!e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "ArrowUp" || (e.key === "ArrowDown" && browsing))) {
+			const history: string[] = [];
+			for (const item of items) {
+				if (item.kind === "user" && item.text && history[history.length - 1] !== item.text) history.push(item.text);
+			}
+			if (history.length && (browsing || (e.key === "ArrowUp" && !draft.slice(0, e.currentTarget.selectionStart).includes("\n")))) {
+				e.preventDefault();
+				const state = browsing ?? { draft, index: history.length };
+				state.index = e.key === "ArrowUp" ? Math.max(0, state.index - 1) : Math.min(history.length, state.index + 1);
+				const text = state.index === history.length ? state.draft : history[state.index];
+				browsingRef.current = state.index === history.length ? null : state;
+				pendingCaretRef.current = text.length;
+				if (text === draft) { e.currentTarget.setSelectionRange(text.length, text.length); pendingCaretRef.current = null; setCaret(text.length); }
+				else setDraft(text);
+				return;
+			}
 		}
 		// Cmd/Ctrl+Enter with nothing in the box and nothing queued: its Allow this time, once awake.
 		if (e.key === "Enter" && !e.shiftKey && !e.altKey && chordHeld(e.nativeEvent) && !boxHolds && askPanelChord(e.nativeEvent.repeat)) {
@@ -1758,6 +1794,7 @@ export function InRoomChatShellView({
 						<div className={composerLayoutClass}>
 							<div className="composer-stack">
 							<ComposerInput
+								items={items}
 								onSend={onSend}
 								onStop={onStop}
 								stopVisible={stopVisible}
