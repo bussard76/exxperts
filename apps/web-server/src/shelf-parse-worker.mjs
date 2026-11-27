@@ -437,6 +437,64 @@ function denyPreviewNetwork() {
 }
 
 
+async function previewPdf(buffer) {
+	if (buffer.subarray(0, 5).toString("ascii") !== "%PDF-") throw previewError("damaged_file");
+	let canvasModule;
+	try { canvasModule = await loadNapiCanvas(); } catch { throw previewError("renderer_unavailable"); }
+	for (const name of ["DOMMatrix", "ImageData", "Path2D"]) {
+		if (globalThis[name] === undefined) globalThis[name] = canvasModule[name];
+	}
+	let getDocument;
+	try { ({ getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs")); } catch { throw previewError("renderer_unavailable"); }
+	let doc;
+	try {
+		doc = await getDocument({ data: new Uint8Array(buffer), isEvalSupported: false, disableFontFace: true, useSystemFonts: false }).promise;
+	} catch (error) {
+		throw previewError(error?.name === "PasswordException" ? "encrypted_file" : "damaged_file");
+	}
+	try {
+		const totalPages = doc.numPages;
+		if (!Number.isInteger(totalPages) || totalPages < 1) throw previewError("damaged_file");
+		if (totalPages > 200) throw previewError("preview_too_complex");
+		const geometry = [];
+		let totalPixels = 0;
+		for (let pageNumber = 1; pageNumber <= totalPages; pageNumber++) {
+			const page = await doc.getPage(pageNumber);
+			const base = page.getViewport({ scale: 1 });
+			if (!Number.isFinite(base.width) || !Number.isFinite(base.height) || base.width < 1 || base.height < 1) throw previewError("damaged_file");
+			let scale = Math.min(1400 / base.width, 4);
+			if (base.width * scale * base.height * scale > 4_000_000) scale = Math.sqrt(4_000_000 / (base.width * base.height));
+			const widthPx = Math.max(1, Math.floor(base.width * scale));
+			const heightPx = Math.max(1, Math.floor(base.height * scale));
+			totalPixels += widthPx * heightPx;
+			if (totalPixels > 80_000_000) throw previewError("preview_too_complex");
+			geometry.push({ widthPx, heightPx, scale });
+			page.cleanup();
+		}
+		const pages = [];
+		let jpegBytes = 0;
+		for (let index = 0; index < totalPages; index++) {
+			const page = await doc.getPage(index + 1);
+			const { widthPx, heightPx, scale } = geometry[index];
+			const canvas = canvasModule.createCanvas(widthPx, heightPx);
+			const context = canvas.getContext("2d");
+			context.fillStyle = "#ffffff";
+			context.fillRect(0, 0, widthPx, heightPx);
+			await page.render({ canvasContext: context, viewport: page.getViewport({ scale }) }).promise;
+			const jpeg = canvas.toBuffer("image/jpeg", 82);
+			jpegBytes += jpeg.length;
+			if (jpegBytes > 33_554_432) throw previewError("preview_too_complex");
+			pages.push({ page: index + 1, mimeType: "image/jpeg", imageBase64: jpeg.toString("base64"), widthPx, heightPx });
+			page.cleanup();
+		}
+		const reply = { ok: true, schemaVersion: 1, notices: [], result: { kind: "pdf", totalPages, pages } };
+		if (Buffer.byteLength(JSON.stringify(reply)) > 50_331_648) throw previewError("preview_too_complex");
+		return reply;
+	} finally {
+		await doc.destroy();
+	}
+}
+
 const EXCEL_DEFAULT_THEME = ["FFFFFF", "000000", "E7E6E6", "44546A", "4472C4", "ED7D31", "A5A5A5", "FFC000", "5B9BD5", "70AD47", "0563C1", "954F72"];
 const EXCEL_INDEXED = "000000 FFFFFF FF0000 00FF00 0000FF FFFF00 FF00FF 00FFFF 000000 FFFFFF FF0000 00FF00 0000FF FFFF00 FF00FF 00FFFF 800000 008000 000080 808000 800080 008080 C0C0C0 808080 9999FF 993366 FFFFCC CCFFFF 660066 FF8080 0066CC CCCCFF 000080 FF00FF FFFF00 00FFFF 800080 800000 008080 0000FF 00CCFF CCFFFF CCFFCC FFFF99 99CCFF FF99CC CC99FF FFCC99 3366FF 33CCCC 99CC00 FFCC00 FF9900 FF6600 666699 969696 003366 339966 003300 333300 993300 993366 333399 333333".split(" ");
 
@@ -581,6 +639,12 @@ async function parseDocx(buffer) {
 	try {
 		const request = JSON.parse(process.argv[2] ?? "");
 		const { absolutePath, kind, maxPages, maxChars } = request;
+		if (request.mode === "workspace-preview-v1" && kind === "pdf") {
+			const buffer = readPreviewSnapshot(request);
+			denyPreviewNetwork();
+			post(await previewPdf(buffer));
+			return;
+		}
 		if (request.mode === "workspace-preview-v1" && kind === "spreadsheet") {
 			const buffer = readPreviewSnapshot(request);
 			for (const entry of previewZipEntries(buffer)) inflatePreviewEntry(buffer, entry);

@@ -35,3 +35,9 @@ The approved ExcelJS 4.4.0 declarations were added to the root and server manife
 This does not establish the route, real browser-to-worker-to-UI acceptance path, native Mac or Windows behavior, independent review, conformance, or CI. The root identity regression and the rest of the migration remain open.
 
 Final XLSX slice checks: `EXXETA_SKIP_BROWSER_INSTALL=1 npm run test:scripts -- apps/web-server/scripts/workspace-spreadsheet-snapshot-smoke.ts` passed 101/101, and `npm run typecheck:scripts` passed. The configured-root listing remains unavailable and its root-identity regression remains unresolved.
+
+## Independent PDF snapshot parser slice
+
+Added PDF to the same private snapshot lifecycle, retaining the two-worker limit, private copy cleanup and cancellation; PDF rendering uses the target's existing pdfjs and canvas dependencies and disables worker network access. The parent validates the source contract, sequential page numbers, JPEG structure and dimensions, pixel and byte limits before returning any page. The invented PDF test exercises real two-page rendering, damaged input, the 200-page limit, the 25 MiB snapshot bound and cancellation; the XLSX snapshot test was rerun after the lifecycle change.
+
+`EXXETA_SKIP_BROWSER_INSTALL=1 npm run test:scripts -- apps/web-server/scripts/workspace-pdf-snapshot-smoke.ts apps/web-server/scripts/workspace-spreadsheet-snapshot-smoke.ts` passed 102/102, `npm run typecheck:scripts` passed, and the existing `room-shelf-smoke.ts` and `shelf-vision-smoke.ts` passed. The two snapshot smokes also passed directly after the cleanup adjustment. These are Linux parser checks only; the route, browser acceptance, native Mac/Windows, independent review and remaining format/dependency work are still open.

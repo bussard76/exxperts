@@ -315,10 +315,32 @@ function validPreviewWorkbook(value: unknown): boolean {
 
 
 
+function previewJpegDimensions(bytes: Buffer): { width: number; height: number } | null {
+	if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[bytes.length - 2] !== 0xff || bytes[bytes.length - 1] !== 0xd9) return null;
+	let offset = 2;
+	while (offset + 4 <= bytes.length) {
+		if (bytes[offset] !== 0xff) return null;
+		while (offset < bytes.length && bytes[offset] === 0xff) offset++;
+		if (offset >= bytes.length) return null;
+		const marker = bytes[offset++];
+		if (marker === 0xda || marker === 0xd9) return null;
+		if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+		if (offset + 2 > bytes.length) return null;
+		const length = bytes.readUInt16BE(offset);
+		if (length < 2 || length > bytes.length - offset) return null;
+		if (marker === 0xc0 || marker === 0xc1 || marker === 0xc2) {
+			if (length < 8) return null;
+			return { height: bytes.readUInt16BE(offset + 3), width: bytes.readUInt16BE(offset + 5) };
+		}
+		offset += length;
+	}
+	return null;
+}
+
 let activeWorkspacePreviews = 0;
 
-/** Parse an already authorized snapshot through a private temporary copy and validate the worker's answer. */
-export async function runWorkspaceSpreadsheetSnapshot(snapshot: Buffer, signal: AbortSignal): Promise<{ ok: boolean; code?: string; result?: { kind: "spreadsheet"; workbook: any }; notices?: unknown[] }> {
+/** Parse an already authorized snapshot through a private temporary copy. */
+async function runWorkspaceSnapshot(snapshot: Buffer, kind: "pdf" | "spreadsheet", signal: AbortSignal): Promise<ShelfWorkerMessage> {
 	if (signal.aborted) return { ok: false, code: "preview_aborted" };
 	if (snapshot.length > SHELF_READ_MAX_FILE_BYTES) return { ok: false, code: "file_too_large" };
 	if (activeWorkspacePreviews >= 2) return { ok: false, code: "preview_busy" };
@@ -326,27 +348,55 @@ export async function runWorkspaceSpreadsheetSnapshot(snapshot: Buffer, signal: 
 	let temporary: string | undefined;
 	try {
 		temporary = await fs.promises.mkdtemp(path.join(os.tmpdir(), "exxperts-preview-"));
-		const absolutePath = path.join(temporary, "snapshot.xlsx");
+		const absolutePath = path.join(temporary, "snapshot");
 		await fs.promises.writeFile(absolutePath, snapshot, { mode: 0o600, flag: "wx", signal });
 		const stat = await fs.promises.stat(absolutePath);
 		const expected = { dev: String(stat.dev), ino: String(stat.ino), size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs };
-		const message = await runShelfWorker({ mode: "workspace-preview-v1", kind: "spreadsheet", absolutePath, expected }, 30_000, signal);
+		const message = await runShelfWorker({ mode: "workspace-preview-v1", kind, absolutePath, expected }, kind === "pdf" ? 60_000 : 30_000, signal);
 		if (!message || message.schemaVersion !== 1 || typeof message.ok !== "boolean") return { ok: false, code: "preview_failed" };
 		if (!message.ok) {
 			const codes = ["file_changed", "file_too_large", "expanded_content_too_large", "preview_too_complex", "decoded_image_too_large", "damaged_file", "encrypted_file", "unsupported_document_feature", "renderer_unavailable", "preview_failed"];
 			return { ok: false, code: hasExactKeys(message, ["ok", "schemaVersion", "code"]) && codes.includes(message.code ?? "") ? message.code : "preview_failed" };
 		}
-		const result = message.result as { kind?: unknown; workbook?: unknown } | undefined;
-		const validNotice = (notice: any) => notice && hasExactKeys(notice, ["code", "text"]) && ((notice.code === "excel_charts_omitted" && notice.text === "Charts are not shown in this preview.") || (notice.code === "excel_unusual_formatting" && notice.text === "Some unusual spreadsheet formatting is not shown."));
-		if (!hasExactKeys(message, ["ok", "schemaVersion", "notices", "result"]) || !Array.isArray(message.notices) || !message.notices.every(validNotice) || !result || !hasExactKeys(result, ["kind", "workbook"]) || result.kind !== "spreadsheet" || !validPreviewWorkbook(result.workbook) || Buffer.byteLength(JSON.stringify(message)) > 50_331_648) return { ok: false, code: "preview_failed" };
-		return { ok: true, result: result as { kind: "spreadsheet"; workbook: any }, notices: message.notices };
+		return message;
 	} catch (error) {
 		const code = (error as { code?: string }).code;
 		return { ok: false, code: signal.aborted || code === "preview_aborted" ? "preview_aborted" : code === "parse_timeout" ? "preview_timeout" : "preview_failed" };
 	} finally {
-		if (temporary) await fs.promises.rm(temporary, { recursive: true, force: true });
-		activeWorkspacePreviews--;
+		try { if (temporary) await fs.promises.rm(temporary, { recursive: true, force: true }); }
+		finally { activeWorkspacePreviews--; }
 	}
+}
+
+export async function runWorkspaceSpreadsheetSnapshot(snapshot: Buffer, signal: AbortSignal): Promise<{ ok: boolean; code?: string; result?: { kind: "spreadsheet"; workbook: any }; notices?: unknown[] }> {
+	const message = await runWorkspaceSnapshot(snapshot, "spreadsheet", signal);
+	if (!message.ok) return { ok: false, code: message.code };
+	const result = message.result as { kind?: unknown; workbook?: unknown } | undefined;
+	const validNotice = (notice: any) => notice && hasExactKeys(notice, ["code", "text"]) && ((notice.code === "excel_charts_omitted" && notice.text === "Charts are not shown in this preview.") || (notice.code === "excel_unusual_formatting" && notice.text === "Some unusual spreadsheet formatting is not shown."));
+	if (!hasExactKeys(message, ["ok", "schemaVersion", "notices", "result"]) || !Array.isArray(message.notices) || !message.notices.every(validNotice) || !result || !hasExactKeys(result, ["kind", "workbook"]) || result.kind !== "spreadsheet" || !validPreviewWorkbook(result.workbook) || Buffer.byteLength(JSON.stringify(message)) > 50_331_648) return { ok: false, code: "preview_failed" };
+	return { ok: true, result: result as { kind: "spreadsheet"; workbook: any }, notices: message.notices };
+}
+
+type PdfPreviewPage = { page: number; mimeType: "image/jpeg"; imageBase64: string; widthPx: number; heightPx: number };
+
+export async function runWorkspacePdfSnapshot(snapshot: Buffer, signal: AbortSignal): Promise<{ ok: boolean; code?: string; result?: { kind: "pdf"; totalPages: number; pages: PdfPreviewPage[] }; notices?: unknown[] }> {
+	const message = await runWorkspaceSnapshot(snapshot, "pdf", signal);
+	if (!message.ok) return { ok: false, code: message.code };
+	const pdf = message.result as { kind?: unknown; totalPages?: unknown; pages?: unknown } | undefined;
+	if (!hasExactKeys(message, ["ok", "schemaVersion", "notices", "result"]) || !Array.isArray(message.notices) || message.notices.length !== 0 || !pdf || !hasExactKeys(pdf, ["kind", "totalPages", "pages"]) || pdf.kind !== "pdf" || !Number.isInteger(pdf.totalPages) || (pdf.totalPages as number) < 1 || (pdf.totalPages as number) > 200 || !Array.isArray(pdf.pages) || pdf.pages.length !== pdf.totalPages) return { ok: false, code: "preview_failed" };
+	let totalPixels = 0, totalBytes = 0;
+	for (const [index, page] of pdf.pages.entries()) {
+		if (!page || typeof page !== "object" || !hasExactKeys(page, ["page", "mimeType", "imageBase64", "widthPx", "heightPx"]) || page.page !== index + 1 || page.mimeType !== "image/jpeg" || !Number.isInteger(page.widthPx) || page.widthPx < 1 || !Number.isInteger(page.heightPx) || page.heightPx < 1 || page.widthPx * page.heightPx > 4_000_000 || typeof page.imageBase64 !== "string" || page.imageBase64.length === 0 || page.imageBase64.length > 44_739_244 || page.imageBase64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(page.imageBase64)) return { ok: false, code: "preview_failed" };
+		totalPixels += page.widthPx * page.heightPx;
+		const byteLength = page.imageBase64.length / 4 * 3 - (page.imageBase64.endsWith("==") ? 2 : page.imageBase64.endsWith("=") ? 1 : 0);
+		totalBytes += byteLength;
+		if (totalPixels > 80_000_000 || totalBytes > 33_554_432) return { ok: false, code: "preview_failed" };
+		const bytes = Buffer.from(page.imageBase64, "base64");
+		const dimensions = previewJpegDimensions(bytes);
+		if (bytes.length !== byteLength || !dimensions || dimensions.width !== page.widthPx || dimensions.height !== page.heightPx) return { ok: false, code: "preview_failed" };
+	}
+	if (Buffer.byteLength(JSON.stringify(message)) > 50_331_648) return { ok: false, code: "preview_failed" };
+	return { ok: true, result: pdf as { kind: "pdf"; totalPages: number; pages: PdfPreviewPage[] }, notices: [] };
 }
 
 export async function runShelfParseWorker(absolutePath: string, kind: "pdf" | "docx"): Promise<{ text: string; pages: number | null; truncated: boolean }> {
