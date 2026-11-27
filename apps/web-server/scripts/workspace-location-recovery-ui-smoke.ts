@@ -32,6 +32,7 @@ try {
 		{ mode: "picker", result: "unknown", expected: false },
 		{ mode: "picker", result: "different", expected: false },
 		{ mode: "picker", result: "unknown-before", expected: false },
+		{ mode: "typed", result: "failed-after", expected: false },
 	] as const) {
 		const page = await browser.newPage();
 		let attempted = false;
@@ -41,6 +42,7 @@ try {
 		await page.route("**/api/system/choose-folder", (route) => route.fulfill(item.mode === "typed" ? { status: 400, contentType: "application/json", body: JSON.stringify({ code: "unsupported_platform" }) } : { status: 200, contentType: "application/json", body: JSON.stringify({ supported: true, cancelled: false, path: "/invented/project" }) }));
 		await page.route("**/api/persistent-agents/**/workspace-default", (route) => {
 			if (route.request().method() === "PUT") { attempted = true; return route.abort("failed"); }
+			if (attempted && item.result === "failed-after") return route.fulfill({ status: 500, body: "unavailable" });
 			const beforeId = item.result === "unknown-before" ? undefined : "old-id";
 			const policyId = attempted && item.result !== "unchanged" ? "new-id" : beforeId;
 			const selected = attempted && item.result === "different" ? "/invented/other" : "/invented/project";
@@ -55,7 +57,10 @@ try {
 			await page.getByRole("button", { name: "Use this folder" }).click();
 		}
 		if (item.expected) await page.getByText("Saved", { exact: true }).first().waitFor({ timeout: 10000, state: "attached" });
-		else await page.getByRole("alert").getByText("Couldn't save the folder. Try again.").waitFor({ timeout: 10000 });
+		else if (item.result === "failed-after") {
+			await page.getByText("Couldn't load this room's folder.").waitFor({ timeout: 10000 });
+			assert.equal(await page.getByRole("button", { name: "Try again" }).count(), 1, "a failed recovery read permits retry");
+		} else await page.getByRole("alert").getByText("Couldn't save the folder. Try again.").waitFor({ timeout: 10000 });
 		assert.equal(attempted, true, `${item.mode}/${item.result} issued a save`);
 		await page.close();
 	}

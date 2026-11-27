@@ -407,3 +407,5 @@ Attributed `workspace-shared-real-app-ui-smoke.ts` now runs the actual app again
 `workspace-shared-preview-race-smoke.ts` pauses a synthetic child after an invented XLSX snapshot, then checks that shelf revocation yields 403 and file change yields 409 without the worker's result. It also checks that revocation before the request invokes no parser. The fake child returns a previously validated invented workbook result; this is shared-shelf evidence and does not establish the required RoomBox owner-generation or local-grant races.
 
 The public grant refusal smoke now restarts the disposable server and checks that an unqualified stored identity remains unchanged and refused, with no identity fields in the view or captured server logs. This is restart refusal evidence; it does not establish a working selected grant or device stability across restart/remount.
+
+The attributed folder-location recovery browser test also checks a failed read after a lost typed save: the pane reports that it cannot load and offers retry instead of declaring success.
