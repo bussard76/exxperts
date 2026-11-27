@@ -32,10 +32,12 @@ try {
 		const url = new URL(route.request().url()), selected = url.searchParams.get("path") ?? "", room = url.pathname.split("/")[3];
 		if (slow) { markRequested?.(); await new Promise<void>((resolve) => { releaseResponse = resolve; }); }
 		const item = (name: string, kind: "file" | "directory", relativePath: string) => ({ name, relativePath, kind, bytes: kind === "file" ? 8 : null, modifiedAt: "2026-01-01T00:00:00.000Z", extension: kind === "file" ? ".txt" : "" });
-		const entries = noRoot || empty ? [] : selected ? [item("entry.txt", "file", invalidEntry ? "../entry.txt" : "notes/entry.txt")] : [item("notes", "directory", "notes"), item("invented.txt", "file", "invented.txt")];
+		const entries = noRoot || empty ? [] : selected ? [item("entry.txt", "file", invalidEntry ? "../entry.txt" : "notes/entry.txt")] : [item("notes", "directory", "notes"), item("invented.txt", "file", "invented.txt"), item("lesson 1: draft.txt", "file", "lesson 1: draft.txt")];
 		await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ agentId: wrongIdentity ? "wrong-room" : room, conversationId: "invented-thread", root: noRoot ? null : { displayLabel: "Invented folder", basename: "invented" }, path: selected, entries }) });
 	});
 	await page.goto(`${base}/__t87_tree_test.html`);
+	await page.getByRole("button", { name: "lesson 1: draft.txt" }).click({ timeout: 10000 });
+	assert.equal(await page.locator("output").textContent(), "lesson 1: draft.txt");
 	await page.getByRole("button", { name: "Expand notes" }).click({ timeout: 10000 });
 	await page.getByRole("button", { name: "entry.txt" }).click({ timeout: 10000 });
 	assert.equal(await page.locator("output").textContent(), "notes/entry.txt");

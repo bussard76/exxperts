@@ -87,17 +87,18 @@ try {
 		let unsupportedRequests = 0;
 		await page.route("**/api/persistent-agents/**/workspace-files?**", async (route) => {
 			const url = new URL(route.request().url()), id = decodeURIComponent(url.pathname.split("/")[3]), conversationId = url.searchParams.get("conversationId");
-			const entries = ["invented.xlsx", "notes.txt", "sketch.excalidraw"].map((name) => ({ name, relativePath: name, kind: "file", bytes: 42, modifiedAt: "2026-01-01T00:00:00.000Z", extension: name.slice(name.lastIndexOf(".")) }));
+			const entries = ["invented.xlsx", "notes.txt", "sketch.excalidraw", "old.doc", "old.xls", "macro.xlsm", "diagram.drawio", "diagram.dio", "auth.png", "lesson 1: draft.txt"].map((name) => ({ name, relativePath: name, kind: "file", bytes: 42, modifiedAt: "2026-01-01T00:00:00.000Z", extension: name.slice(name.lastIndexOf(".")) }));
 			await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ agentId: id, conversationId, root: { displayLabel: "Invented workspace", basename: "invented" }, path: "", entries }) });
 		});
 		await page.route("**/api/persistent-agents/**/workspace-preview?**", async (route) => {
 			const url = new URL(route.request().url()), id = decodeURIComponent(url.pathname.split("/")[3]), conversationId = url.searchParams.get("conversationId");
 			const selected = url.searchParams.get("path");
 			if (selected === "sketch.excalidraw") unsupportedRequests++;
-			const body = selected === "notes.txt" ? { schemaVersion: 1, agentId: id, conversationId, path: selected, kind: "text", notices: [], text: "Invented notes" } : { schemaVersion: 1, agentId: id, conversationId, path: "invented.xlsx", kind: "spreadsheet", notices: parsed.notices, workbook: parsed.result!.workbook };
+			const body = selected === "notes.txt" || selected === "lesson 1: draft.txt" ? { schemaVersion: 1, agentId: id, conversationId, path: selected, kind: "text", notices: [], text: selected === "notes.txt" ? "Invented notes" : "Invented colon name" } : { schemaVersion: 1, agentId: id, conversationId, path: "invented.xlsx", kind: "spreadsheet", notices: parsed.notices, workbook: parsed.result!.workbook };
 			await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
 		});
 		await page.route("**/api/persistent-agents/**/workspace-open", async (route) => { await route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ code: "association_unverified", error: "Cannot open." }) }); });
+		await page.route("**/api/persistent-agents/**/workspace-image?**", async (route) => { await route.fulfill({ status: 401, contentType: "application/json", body: "{}" }); });
 
 		await page.goto(`${baseUrl}/auth/session?token=${SMOKE_AUTH_TOKEN}`);
 		await page.waitForLoadState("networkidle");
@@ -129,6 +130,21 @@ try {
 		await page.setViewportSize({ width: 1280, height: 900 });
 		await page.getByRole("button", { name: "sketch.excalidraw", exact: true }).click();
 		assert(await page.getByRole("button", { name: "Close sketch.excalidraw" }).count() === 0 && unsupportedRequests === 0, "unsupported selection opens no tab and requests no preview");
+		for (const name of ["old.doc", "old.xls", "macro.xlsm", "diagram.drawio", "diagram.dio"]) {
+			await page.getByRole("button", { name, exact: true }).click();
+			await page.getByText(name.endsWith(".doc") ? "Save this old .doc file as .docx to preview it here." : "This file type cannot be previewed here.", { exact: true }).waitFor({ timeout: 10000 });
+			const action = page.locator(".workspace-pane .workspace-open-action button");
+			if (name.endsWith(".doc") || name.endsWith(".xls")) assert(await action.count() === 0, `source hides open action for ${name}`);
+			else await action.waitFor({ timeout: 10000 });
+			await page.getByRole("button", { name: `Close ${name}` }).click();
+		}
+		await page.getByRole("button", { name: "lesson 1: draft.txt", exact: true }).click();
+		await page.getByText("Invented colon name", { exact: true }).waitFor({ timeout: 10000 });
+		await page.getByRole("button", { name: "Close lesson 1: draft.txt" }).click();
+		await page.evaluate(() => sessionStorage.setItem("exxperts-auth-redirect", String(Date.now())));
+		await page.getByRole("button", { name: "auth.png", exact: true }).click();
+		await page.getByText("Sign in to preview this file.", { exact: true }).waitFor({ timeout: 10000 });
+		await page.getByRole("button", { name: "Close auth.png" }).click();
 		await page.getByRole("button", { name: "notes.txt", exact: true }).click();
 		await page.getByText("Invented notes", { exact: true }).waitFor({ timeout: 10000 });
 

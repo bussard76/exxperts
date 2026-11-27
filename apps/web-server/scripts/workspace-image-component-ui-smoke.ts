@@ -26,11 +26,12 @@ try {
 	await ready;
 	browser = await chromium.launch({ headless: true });
 	const page = await browser.newPage();
-	let slow = false, badMime = false, oversized = false;
+	let slow = false, badMime = false, oversized = false, unauthorized = false;
 	let markRequested: (() => void) | undefined, releaseResponse: (() => void) | undefined;
 	const arm = () => new Promise<void>((resolve) => { markRequested = resolve; });
 	await page.route("**/api/persistent-agents/**/workspace-image?**", async (route) => {
 		if (slow) { markRequested?.(); await new Promise<void>((resolve) => { releaseResponse = resolve; }); }
+		if (unauthorized) { await route.fulfill({ status: 401, contentType: "application/json", body: '{}' }); return; }
 		await route.fulfill({ status: 200, contentType: badMime ? "application/json" : "image/png", body: oversized ? Buffer.alloc(20_971_521) : pixel });
 	});
 	await page.goto(`${base}/__t87_image_test.html`);
@@ -55,6 +56,12 @@ try {
 	oversized = true;
 	await page.reload();
 	await page.getByText("This file could not be previewed.").waitFor({ timeout: 20000 });
+	assert.equal(await page.locator("img").count(), 0);
+	oversized = false;
+	unauthorized = true;
+	await page.evaluate(() => sessionStorage.setItem("exxperts-auth-redirect", String(Date.now())));
+	await page.reload();
+	await page.getByText("Sign in to preview this file.").waitFor({ timeout: 10000 });
 	assert.equal(await page.locator("img").count(), 0);
 	console.log("workspace image consumer UI smoke passed");
 } catch (error) {

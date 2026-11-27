@@ -1,5 +1,7 @@
 # T87 implementation checklist
 
+This is the historical first checkpoint. Its unchecked items and blocker below do not describe the current implementation; see [the current PR 87 evidence](../../pr87-rebase.md) for the amended review, acceptance audit, tests and remaining platform limitations.
+
 Source PR head: `5fcffe1036b2d6f867d6583b29822c4985d36fba`; target: `b898e851813b4da0211e6a049e9537160391091f`. Reviewed spec: `339e5d5e9bd4a21bb5e5a3e3e9e31b4153c88700`; review: `3030cfa733e0f712193140fd6584ac7bcf061b0f`.
 
 ## Architecture impact
