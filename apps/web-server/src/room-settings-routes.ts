@@ -1,4 +1,5 @@
 import type { FastifyRequest } from "fastify";
+import { listWorkspaceForBrowser } from "./persistent-room-workspace-tools.js";
 import { MAINTENANCE_DIAGNOSTICS_KEEP, MAINTENANCE_DIAGNOSTICS_DEFAULT_LIMIT, listMaintenanceDiagnostics, exportMaintenanceDiagnostics } from "./maintenance-diagnostics.js";
 import { createPersistentAgentInstance, getPersistentAgentThread, saveWithOpenConversationCheck, getPersistentRoomInstructionsView, savePersistentRoomGlobalInstructionsEnabled, savePersistentRoomInstructions } from "./persistent-agents.js";
 import { normalizePersistentRoomWorkspaceToolSelectionInput } from "./persistent-room-tool-policy.js";
@@ -628,9 +629,29 @@ app.get("/api/persistent-agents/:id/workspace-files", async (req, reply) => {
 		if (!getPersistentAgentThread(id, conversationId)) return reply.code(404).send({ code: "conversation_not_found", error: "Conversation not found." });
 		const effectivePolicy = resolvePersistentRoomEffectiveWorkspacePolicy(id, conversationId);
 		if (effectivePolicy.source === "none") return { agentId: id, conversationId, root: null, path: requestedPath, entries: [] };
+		if (effectivePolicy.source === "room-files" && effectivePolicy.policy && effectivePolicy.workspaceToolsEnabled) {
+			const policyNow = () => {
+				getUsablePersistentAgentStatusForNormalUse(id);
+				if (!getPersistentAgentThread(id, conversationId)) throw Object.assign(new Error("Conversation unavailable."), { code: "grant_changed" });
+				const current = resolvePersistentRoomEffectiveWorkspacePolicy(id, conversationId);
+				if (current.source !== "room-files" || !current.policy || !current.workspaceToolsEnabled || current.fingerprint.value !== effectivePolicy.fingerprint.value) throw Object.assign(new Error("Workspace changed."), { code: "grant_changed" });
+				return current.policy;
+			};
+			const controller = new AbortController();
+			const disconnected = () => controller.abort();
+			reply.raw.once("close", disconnected);
+			try {
+				const entries = await listWorkspaceForBrowser(policyNow, requestedPath, undefined, () => undefined, controller.signal);
+				return { agentId: id, conversationId, root: { displayLabel: "Attachments", basename: "files" }, path: requestedPath, entries };
+			} finally { reply.raw.removeListener("close", disconnected); }
+		}
 		return reply.code(503).send({ code: "workspace_unavailable", error: "Workspace is unavailable." });
 	} catch (error) {
 		if ((error as { code?: string })?.code === "workspace_unavailable") return reply.code(503).send({ code: "workspace_unavailable", error: "Workspace is unavailable." });
+		if ((error as { code?: string })?.code === "grant_changed") return reply.code(403).send({ code: "grant_changed", error: "Workspace access changed." });
+		if ((error as { code?: string })?.code === "file_changed") return reply.code(409).send({ code: "file_changed", error: "Workspace changed while it was read." });
+		if ((error as { code?: string })?.code === "box_failed") return reply.code(503).send({ code: "box_failed", error: "Workspace is unavailable." });
+		if (["outside_workspace", "blocked_by_policy", "invalid_name", "not_directory", "file_not_found"].includes((error as { code?: string })?.code ?? "")) return reply.code(400).send({ code: "invalid_path", error: "Invalid workspace path." });
 		return reply.code(404).send({ code: "room_not_found", error: "Room not found." });
 	}
 });
