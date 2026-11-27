@@ -1,0 +1,38 @@
+# T24-THINKING-SWEEP architecture spec
+
+Verdict: change-spec
+Spec: `docs/specs/T24-thinking-sweep-lab.md` at `4b0835fb605f2ba2765d9b61900016753544f11e`
+Level: 2, provisionally confirmed for the stated lab-only scope; a chosen solution must be reclassified if it changes production contracts or data flow.
+Decision: Sascha selected Option A for this amendment; the Controller must settle the level-2 lab interfaces and return the amended spec for review. ADR-0009 covers the existing suggestion producer, not an unspecified new production correlation flow.
+
+## Fit checklist
+
+| Requirement | Owning module and seam | Boundary/data flow | Evidence or required change |
+| --- | --- | --- | --- |
+| Rung identity and isolation | `thinking-levels-sweep-recorder.mjs` → `readRecorderLog` → `runSweep` | Preloaded server to private JSONL reader | **Finding 1:** specify a demonstrably reliable in-process source and exact metadata contract, including unknown and unrelated calls. Model and timestamp are insufficient. |
+| Complete cost and completion | Recorder, room socket frames and existing usage ledger → lab budget | Provider attempts and asynchronous suggestions to one run | **Finding 2:** specify the correlation, pricing, completeness and closure rules before another rung or final result. Current sources cannot be joined per call as specified. |
+| Existing lab interface and coverage | `runSweep`, `SweepResult`, TSV and fake provider smoke | Lab caller and TSV consumer | Define how an incomplete result is exposed without reporting unknown as zero; preserve the existing columns, budget threshold, selected-rung semantics and the original assertions' coverage. |
+| Privacy and fail closed | Preload recorder | Only technical metadata enters the recorder | **Finding 3:** define an allowlist for added fields and reconcile the existing raw provider error strings with the stated content prohibition. Keep request-log failure refusing departure and equality with provider receipts. |
+| Outside-in evidence | Lab amendment; existing T24 ADR/spec | No UI or production interface change in this amendment | No separate `design/<feature>/` export or lab logic diagram exists; ADR-0009 records the accepted UI export exception. A short lab data-flow/logic diagram and exact private record interface are needed to make this amendment reviewable. No parallel implementation split or shared worker interface is specified. |
+
+## Prefactoring
+
+None is justified before the private recorder/reader and accounting interfaces are specified. Keep any approved change within the existing lab and recorder; do not introduce production instrumentation as an implicit workaround.
+
+## Findings
+
+### 1. The category and ownership source is not fixed
+
+At code baseline `fc1049aa828ebddfb1d6a89fa58fabf8611a685f`, recorder request lines contain `seq`, `at`, `path`, `transport`, `model` and `sent`, but no kind, room, answer or run identity. `callsFor` selects by model and `at >= sentAt` without an upper bound, then judges those calls; a suggestion on the same model or unrelated concurrent traffic can therefore become rung evidence. Suggestion generation in `room-socket.ts` starts an isolated worker from the completed answer and can outlive room turn settlement. Neither timing nor ordering proves ownership or category, including when a previous suggestion arrives during the next rung. The specification says to use reliable existing in-process evidence but names neither that evidence nor how the preload accesses it without changing production. The wallet's later `kind` is not a request-time correlation ID.
+
+Amend the spec with the concrete source at the interception seam, why it works for both fetch and WebSocket paths and asynchronous retries/suggestions, its lifecycle and exact typed request/answer record fields, enum values and unknown handling. Specify how the lab ties each call to its run and rung, distinguishes unrelated traffic, and handles missing, legacy, ambiguous or inconsistent evidence without a rung verdict. Demonstrate that the source exists on the pinned code and needs no production change; if it does not, return the design for a new scope/level decision rather than infer from prompt content, model or time. Require an end-to-end fake-provider case where a same-model suggestion from an earlier answer completes or starts late amid another rung, plus unrelated same-model traffic and missing/ambiguous evidence.
+
+### 2. Accounting has no reliable join or completion barrier
+
+`runRung` sums socket `agent_end` message costs, while `recordWorkerUsage` writes suggestion usage separately after the isolated worker resolves or rejects. The ledger has room, kind, model and timestamp but no recorder `seq` or answer/rung ID, can omit rows when usage is absent, defaults missing cost to zero, and its append failure is only warned. The socket sum and the wallet row can overlap if combined indiscriminately; one worker usage can aggregate messages, while retries can have individual recorder requests. Recorder answer counters also default to zero when usage is absent and do not capture all cache/pricing inputs. Thus a positive amount on one fake does not prove all attempts were accounted for. Wallet `priceRow` expressly distinguishes unpriced zero from priced usage and `sourceOfRow` distinguishes unattributed source; `framesCost` currently maps missing or invalid cost to zero.
+
+Specify the exact per-attempt or provably disjoint aggregate correlation and deduplication, its record shape, price source and provenance, and how known zero differs from absent usage, unpriced and unattributed cost. Define what is attributable to the isolated run, including failed/retried attempts and late or cancelled suggestions; explicitly diagnose an unknown incurred cost rather than assume a failed request cost zero. Define a bounded completion barrier that proves no attributable work or late usage can still arrive before budget checking the next rung **and before returning the final result**; a timeout, lost record, unknown ownership or incomplete cost must produce an explicit incomplete diagnostic and prevent further sends. Specify how diagnostic, per-row cost, total and TSV represent incomplete or delayed costs without silently changing their meanings. Preserve `costUsd >= maxUsd` as the stop threshold for known spend. Exercise priced and unpriced calls, missing usage and ledger/recorder failures, paid retries, overlap/double count, a late suggestion crossing a rung boundary and a final-rung suggestion, through the real producer and consumer with fake providers.
+
+### 3. Existing recorder privacy contract needs an explicit resolution
+
+The existing recorder avoids headers and request messages but stores provider-supplied error text (`errorText` and HTTP body fallback, up to 300 characters), which can echo request or suggestion content; the existing smoke checks request records for authorization and messages, not answer errors. The amendment prohibits logging request or suggestion content while also retaining technical metadata. Specify a safe technical error representation and cover an echoed synthetic secret/prompt in both fetch and WebSocket error paths and output artifacts. Keep the useful refusal/status evidence without copying arbitrary response content. Preserve the recorder-versus-provider equality assertion for **all** provider calls, the unavailable-log refusal probes, chat/tool/retry evidence, the 15-rung TSV/verdict checks and their original intent; document only assertion changes made necessary by the now-correct separation of suggestion calls.
