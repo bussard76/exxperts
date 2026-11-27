@@ -151,6 +151,16 @@ try {
   await page.reload();
   await box.waitFor();
   assert.notEqual(await placeholder(), "Send clears me", "suggestions are not persisted or replayed after reload");
+  await page.waitForFunction(() => Boolean((window as any).testThread));
+  await frame({ type: "turn_reattach" });
+  await frame({ type: "answer_lifecycle", phase: "complete", answerId: "replayed-answer" });
+  await frame({ type: "suggestions", answerId: "replayed-answer", items: ["Replayed suggestion"] });
+  await frame({ type: "turn_reattach_replay_done" });
+  assert.notEqual(await placeholder(), "Replayed suggestion", "replayed completion and suggestions are ignored");
+  await page.locator(".sidebar-home-btn").click();
+  await page.locator(".persistent-agent-card").filter({ hasText: "Other Room" }).getByRole("button", { name: "Enter" }).click();
+  await box.waitFor();
+  assert.notEqual(await placeholder(), "Send clears me", "changing rooms clears suggestions");
  } finally { await browser.close(); }
 } finally {
  await stopSmokeServer(server);
