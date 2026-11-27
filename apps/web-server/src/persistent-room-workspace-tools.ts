@@ -12,7 +12,7 @@ import { SHELF_READ_MAX_FILE_BYTES, runShelfParseWorker, shelfPdfExtractionIsBla
 import type { PersistentRoomCapabilityPolicy } from "./persistent-room-workspace-policy.js";
 import { IN_FLIGHT_TEMPORARY_MARK, roomFilesAreTheFolder } from "./room-files-folder.js";
 import { PERSISTENT_ROOM_APP_SIBLING_GLOBS, PERSISTENT_ROOM_APP_STATE_SEGMENTS, PERSISTENT_ROOM_SECRET_FILENAME_TEMPLATES, PERSISTENT_ROOM_ZIP_OPENS_FILENAME_GLOBS } from "./persistent-room-workspace-policy.js";
-import { BeyondNotHeld, type ClosedKeys, closedRefusal, type DataRead, type FenceAccess, type FencedPath, type FenceRoot, fencePath, foldPart, globToRegExp, linkRefused, matchesGlob, normalizeSlashes, RoomFilesError, roomFence as fenceWith, type RoomFence, roomFilesFence, showPath } from "./room-files.js";
+import { BeyondNotHeld, type ClosedKeys, closedRefusal, type DataRead, type FenceAccess, type FencedPath, type FenceRoot, fencePath, FILES_UNAVAILABLE, foldPart, globToRegExp, linkRefused, matchesGlob, normalizeSlashes, RoomFilesError, roomFence as fenceWith, type RoomFence, roomFilesFence, showPath } from "./room-files.js";
 import { BoundedPattern, oneSearchAtATime, SearchTooSlow } from "./room-files-search.js";
 import { BoxFiles, boxedCommandSinceStart, FILES_STOPPED_LINE, notEnoughSpace, READ_LIMIT_BYTES, type PreviewIdentity, type PreviewListedEntry, type SearchMatch, tooLargeForTool } from "./room-box/box-files.js";
 import { BoxFault } from "./room-box/box-process.js";
@@ -1776,6 +1776,52 @@ function namedFolders(policy: PersistentRoomCapabilityPolicy, answer: AnswerFold
 	const room = policy.roots[0];
 	const listed = readAlsoAllowed(policy.agentId).folders;
 	return [...(room ? [room.realpath, room.path] : []), ...(answer?.over(listed) ?? listed).map((entry) => entry.path), ...roomSkillFolders(policy.agentId).map((skill) => skill.skillDir)];
+}
+
+/** A bounded shared-shelf snapshot, rechecked against the same file and current fence. */
+export async function readWorkspaceForBrowser(policyNow: () => PersistentRoomCapabilityPolicy, raw: string, limit: number, signal?: AbortSignal): Promise<{ bytes: Buffer; recheck: () => void }> {
+	if (!roomFilesAreTheFolder()) throw new RoomFilesError("workspace_unavailable", FILES_UNAVAILABLE);
+	const stopped = () => { if (signal?.aborted) throw new RoomFilesError("aborted", "Reading stopped."); };
+	const same = (a: fs.Stats, b: fs.Stats) => a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs;
+	stopped();
+	const fence = roomFilesFence(policyNow().agentId);
+	const target = guard(fence, raw, "read", null);
+	if (!target.root.room || !target.stat.isFile()) throw new RoomFilesError("not_file", "Not a file.");
+	if (target.stat.size > limit) throw new RoomFilesError("file_too_large", "File is too large.");
+	if (!fs.constants.O_NOFOLLOW) throw new RoomFilesError("workspace_unavailable", FILES_UNAVAILABLE);
+	let handle: fs.promises.FileHandle;
+	try { handle = await fs.promises.open(target.real, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW); }
+	catch { throw new RoomFilesError("file_not_found", "File is unavailable."); }
+	try {
+		const before = await handle.stat();
+		if (!before.isFile() || !same(before, target.stat) || before.size > limit) throw new RoomFilesError("file_changed", "File changed.");
+		const bytes = Buffer.alloc(before.size);
+		let offset = 0;
+		while (offset < bytes.length) {
+			stopped();
+			const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+			if (!bytesRead) throw new RoomFilesError("file_changed", "File changed.");
+			offset += bytesRead;
+		}
+		stopped();
+		const after = await handle.stat();
+		const freshFence = roomFilesFence(policyNow().agentId);
+		let fresh: PersistentRoomWorkspaceToolGuardResult;
+		try { fresh = guard(freshFence, raw, "read", null); }
+		catch { throw new RoomFilesError("file_changed", "File changed."); }
+		if (fresh.real !== target.real || !same(before, after) || !same(after, fresh.stat)) throw new RoomFilesError("file_changed", "File changed.");
+		const recheck = () => {
+			stopped();
+			const currentFence = roomFilesFence(policyNow().agentId);
+			let current: PersistentRoomWorkspaceToolGuardResult;
+			try { current = guard(currentFence, raw, "read", null); }
+			catch { throw new RoomFilesError("file_changed", "File changed."); }
+			if (current.real !== target.real || !same(before, current.stat)) throw new RoomFilesError("file_changed", "File changed.");
+			stopped();
+		};
+		recheck();
+		return { bytes, recheck };
+	} finally { await handle.close(); }
 }
 
 /** The file browser's bounded view, through the same fence and folder hold as file tools. */

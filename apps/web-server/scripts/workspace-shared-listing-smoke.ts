@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import * as XLSX from "xlsx";
 import { SMOKE_AUTH_HEADERS } from "./smoke-server-process.js";
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "workspace-box-race-"));
@@ -39,6 +40,25 @@ try {
 	if (missing.statusCode !== 404 || missing.body.includes("example.txt")) throw new Error("a missing conversation cannot list the shelf");
 	const nested = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-files?conversationId=invented-thread&path=folder%2Fchild`, headers: SMOKE_AUTH_HEADERS });
 	if (nested.statusCode < 400) throw new Error("shared shelf does not allow nested paths");
+	const preview = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-preview?conversationId=invented-thread&path=example.txt`, headers: SMOKE_AUTH_HEADERS });
+	if (preview.statusCode !== 200 || preview.json().kind !== "text" || preview.json().text !== "invented" || preview.json().agentId !== room) throw new Error(`shared text preview failed: ${preview.statusCode} ${preview.body}`);
+	if (preview.headers["cache-control"] !== "no-store" || preview.headers["x-content-type-options"] !== "nosniff" || preview.headers["content-security-policy"] !== "sandbox; default-src 'none'") throw new Error("text preview must retain its security headers");
+	const refused = await app.inject({ method: "GET", url: `/api/persistent-agents/${other}/workspace-preview?conversationId=invented-thread&path=example.txt`, headers: SMOKE_AUTH_HEADERS });
+	if (refused.statusCode < 400 || refused.body.includes("invented\"")) throw new Error("a different room cannot preview the file");
+	const unsupported = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-preview?conversationId=invented-thread&path=sketch.excalidraw`, headers: SMOKE_AUTH_HEADERS });
+	if (unsupported.statusCode !== 415 || unsupported.json().code !== "unsupported_file_type") throw new Error("unsupported preview retains the specified response");
+	const workbook = XLSX.utils.book_new();
+	XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([["Invented cell"]]), "Example");
+	fs.writeFileSync(path.join(shelf, "book.xlsx"), XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }));
+	const spreadsheet = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-preview?conversationId=invented-thread&path=book.xlsx`, headers: SMOKE_AUTH_HEADERS });
+	if (spreadsheet.statusCode !== 200 || spreadsheet.json().kind !== "spreadsheet" || spreadsheet.json().workbook?.sheets?.[0]?.cells?.[0]?.text !== "Invented cell") throw new Error(`shared workbook preview failed: ${spreadsheet.statusCode} ${spreadsheet.body}`);
+	fs.writeFileSync(path.join(shelf, "encoded.txt"), Buffer.from([0x66, 0x80, 0x6f]));
+	const encoded = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-preview?conversationId=invented-thread&path=encoded.txt`, headers: SMOKE_AUTH_HEADERS });
+	if (encoded.statusCode !== 200 || encoded.json().text !== "f\ufffdo") throw new Error("text preview decodes invalid UTF-8 with replacement");
+	const largeFile = fs.openSync(path.join(shelf, "large.txt"), "w");
+	try { fs.ftruncateSync(largeFile, 16_777_217); } finally { fs.closeSync(largeFile); }
+	const large = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-preview?conversationId=invented-thread&path=large.txt`, headers: SMOKE_AUTH_HEADERS });
+	if (large.statusCode !== 413 || large.json().code !== "file_too_large") throw new Error("text preview refuses a file over its bound");
 	console.log("workspace shared shelf listing smoke passed");
 } finally {
 	await app.close();
