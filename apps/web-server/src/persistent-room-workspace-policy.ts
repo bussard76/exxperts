@@ -1096,16 +1096,9 @@ export function persistentRoomCapabilityPolicyView(policy: PersistentRoomCapabil
 	};
 }
 
-function workspacePolicyRootCurrentlyUsable(policy: PersistentRoomCapabilityPolicy): boolean {
-	const root = policy.roots[0];
-	if (!root) return false;
-	const rootRealpath = existingRealpath(root.realpath) ?? existingRealpath(root.path);
-	if (!rootRealpath) return false;
-	try {
-		return fs.statSync(rootRealpath).isDirectory();
-	} catch {
-		return false;
-	}
+function workspacePolicyRootCurrentlyUsable(_policy: PersistentRoomCapabilityPolicy): boolean {
+	// No selected local root has qualified identity evidence yet.
+	return false;
 }
 
 function fingerprintEffectiveWorkspacePolicy(input: {
@@ -1225,7 +1218,7 @@ export function persistentRoomRuntimeCwdForEffectiveWorkspacePolicy(effectivePol
 	// cwd, but the session claiming to run from the repo root was a lie).
 	const root = effectivePolicy?.policy?.roots[0];
 	// A room's own files hold only what people and the room put there: the session's own settings never come from them.
-	if (!root || effectivePolicy?.source === "room-files") return fallback;
+	if (!root || !effectivePolicy?.workspaceToolsEnabled || effectivePolicy.source === "room-files") return fallback;
 	const rootRealpath = existingRealpath(root.realpath) ?? existingRealpath(root.path);
 	if (!rootRealpath) return fallback;
 	try {

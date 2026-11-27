@@ -84,7 +84,7 @@ try {
 	server.stderr.on("data", (chunk) => serverOutput.push(String(chunk)));
 	await waitForServer(server, baseUrl, 15000);
 	const { writePersistentAgentThread } = await import("../src/persistent-agents.js");
-	const { resolvePersistentRoomCapabilityPolicy } = await import("../src/persistent-room-workspace-policy.js");
+	const { resolvePersistentRoomCapabilityPolicy, resolvePersistentRoomEffectiveWorkspacePolicy, persistentRoomRuntimeCwdForEffectiveWorkspacePolicy } = await import("../src/persistent-room-workspace-policy.js");
 	const model = { provider: "openai-compatible", model: "gpt-5.5", label: "GPT 5.5" };
 
 	const created = await requestJson("/api/persistent-agents", {
@@ -125,6 +125,8 @@ try {
 			fs.writeFileSync(legacyThreadFile, JSON.stringify({ ...fixture, conversationId: "demo-thread" }));
 		}
 		assert(resolvePersistentRoomCapabilityPolicy(agentId, "demo-thread", { persistentAgentsRoot: tempAgentsRoot }).source === "room-default", `fixture resolves from the configured test root: ${resolvePersistentRoomCapabilityPolicy(agentId, "demo-thread", { persistentAgentsRoot: tempAgentsRoot }).source}`);
+		const effective = resolvePersistentRoomEffectiveWorkspacePolicy(agentId, "demo-thread", { persistentAgentsRoot: tempAgentsRoot });
+		assert(!effective.workspaceToolsEnabled && !effective.bashEnabled && persistentRoomRuntimeCwdForEffectiveWorkspacePolicy(effective, repoRoot) === repoRoot, "unqualified root grants neither file tools nor commands nor a workspace working directory");
 		const view = await requestJson(`/api/persistent-agents/${encodedAgentId}/workspace-default`);
 		assert(view.status === 200 && view.body.policy?.rootCount === 1 && view.body.folderRefused === true, `configured unqualified or malformed identity remains visible and refused: ${JSON.stringify(view)}`);
 		assertNoPathLeak(view.body, "GET identity", [tempHome, tempAgentsRoot, repoRoot, workspaceRoot, agentRoot], workspaceRoot);
