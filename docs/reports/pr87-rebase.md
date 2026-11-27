@@ -81,3 +81,7 @@ Added the approved UI `@aiden0z/pptx-renderer@1.4.0` and its supplied license/no
 ## Isolated file-tree consumer
 
 Restored the source file-tree consumer and its tooltip and drag helpers. Its listing client now validates the response room, conversation, path, root and entry fields before use, including rejecting paths outside the requested directory; the tree hides the previous room's entries while a new room loads. The attributed Chromium component gate passed expansion, nested selection, wrong-room and invalid-path refusal, stale-room hiding, and distinct empty and unconfigured states, using invented intercepted responses. UI and scripts typechecks passed before the final test-only additions, and the expanded browser check passed; the real listing route remains closed and app wiring and full acceptance remain open.
+
+## Isolated file tabs
+
+Restored the source file tabs and workspace stylesheet for later app integration. The attributed Chromium component gate exercised selection, drag reorder and closing with the source stylesheet, and both UI and scripts typechecks passed. The stylesheet is not imported into the app yet because its sidebar rules depend on the accompanying integration; real app layout and protected-route acceptance remain open.
