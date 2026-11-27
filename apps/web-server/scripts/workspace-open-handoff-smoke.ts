@@ -30,7 +30,7 @@ fs.writeFileSync(path.join(applications, "invented.desktop"), `[Desktop Entry]\n
 process.env.XDG_DATA_HOME = path.join(home, ".local", "share");
 process.env.XDG_DATA_DIRS = path.join(home, "other-data");
 let queries = 0, types = 0, dispatches = 0, changed = false, changeFileAt = 0;
-let unavailable = false;
+let launchMode: "success" | "unavailable" | "failure" | "timeout" = "success", killed = 0;
 let revokeAt = 0, revoke = () => {};
 let launched: { executable: string; args: string[]; cwd: string; shell: unknown } | undefined;
 const originalExecFile = childProcess.execFile, originalSpawn = childProcess.spawn;
@@ -42,7 +42,9 @@ childProcess.execFile = ((_file: unknown, args: string[], _options: unknown, cal
 childProcess.spawn = ((executable: string, args: string[], options: any) => {
 	dispatches++; launched = { executable, args, cwd: options.cwd, shell: options.shell };
 	const child = new EventEmitter() as EventEmitter & { unref: () => void; kill: () => boolean };
-	child.unref = () => {}; child.kill = () => true; queueMicrotask(() => unavailable ? child.emit("error", Object.assign(new Error("unavailable"), { code: "ENOENT" })) : child.emit("spawn")); return child;
+	child.unref = () => {}; child.kill = () => { killed++; return true; };
+	queueMicrotask(() => { if (launchMode === "unavailable" || launchMode === "failure") child.emit("error", Object.assign(new Error("synthetic failure"), { code: launchMode === "unavailable" ? "ENOENT" : "EIO" })); else if (launchMode === "success") child.emit("spawn"); });
+	return child;
 }) as typeof childProcess.spawn;
 syncBuiltinESMExports();
 const { app, PORT } = await import("../src/server-app.js");
@@ -83,10 +85,10 @@ try {
 	const revokedAtFinalLookup = await request();
 	if (revokedAtFinalLookup.statusCode !== 403 || Number(dispatches) !== 1) throw new Error("policy change during final lookup must not dispatch");
 	writePersistentRoomDefaultCapabilityPolicy(policy); revokeAt = 0;
-	queries = 0; unavailable = true;
+	queries = 0; launchMode = "unavailable";
 	const missingOpener = await request();
 	if (missingOpener.statusCode !== 503 || missingOpener.json().code !== "opener_unavailable") throw new Error("unavailable dispatcher must report opener_unavailable");
-	unavailable = false; queries = 0;
+	launchMode = "success"; queries = 0;
 	fs.writeFileSync(desktop, `[Desktop Entry]\nType=Application\nName=Invented\nMimeType=text/plain;\nExec=${binary} %u\nPath=${cwd}\n`);
 	const uriOpen = await request();
 	if (uriOpen.statusCode !== 202 || Number(dispatches) !== 3 || launched?.args.length !== 1 || launched.args[0] !== pathToFileURL(fs.realpathSync(path.join(folder, "invented.txt"))).href) throw new Error("URI placeholder must name exactly the authorized local file");
@@ -94,6 +96,16 @@ try {
 	fs.writeFileSync(desktop, `[Desktop Entry]\nType=Application\nName=Invented\nMimeType=text/plain;\nExec=${binary} --invented-mode %f\nPath=${cwd}\n`);
 	const literalArgument = await request();
 	if (literalArgument.statusCode !== 202 || Number(dispatches) !== 4 || Number(launched?.args.length) !== 2 || launched?.args[0] !== "--invented-mode" || launched.args[1] !== fs.realpathSync(path.join(folder, "invented.txt"))) throw new Error("unambiguous literal arguments must be bound and preserved");
+	queries = 0; launchMode = "failure";
+	const failed = await request();
+	if (failed.statusCode !== 500 || failed.json().code !== "open_failed") throw new Error("dispatcher error must report open_failed");
+	queries = 0; launchMode = "timeout";
+	const originalTimeout = globalThis.setTimeout;
+	globalThis.setTimeout = ((callback: (...args: any[]) => void, delay?: number, ...args: any[]) => originalTimeout(callback, delay === 10_000 ? 10 : delay, ...args)) as typeof setTimeout;
+	try {
+		const timeout = await request();
+		if (timeout.statusCode !== 504 || timeout.json().code !== "open_timeout" || killed !== 3) throw new Error("timed-out dispatcher must be stopped and report open_timeout");
+	} finally { globalThis.setTimeout = originalTimeout; }
 	console.log("workspace checked open handoff smoke passed");
 } finally {
 	childProcess.execFile = originalExecFile; childProcess.spawn = originalSpawn; syncBuiltinESMExports();

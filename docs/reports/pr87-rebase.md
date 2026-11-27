@@ -12,6 +12,8 @@ On Linux, the four affected script suites passed 104/104, both UI and script typ
 
 The focused handoff smoke also passes policy revocation during the final association query with zero additional handoffs, and a `%u` association with exactly one file URL for the authorized local file. These cases use the same fake resolver and dispatcher and do not launch a real application.
 
+The fake dispatcher additionally verifies 500 `open_failed` on a launch error and 504 `open_timeout` with a stopped child when the launch does not settle; the test shortens only that synthetic timer.
+
 The same public handoff smoke first failed for an unambiguous literal desktop argument and then passed with that argument preserved alongside exactly one file placeholder. Ambiguous field codes and duplicate placeholders remain refused; the actual argument vector is also passed to each room protection check. The four affected script suites passed 104/104, and the attributed local-action-context Chromium check passed on Linux.
 
 `workspace-listing-box-race-smoke.ts` was extended through the public listing route for owner conversation and connection identity changes, detached owners and reconnection. The conversation and connection checks each initially failed because the prior binding remained usable; the binding now records the connection and invalidates itself on an observed owner or conversation change. Restoring an old identity does not revive the invalidated binding, and a replacement owner can use a freshly registered box. These are simulated Mac ownership checks with a fake box dispatcher, not native Mac acceptance.
