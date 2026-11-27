@@ -89,6 +89,8 @@ try {
 	if (image.statusCode !== 200 || !image.rawPayload.equals(imageBytes) || !String(image.headers["content-type"]).startsWith("image/png") || image.headers["x-content-type-options"] !== "nosniff") throw new Error("image route returns guarded bytes with security headers");
 	const imageOther = await app.inject({ method: "GET", url: `/api/persistent-agents/${other}/workspace-image?conversationId=invented-thread&path=invented.png`, headers: SMOKE_AUTH_HEADERS });
 	if (imageOther.statusCode < 400 || imageOther.rawPayload.equals(imageBytes)) throw new Error("another room cannot read this image");
+	const missingImageThread = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-image?conversationId=missing-thread&path=invented.png`, headers: SMOKE_AUTH_HEADERS });
+	if (missingImageThread.statusCode !== 404 || missingImageThread.json().code !== "conversation_not_found") throw new Error("an image requires an existing conversation");
 	const unsupportedImage = await app.inject({ method: "GET", url: `/api/persistent-agents/${room}/workspace-image?conversationId=invented-thread&path=example.txt`, headers: SMOKE_AUTH_HEADERS });
 	if (unsupportedImage.statusCode !== 400 || unsupportedImage.json().code !== "unsupported_file_type") throw new Error("image route refuses non-image extensions");
 	const largeImage = fs.openSync(path.join(shelf, "large.png"), "w");
